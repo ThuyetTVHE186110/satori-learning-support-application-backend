@@ -1,0 +1,33 @@
+server:
+    port: 8080
+
+spring:
+    application:
+        name: korean-learning-platform
+
+    datasource:
+        url: jdbc:mysql://localhost:3306/korean_learning?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+        username: root
+        password: 03102004AaBbCc!@#
+        driver-class-name: com.mysql.cj.jdbc.Driver
+
+    jpa:
+        hibernate:
+            ddl-auto: create
+        show-sql: true
+        properties:
+            hibernate:
+                format_sql: true
+                dialect: org.hibernate.dialect.MySQLDialect
+
+logging:
+    level:
+        root: INFO
+        com.fu: DEBUG
+        org.springframework.security: DEBUG
+
+management:
+    endpoints:
+        web:
+            exposure:
+                include: health,info,metrics
