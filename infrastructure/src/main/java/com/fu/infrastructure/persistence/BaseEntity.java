@@ -11,7 +11,19 @@ import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
+/**
+ * Base entity class providing common fields for all entities.
+ * Contains: id (UUID), createdAt, updatedAt
+ * 
+ * Use this for:
+ * - System-generated tables (cache, statistics, etc.)
+ * - Tables where user tracking is not needed
+ * 
+ * For user-tracked content, use {@link AuditableEntity}
+ * For soft-deletable content, use {@link SoftDeletableEntity}
+ */
 @Getter
 @Setter
 @NoArgsConstructor
@@ -22,8 +34,9 @@ import java.time.LocalDateTime;
 public abstract class BaseEntity {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    @GeneratedValue(strategy = GenerationType.UUID)
+    @Column(name = "id", updatable = false, nullable = false)
+    private UUID id;
 
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -32,7 +45,4 @@ public abstract class BaseEntity {
     @LastModifiedDate
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
-
-    @Column(name = "is_deleted")
-    private Boolean isDeleted = false;
 }

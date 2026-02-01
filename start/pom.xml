@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>com.fu</groupId>
-        <artifactId>korean-learning-platform-backend</artifactId>
+        <artifactId>satori-learning-support-application-backend</artifactId>
         <version>1.0-SNAPSHOT</version>
     </parent>
 

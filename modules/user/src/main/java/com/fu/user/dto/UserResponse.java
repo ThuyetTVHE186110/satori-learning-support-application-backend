@@ -7,20 +7,38 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.UUID;
 
+/**
+ * Response DTO for user data.
+ * Used in list view and detail view.
+ */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class UserResponse {
 
-    private Long id;
+    private UUID id;
     private String email;
-    private String fullName;
+    
+    // Profile information
+    private String firstName;
+    private String lastName;
+    private String displayName;
+    private String fullName;  // Computed: displayName or firstName + lastName
     private String avatarUrl;
+    private String phoneNumber;
+    private LocalDate dateOfBirth;
+    
+    // Account info
     private UserRole role;
     private UserStatus status;
+    
+    // Timestamps
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private LocalDateTime lastLoginAt;
 }

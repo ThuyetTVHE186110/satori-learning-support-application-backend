@@ -1,0 +1,87 @@
+services:
+    # ==================== PostgreSQL ====================
+    # Main database for all structured data (users, lessons, AI conversations via JSONB)
+    postgres:
+        image: pgvector/pgvector:pg16
+        container_name: satori-postgres
+        restart: unless-stopped
+        environment:
+            POSTGRES_DB: satori_learning
+            POSTGRES_USER: satori_user
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-SatoriSecure2026!}
+        ports:
+            - "5432:5432"
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+            - ./docker/init-scripts/postgres:/docker-entrypoint-initdb.d
+        networks:
+            - satori-network
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U satori_user -d satori_learning"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+    # ==================== Redis ====================
+    # For caching, session management, AI response caching
+    redis:
+        image: redis:7.2-alpine
+        container_name: satori-redis
+        restart: unless-stopped
+        command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-SatoriRedis2026!}
+        ports:
+            - "6379:6379"
+        volumes:
+            - redis_data:/data
+        networks:
+            - satori-network
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "redis-cli",
+                    "-a",
+                    "${REDIS_PASSWORD:-SatoriRedis2026!}",
+                    "ping",
+                ]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+    # ==================== Adminer ====================
+    # Database management UI
+    adminer:
+        image: adminer:latest
+        container_name: satori-adminer
+        restart: unless-stopped
+        ports:
+            - "8081:8080"
+        networks:
+            - satori-network
+        depends_on:
+            - postgres
+
+    # ==================== Redis Commander ====================
+    # Redis management UI
+    redis-commander:
+        image: rediscommander/redis-commander:latest
+        container_name: satori-redis-commander
+        restart: unless-stopped
+        environment:
+            REDIS_HOSTS: local:redis:6379:0:${REDIS_PASSWORD:-SatoriRedis2026!}
+        ports:
+            - "8083:8081"
+        networks:
+            - satori-network
+        depends_on:
+            - redis
+
+networks:
+    satori-network:
+        driver: bridge
+
+volumes:
+    postgres_data:
+        name: satori-postgres-data
+    redis_data:
+        name: satori-redis-data

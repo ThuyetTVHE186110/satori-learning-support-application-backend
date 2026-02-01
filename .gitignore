@@ -64,3 +64,4 @@ release.properties
 **/generated/**
 **/generated-sources/**
 **/generated-test-sources/**
+/docs

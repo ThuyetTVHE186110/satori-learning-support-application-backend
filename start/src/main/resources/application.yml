@@ -1,33 +1,110 @@
 server:
-    port: 8080
+    port: ${APP_PORT:8080}
 
 spring:
     application:
-        name: korean-learning-platform
+        name: satori-learning-platform
 
+    profiles:
+        active: ${SPRING_PROFILES_ACTIVE:local}
+
+    # ==================== PostgreSQL Configuration ====================
     datasource:
-        url: jdbc:mysql://localhost:3306/korean_learning?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-        username: root
-        password: 03102004AaBbCc!@#
-        driver-class-name: com.mysql.cj.jdbc.Driver
+        url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:satori_learning}
+        username: ${POSTGRES_USER:satori_user}
+        password: ${POSTGRES_PASSWORD:SatoriSecure2026!}
+        driver-class-name: org.postgresql.Driver
+        hikari:
+            maximum-pool-size: 10
+            minimum-idle: 5
+            connection-timeout: 30000
+            idle-timeout: 600000
+            max-lifetime: 1800000
 
     jpa:
         hibernate:
-            ddl-auto: create
-        show-sql: true
+            ddl-auto: update
+        show-sql: ${SHOW_SQL:true}
         properties:
             hibernate:
                 format_sql: true
-                dialect: org.hibernate.dialect.MySQLDialect
+                dialect: org.hibernate.dialect.PostgreSQLDialect
+                default_schema: user_management
+        open-in-view: false
 
+    # ==================== Redis Configuration ====================
+    cache:
+        type: redis
+        redis:
+            time-to-live: 3600000 # 1 hour
+    data:
+        redis:
+            host: ${REDIS_HOST:localhost}
+            port: ${REDIS_PORT:6379}
+            password: ${REDIS_PASSWORD:SatoriRedis2026!}
+            timeout: 5000
+            lettuce:
+                pool:
+                    max-active: 8
+                    max-idle: 8
+                    min-idle: 0
+
+    # ==================== AI Configuration ====================
+    ai:
+        openai:
+            api-key: ${OPENAI_API_KEY:}
+            chat:
+                options:
+                    model: gpt-4o-mini
+                    temperature: 0.7
+                    max-tokens: 2000
+            embedding:
+                options:
+                    model: text-embedding-3-small
+
+# ==================== Japanese Learning Configuration ====================
+learning:
+    jlpt:
+        levels:
+            - N5
+            - N4
+            - N3
+            - N2
+            - N1
+
+    session:
+        max-messages-per-session: 100
+        session-timeout-minutes: 60
+
+    personalization:
+        enabled: true
+        recommendation-count: 10
+        similarity-threshold: 0.7
+
+# ==================== Logging Configuration ====================
 logging:
     level:
         root: INFO
         com.fu: DEBUG
-        org.springframework.security: DEBUG
+        org.springframework.data.redis: DEBUG
+        org.hibernate.SQL: DEBUG
+        org.hibernate.type.descriptor.sql.BasicBinder: TRACE
 
+# ==================== Actuator Configuration ====================
 management:
     endpoints:
         web:
             exposure:
-                include: health,info,metrics
+                include: health,info,metrics,prometheus
+    endpoint:
+        health:
+            show-details: when-authorized
+            probes:
+                enabled: true
+
+# ==================== Security Configuration ====================
+security:
+    jwt:
+        secret: ${JWT_SECRET:your-super-secret-jwt-key-should-be-at-least-256-bits-long}
+        expiration: 86400000 # 24 hours
+        refresh-expiration: 604800000 # 7 days
