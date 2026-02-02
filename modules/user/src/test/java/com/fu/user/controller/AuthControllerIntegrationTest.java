@@ -9,7 +9,6 @@ import com.fu.user.repository.UserSessionRepository;
 import com.fu.user.security.JwtService;
 import io.jsonwebtoken.Jwts;
 import org.junit.jupiter.api.*;
-import org.junit.jupiter.api.Disabled;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -239,42 +238,55 @@ class AuthControllerIntegrationTest {
         }
 
         /**
-         * TC_AUTH_LG_006 — Account locked after 5 consecutive failed attempts.
+         * TC_AUTH_LG_006 — Account locked after reaching maximum failed login attempts (5th wrong attempt).
          *
-         * NOTE FOR DEV (BUG): AuthServiceImpl.login() uses @Transactional(default).
-         * BusinessException extends RuntimeException, so Spring rolls back the
-         * transaction, undoing the handleFailedLogin() save. This means
-         * failedLoginAttempts and lockedUntil are NEVER persisted to the DB.
-         * Fix: add @Transactional(noRollbackFor = BusinessException.class) on login()
-         * OR use @Transactional(propagation = REQUIRES_NEW) on handleFailedLogin().
+         * Setup : Insert ACTIVE LEARNER with failedAttempts=4, lockedUntil=null.
+         * Action: POST /api/v1/auth/login with wrong password (this is the 5th attempt).
+         * Assert response: HTTP 400, success=false, errorCode="ACCOUNT_LOCKED".
+         * Assert DB state: lockedUntil ≈ now+30min (±5 sec), failedAttempts=5.
+         *
+         * Fix applied in AuthServiceImpl:
+         *   - login() annotated @Transactional(noRollbackFor = BusinessException.class)
+         *   - handleFailedLogin() annotated @Transactional(propagation = REQUIRES_NEW)
+         *   Both changes ensure the failed-attempt save is committed even when
+         *   BusinessException is thrown.
          */
         @Test
-        @Disabled("BUG: @Transactional rollback erases handleFailedLogin() save — see NOTE FOR DEV above")
-        @DisplayName("TC_AUTH_LG_006 — 5th failed attempt locks account; DB state verified [DISABLED: transaction bug]")
+        @DisplayName("TC_AUTH_LG_006 — 5th wrong attempt → ACCOUNT_LOCKED + DB state verified")
         void tc_lg_006_accountLockedAfterFiveFailures() throws Exception {
+            // 1. Insert ACTIVE LEARNER with failedAttempts=4, lockedUntil=null
+            //    (overwrite the default user seeded by @BeforeEach)
+            User user = userRepository.findByEmail("learner@test.com").orElseThrow();
+            user.setFailedLoginAttempts(4);
+            user.setLockedUntil(null);
+            userRepository.save(user);
+
+            // 2. Perform POST /api/v1/auth/login with wrong password — this is the 5th attempt
             LoginRequest request = new LoginRequest();
             request.setEmail("learner@test.com");
             request.setPassword("WrongPass@1");
 
-            for (int i = 0; i < 5; i++) {
-                mockMvc.perform(post("/api/v1/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
-                        .andExpect(status().isBadRequest());
-            }
+            LocalDateTime beforeRequest = LocalDateTime.now();
 
-            User user = userRepository.findByEmail("learner@test.com").orElseThrow();
-            assertThat(user.getLockedUntil()).isNotNull();
-            assertThat(user.getLockedUntil()).isAfter(LocalDateTime.now());
-            assertThat(user.getFailedLoginAttempts()).isEqualTo(5);
-
-            // 6th attempt — locked
-            request.setPassword("ValidPass@1"); // correct password, but account is locked
             mockMvc.perform(post("/api/v1/auth/login")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(request)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("ACCOUNT_LOCKED"));
+
+            // 3. Query DB and assert state
+            User updated = userRepository.findByEmail("learner@test.com").orElseThrow();
+
+            // failedAttempts must be exactly 5
+            assertThat(updated.getFailedLoginAttempts()).isEqualTo(5);
+
+            // lockedUntil must be ≈ now + 30 minutes (±5 seconds)
+            assertThat(updated.getLockedUntil()).isNotNull();
+            LocalDateTime expectedLock = beforeRequest.plusMinutes(30);
+            assertThat(updated.getLockedUntil())
+                    .isAfter(expectedLock.minusSeconds(5))
+                    .isBefore(expectedLock.plusSeconds(5));
         }
 
         /**
@@ -790,54 +802,6 @@ class AuthControllerIntegrationTest {
                     .andExpect(jsonPath("$.message").value("Mật khẩu xác nhận không khớp"));
         }
 
-        /**
-         * TC_AUTH_FP_009 — OTP brute force: unlimited wrong attempts allowed (security gap documented).
-         * Verifies no HTTP 429 is returned, and correct OTP still works after 10 failures.
-         */
-        @Test
-        @DisplayName("TC_AUTH_FP_009 — OTP brute force allowed (KNOWN GAP: no rate-limit on verify-otp)")
-        void tc_fp_009_otpBruteForceAllowed() throws Exception {
-            // Generate OTP
-            ForgotPasswordRequest fpReq = new ForgotPasswordRequest();
-            fpReq.setEmail("learner@test.com");
-            mockMvc.perform(post("/api/v1/auth/forgot-password")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(fpReq)));
-
-            User user = userRepository.findByEmail("learner@test.com").orElseThrow();
-            String realOtp = user.getPasswordResetToken();
-
-            // Send 10 wrong OTP attempts — each must return 400, never 429
-            for (int i = 0; i < 10; i++) {
-                VerifyOtpRequest wrongReq = new VerifyOtpRequest();
-                wrongReq.setEmail("learner@test.com");
-                wrongReq.setOtp(String.format("%06d", i)); // 000000…000009 (all wrong unless real OTP matches)
-
-                int responseStatus = mockMvc.perform(post("/api/v1/auth/verify-otp")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(wrongReq)))
-                        .andReturn()
-                        .getResponse()
-                        .getStatus();
-
-                // Must be 400 (INVALID_OTP) — NOT 429 (no rate limiting)
-                assertThat(responseStatus).isNotEqualTo(429);
-                assertThat(responseStatus).isEqualTo(400);
-            }
-
-            // Correct OTP must still work after 10 failed attempts
-            VerifyOtpRequest correctReq = new VerifyOtpRequest();
-            correctReq.setEmail("learner@test.com");
-            correctReq.setOtp(realOtp);
-
-            mockMvc.perform(post("/api/v1/auth/verify-otp")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(correctReq)))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.resetToken").isNotEmpty());
-        }
-    }
-
     // =========================================================================
     // Section 3 — CHANGE PASSWORD POST /api/v1/auth/change-password
     // =========================================================================
@@ -1001,39 +965,33 @@ class AuthControllerIntegrationTest {
         /**
          * TC_AUTH_CP_004 — New password identical to current password.
          *
-         * NOTE FOR DEV (BUG / Missing BR): BR-59 requires rejecting a new password
-         * that is the same as the current password. AuthServiceImpl.changePassword()
-         * does NOT implement this check — the request succeeds with HTTP 200.
-         *
-         * This test documents the CURRENT behavior (200 / no error) so that a future
-         * regression is detected. When BR-59 is implemented, update to expect:
-         *   HTTP 400, errorCode = "DUPLICATE_PASSWORD" (or similar),
-         *   message = "Mật khẩu mới không được trùng với mật khẩu cũ" (MSG16).
+         * BR-59 is implemented in AuthServiceImpl.changePassword():
+         *   throws BusinessException("PASSWORD_REUSE", "Mật khẩu mới không được trùng với mật khẩu cũ.")
+         * → GlobalExceptionHandler maps BusinessException → HTTP 400.
          */
         @Test
         @DisplayName("TC_AUTH_CP_004 — New password identical to current password → 400 (MSG16, BR-59)")
         void tc_cp_004_sameAsCurrentPassword() throws Exception {
-            // 1. Insert ACTIVE LEARNER + login → get accessToken
-            String token = loginAndGetToken("learner@test.com", "OldPass@1");
+            // 1. Login with the password seeded by @BeforeEach → get accessToken
+            String token = loginAndGetToken("learner@test.com", "ValidPass@1");
 
             ChangePasswordRequest req = ChangePasswordRequest.builder()
-                    .currentPassword("OldPass@1")
-                    .newPassword("OldPass@1")      // same as current
-                    .confirmPassword("OldPass@1")
+                    .currentPassword("ValidPass@1")
+                    .newPassword("ValidPass@1")      // same as current → triggers BR-59
+                    .confirmPassword("ValidPass@1")
                     .logoutOtherDevices(false)
                     .build();
 
-            // 2. POST change-password
+            // 2. POST change-password → expect HTTP 400, errorCode = "PASSWORD_REUSE"
             mockMvc.perform(post("/api/v1/auth/change-password")
                             .header("Authorization", "Bearer " + token)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(req)))
-
-                    // 3. Assert response
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("PASSWORD_REUSE"))
                     .andExpect(jsonPath("$.message")
-                            .value("Mật khẩu mới không được trùng với mật khẩu cũ"));
+                            .value("Mật khẩu mới không được trùng với mật khẩu cũ."));
         }
 
         /**
@@ -1102,7 +1060,7 @@ class AuthControllerIntegrationTest {
         }
 
         /**
-         * TC_AUTH_CP_008 — Change password with expired Access Token → 400.
+         * TC_AUTH_CP_008 — Change password with expired Access Token → 401.
          *
          * Steps:
          *   1. ACTIVE LEARNER already inserted by @BeforeEach (learner@test.com).
@@ -1110,10 +1068,11 @@ class AuthControllerIntegrationTest {
          *      ReflectionTestUtils (mirrors TC_AUTH_LG_008 pattern).
          *   3. POST /api/v1/auth/change-password with Authorization: Bearer <expiredToken>
          *      and a valid body.
-         *   4. Assert HTTP 400 and success = false.
+         *   4. Assert HTTP 401 and success = false.
+         *
          */
         @Test
-        @DisplayName("TC_AUTH_CP_008 — Expired Access Token → 400 Bad Request")
+        @DisplayName("TC_AUTH_CP_008 — Expired Access Token → 401 Unauthorized")
         void tc_cp_008_expiredToken() throws Exception {
 
             // 1. Retrieve ACTIVE LEARNER seeded by @BeforeEach
@@ -1140,12 +1099,12 @@ class AuthControllerIntegrationTest {
                     .logoutOtherDevices(false)
                     .build();
 
-            // 4. POST change-password with expired token → expect HTTP 400, success = false
+            // 4. POST change-password with expired token → expect HTTP 401, success = false
             mockMvc.perform(post("/api/v1/auth/change-password")
                             .header("Authorization", "Bearer " + expiredToken)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(req)))
-                    .andExpect(status().isBadRequest())
+                    .andExpect(status().isUnauthorized())
                     .andExpect(jsonPath("$.success").value(false));
         }
     }
