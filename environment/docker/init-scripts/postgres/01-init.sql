@@ -518,6 +518,70 @@ CREATE INDEX idx_pronunciation_attempts_item ON pronunciation.pronunciation_atte
 CREATE INDEX idx_pronunciation_attempts_analysis ON pronunciation.pronunciation_attempts USING gin(analysis);
 
 -- ==========================================================================
+-- ==================== SPEAKING/CONVERSATION TOPICS ========================
+-- (Must be created BEFORE ai_conversation due to foreign key reference)
+-- ==========================================================================
+
+-- Conversation topics (for AI practice)
+CREATE TABLE speaking.conversation_topics (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    
+    title VARCHAR(255) NOT NULL,
+    title_japanese VARCHAR(255),
+    description TEXT,
+    
+    -- Topic context
+    scenario TEXT,
+    vocabulary_hints JSONB DEFAULT '[]'::JSONB,
+    grammar_points JSONB DEFAULT '[]'::JSONB,
+    useful_expressions JSONB DEFAULT '[]'::JSONB,
+    
+    -- Classification
+    category VARCHAR(100), -- 'daily_life', 'travel', 'business', 'school', etc.
+    jlpt_level jlpt_level,
+    difficulty_score INT DEFAULT 1,
+    
+    -- For roleplay
+    is_roleplay BOOLEAN DEFAULT FALSE,
+    roleplay_context JSONB,
+    
+    thumbnail_url TEXT,
+    status content_status DEFAULT 'DRAFT',
+    order_index INT DEFAULT 0,
+    
+    created_by UUID REFERENCES user_management.users(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- User conversation progress
+CREATE TABLE speaking.user_conversation_progress (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
+    topic_id UUID NOT NULL REFERENCES speaking.conversation_topics(id) ON DELETE CASCADE,
+    
+    -- Practice stats
+    total_sessions INT DEFAULT 0,
+    total_messages_sent INT DEFAULT 0,
+    
+    -- Best scores
+    best_fluency_score DECIMAL(5,2) DEFAULT 0,
+    best_accuracy_score DECIMAL(5,2) DEFAULT 0,
+    best_vocabulary_score DECIMAL(5,2) DEFAULT 0,
+    best_overall_score DECIMAL(5,2) DEFAULT 0,
+    
+    -- Learning state
+    last_practiced_at TIMESTAMP WITH TIME ZONE,
+    is_completed BOOLEAN DEFAULT FALSE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    
+    UNIQUE(user_id, topic_id)
+);
+
+-- ==========================================================================
 -- ==================== AI CONVERSATION SCHEMA ==============================
 -- (Replaces MongoDB - uses JSONB for flexible document storage)
 -- ==========================================================================
@@ -675,69 +739,6 @@ CREATE TABLE ai_conversation.translation_cache (
 
 CREATE INDEX idx_translation_cache_lookup ON ai_conversation.translation_cache(source_text, source_language, target_language);
 CREATE INDEX idx_translation_cache_ttl ON ai_conversation.translation_cache(last_accessed_at);
-
--- ==========================================================================
--- ==================== SPEAKING/CONVERSATION TOPICS ========================
--- ==========================================================================
-
--- Conversation topics (for AI practice)
-CREATE TABLE speaking.conversation_topics (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    
-    title VARCHAR(255) NOT NULL,
-    title_japanese VARCHAR(255),
-    description TEXT,
-    
-    -- Topic context
-    scenario TEXT,
-    vocabulary_hints JSONB DEFAULT '[]'::JSONB,
-    grammar_points JSONB DEFAULT '[]'::JSONB,
-    useful_expressions JSONB DEFAULT '[]'::JSONB,
-    
-    -- Classification
-    category VARCHAR(100), -- 'daily_life', 'travel', 'business', 'school', etc.
-    jlpt_level jlpt_level,
-    difficulty_score INT DEFAULT 1,
-    
-    -- For roleplay
-    is_roleplay BOOLEAN DEFAULT FALSE,
-    roleplay_context JSONB,
-    
-    thumbnail_url TEXT,
-    status content_status DEFAULT 'DRAFT',
-    order_index INT DEFAULT 0,
-    
-    created_by UUID REFERENCES user_management.users(id),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- User conversation progress
-CREATE TABLE speaking.user_conversation_progress (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
-    topic_id UUID NOT NULL REFERENCES speaking.conversation_topics(id) ON DELETE CASCADE,
-    
-    -- Practice stats
-    total_sessions INT DEFAULT 0,
-    total_messages_sent INT DEFAULT 0,
-    
-    -- Best scores
-    best_fluency_score DECIMAL(5,2) DEFAULT 0,
-    best_accuracy_score DECIMAL(5,2) DEFAULT 0,
-    best_vocabulary_score DECIMAL(5,2) DEFAULT 0,
-    best_overall_score DECIMAL(5,2) DEFAULT 0,
-    
-    -- Learning state
-    last_practiced_at TIMESTAMP WITH TIME ZONE,
-    is_completed BOOLEAN DEFAULT FALSE,
-    completed_at TIMESTAMP WITH TIME ZONE,
-    
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
-    UNIQUE(user_id, topic_id)
-);
 
 -- ==========================================================================
 -- ==================== ASSIGNMENT SCHEMA ===================================
