@@ -162,19 +162,51 @@ CREATE TABLE user_management.class_members (
     UNIQUE(class_id, user_id)
 );
 
--- User sessions for tracking
+-- User sessions for tracking login sessions and refresh tokens
+-- Supports both Mobile App and Web Browser sessions
 CREATE TABLE user_management.user_sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
     
-    refresh_token VARCHAR(500),
-    device_info JSONB,
-    ip_address INET,
+    -- Token storage (session reference for JWT validation)
+    refresh_token VARCHAR(512),
     
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    -- Device information as JSONB for flexible storage
+    -- For Mobile App: {
+    --   "platform": "app",
+    --   "device_type": "mobile|tablet",
+    --   "os": "iOS 17.2|Android 14",
+    --   "app_version": "2.1.0",
+    --   "device_model": "iPhone 15|Samsung S24",
+    --   "device_id": "unique-device-identifier",
+    --   "push_token": "fcm_token_for_push_notifications"
+    -- }
+    -- For Web Browser: {
+    --   "platform": "web",
+    --   "device_type": "desktop|mobile",
+    --   "os": "Windows 11|macOS|Linux",
+    --   "browser": "Chrome 120|Safari 17|Firefox 121",
+    --   "browser_version": "120.0.0"
+    -- }
+    device_info JSONB,
+    
+    -- Client network information
+    ip_address INET,
+    user_agent VARCHAR(500),
+    
+    -- Timestamps
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    revoked_at TIMESTAMP WITH TIME ZONE
+    revoked_at TIMESTAMP WITH TIME ZONE,
+    last_active_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Indexes for user_sessions
+CREATE INDEX idx_user_sessions_user_id ON user_management.user_sessions(user_id);
+CREATE INDEX idx_user_sessions_refresh_token ON user_management.user_sessions(refresh_token);
+CREATE INDEX idx_user_sessions_expires_at ON user_management.user_sessions(expires_at);
+CREATE INDEX idx_user_sessions_active ON user_management.user_sessions(user_id) 
+    WHERE revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP;
 
 -- ==========================================================================
 -- ==================== LEARNING CONTENT SCHEMA =============================

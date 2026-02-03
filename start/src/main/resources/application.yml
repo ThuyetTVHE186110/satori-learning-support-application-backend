@@ -81,6 +81,58 @@ learning:
         recommendation-count: 10
         similarity-threshold: 0.7
 
+# ==================== Application Security Configuration ====================
+app:
+    security:
+        jwt:
+            # Access token secret (at least 256 bits / 32 characters)
+            access-token-secret: ${JWT_ACCESS_SECRET:SatoriAccessTokenSecret2026!VeryLongSecretKeyForJWT256Bits}
+            # Refresh token secret (different from access token)
+            refresh-token-secret: ${JWT_REFRESH_SECRET:SatoriRefreshTokenSecret2026!AnotherLongSecretKeyForJWT256}
+            # Access token expiration: 30 minutes (1800000 ms)
+            access-token-expiration-ms: ${JWT_ACCESS_EXPIRATION:1800000}
+            # Refresh token expiration: 7 days (604800000 ms)
+            refresh-token-expiration-ms: ${JWT_REFRESH_EXPIRATION:604800000}
+        # Max failed login attempts before account lock
+        max-failed-attempts: ${MAX_FAILED_ATTEMPTS:5}
+        # Account lock duration in minutes
+        lock-duration-minutes: ${LOCK_DURATION_MINUTES:30}
+        # OTP expiration time in minutes
+        otp-expiration-minutes: ${OTP_EXPIRATION_MINUTES:10}
+        # Activation token expiration time in hours
+        activation-token-expiration-hours: ${ACTIVATION_TOKEN_EXPIRATION_HOURS:24}
+
+    # Google OAuth / Firebase Configuration
+    google:
+        firebase:
+            enabled: ${FIREBASE_ENABLED:false}
+            credentials-file: ${FIREBASE_CREDENTIALS_FILE:}
+            project-id: ${FIREBASE_PROJECT_ID:}
+
+    # Email Configuration
+    email:
+        enabled: ${EMAIL_ENABLED:true}
+        from: ${EMAIL_FROM:noreply@satori-learning.com}
+        from-name: ${EMAIL_FROM_NAME:Satori Learning}
+        base-url: ${APP_BASE_URL:http://localhost:3000}
+
+# ==================== Spring Mail Configuration ====================
+spring.mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+        mail:
+            smtp:
+                auth: true
+                starttls:
+                    enable: true
+                    required: true
+                connectiontimeout: 5000
+                timeout: 5000
+                writetimeout: 5000
+
 # ==================== Logging Configuration ====================
 logging:
     level:
@@ -101,10 +153,3 @@ management:
             show-details: when-authorized
             probes:
                 enabled: true
-
-# ==================== Security Configuration ====================
-security:
-    jwt:
-        secret: ${JWT_SECRET:your-super-secret-jwt-key-should-be-at-least-256-bits-long}
-        expiration: 86400000 # 24 hours
-        refresh-expiration: 604800000 # 7 days

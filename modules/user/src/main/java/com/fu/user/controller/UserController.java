@@ -19,6 +19,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -48,8 +50,10 @@ public class UserController {
     @PostMapping
     @PreAuthorize("hasRole('MANAGER')")
     public ResponseEntity<ApiResponse<UserResponse>> createUser(
+            @AuthenticationPrincipal UserDetails userDetails,
             @Valid @RequestBody CreateUserRequest request) {
-        UserResponse response = userService.createUser(request);
+        UUID currentUserId = extractUserId(userDetails);
+        UserResponse response = userService.createUser(request, currentUserId);
         return ResponseEntity
                 .status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Tạo người dùng thành công", response));
@@ -145,29 +149,35 @@ public class UserController {
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('MANAGER')")
     public ResponseEntity<ApiResponse<UserResponse>> updateUser(
+            @AuthenticationPrincipal UserDetails userDetails,
             @PathVariable("id") UUID id,
             @Valid @RequestBody UpdateUserRequest request) {
-        UserResponse response = userService.updateUser(id, request);
+        UUID currentUserId = extractUserId(userDetails);
+        UserResponse response = userService.updateUser(id, request, currentUserId);
         return ResponseEntity.ok(ApiResponse.success("Cập nhật thông tin thành công", response));
     }
 
     /**
      * UC-05: Delete User (Soft Delete)
-     * Manager soft-deletes a user (sets status to INACTIVE).
+     * Manager soft-deletes a user (sets status to DELETED).
      * 
      * DELETE /api/v1/users/{id}
-     * 
-     * Note: deletedByUserId should come from SecurityContext in production.
-     * For now, we pass it as a header for testing.
      */
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('MANAGER')")
     public ResponseEntity<ApiResponse<Void>> deleteUser(
-            @PathVariable("id") UUID id,
-            @RequestHeader(name = "X-Deleted-By", required = false) UUID deletedByUserId) {
-        // TODO: Get deletedByUserId from SecurityContext
-        // UUID currentUserId = SecurityUtils.getCurrentUserId();
-        userService.deleteUser(id, deletedByUserId);
+            @AuthenticationPrincipal UserDetails userDetails,
+            @PathVariable("id") UUID id) {
+        UUID currentUserId = extractUserId(userDetails);
+        userService.deleteUser(id, currentUserId);
         return ResponseEntity.ok(ApiResponse.success("Xóa người dùng thành công", null));
+    }
+
+    /**
+     * Extract UUID from UserDetails.
+     * The username is expected to be the user's UUID string.
+     */
+    private UUID extractUserId(UserDetails userDetails) {
+        return UUID.fromString(userDetails.getUsername());
     }
 }

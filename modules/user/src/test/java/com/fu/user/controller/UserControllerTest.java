@@ -96,7 +96,7 @@ class UserControllerTest {
         @WithMockUser(roles = "MANAGER")
         void createUser_authenticatedManager_returns201() throws Exception {
             // Given
-            given(userService.createUser(any(CreateUserRequest.class)))
+            given(userService.createUser(any(CreateUserRequest.class), any(UUID.class)))
                     .willReturn(testUserResponse);
 
             // When
@@ -222,7 +222,7 @@ class UserControllerTest {
         @WithMockUser(roles = "MANAGER")
         void updateUser_validRequest_returns200() throws Exception {
             // Given
-            given(userService.updateUser(eq(testUserId), any(UpdateUserRequest.class)))
+            given(userService.updateUser(eq(testUserId), any(UpdateUserRequest.class), any(UUID.class)))
                     .willReturn(testUserResponse);
 
             // When

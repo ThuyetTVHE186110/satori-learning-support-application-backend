@@ -81,4 +81,10 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
      * Find user by Google ID (for OAuth login)
      */
     Optional<User> findByGoogleId(String googleId);
+
+    /**
+     * Find user by activation token (for email verification)
+     */
+    @Query("SELECT u FROM User u WHERE u.activationToken = :token AND u.deletedAt IS NULL")
+    Optional<User> findByActivationToken(@Param("token") String token);
 }
