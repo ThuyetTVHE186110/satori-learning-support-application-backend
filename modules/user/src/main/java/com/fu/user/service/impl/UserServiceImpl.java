@@ -1,7 +1,6 @@
 package com.fu.user.service.impl;
 
 import com.fu.common.exception.BusinessException;
-import com.fu.common.exception.DeletedUserExistsException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.infrastructure.email.EmailService;
 import com.fu.user.dto.*;
@@ -9,6 +8,7 @@ import com.fu.user.entity.AuthProvider;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
+import com.fu.user.exception.DeletedUserExistsException;
 import com.fu.user.mapper.UserMapper;
 import com.fu.user.repository.UserRepository;
 import com.fu.user.service.UserService;

@@ -1,6 +1,7 @@
 package com.fu.user.service;
 
 import com.fu.user.dto.*;
+import com.fu.user.entity.UserRole;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -102,7 +103,9 @@ public interface UserService {
      */
     Page<UserResponse> searchUsers(UserFilterRequest filter, Pageable pageable, UserRole currentUserRole);
 
-    /**status for LEARNER/TEACHER).
+    /**
+     * UC-04: Update User Information
+     * Manager updates user details (name, phone, status for LEARNER/TEACHER).
      * Admin can update all users including MANAGER.
      * 
      * @param id User UUID
@@ -111,11 +114,11 @@ public interface UserService {
      * @param updaterRole Role of the user performing the update
      * @return Updated user response
      */
-    UserResponse updateUser(UUID id, UpdateUserRequest request, UUID updatedByUserId, UserRole updaterRole
-     */
-    UserResponse updateUser(UUID id, UpdateUserRequest request, UUID updatedByUserId);
+    UserResponse updateUser(UUID id, UpdateUserRequest request, UUID updatedByUserId, UserRole updaterRole);
 
-    /**and marks as deleted.
+    /**
+     * UC-05: Delete User (Soft Delete)
+     * Sets status to INACTIVE and marks as deleted.
      * Manager can delete LEARNER/TEACHER only.
      * Admin can delete all including MANAGER.
      * Historical data (learning progress, scores) is preserved for reporting.
@@ -144,9 +147,7 @@ public interface UserService {
      * @param restorerRole Role of the user performing the restoration
      * @return Restored user response
      */
-    UserResponse restoreUser(RestoreUserRequest request, UUID restoredByUserId, UserRole restorerRole performing deletion
-     */
-    void deleteUser(UUID id, UUID deletedByUserId);
+    UserResponse restoreUser(RestoreUserRequest request, UUID restoredByUserId, UserRole restorerRole);
 
     // ==================== User Self-Service Operations ====================
 

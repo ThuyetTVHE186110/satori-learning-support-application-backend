@@ -1,4 +1,4 @@
-package com.fu.common.exception;
+package com.fu.user.exception;
 
 import com.fu.user.dto.DeletedUserInfo;
 import lombok.Getter;
@@ -6,6 +6,7 @@ import lombok.Getter;
 /**
  * Exception thrown when trying to create a user with an email that belongs to a soft-deleted account.
  * Contains information about the deleted user to allow restoration.
+ * This is a user-domain specific exception, not a generic common exception.
  */
 @Getter
 public class DeletedUserExistsException extends RuntimeException {

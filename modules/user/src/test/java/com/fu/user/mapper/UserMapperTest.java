@@ -10,6 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mapstruct.factory.Mappers;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -22,9 +23,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Unit tests for UserMapper (MapStruct generated implementation).
  * 
  * Tests the mapping logic between DTOs and Entities.
- * Uses Mappers.getMapper() for standalone testing without Spring context.
+ * Updated for firstName/lastName structure instead of fullName.
  */
-@DisplayName("UserMapper Unit Tests")
+@DisplayName("UserMapper Unit Tests - Updated")
 class UserMapperTest {
 
     private UserMapper userMapper;
@@ -39,15 +40,17 @@ class UserMapperTest {
     class ToEntityTests {
 
         @Test
-        @DisplayName("Should map CreateUserRequest to User entity")
+        @DisplayName("Should map CreateUserRequest with firstName/lastName to User entity")
         void toEntity_validRequest_mapsCorrectly() {
             // Given
-            CreateUserRequest request = new CreateUserRequest();
-            request.setEmail("test@example.com");
-            request.setFullName("John Doe");
-            request.setRole(UserRole.LEARNER);
-            request.setPhoneNumber("0123456789");
-            request.setDateOfBirth(LocalDate.of(2000, 5, 15));
+            CreateUserRequest request = CreateUserRequest.builder()
+                    .email("test@example.com")
+                    .firstName("John")
+                    .lastName("Doe")
+                    .role(UserRole.LEARNER)
+                    .phoneNumber("0123456789")
+                    .dateOfBirth(LocalDate.of(2000, 5, 15))
+                    .build();
 
             // When
             User user = userMapper.toEntity(request);
@@ -55,80 +58,59 @@ class UserMapperTest {
             // Then
             assertThat(user).isNotNull();
             assertThat(user.getEmail()).isEqualTo("test@example.com");
-            assertThat(user.getDisplayName()).isEqualTo("John Doe");
+            assertThat(user.getFirstName()).isEqualTo("John");
+            assertThat(user.getLastName()).isEqualTo("Doe");
             assertThat(user.getPhoneNumber()).isEqualTo("0123456789");
             assertThat(user.getDateOfBirth()).isEqualTo(LocalDate.of(2000, 5, 15));
             
-            // ID should not be set (ignored in mapping)
+            // Ignored fields should not be set
             assertThat(user.getId()).isNull();
-            // passwordHash should not be set (ignored in mapping)
             assertThat(user.getPasswordHash()).isNull();
+            assertThat(user.getRole()).isNull(); // Set by service layer
+            assertThat(user.getStatus()).isNull(); // Set by service layer
         }
 
         @Test
-        @DisplayName("Should extract firstName from fullName")
-        void toEntity_fullName_extractsFirstName() {
+        @DisplayName("Should map firstName and lastName directly without extraction")
+        void toEntity_firstNameLastName_mapDirectly() {
             // Given
-            CreateUserRequest request = new CreateUserRequest();
-            request.setEmail("test@example.com");
-            request.setFullName("John Michael Doe");
-            request.setRole(UserRole.LEARNER);
+            CreateUserRequest request = CreateUserRequest.builder()
+                    .email("test@example.com")
+                    .firstName("Jane")
+                    .lastName("Smith")
+                    .role(UserRole.TEACHER)
+                    .build();
 
             // When
             User user = userMapper.toEntity(request);
 
             // Then
-            assertThat(user.getFirstName()).isEqualTo("John");
+            assertThat(user.getFirstName()).isEqualTo("Jane");
+            assertThat(user.getLastName()).isEqualTo("Smith");
         }
 
         @Test
-        @DisplayName("Should extract lastName from fullName")
-        void toEntity_fullName_extractsLastName() {
+        @DisplayName("Should map all optional fields when present")
+        void toEntity_allFieldsPresent_mapsAll() {
             // Given
-            CreateUserRequest request = new CreateUserRequest();
-            request.setEmail("test@example.com");
-            request.setFullName("John Michael Doe");
-            request.setRole(UserRole.LEARNER);
+            CreateUserRequest request = CreateUserRequest.builder()
+                    .email("test@example.com")
+                    .firstName("Test")
+                    .lastName("User")
+                    .phoneNumber("0987654321")
+                    .dateOfBirth(LocalDate.of(1995, 3, 20))
+                    .role(UserRole.TEACHER)
+                    .build();
 
             // When
             User user = userMapper.toEntity(request);
 
             // Then
-            assertThat(user.getLastName()).isEqualTo("Michael Doe");
-        }
-
-        @Test
-        @DisplayName("Should handle single word name (no lastName)")
-        void toEntity_singleWordName_handlesCorrectly() {
-            // Given
-            CreateUserRequest request = new CreateUserRequest();
-            request.setEmail("test@example.com");
-            request.setFullName("John");
-            request.setRole(UserRole.LEARNER);
-
-            // When
-            User user = userMapper.toEntity(request);
-
-            // Then
-            assertThat(user.getFirstName()).isEqualTo("John");
-            assertThat(user.getLastName()).isNull();
-        }
-
-        @Test
-        @DisplayName("Should handle null fullName")
-        void toEntity_nullFullName_handlesGracefully() {
-            // Given
-            CreateUserRequest request = new CreateUserRequest();
-            request.setEmail("test@example.com");
-            request.setFullName(null);
-            request.setRole(UserRole.LEARNER);
-
-            // When
-            User user = userMapper.toEntity(request);
-
-            // Then
-            assertThat(user.getFirstName()).isNull();
-            assertThat(user.getLastName()).isNull();
+            assertThat(user.getEmail()).isEqualTo("test@example.com");
+            assertThat(user.getFirstName()).isEqualTo("Test");
+            assertThat(user.getLastName()).isEqualTo("User");
+            assertThat(user.getPhoneNumber()).isEqualTo("0987654321");
+            assertThat(user.getDateOfBirth()).isEqualTo(LocalDate.of(1995, 3, 20));
         }
     }
 
@@ -141,19 +123,20 @@ class UserMapperTest {
         void toResponse_validUser_mapsCorrectly() {
             // Given
             UUID userId = UUID.randomUUID();
-            User user = new User();
-            user.setId(userId);
-            user.setEmail("test@example.com");
-            user.setFirstName("John");
-            user.setLastName("Doe");
-            user.setDisplayName("Johnny D");
-            user.setRole(UserRole.TEACHER);
-            user.setStatus(UserStatus.ACTIVE);
-            user.setPhoneNumber("0123456789");
-            user.setDateOfBirth(LocalDate.of(1990, 1, 1));
-            user.setAvatarUrl("https://example.com/avatar.jpg");
-            user.setCreatedAt(LocalDateTime.of(2026, 1, 1, 10, 0));
-            user.setUpdatedAt(LocalDateTime.of(2026, 1, 15, 14, 30));
+            User user = User.builder()
+                    .email("test@example.com")
+                    .firstName("John")
+                    .lastName("Doe")
+                    .displayName("Johnny D")
+                    .role(UserRole.TEACHER)
+                    .status(UserStatus.ACTIVE)
+                    .phoneNumber("0123456789")
+                    .dateOfBirth(LocalDate.of(1990, 1, 1))
+                    .avatarUrl("https://example.com/avatar.jpg")
+                    .build();
+            ReflectionTestUtils.setField(user, "id", userId);
+            ReflectionTestUtils.setField(user, "createdAt", LocalDateTime.of(2026, 1, 1, 10, 0));
+            ReflectionTestUtils.setField(user, "updatedAt", LocalDateTime.of(2026, 1, 15, 14, 30));
 
             // When
             UserResponse response = userMapper.toResponse(user);
@@ -174,20 +157,69 @@ class UserMapperTest {
         }
 
         @Test
-        @DisplayName("Should generate fullName from firstName and lastName")
+        @DisplayName("Should generate fullName from firstName and lastName using User.getFullName()")
         void toResponse_user_generatesFullName() {
             // Given
-            User user = new User();
-            user.setId(UUID.randomUUID());
-            user.setFirstName("John");
-            user.setLastName("Doe");
-            user.setEmail("test@example.com");
+            User user = User.builder()
+                    .email("test@example.com")
+                    .firstName("John")
+                    .lastName("Doe")
+                    .role(UserRole.LEARNER)
+                    .status(UserStatus.ACTIVE)
+                    .build();
+            ReflectionTestUtils.setField(user, "id", UUID.randomUUID());
 
             // When
             UserResponse response = userMapper.toResponse(user);
 
             // Then
             assertThat(response.getFullName()).isEqualTo("John Doe");
+            assertThat(response.getFirstName()).isEqualTo("John");
+            assertThat(response.getLastName()).isEqualTo("Doe");
+        }
+
+        @Test
+        @DisplayName("Should handle user with only firstName")
+        void toResponse_onlyFirstName_generatesFullNameCorrectly() {
+            // Given
+            User user = User.builder()
+                    .email("test@example.com")
+                    .firstName("John")
+                    .lastName(null)
+                    .role(UserRole.LEARNER)
+                    .status(UserStatus.ACTIVE)
+                    .build();
+            ReflectionTestUtils.setField(user, "id", UUID.randomUUID());
+
+            // When
+            UserResponse response = userMapper.toResponse(user);
+
+            // Then
+            assertThat(response.getFullName()).isEqualTo("John");
+            assertThat(response.getFirstName()).isEqualTo("John");
+            assertThat(response.getLastName()).isNull();
+        }
+
+        @Test
+        @DisplayName("Should map learner with displayName")
+        void toResponse_learnerWithDisplayName_mapsDisplayName() {
+            // Given
+            User user = User.builder()
+                    .email("learner@example.com")
+                    .firstName("Student")
+                    .lastName("One")
+                    .displayName("Stu")
+                    .role(UserRole.LEARNER)
+                    .status(UserStatus.ACTIVE)
+                    .build();
+            ReflectionTestUtils.setField(user, "id", UUID.randomUUID());
+
+            // When
+            UserResponse response = userMapper.toResponse(user);
+
+            // Then
+            assertThat(response.getDisplayName()).isEqualTo("Stu");
+            assertThat(response.getFullName()).isEqualTo("Student One");
         }
     }
 
@@ -199,9 +231,9 @@ class UserMapperTest {
         @DisplayName("Should map list of users to list of responses")
         void toResponseList_multipleUsers_mapsAll() {
             // Given
-            User user1 = createTestUser("user1@example.com", "John", "Doe");
-            User user2 = createTestUser("user2@example.com", "Jane", "Smith");
-            User user3 = createTestUser("user3@example.com", "Bob", "Brown");
+            User user1 = createTestUser("user1@example.com", "John", "Doe", UserRole.LEARNER);
+            User user2 = createTestUser("user2@example.com", "Jane", "Smith", UserRole.TEACHER);
+            User user3 = createTestUser("user3@example.com", "Bob", "Brown", UserRole.MANAGER);
             
             List<User> users = List.of(user1, user2, user3);
 
@@ -211,8 +243,11 @@ class UserMapperTest {
             // Then
             assertThat(responses).hasSize(3);
             assertThat(responses.get(0).getEmail()).isEqualTo("user1@example.com");
+            assertThat(responses.get(0).getFullName()).isEqualTo("John Doe");
             assertThat(responses.get(1).getEmail()).isEqualTo("user2@example.com");
+            assertThat(responses.get(1).getFullName()).isEqualTo("Jane Smith");
             assertThat(responses.get(2).getEmail()).isEqualTo("user3@example.com");
+            assertThat(responses.get(2).getFullName()).isEqualTo("Bob Brown");
         }
 
         @Test
@@ -225,58 +260,87 @@ class UserMapperTest {
             assertThat(responses).isEmpty();
         }
 
-        private User createTestUser(String email, String firstName, String lastName) {
-            User user = new User();
-            user.setId(UUID.randomUUID());
-            user.setEmail(email);
-            user.setFirstName(firstName);
-            user.setLastName(lastName);
+        @Test
+        @DisplayName("Should handle mixed roles in list")
+        void toResponseList_mixedRoles_mapsCorrectly() {
+            // Given
+            User learner = createTestUser("learner@example.com", "Learn", "Er", UserRole.LEARNER);
+            learner.setDisplayName("Leo");
+            
+            User teacher = createTestUser("teacher@example.com", "Teach", "Er", UserRole.TEACHER);
+            
+            List<User> users = List.of(learner, teacher);
+
+            // When
+            List<UserResponse> responses = userMapper.toResponseList(users);
+
+            // Then
+            assertThat(responses).hasSize(2);
+            assertThat(responses.get(0).getRole()).isEqualTo(UserRole.LEARNER);
+            assertThat(responses.get(0).getDisplayName()).isEqualTo("Leo");
+            assertThat(responses.get(1).getRole()).isEqualTo(UserRole.TEACHER);
+        }
+
+        private User createTestUser(String email, String firstName, String lastName, UserRole role) {
+            User user = User.builder()
+                    .email(email)
+                    .firstName(firstName)
+                    .lastName(lastName)
+                    .role(role)
+                    .status(UserStatus.ACTIVE)
+                    .build();
+            ReflectionTestUtils.setField(user, "id", UUID.randomUUID());
             return user;
         }
     }
 
     @Nested
-    @DisplayName("Helper Methods - extractFirstName, extractLastName")
-    class HelperMethodTests {
+    @DisplayName("Edge Cases and Null Handling")
+    class EdgeCaseTests {
 
         @Test
-        @DisplayName("extractFirstName should handle whitespace correctly")
-        void extractFirstName_withWhitespace_trimsCorrectly() {
+        @DisplayName("Should handle minimal CreateUserRequest")
+        void toEntity_minimalRequest_mapsRequiredFieldsOnly() {
+            // Given
+            CreateUserRequest request = CreateUserRequest.builder()
+                    .email("minimal@example.com")
+                    .firstName("Min")
+                    .lastName("User")
+                    .role(UserRole.LEARNER)
+                    .build();
+
             // When
-            String firstName = userMapper.extractFirstName("  John   Doe  ");
+            User user = userMapper.toEntity(request);
 
             // Then
-            assertThat(firstName).isEqualTo("John");
+            assertThat(user.getEmail()).isEqualTo("minimal@example.com");
+            assertThat(user.getFirstName()).isEqualTo("Min");
+            assertThat(user.getLastName()).isEqualTo("User");
+            assertThat(user.getPhoneNumber()).isNull();
+            assertThat(user.getDateOfBirth()).isNull();
         }
 
         @Test
-        @DisplayName("extractLastName should handle whitespace correctly")
-        void extractLastName_withWhitespace_trimsCorrectly() {
+        @DisplayName("Should handle User with minimal fields in toResponse")
+        void toResponse_minimalUser_mapsRequiredFieldsOnly() {
+            // Given
+            User user = User.builder()
+                    .email("minimal@example.com")
+                    .firstName("Min")
+                    .lastName("User")
+                    .role(UserRole.LEARNER)
+                    .status(UserStatus.PENDING_ACTIVATION)
+                    .build();
+            ReflectionTestUtils.setField(user, "id", UUID.randomUUID());
+
             // When
-            String lastName = userMapper.extractLastName("  John   Doe  ");
+            UserResponse response = userMapper.toResponse(user);
 
             // Then
-            assertThat(lastName).isEqualTo("Doe");
-        }
-
-        @Test
-        @DisplayName("extractFirstName should return null for blank string")
-        void extractFirstName_blankString_returnsNull() {
-            // When
-            String firstName = userMapper.extractFirstName("   ");
-
-            // Then
-            assertThat(firstName).isNull();
-        }
-
-        @Test
-        @DisplayName("extractLastName should return null for single word")
-        void extractLastName_singleWord_returnsNull() {
-            // When
-            String lastName = userMapper.extractLastName("John");
-
-            // Then
-            assertThat(lastName).isNull();
+            assertThat(response.getEmail()).isEqualTo("minimal@example.com");
+            assertThat(response.getFullName()).isEqualTo("Min User");
+            assertThat(response.getPhoneNumber()).isNull();
+            assertThat(response.getAvatarUrl()).isNull();
         }
     }
 }
