@@ -34,6 +34,14 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ex.getErrorCode(), ex.getMessage()));
     }
 
+    @ExceptionHandler(DeletedUserExistsException.class)
+    public ResponseEntity<ApiResponse<Object>> handleDeletedUserExistsException(DeletedUserExistsException ex) {
+        log.warn("Deleted user exists: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error("DELETED_USER_EXISTS", ex.getMessage(), ex.getDeletedUserInfo()));
+    }
+
     @ExceptionHandler({AccessDeniedException.class, AuthorizationDeniedException.class})
     public ResponseEntity<ApiResponse<Void>> handleAccessDeniedException(Exception ex) {
         log.warn("Access denied: {}", ex.getMessage());

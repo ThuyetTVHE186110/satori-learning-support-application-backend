@@ -1,5 +1,7 @@
 package com.fu.user.dto;
 
+import com.fu.common.validator.NoEmoji;
+import com.fu.common.validator.SafeText;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
 import jakarta.validation.constraints.Past;
@@ -23,12 +25,18 @@ import java.time.LocalDate;
 public class UpdateUserRequest {
 
     @Size(max = 100, message = "First name must not exceed 100 characters")
+    @NoEmoji(message = "First name must not contain emoji characters")
+    @SafeText(message = "First name contains invalid characters")
     private String firstName;
 
     @Size(max = 100, message = "Last name must not exceed 100 characters")
+    @NoEmoji(message = "Last name must not contain emoji characters")
+    @SafeText(message = "Last name contains invalid characters")
     private String lastName;
 
     @Size(max = 100, message = "Display name must not exceed 100 characters")
+    @NoEmoji(message = "Display name must not contain emoji characters")
+    @SafeText(message = "Display name contains invalid characters")
     private String displayName;
 
     @Pattern(regexp = "^[+]?[0-9]{10,15}$", message = "Invalid phone number format")

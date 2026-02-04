@@ -1,5 +1,7 @@
 package com.fu.user.dto;
 
+import com.fu.common.validator.NoEmoji;
+import com.fu.common.validator.SafeText;
 import com.fu.user.entity.UserRole;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -16,7 +18,8 @@ import java.time.LocalDate;
 
 /**
  * Request DTO for creating a new user (UC-02: Create User).
- * Used by Manager to create Learner/Teacher accounts.
+ * Used by Manager/Admin to create Learner/Teacher/Manager accounts.
+ * Frontend sends firstName and lastName separately.
  */
 @Data
 @Builder
@@ -29,9 +32,17 @@ public class CreateUserRequest {
     @Size(max = 255, message = "Email must not exceed 255 characters")
     private String email;
 
-    @NotBlank(message = "Full name is required")
-    @Size(max = 200, message = "Full name must not exceed 200 characters")
-    private String fullName;
+    @NotBlank(message = "First name is required")
+    @Size(max = 100, message = "First name must not exceed 100 characters")
+    @NoEmoji(message = "First name must not contain emoji characters")
+    @SafeText(message = "First name contains invalid characters")
+    private String firstName;
+
+    @NotBlank(message = "Last name is required")
+    @Size(max = 100, message = "Last name must not exceed 100 characters")
+    @NoEmoji(message = "Last name must not contain emoji characters")
+    @SafeText(message = "Last name contains invalid characters")
+    private String lastName;
 
     @NotNull(message = "Role is required")
     private UserRole role;

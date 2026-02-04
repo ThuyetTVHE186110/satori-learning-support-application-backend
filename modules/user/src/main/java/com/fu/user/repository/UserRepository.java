@@ -87,4 +87,37 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
      */
     @Query("SELECT u FROM User u WHERE u.activationToken = :token AND u.deletedAt IS NULL")
     Optional<User> findByActivationToken(@Param("token") String token);
+
+    /**
+     * Search users by keyword with role filters (excluding certain roles for Manager)
+     * Manager can only see LEARNER and TEACHER
+     */
+    @Query("SELECT u FROM User u WHERE u.deletedAt IS NULL " +
+           "AND (:keyword IS NULL OR :keyword = '' OR " +
+           "     LOWER(u.firstName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+           "     LOWER(u.lastName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+           "     LOWER(u.displayName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+           "     LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+           "AND (:role IS NULL OR u.role = :role) " +
+           "AND (:status IS NULL OR u.status = :status) " +
+           "AND u.role IN :allowedRoles")
+    Page<User> searchUsersByRoles(
+            @Param("keyword") String keyword,
+            @Param("role") UserRole role,
+            @Param("status") UserStatus status,
+            @Param("allowedRoles") java.util.List<UserRole> allowedRoles,
+            Pageable pageable
+    );
+
+    /**
+     * Find all deleted users (for Admin only)
+     */
+    @Query("SELECT u FROM User u WHERE u.deletedAt IS NOT NULL ORDER BY u.deletedAt DESC")
+    Page<User> findAllDeleted(Pageable pageable);
+
+    /**
+     * Find deleted user by email
+     */
+    @Query("SELECT u FROM User u WHERE u.email = :email AND u.deletedAt IS NOT NULL")
+    Optional<User> findDeletedByEmail(@Param("email") String email);
 }

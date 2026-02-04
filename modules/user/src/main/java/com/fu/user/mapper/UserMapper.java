@@ -37,9 +37,7 @@ public interface UserMapper {
     @Mapping(target = "lastLoginAt", ignore = true)
     @Mapping(target = "emailVerifiedAt", ignore = true)
     @Mapping(target = "gender", ignore = true)
-    @Mapping(target = "firstName", source = "fullName", qualifiedByName = "extractFirstName")
-    @Mapping(target = "lastName", source = "fullName", qualifiedByName = "extractLastName")
-    @Mapping(target = "displayName", source = "fullName")
+    @Mapping(target = "displayName", ignore = true)
     User toEntity(CreateUserRequest request);
 
     /**
@@ -49,24 +47,4 @@ public interface UserMapper {
     UserResponse toResponse(User user);
 
     List<UserResponse> toResponseList(List<User> users);
-
-    /**
-     * Extract first name from full name.
-     */
-    @Named("extractFirstName")
-    default String extractFirstName(String fullName) {
-        if (fullName == null || fullName.isBlank()) return null;
-        String[] parts = fullName.trim().split("\\s+", 2);
-        return parts[0];
-    }
-
-    /**
-     * Extract last name from full name.
-     */
-    @Named("extractLastName")
-    default String extractLastName(String fullName) {
-        if (fullName == null || fullName.isBlank()) return null;
-        String[] parts = fullName.trim().split("\\s+", 2);
-        return parts.length > 1 ? parts[1] : null;
-    }
 }
