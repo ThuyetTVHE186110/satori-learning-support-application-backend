@@ -63,11 +63,11 @@ class UserMapperTest {
             assertThat(user.getPhoneNumber()).isEqualTo("0123456789");
             assertThat(user.getDateOfBirth()).isEqualTo(LocalDate.of(2000, 5, 15));
             
-            // Ignored fields should not be set
+            // Ignored fields should not be set by mapper - service layer handles these
             assertThat(user.getId()).isNull();
             assertThat(user.getPasswordHash()).isNull();
-            assertThat(user.getRole()).isNull(); // Set by service layer
-            assertThat(user.getStatus()).isNull(); // Set by service layer
+            assertThat(user.getRole()).isNull(); // Service validates permissions and sets role
+            assertThat(user.getStatus()).isNull(); // Service sets status
         }
 
         @Test

@@ -7,12 +7,13 @@ import org.mapstruct.*;
 
 import java.util.List;
 
-@Mapper(componentModel = "spring")
+@Mapper(componentModel = "spring", unmappedTargetPolicy = ReportingPolicy.IGNORE)
 public interface UserMapper {
 
     /**
      * Map CreateUserRequest to User entity.
-     * Note: passwordHash, role, status are set in service layer.
+     * Note: passwordHash, role, and status are set by service layer.
+     * Role mapping is explicitly ignored - service layer validates permissions and sets role.
      */
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
@@ -43,8 +44,24 @@ public interface UserMapper {
     /**
      * Map User entity to UserResponse.
      */
-    @Mapping(target = "fullName", expression = "java(user.getFullName())")
+    @Mapping(target = "fullName", expression = "java(buildFullName(user))")
     UserResponse toResponse(User user);
 
     List<UserResponse> toResponseList(List<User> users);
+    
+    /**
+     * Build fullName from firstName and lastName.
+     */
+    default String buildFullName(User user) {
+        if (user.getFirstName() == null && user.getLastName() == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        if (user.getFirstName() != null) sb.append(user.getFirstName());
+        if (user.getLastName() != null) {
+            if (sb.length() > 0) sb.append(" ");
+            sb.append(user.getLastName());
+        }
+        return sb.length() > 0 ? sb.toString() : null;
+    }
 }

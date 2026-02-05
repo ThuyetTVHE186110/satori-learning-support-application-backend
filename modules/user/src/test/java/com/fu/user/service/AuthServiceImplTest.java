@@ -116,6 +116,9 @@ class AuthServiceImplTest {
         
         // Set default expiration minutes
         ReflectionTestUtils.setField(authService, "otpExpirationMinutes", 10);
+        
+        // Inject Optional<FirebaseAuth> for Google auth tests
+        ReflectionTestUtils.setField(authService, "firebaseAuth", Optional.of(firebaseAuth));
     }
 
     @Nested
@@ -153,7 +156,7 @@ class AuthServiceImplTest {
             assertThat(savedUser.getFailedLoginAttempts()).isEqualTo(0);
             assertThat(savedUser.getLastLoginAt()).isNotNull();
             
-            verify(sessionRepository).save(any(UserSession.class));
+            verify(sessionRepository, times(2)).save(any(UserSession.class));
         }
 
         @Test
@@ -332,6 +335,7 @@ class AuthServiceImplTest {
             request.setEmail("test@example.com");
             request.setOtp("123456");
             request.setNewPassword("NewPassword123!");
+            request.setConfirmPassword("NewPassword123!");
             
             given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
             given(passwordEncoder.encode(request.getNewPassword())).willReturn("newHashedPassword");
@@ -365,6 +369,7 @@ class AuthServiceImplTest {
             request.setEmail("test@example.com");
             request.setOtp("999999");
             request.setNewPassword("NewPassword123!");
+            request.setConfirmPassword("NewPassword123!");
             
             given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
             
@@ -387,6 +392,7 @@ class AuthServiceImplTest {
             request.setEmail("test@example.com");
             request.setOtp("123456");
             request.setNewPassword("NewPassword123!");
+            request.setConfirmPassword("NewPassword123!");
             
             given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
             
@@ -410,6 +416,7 @@ class AuthServiceImplTest {
             ChangePasswordRequest request = new ChangePasswordRequest();
             request.setCurrentPassword("OldPassword123!");
             request.setNewPassword("NewPassword456@");
+            request.setConfirmPassword("NewPassword456@");
             
             given(userRepository.findById(userId)).willReturn(Optional.of(testUser));
             given(passwordEncoder.matches(request.getCurrentPassword(), testUser.getPasswordHash())).willReturn(true);
@@ -439,6 +446,7 @@ class AuthServiceImplTest {
             ChangePasswordRequest request = new ChangePasswordRequest();
             request.setCurrentPassword("WrongPassword");
             request.setNewPassword("NewPassword456@");
+            request.setConfirmPassword("NewPassword456@");
             
             given(userRepository.findById(userId)).willReturn(Optional.of(testUser));
             given(passwordEncoder.matches(request.getCurrentPassword(), testUser.getPasswordHash())).willReturn(false);
@@ -564,17 +572,16 @@ class AuthServiceImplTest {
                     .refreshToken("refresh-token")
                     .logoutAll(false)
                     .build();
+            UUID sessionId = (UUID) ReflectionTestUtils.getField(testSession, "id");
             
-            given(sessionRepository.findActiveByRefreshToken(eq("refresh-token"), any(LocalDateTime.class)))
-                    .willReturn(Optional.of(testSession));
+            given(jwtService.validateRefreshToken("refresh-token")).willReturn(sessionId);
+            given(sessionRepository.findById(sessionId)).willReturn(Optional.of(testSession));
             
             // When
             authService.logout(userId, request);
             
             // Then
-            verify(sessionRepository).save(sessionCaptor.capture());
-            UserSession revokedSession = sessionCaptor.getValue();
-            assertThat(revokedSession.getRevokedAt()).isNotNull();
+            assertThat(testSession.getRevokedAt()).isNotNull();
         }
 
         @Test
@@ -604,11 +611,12 @@ class AuthServiceImplTest {
             RefreshTokenRequest request = new RefreshTokenRequest();
             request.setRefreshToken("valid-refresh-token");
             String newAccessToken = "new-access-token";
+            UUID sessionId = (UUID) ReflectionTestUtils.getField(testSession, "id");
             
-            given(sessionRepository.findActiveByRefreshToken(eq("valid-refresh-token"), any(LocalDateTime.class)))
+            given(jwtService.validateRefreshToken("valid-refresh-token")).willReturn(sessionId);
+            given(sessionRepository.findById(sessionId))
                     .willReturn(Optional.of(testSession));
-            given(userRepository.findById(userId)).willReturn(Optional.of(testUser));
-            given(jwtService.generateAccessToken(eq(testUser), any(UUID.class))).willReturn(newAccessToken);
+            given(jwtService.generateAccessToken(eq(testUser), eq(sessionId))).willReturn(newAccessToken);
             
             // When
             LoginResponse result = authService.refreshToken(request);
@@ -616,6 +624,7 @@ class AuthServiceImplTest {
             // Then
             assertThat(result).isNotNull();
             assertThat(result.getAccessToken()).isEqualTo(newAccessToken);
+            assertThat(result.getRefreshToken()).isEqualTo("valid-refresh-token");
         }
 
         @Test
@@ -625,8 +634,7 @@ class AuthServiceImplTest {
             RefreshTokenRequest request = new RefreshTokenRequest();
             request.setRefreshToken("expired-token");
             
-            given(sessionRepository.findActiveByRefreshToken(eq("expired-token"), any(LocalDateTime.class)))
-                    .willReturn(Optional.empty());
+            given(jwtService.validateRefreshToken("expired-token")).willReturn(null);
             
             // When/Then
             assertThatThrownBy(() -> 
@@ -643,14 +651,14 @@ class AuthServiceImplTest {
             RefreshTokenRequest request = new RefreshTokenRequest();
             request.setRefreshToken("invalid-token");
             
-            given(sessionRepository.findActiveByRefreshToken(eq("invalid-token"), any(LocalDateTime.class)))
-                    .willReturn(Optional.empty());
+            given(jwtService.validateRefreshToken("invalid-token")).willReturn(null);
             
             // When/Then
             assertThatThrownBy(() -> 
                 authService.refreshToken(request)
             )
-            .isInstanceOf(BusinessException.class);
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Refresh token");
         }
     }
 }

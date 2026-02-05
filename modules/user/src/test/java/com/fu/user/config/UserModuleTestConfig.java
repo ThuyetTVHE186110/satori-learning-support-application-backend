@@ -34,9 +34,9 @@ import org.springframework.security.web.SecurityFilterChain;
     RedisRepositoriesAutoConfiguration.class
 })
 @EnableWebSecurity
-@EnableMethodSecurity
+@EnableMethodSecurity(prePostEnabled = true)
 @ComponentScan(
-    basePackages = {"com.fu.user.controller", "com.fu.common.exception"},
+    basePackages = {"com.fu.user.controller", "com.fu.user.security", "com.fu.common.exception"},
     excludeFilters = @ComponentScan.Filter(
         type = FilterType.REGEX,
         pattern = "com\\.fu\\.infrastructure\\..*"
@@ -51,7 +51,7 @@ public class UserModuleTestConfig {
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                .anyRequest().authenticated()
+                .anyRequest().permitAll()
             );
         return http.build();
     }

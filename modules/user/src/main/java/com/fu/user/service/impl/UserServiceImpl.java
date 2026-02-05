@@ -281,7 +281,7 @@ public class UserServiceImpl implements UserService {
 
     /**
      * UC-05: Delete User (Soft Delete)
-     * Sets deletedAt and deletedBy, changes status to INACTIVE.
+     * Sets deletedAt and deletedBy, changes status to DELETED.
      * Manager can only delete LEARNER/TEACHER.
      * Admin can delete all including MANAGER.
      * Historical data (learning progress, scores) is preserved for reporting.
@@ -296,14 +296,14 @@ public class UserServiceImpl implements UserService {
         // Validate permission to delete
         validateDeletePermission(user, deleterRole);
         
-        // Soft delete: set status to INACTIVE and mark deletion
-        user.setStatus(UserStatus.INACTIVE);
+        // Soft delete: set status to DELETED and mark deletion
+        user.setStatus(UserStatus.DELETED);
         user.setDeletedAt(LocalDateTime.now());
         user.setDeletedBy(deletedByUserId);
         user.setUpdatedBy(deletedByUserId);
         
         userRepository.save(user);
-        log.info("User soft deleted (set to INACTIVE) with id: {}", id);
+        log.info("User soft deleted (set to DELETED) with id: {}", id);
     }
 
     // ==================== Admin-only Operations ====================
