@@ -321,23 +321,99 @@ class AuthServiceImplTest {
     }
 
     @Nested
-    @DisplayName("UC-08: Reset Password Tests")
-    class ResetPasswordTests {
+    @DisplayName("UC-07: Verify OTP Tests")
+    class VerifyOtpTests {
 
         @Test
-        @DisplayName("Should reset password successfully with valid OTP")
-        void shouldResetPasswordSuccessfully() {
+        @DisplayName("Should verify OTP and return reset token successfully")
+        void shouldVerifyOtpSuccessfully() {
             // Given
             testUser.setPasswordResetToken("123456");
             testUser.setPasswordResetTokenExpiresAt(LocalDateTime.now().plusMinutes(10));
             
-            ResetPasswordRequest request = new ResetPasswordRequest();
+            VerifyOtpRequest request = new VerifyOtpRequest();
             request.setEmail("test@example.com");
             request.setOtp("123456");
+            
+            given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
+            given(userRepository.save(any(User.class))).willReturn(testUser);
+            
+            // When
+            VerifyOtpResponse response = authService.verifyOtp(request);
+            
+            // Then
+            assertThat(response).isNotNull();
+            assertThat(response.getResetToken()).isNotNull();
+            assertThat(response.getEmail()).isEqualTo("test@example.com");
+            assertThat(response.getExpiresInSeconds()).isEqualTo(300); // 5 minutes
+            
+            verify(userRepository).save(userCaptor.capture());
+            User savedUser = userCaptor.getValue();
+            assertThat(savedUser.getPasswordResetToken()).isNotEqualTo("123456"); // Token changed to UUID
+            assertThat(savedUser.getPasswordResetTokenExpiresAt()).isAfter(LocalDateTime.now());
+        }
+
+        @Test
+        @DisplayName("Should reject invalid OTP")
+        void shouldRejectInvalidOtp() {
+            // Given
+            testUser.setPasswordResetToken("123456");
+            testUser.setPasswordResetTokenExpiresAt(LocalDateTime.now().plusMinutes(10));
+            
+            VerifyOtpRequest request = new VerifyOtpRequest();
+            request.setEmail("test@example.com");
+            request.setOtp("999999");
+            
+            given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
+            
+            // When/Then
+            assertThatThrownBy(() -> 
+                authService.verifyOtp(request)
+            )
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("OTP");
+        }
+
+        @Test
+        @DisplayName("Should reject expired OTP")
+        void shouldRejectExpiredOtp() {
+            // Given
+            testUser.setPasswordResetToken("123456");
+            testUser.setPasswordResetTokenExpiresAt(LocalDateTime.now().minusMinutes(1)); // Expired
+            
+            VerifyOtpRequest request = new VerifyOtpRequest();
+            request.setEmail("test@example.com");
+            request.setOtp("123456");
+            
+            given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
+            
+            // When/Then
+            assertThatThrownBy(() -> 
+                authService.verifyOtp(request)
+            )
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("hết hạn");
+        }
+    }
+
+    @Nested
+    @DisplayName("UC-08: Reset Password Tests")
+    class ResetPasswordTests {
+
+        @Test
+        @DisplayName("Should reset password successfully with valid reset token")
+        void shouldResetPasswordSuccessfully() {
+            // Given
+            String resetToken = UUID.randomUUID().toString();
+            testUser.setPasswordResetToken(resetToken);
+            testUser.setPasswordResetTokenExpiresAt(LocalDateTime.now().plusMinutes(5));
+            
+            ResetPasswordRequest request = new ResetPasswordRequest();
+            request.setResetToken(resetToken);
             request.setNewPassword("NewPassword123!");
             request.setConfirmPassword("NewPassword123!");
             
-            given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
+            given(userRepository.findByPasswordResetToken(resetToken)).willReturn(Optional.of(testUser));
             given(passwordEncoder.encode(request.getNewPassword())).willReturn("newHashedPassword");
             given(userRepository.save(any(User.class))).willReturn(testUser);
             doNothing().when(emailService).sendPasswordChangedNotification(anyString(), anyString());
@@ -359,42 +435,39 @@ class AuthServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should reject invalid OTP")
-        void shouldRejectInvalidOtp() {
+        @DisplayName("Should reject invalid reset token")
+        void shouldRejectInvalidResetToken() {
             // Given
-            testUser.setPasswordResetToken("123456");
-            testUser.setPasswordResetTokenExpiresAt(LocalDateTime.now().plusMinutes(10));
-            
             ResetPasswordRequest request = new ResetPasswordRequest();
-            request.setEmail("test@example.com");
-            request.setOtp("999999");
+            request.setResetToken("invalid-token");
             request.setNewPassword("NewPassword123!");
             request.setConfirmPassword("NewPassword123!");
             
-            given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
+            given(userRepository.findByPasswordResetToken("invalid-token")).willReturn(Optional.empty());
             
             // When/Then
             assertThatThrownBy(() -> 
                 authService.resetPassword(request)
             )
             .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("OTP");
+            .hasMessageContaining("Token");
         }
 
         @Test
-        @DisplayName("Should reject expired OTP")
-        void shouldRejectExpiredOtp() {
+        @DisplayName("Should reject expired reset token")
+        void shouldRejectExpiredResetToken() {
             // Given
-            testUser.setPasswordResetToken("123456");
+            String resetToken = UUID.randomUUID().toString();
+            testUser.setPasswordResetToken(resetToken);
             testUser.setPasswordResetTokenExpiresAt(LocalDateTime.now().minusMinutes(1)); // Expired
             
             ResetPasswordRequest request = new ResetPasswordRequest();
-            request.setEmail("test@example.com");
-            request.setOtp("123456");
+            request.setResetToken(resetToken);
             request.setNewPassword("NewPassword123!");
             request.setConfirmPassword("NewPassword123!");
             
-            given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
+            given(userRepository.findByPasswordResetToken(resetToken)).willReturn(Optional.of(testUser));
+            given(userRepository.save(any(User.class))).willReturn(testUser);
             
             // When/Then
             assertThatThrownBy(() -> 

@@ -48,11 +48,12 @@ public class AuthServiceImpl implements AuthService {
     @Value("${app.security.lock-duration-minutes:30}")
     private int lockDurationMinutes;
 
-    @Value("${app.security.otp-expiration-minutes:10}")
+    @Value("${app.security.otp-expiration-minutes:1}")
     private int otpExpirationMinutes;
 
     private static final String OTP_CHARACTERS = "0123456789";
     private static final int OTP_LENGTH = 6;
+    private static final int RESET_TOKEN_EXPIRATION_MINUTES = 5;
 
     // ==================== UC-06: Login by Email ====================
 
@@ -199,14 +200,8 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional
-    public void resetPassword(ResetPasswordRequest request) {
-        log.info("Reset password attempt for email: {}", request.getEmail());
-
-        // Validate password confirmation
-        if (!request.getNewPassword().equals(request.getConfirmPassword())) {
-            throw new BusinessException("PASSWORD_MISMATCH", 
-                    "Mật khẩu xác nhận không khớp");
-        }
+    public VerifyOtpResponse verifyOtp(VerifyOtpRequest request) {
+        log.info("Verify OTP for email: {}", request.getEmail());
 
         User user = userRepository.findActiveByEmail(request.getEmail())
                 .orElseThrow(() -> new BusinessException("INVALID_REQUEST", 
@@ -222,6 +217,47 @@ public class AuthServiceImpl implements AuthService {
         if (user.getPasswordResetTokenExpiresAt() == null || 
             user.getPasswordResetTokenExpiresAt().isBefore(LocalDateTime.now())) {
             throw new BusinessException("OTP_EXPIRED", "Mã OTP đã hết hạn");
+        }
+
+        // Generate reset token (UUID-based for security)
+        String resetToken = UUID.randomUUID().toString();
+        user.setPasswordResetToken(resetToken);
+        user.setPasswordResetTokenExpiresAt(LocalDateTime.now().plusMinutes(RESET_TOKEN_EXPIRATION_MINUTES));
+        userRepository.save(user);
+
+        log.info("OTP verified successfully for: {}", user.getEmail());
+
+        return VerifyOtpResponse.builder()
+                .resetToken(resetToken)
+                .expiresInSeconds(RESET_TOKEN_EXPIRATION_MINUTES * 60)
+                .email(user.getEmail())
+                .build();
+    }
+
+    @Override
+    @Transactional
+    public void resetPassword(ResetPasswordRequest request) {
+        log.info("Reset password attempt with reset token");
+
+        // Validate password confirmation
+        if (!request.getNewPassword().equals(request.getConfirmPassword())) {
+            throw new BusinessException("PASSWORD_MISMATCH", 
+                    "Mật khẩu xác nhận không khớp");
+        }
+
+        // Find user by reset token
+        User user = userRepository.findByPasswordResetToken(request.getResetToken())
+                .orElseThrow(() -> new BusinessException("INVALID_TOKEN", 
+                        "Token đặt lại mật khẩu không hợp lệ hoặc đã hết hạn"));
+
+        // Check reset token expiration
+        if (user.getPasswordResetTokenExpiresAt() == null || 
+            user.getPasswordResetTokenExpiresAt().isBefore(LocalDateTime.now())) {
+            // Clear expired token
+            user.setPasswordResetToken(null);
+            user.setPasswordResetTokenExpiresAt(null);
+            userRepository.save(user);
+            throw new BusinessException("TOKEN_EXPIRED", "Token đặt lại mật khẩu đã hết hạn. Vui lòng thử lại");
         }
 
         // Update password

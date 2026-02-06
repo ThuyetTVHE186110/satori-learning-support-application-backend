@@ -69,9 +69,25 @@ public interface AuthService {
     void forgotPassword(ForgotPasswordRequest request);
 
     /**
-     * Verify OTP and reset password.
+     * Verify OTP and generate a temporary reset token.
+     * UC-07: Forgot Password - Step 2
      * 
-     * @param request Email, OTP, and new password
+     * Flow:
+     * 1. Validate OTP against stored value
+     * 2. Check OTP expiration
+     * 3. Generate a short-lived reset token (5 minutes)
+     * 4. Return reset token to frontend
+     * 
+     * @param request Email and OTP
+     * @return Reset token for password reset
+     */
+    VerifyOtpResponse verifyOtp(VerifyOtpRequest request);
+
+    /**
+     * Reset password using the temporary reset token.
+     * UC-07: Forgot Password - Step 3
+     * 
+     * @param request Reset token and new password
      */
     void resetPassword(ResetPasswordRequest request);
 

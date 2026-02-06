@@ -97,11 +97,28 @@ public class AuthController {
     }
 
     /**
-     * Reset password with OTP verification.
+     * Verify OTP and get reset token.
+     * 
+     * POST /api/v1/auth/verify-otp
+     * 
+     * @param request Email and OTP
+     * @return Reset token for password reset
+     */
+    @PostMapping("/verify-otp")
+    public ResponseEntity<ApiResponse<VerifyOtpResponse>> verifyOtp(
+            @Valid @RequestBody VerifyOtpRequest request) {
+        
+        VerifyOtpResponse response = authService.verifyOtp(request);
+        
+        return ResponseEntity.ok(ApiResponse.success("Xác thực OTP thành công", response));
+    }
+
+    /**
+     * Reset password with reset token.
      * 
      * POST /api/v1/auth/reset-password
      * 
-     * @param request Email, OTP, and new password
+     * @param request Reset token and new password
      * @return Success message
      */
     @PostMapping("/reset-password")

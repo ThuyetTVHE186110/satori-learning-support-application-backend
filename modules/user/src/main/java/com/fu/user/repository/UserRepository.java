@@ -89,6 +89,12 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
     Optional<User> findByActivationToken(@Param("token") String token);
 
     /**
+     * Find user by password reset token (for reset password flow)
+     */
+    @Query("SELECT u FROM User u WHERE u.passwordResetToken = :token AND u.deletedAt IS NULL")
+    Optional<User> findByPasswordResetToken(@Param("token") String token);
+
+    /**
      * Search users by keyword with role filters (excluding certain roles for Manager)
      * Manager can only see LEARNER and TEACHER
      */
