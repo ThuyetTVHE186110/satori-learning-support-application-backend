@@ -186,13 +186,23 @@ public class UserServiceImpl implements UserService {
 
     /**
      * UC-01: View User List
-     * Get paginated list of users (excluding DELETED).
+     * Get paginated list of users.
+     * - Admin sees all users (including deleted)
+     * - Manager sees only active users (excluding deleted)
      */
     @Override
-    public Page<UserResponse> getAllUsers(Pageable pageable) {
-        log.debug("Fetching all users with pageable: {}", pageable);
-        return userRepository.findAllActive(pageable)
-                .map(userMapper::toResponse);
+    public Page<UserResponse> getAllUsers(Pageable pageable, UserRole currentUserRole) {
+        log.debug("Fetching all users with pageable: {} for role: {}", pageable, currentUserRole);
+        
+        if (currentUserRole == UserRole.ADMIN) {
+            // Admin sees all users including deleted
+            return userRepository.findAll(pageable)
+                    .map(userMapper::toResponse);
+        } else {
+            // Manager sees only active users
+            return userRepository.findAllActive(pageable)
+                    .map(userMapper::toResponse);
+        }
     }
 
     /**
@@ -307,16 +317,6 @@ public class UserServiceImpl implements UserService {
     }
 
     // ==================== Admin-only Operations ====================
-
-    /**
-     * Admin: Get all deleted users
-     */
-    @Override
-    public Page<UserResponse> getDeletedUsers(Pageable pageable) {
-        log.debug("Admin fetching deleted users with pageable: {}", pageable);
-        return userRepository.findAllDeleted(pageable)
-                .map(userMapper::toResponse);
-    }
 
     /**
      * Admin/Manager: Restore deleted user

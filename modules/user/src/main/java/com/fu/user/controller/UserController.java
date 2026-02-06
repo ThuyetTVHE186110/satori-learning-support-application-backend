@@ -27,8 +27,8 @@ import java.util.UUID;
  * Implements UC-01 to UC-05 from business requirements.
  * 
  * Access Control:
- * - ADMIN: Full access to all users (LEARNER, TEACHER, MANAGER)
- * - MANAGER: Limited access to LEARNER and TEACHER only
+ * - ADMIN: Full access to all users (LEARNER, TEACHER, MANAGER) including deleted users
+ * - MANAGER: Limited access to LEARNER and TEACHER only (active users only)
  */
 @RestController
 @RequestMapping("/api/v1/users")
@@ -90,8 +90,8 @@ public class UserController {
     /**
      * UC-01: View User List
      * Returns paginated list of users with optional search and filters.
-     * Manager sees LEARNER/TEACHER only.
-     * Admin sees all users.
+     * - Manager: sees LEARNER/TEACHER only (active users, no deleted)
+     * - Admin: sees all users including deleted users
      * Default sort: createdAt DESC
      * 
      * GET /api/v1/users?page=0&size=10&keyword=...&role=LEARNER&status=ACTIVE
@@ -135,7 +135,7 @@ public class UserController {
                     .build();
             usersPage = userService.searchUsers(filter, pageable, currentUserRole);
         } else {
-            usersPage = userService.getAllUsers(pageable);
+            usersPage = userService.getAllUsers(pageable, currentUserRole);
         }
 
         // Check if no results found
@@ -200,38 +200,7 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success("Xóa người dùng thành công", null));
     }
 
-    // ==================== Admin-only Operations ====================
-
-    /**
-     * Admin: Get all deleted users
-     * 
-     * GET /api/v1/users/deleted?page=0&size=10
-     */
-    @GetMapping("/deleted")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse<PageResponse<UserResponse>>> getDeletedUsers(
-            @RequestParam(name = "page", defaultValue = AppConstants.DEFAULT_PAGE_NUMBER) int page,
-            @RequestParam(name = "size", defaultValue = AppConstants.DEFAULT_PAGE_SIZE) int size,
-            @RequestParam(name = "sortBy", defaultValue = "deletedAt") String sortBy,
-            @RequestParam(name = "sortDir", defaultValue = "desc") String sortDir) {
-
-        Sort sort = sortDir.equalsIgnoreCase("desc")
-                ? Sort.by(sortBy).descending()
-                : Sort.by(sortBy).ascending();
-
-        Pageable pageable = PageRequest.of(page, size, sort);
-        Page<UserResponse> deletedUsersPage = userService.getDeletedUsers(pageable);
-
-        PageResponse<UserResponse> pageResponse = PageResponse.of(
-                deletedUsersPage.getContent(),
-                deletedUsersPage.getNumber(),
-                deletedUsersPage.getSize(),
-                deletedUsersPage.getTotalElements(),
-                deletedUsersPage.getTotalPages()
-        );
-
-        return ResponseEntity.ok(ApiResponse.success("Danh sách người dùng đã xóa", pageResponse));
-    }
+    // ==================== Admin/Manager Operations ====================
 
     /**
      * Admin/Manager: Restore a deleted user

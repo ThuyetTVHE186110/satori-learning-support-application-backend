@@ -80,11 +80,14 @@ public interface UserService {
      * UC-01: View User List
      * Get paginated list of users.
      * Default sort: createdAt DESC
+     * - Admin sees all users (including deleted)
+     * - Manager sees only active users
      * 
      * @param pageable Pagination parameters
+     * @param currentUserRole Role of the requesting user
      * @return Page of user responses
      */
-    Page<UserResponse> getAllUsers(Pageable pageable);
+    Page<UserResponse> getAllUsers(Pageable pageable, UserRole currentUserRole);
 
     /**
      * UC-01: View User List with search and filters
@@ -129,15 +132,7 @@ public interface UserService {
      */
     void deleteUser(UUID id, UUID deletedByUserId, UserRole deleterRole);
 
-    // ==================== Admin-only Operations ====================
-
-    /**
-     * Admin: Get all deleted users for review/restore
-     * 
-     * @param pageable Pagination parameters
-     * @return Page of deleted user responses
-     */
-    Page<UserResponse> getDeletedUsers(Pageable pageable);
+    // ==================== Admin/Manager Operations ====================
 
     /**
      * Admin/Manager: Restore a soft-deleted user account
