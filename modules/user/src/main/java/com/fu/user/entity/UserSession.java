@@ -56,7 +56,7 @@ public class UserSession {
     /**
      * Client IP address for security tracking.
      */
-    @Column(name = "ip_address", length = 45)
+    @Column(name = "ip_address", columnDefinition = "inet")
     private String ipAddress;
 
     /**

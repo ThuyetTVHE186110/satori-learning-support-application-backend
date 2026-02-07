@@ -50,6 +50,13 @@ ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
 -- FIX 2B: Add deleted_by to track WHO deleted the record (Audit requirement)
 -- ==========================================================================
 
+-- Users - add created_by (track who created the user account)
+ALTER TABLE user_management.users 
+ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES user_management.users(id) ON DELETE SET NULL;
+
+COMMENT ON COLUMN user_management.users.created_by IS 
+'User who created this account. NULL for self-registered users. Set to admin/manager ID when account is created by staff.';
+
 -- Users - add deleted_by (track who deleted: self-delete vs admin-delete)
 ALTER TABLE user_management.users 
 ADD COLUMN IF NOT EXISTS deleted_by UUID REFERENCES user_management.users(id);

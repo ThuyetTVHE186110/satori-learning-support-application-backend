@@ -1,0 +1,171 @@
+package com.fu.course.controller;
+
+import com.fu.common.response.ApiResponse;
+import com.fu.common.response.PageResponse;
+import com.fu.course.dto.request.CreateCourseRequest;
+import com.fu.course.dto.request.UpdateCourseRequest;
+import com.fu.course.dto.response.CourseResponse;
+import com.fu.course.dto.response.CourseSummaryResponse;
+import com.fu.course.entity.Course.ContentStatus;
+import com.fu.course.entity.Course.JlptLevel;
+import com.fu.course.service.CourseService;
+import com.fu.course.service.CourseService.CourseStatistics;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.UUID;
+
+/**
+ * REST Controller for Manager Course CRUD operations.
+ *
+ * All endpoints require ROLE_MANAGER.
+ * Base path: /api/v1/manager/courses
+ */
+@Slf4j
+@RestController
+@RequestMapping("/api/v1/manager/courses")
+@RequiredArgsConstructor
+@PreAuthorize("hasRole('MANAGER')")
+public class ManagerCourseController {
+
+    private final CourseService courseService;
+
+    /**
+     * Create a new course.
+     * POST /api/v1/manager/courses
+     */
+    @PostMapping
+    public ResponseEntity<ApiResponse<CourseResponse>> createCourse(
+            @Valid @RequestBody CreateCourseRequest request,
+            @AuthenticationPrincipal UUID managerId) {
+
+        log.info("Manager {} creating course: {}", managerId, request.getName());
+        CourseResponse response = courseService.createCourse(request, managerId);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("Course created successfully", response));
+    }
+
+    /**
+     * Update an existing course.
+     * PUT /api/v1/manager/courses/{courseId}
+     */
+    @PutMapping("/{courseId}")
+    public ResponseEntity<ApiResponse<CourseResponse>> updateCourse(
+            @PathVariable UUID courseId,
+            @Valid @RequestBody UpdateCourseRequest request,
+            @AuthenticationPrincipal UUID managerId) {
+
+        log.info("Manager {} updating course: {}", managerId, courseId);
+        CourseResponse response = courseService.updateCourse(courseId, request, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Course updated successfully", response));
+    }
+
+    /**
+     * Get course by ID (including non-published).
+     * GET /api/v1/manager/courses/{courseId}
+     */
+    @GetMapping("/{courseId}")
+    public ResponseEntity<ApiResponse<CourseResponse>> getCourseById(
+            @PathVariable UUID courseId) {
+
+        CourseResponse response = courseService.getCourseById(courseId);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    /**
+     * Get all courses with pagination and optional filters.
+     * GET /api/v1/manager/courses?page=0&size=10&status=DRAFT&level=N5&keyword=xxx
+     */
+    @GetMapping
+    public ResponseEntity<ApiResponse<PageResponse<CourseSummaryResponse>>> getAllCourses(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) ContentStatus status,
+            @RequestParam(required = false) JlptLevel level,
+            @RequestParam(required = false) String keyword) {
+
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("orderIndex").ascending());
+
+        Page<CourseSummaryResponse> coursePage;
+        if (keyword != null && !keyword.isBlank()) {
+            coursePage = courseService.searchCourses(keyword.trim(), pageable);
+        } else if (status != null) {
+            coursePage = courseService.getCoursesByStatus(status, pageable);
+        } else if (level != null) {
+            coursePage = courseService.getCoursesByJlptLevel(level, pageable);
+        } else {
+            coursePage = courseService.getAllCourses(pageable);
+        }
+
+        PageResponse<CourseSummaryResponse> pageResponse = PageResponse.of(
+                coursePage.getContent(),
+                coursePage.getNumber(),
+                coursePage.getSize(),
+                coursePage.getTotalElements(),
+                coursePage.getTotalPages()
+        );
+        return ResponseEntity.ok(ApiResponse.success(pageResponse));
+    }
+
+    /**
+     * Publish a course (DRAFT -> PUBLISHED).
+     * PATCH /api/v1/manager/courses/{courseId}/publish
+     */
+    @PatchMapping("/{courseId}/publish")
+    public ResponseEntity<ApiResponse<CourseResponse>> publishCourse(
+            @PathVariable UUID courseId,
+            @AuthenticationPrincipal UUID managerId) {
+
+        log.info("Manager {} publishing course: {}", managerId, courseId);
+        CourseResponse response = courseService.publishCourse(courseId, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Course published successfully", response));
+    }
+
+    /**
+     * Archive a course (any status -> ARCHIVED).
+     * PATCH /api/v1/manager/courses/{courseId}/archive
+     */
+    @PatchMapping("/{courseId}/archive")
+    public ResponseEntity<ApiResponse<CourseResponse>> archiveCourse(
+            @PathVariable UUID courseId,
+            @AuthenticationPrincipal UUID managerId) {
+
+        log.info("Manager {} archiving course: {}", managerId, courseId);
+        CourseResponse response = courseService.archiveCourse(courseId, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Course archived successfully", response));
+    }
+
+    /**
+     * Soft-delete a course.
+     * DELETE /api/v1/manager/courses/{courseId}
+     */
+    @DeleteMapping("/{courseId}")
+    public ResponseEntity<ApiResponse<Void>> deleteCourse(
+            @PathVariable UUID courseId,
+            @AuthenticationPrincipal UUID managerId) {
+
+        log.info("Manager {} deleting course: {}", managerId, courseId);
+        courseService.deleteCourse(courseId, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Course deleted successfully", null));
+    }
+
+    /**
+     * Get course statistics for dashboard.
+     * GET /api/v1/manager/courses/statistics
+     */
+    @GetMapping("/statistics")
+    public ResponseEntity<ApiResponse<CourseStatistics>> getCourseStatistics() {
+        CourseStatistics statistics = courseService.getCourseStatistics();
+        return ResponseEntity.ok(ApiResponse.success(statistics));
+    }
+}

@@ -44,6 +44,7 @@ public class SecurityConfig {
             "/api/v1/auth/forgot-password",
             "/api/v1/auth/reset-password",
             "/api/v1/auth/refresh",
+            "/api/v1/auth/verify-otp",
             "/actuator/**",
             "/swagger-ui/**",
             "/swagger-ui.html",
@@ -74,6 +75,11 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Public endpoints
                         .requestMatchers(PUBLIC_ENDPOINTS).permitAll()
+                        // Public course & lesson browsing (students can view published content)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/courses/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/courses/*/lessons/**").permitAll()
+                        // Manager course & lesson management
+                        .requestMatchers("/api/v1/manager/**").hasRole("MANAGER")
                         // User management - Manager only (existing behavior)
                         .requestMatchers("/api/v1/users/**").hasRole("MANAGER")
                         // All other requests require authentication
