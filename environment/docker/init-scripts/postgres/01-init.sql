@@ -205,8 +205,10 @@ CREATE TABLE user_management.user_sessions (
 CREATE INDEX idx_user_sessions_user_id ON user_management.user_sessions(user_id);
 CREATE INDEX idx_user_sessions_refresh_token ON user_management.user_sessions(refresh_token);
 CREATE INDEX idx_user_sessions_expires_at ON user_management.user_sessions(expires_at);
+-- Partial index for active (non-revoked) sessions
+-- Note: expires_at filtering done at query time (CURRENT_TIMESTAMP is not IMMUTABLE)
 CREATE INDEX idx_user_sessions_active ON user_management.user_sessions(user_id) 
-    WHERE revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP;
+    WHERE revoked_at IS NULL;
 
 -- ==========================================================================
 -- ==================== LEARNING CONTENT SCHEMA =============================
@@ -1636,4 +1638,4 @@ INSERT INTO speaking.conversation_topics (title, title_japanese, description, sc
     '["～の予約をした～です", "～してもいいですか"]'::JSONB,
     '["予約した〇〇です", "部屋は何階ですか", "Wi-Fiのパスワードを教えてください"]'::JSONB, 6, 'PUBLISHED');
 
-RAISE NOTICE 'PostgreSQL initialization completed successfully! MongoDB has been replaced with JSONB.';
+DO $$ BEGIN RAISE NOTICE 'PostgreSQL initialization completed successfully! MongoDB has been replaced with JSONB.'; END $$;
