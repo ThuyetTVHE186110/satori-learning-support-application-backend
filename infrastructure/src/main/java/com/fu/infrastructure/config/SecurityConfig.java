@@ -76,7 +76,7 @@ public class SecurityConfig {
                         // Public endpoints
                         .requestMatchers(PUBLIC_ENDPOINTS).permitAll()
                         // User management - Manager only (existing behavior)
-                        .requestMatchers("/api/v1/users/**").hasRole("MANAGER")
+                        .requestMatchers("/api/v1/users/**").hasAnyRole("MANAGER","ADMIN")
                         // All other requests require authentication
                         .anyRequest().authenticated()
                 )

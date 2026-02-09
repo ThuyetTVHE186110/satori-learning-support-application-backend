@@ -82,8 +82,9 @@ public class UserController {
      */
     @GetMapping("/{id}/details")
     @PreAuthorize("hasAnyRole('MANAGER', 'ADMIN')")
-    public ResponseEntity<ApiResponse<UserDetailResponse>> getUserDetail(@PathVariable("id") UUID id) {
-        UserDetailResponse response = userService.getUserDetailById(id);
+    public ResponseEntity<ApiResponse<UserDetailResponse>> getUserDetail(@AuthenticationPrincipal CustomUserDetails currentUser, @PathVariable("id") UUID id) {
+        UserRole currentUserRole = UserRole.valueOf(currentUser.getRole());
+        UserDetailResponse response = userService.getUserDetailById(currentUserRole,id);
         return ResponseEntity.ok(ApiResponse.success("Chi tiết người dùng", response));
     }
 
@@ -176,7 +177,6 @@ public class UserController {
             @Valid @RequestBody UpdateUserRequest request) {
         UUID currentUserId = extractUserId(userDetails);
         UserRole currentUserRole = UserRole.valueOf(userDetails.getRole());
-        
         UserResponse response = userService.updateUser(id, request, currentUserId, currentUserRole);
         return ResponseEntity.ok(ApiResponse.success("Cập nhật thông tin thành công", response));
     }
