@@ -1,0 +1,28 @@
+package com.fu.course.dto.request;
+
+import jakarta.validation.constraints.Size;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+/**
+ * Request DTO for updating a course
+ * MANAGER only
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class UpdateCourseRequest {
+
+    @Size(min = 3, max = 255, message = "Course name must be between 3 and 255 characters")
+    private String name;
+
+    @Size(max = 5000, message = "Description must not exceed 5000 characters")
+    private String description;
+
+    private String thumbnailUrl;
+
+    private Integer orderIndex;
+}

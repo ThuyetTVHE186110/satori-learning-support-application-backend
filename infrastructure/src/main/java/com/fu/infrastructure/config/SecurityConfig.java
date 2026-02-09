@@ -75,8 +75,13 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Public endpoints
                         .requestMatchers(PUBLIC_ENDPOINTS).permitAll()
-                        // User management - Manager only (existing behavior)
-                        .requestMatchers("/api/v1/users/**").hasAnyRole("MANAGER","ADMIN")
+                        // Public course & lesson browsing (students can view published content)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/courses/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/courses/*/lessons/**").permitAll()
+                        // Manager course & lesson management
+                        .requestMatchers("/api/v1/manager/**").hasRole("MANAGER")
+                        // User management - Manager and Admin access
+                        .requestMatchers("/api/v1/users/**").hasAnyRole("MANAGER", "ADMIN")
                         // All other requests require authentication
                         .anyRequest().authenticated()
                 )
