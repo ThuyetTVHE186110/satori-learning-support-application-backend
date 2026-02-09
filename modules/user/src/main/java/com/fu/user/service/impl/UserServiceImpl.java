@@ -31,7 +31,7 @@ import java.util.UUID;
  * Implementation of UserService.
  * Handles all User Management use cases (UC-01 to UC-05) for Manager.
  * Also handles user self-service profile operations.
- * 
+ *
  * <h2>Manager Operations (Web Portal)</h2>
  * <ul>
  *   <li>UC-01: View User List - search, filter by role/status, pagination</li>
@@ -40,7 +40,7 @@ import java.util.UUID;
  *   <li>UC-04: Update User Information - modify name, phone, role, status</li>
  *   <li>UC-05: Delete User - soft delete (status → INACTIVE)</li>
  * </ul>
- * 
+ *
  * <h2>User Self-Service</h2>
  * <ul>
  *   <li>View own profile</li>
@@ -69,7 +69,7 @@ public class UserServiceImpl implements UserService {
     /**
      * UC-02: Create User (by Manager/Admin)
      * Creates a new user account (Learner/Teacher/Manager).
-     * 
+     * <p>
      * Business Rules:
      * - BR-01: Email must be unique
      * - If email exists with DELETED status: throw DeletedUserExistsException to allow user choice
@@ -89,10 +89,10 @@ public class UserServiceImpl implements UserService {
 
         // Check if email exists
         Optional<User> existingUserOpt = userRepository.findByEmail(request.getEmail());
-        
+
         if (existingUserOpt.isPresent()) {
             User existingUser = existingUserOpt.get();
-            
+
             // If DELETED status → throw exception to let frontend handle restore choice
             if (existingUser.getDeletedAt() != null) {
                 log.warn("Email already exists with DELETED status: {}", request.getEmail());
@@ -147,15 +147,24 @@ public class UserServiceImpl implements UserService {
      * UC-03: Get detailed user information with enrollment history
      */
     @Override
-    public UserDetailResponse getUserDetailById(UUID id) {
+    public UserDetailResponse getUserDetailById(UserRole userRole, UUID id) {
+
         log.debug("Fetching detailed user information for id: {}", id);
-        User user = findUserById(id);
+        User user = new User();
+        switch (userRole) {
+            case ADMIN:
+                user = findUserByIdIncludingDeleted(id);
+                break;
+            default:
+                user = findUserById(id);
+                break;
+        }
         UserResponse userResponse = userMapper.toResponse(user);
-        
+
         UserDetailResponse detailResponse = UserDetailResponse.builder()
                 .userInfo(userResponse)
                 .build();
-        
+
         // TODO: Populate enrollment history when course/class management modules are available
         // For now, return empty lists based on role
         if (user.getRole() == UserRole.LEARNER) {
@@ -169,7 +178,7 @@ public class UserServiceImpl implements UserService {
             detailResponse.setTaughtClasses(java.util.Collections.emptyList());
             detailResponse.setTotalClasses(0);
         }
-        
+
         return detailResponse;
     }
 
@@ -193,7 +202,7 @@ public class UserServiceImpl implements UserService {
     @Override
     public Page<UserResponse> getAllUsers(Pageable pageable, UserRole currentUserRole) {
         log.debug("Fetching all users with pageable: {} for role: {}", pageable, currentUserRole);
-        
+
         if (currentUserRole == UserRole.ADMIN) {
             // Admin sees all users including deleted
             return userRepository.findAll(pageable)
@@ -214,7 +223,7 @@ public class UserServiceImpl implements UserService {
     @Override
     public Page<UserResponse> searchUsers(UserFilterRequest filter, Pageable pageable, UserRole currentUserRole) {
         log.debug("Searching users with filter: {}, role: {}", filter, currentUserRole);
-        
+
         if (currentUserRole == UserRole.ADMIN) {
             // Admin sees all users
             return userRepository.searchUsers(
@@ -240,17 +249,47 @@ public class UserServiceImpl implements UserService {
      * UC-04: Update User Information
      * Manager updates user details (name, phone, role, status) for LEARNER/TEACHER.
      * Admin can update all users including MANAGER.
+     * Deleted users cannot be updated.
      */
     @Override
     @Transactional
     public UserResponse updateUser(UUID id, UpdateUserRequest request, UUID updatedByUserId, UserRole updaterRole) {
         log.info("User {} (role: {}) updating user with id: {}", updatedByUserId, updaterRole, id);
-
-        User user = findUserById(id);
-
+        User user = new User();
+        // Find user based on updater role
+        switch (updaterRole) {
+            case ADMIN:
+                user = findUserByIdIncludingDeleted(id);
+                break;
+            default:
+                user = findUserById(id);
+                break;
+        }
+        // Validate user is not deleted
+        if (user.getDeletedAt() != null) {
+            throw new BusinessException("USER_DELETED", "Không thể chỉnh sửa tài khoản đã bị xóa");
+        }
         // Validate permission to update this user
         validateUpdatePermission(user, updaterRole);
-
+        //Update email if provided
+        if (request.getEmail() != null && !request.getEmail().equals(user.getEmail())) {
+            // Check if new email already exists
+            Optional<User> existingUserOpt = userRepository.findByEmail(request.getEmail());
+            //Check if existingUser is deleted
+            if (existingUserOpt.isPresent()) {
+                User existingUser = existingUserOpt.get();
+                // If DELETED status → throw error
+                if (existingUser.getDeletedAt() != null) {
+                    log.warn("Email already exists with DELETED status: {}", request.getEmail());
+                    throw new BusinessException("EMAIL_EXISTS_DELETED", "Email này đã tồn tại trong hệ thống nhưng đã bị xóa. Vui lòng chọn email khác hoặc khôi phục tài khoản đã xóa");
+                }
+            }
+            // If email exists with non-DELETED status → error
+            if (existingUserOpt.isPresent() && !existingUserOpt.get().getId().equals(id)) {
+                throw new BusinessException("EMAIL_EXISTS", "Email này đã được sử dụng. Vui lòng nhập email khác");
+            }
+            user.setEmail(request.getEmail());
+        }
         // Update fields if provided
         if (request.getFirstName() != null) {
             user.setFirstName(request.getFirstName());
@@ -270,13 +309,13 @@ public class UserServiceImpl implements UserService {
         if (request.getAvatarUrl() != null) {
             user.setAvatarUrl(request.getAvatarUrl());
         }
-        
+
         // Update role if provided (with permission check)
         if (request.getRole() != null) {
             validateRoleUpdate(request.getRole(), updaterRole);
             user.setRole(request.getRole());
         }
-        
+
         // Update status if provided
         if (request.getStatus() != null) {
             user.setStatus(request.getStatus());
@@ -300,18 +339,18 @@ public class UserServiceImpl implements UserService {
     @Transactional
     public void deleteUser(UUID id, UUID deletedByUserId, UserRole deleterRole) {
         log.info("User {} (role: {}) soft deleting user with id: {}", deletedByUserId, deleterRole, id);
-        
+
         User user = findUserById(id);
-        
+
         // Validate permission to delete
         validateDeletePermission(user, deleterRole);
-        
+
         // Soft delete: set status to DELETED and mark deletion
         user.setStatus(UserStatus.DELETED);
         user.setDeletedAt(LocalDateTime.now());
         user.setDeletedBy(deletedByUserId);
         user.setUpdatedBy(deletedByUserId);
-        
+
         userRepository.save(user);
         log.info("User soft deleted (set to DELETED) with id: {}", id);
     }
@@ -349,14 +388,14 @@ public class UserServiceImpl implements UserService {
         user.setEmailVerifiedAt(LocalDateTime.now());
         user.setFailedLoginAttempts(0);
         user.setLockedUntil(null);
-        
+
         // Clear soft delete markers
         user.setDeletedAt(null);
         user.setDeletedBy(null);
-        
+
         // Update audit
         user.setUpdatedBy(restoredByUserId);
-        
+
         User restoredUser = userRepository.save(user);
         log.info("User restored successfully with id: {}", restoredUser.getId());
 
@@ -393,7 +432,25 @@ public class UserServiceImpl implements UserService {
         log.info("User {} updating their own profile", userId);
 
         User user = findUserById(userId);
-
+        // Check email is existing
+        if (request.getEmail() != null && !request.getEmail().equals(user.getEmail())) {
+            // Check if new email already exists
+            Optional<User> existingUserOpt = userRepository.findByEmail(request.getEmail());
+            //Check if existingUser is deleted
+            if (existingUserOpt.isPresent()) {
+                User existingUser = existingUserOpt.get();
+                // If DELETED status → throw error
+                if (existingUser.getDeletedAt() != null) {
+                    log.warn("Email already exists with DELETED status: {}", request.getEmail());
+                    throw new BusinessException("EMAIL_EXISTS_DELETED", "Email này đã tồn tại trong hệ thống nhưng đã bị xóa. Vui lòng chọn email khác hoặc khôi phục tài khoản đã xóa");
+                }
+            }
+            // If email exists with non-DELETED status → error
+            if (existingUserOpt.isPresent() && !existingUserOpt.get().getId().equals(userId)) {
+                throw new BusinessException("EMAIL_EXISTS", "Email này đã được sử dụng. Vui lòng nhập email khác");
+            }
+            user.setEmail(request.getEmail());
+        }
         // Update allowed fields only
         if (request.getFirstName() != null) {
             user.setFirstName(request.getFirstName());
@@ -431,6 +488,14 @@ public class UserServiceImpl implements UserService {
     private User findUserById(UUID id) {
         return userRepository.findById(id)
                 .filter(user -> user.getDeletedAt() == null)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
+    }
+
+    /**
+     * Find user by ID including soft-deleted.
+     */
+    private User findUserByIdIncludingDeleted(UUID id) {
+        return userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
     }
 
@@ -503,21 +568,21 @@ public class UserServiceImpl implements UserService {
      */
     private User createNewUser(CreateUserRequest request, String rawPassword, UUID createdByUserId) {
         User user = userMapper.toEntity(request);
-        
+
         user.setPasswordHash(passwordEncoder.encode(rawPassword));
         user.setRole(request.getRole());
         user.setStatus(UserStatus.ACTIVE);
         user.setAuthProvider(AuthProvider.LOCAL);
         user.setEmailVerifiedAt(LocalDateTime.now()); // Verified by manager/admin
         user.setCreatedBy(createdByUserId);
-        
+
         if (request.getPhoneNumber() != null) {
             user.setPhoneNumber(request.getPhoneNumber());
         }
         if (request.getDateOfBirth() != null) {
             user.setDateOfBirth(request.getDateOfBirth());
         }
-        
+
         return user;
     }
 
@@ -533,23 +598,23 @@ public class UserServiceImpl implements UserService {
     private String generateRandomPassword() {
         SecureRandom random = new SecureRandom();
         StringBuilder password = new StringBuilder(DEFAULT_PASSWORD_LENGTH);
-        
+
         // Ensure at least one character from each required category
         password.append(UPPERCASE_CHARS.charAt(random.nextInt(UPPERCASE_CHARS.length())));
         password.append(LOWERCASE_CHARS.charAt(random.nextInt(LOWERCASE_CHARS.length())));
         password.append(DIGIT_CHARS.charAt(random.nextInt(DIGIT_CHARS.length())));
         password.append(SPECIAL_CHARS.charAt(random.nextInt(SPECIAL_CHARS.length())));
-        
+
         // Fill remaining positions with random characters from all categories
         String allChars = UPPERCASE_CHARS + LOWERCASE_CHARS + DIGIT_CHARS + SPECIAL_CHARS;
         for (int i = 4; i < DEFAULT_PASSWORD_LENGTH; i++) {
             password.append(allChars.charAt(random.nextInt(allChars.length())));
         }
-        
+
         // Shuffle the password to avoid predictable pattern
         return shuffleString(password.toString(), random);
     }
-    
+
     /**
      * Shuffle a string randomly.
      */

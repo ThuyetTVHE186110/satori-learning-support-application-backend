@@ -66,7 +66,7 @@ public interface UserService {
      * @param id User UUID
      * @return Detailed user response with enrollment history
      */
-    UserDetailResponse getUserDetailById(UUID id);
+    UserDetailResponse getUserDetailById(UserRole userRole,UUID id);
 
     /**
      * Get user by email.
@@ -110,6 +110,7 @@ public interface UserService {
      * UC-04: Update User Information
      * Manager updates user details (name, phone, status for LEARNER/TEACHER).
      * Admin can update all users including MANAGER.
+     * Deleted users cannot be updated.
      * 
      * @param id User UUID
      * @param request Update request with changed fields

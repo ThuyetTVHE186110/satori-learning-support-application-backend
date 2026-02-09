@@ -4,9 +4,7 @@ import com.fu.common.validator.NoEmoji;
 import com.fu.common.validator.SafeText;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
-import jakarta.validation.constraints.Past;
-import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -41,6 +39,11 @@ public class UpdateUserRequest {
 
     @Pattern(regexp = "^[+]?[0-9]{10,15}$", message = "Invalid phone number format")
     private String phoneNumber;
+
+    @NotBlank(message = "Email is required")
+    @Email(message = "Invalid email format")
+    @Size(max = 255, message = "Email must not exceed 255 characters")
+    private String email;
 
     @Past(message = "Date of birth must be in the past")
     private LocalDate dateOfBirth;
