@@ -275,8 +275,9 @@ class UserServiceImplTest {
                     .email(createRequest.getEmail())
                     .firstName("Deleted")
                     .lastName("User")
-                    .role(UserRole.LEARNER)
-                    .status(UserStatus.INACTIVE)
+                    // Manager can now restore LEARNER/TEACHER reactively; use ADMIN here so manager should NOT be able to restore
+                    .role(UserRole.ADMIN)
+                    .status(UserStatus.DELETED)
                     .deletedAt(LocalDateTime.now().minusDays(1))
                     .deletedBy(adminId)
                     .build();
@@ -301,43 +302,86 @@ class UserServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should throw exception when email already exists with active user")
-        void shouldRejectDuplicateActiveEmail() {
+        @DisplayName("Should reactive restore deleted learner when created by manager")
+        void shouldReactiveRestoreDeletedLearnerByManager() {
             // Given
-            given(userRepository.findByEmail(createRequest.getEmail())).willReturn(Optional.of(testLearner));
-            
-            // When/Then
-            assertThatThrownBy(() -> 
-                userService.createUser(createRequest, managerId, UserRole.MANAGER)
-            )
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Email này đã được sử dụng");
+            User deletedLearner = User.builder()
+                    .email(createRequest.getEmail())
+                    .firstName("Old")
+                    .lastName("Learner")
+                    .role(UserRole.LEARNER)
+                    .status(UserStatus.INACTIVE)
+                    .deletedAt(LocalDateTime.now().minusDays(2))
+                    .deletedBy(adminId)
+                    .build();
+            ReflectionTestUtils.setField(deletedLearner, "id", UUID.randomUUID());
+
+            CreateUserRequest learnerCreate = CreateUserRequest.builder()
+                    .email(createRequest.getEmail())
+                    .firstName("Restored")
+                    .lastName("Learner")
+                    .role(UserRole.LEARNER)
+                    .build();
+
+            UserResponse restoredResponse = UserResponse.builder()
+                    .id((UUID) ReflectionTestUtils.getField(deletedLearner, "id"))
+                    .email(deletedLearner.getEmail())
+                    .firstName("Restored")
+                    .lastName("Learner")
+                    .role(UserRole.LEARNER)
+                    .status(UserStatus.ACTIVE)
+                    .build();
+
+            given(userRepository.findByEmail(learnerCreate.getEmail())).willReturn(Optional.of(deletedLearner));
+            given(passwordEncoder.encode(anyString())).willReturn("newHashedPassword");
+            given(userRepository.save(any(User.class))).willAnswer(invocation -> invocation.getArgument(0));
+            given(userMapper.toResponse(any(User.class))).willReturn(restoredResponse);
+            doNothing().when(emailService).sendWelcomeEmailWithCredentials(anyString(), anyString(), anyString(), anyString());
+
+            // When
+            UserResponse result = userService.createUser(learnerCreate, managerId, UserRole.MANAGER);
+
+            // Then
+            assertThat(result).isNotNull();
+            assertThat(result.getEmail()).isEqualTo(learnerCreate.getEmail());
+            verify(userRepository).findByEmail(learnerCreate.getEmail());
+            verify(userRepository).save(userCaptor.capture());
+            verify(emailService).sendWelcomeEmailWithCredentials(anyString(), anyString(), anyString(), anyString());
+
+            User saved = userCaptor.getValue();
+            assertThat(saved.getDeletedAt()).isNull();
+            assertThat(saved.getStatus()).isEqualTo(UserStatus.ACTIVE);
         }
 
         @Test
-        @DisplayName("Should generate password with strict requirements")
-        void shouldGeneratePasswordWithStrictRequirements() {
+        @DisplayName("Should not allow manager to restore deleted admin during create")
+        void shouldRejectManagerRestoringAdminDuringCreate() {
             // Given
-            given(userRepository.findByEmail(createRequest.getEmail())).willReturn(Optional.empty());
-            given(userMapper.toEntity(createRequest)).willReturn(testLearner);
-            given(passwordEncoder.encode(anyString())).willAnswer(invocation -> {
-                String rawPassword = invocation.getArgument(0);
-                // Verify password meets requirements
-                assertThat(rawPassword).matches(".*[A-Z].*"); // Has uppercase
-                assertThat(rawPassword).matches(".*[a-z].*"); // Has lowercase
-                assertThat(rawPassword).matches(".*[0-9].*"); // Has digit
-                assertThat(rawPassword).matches(".*[!@#$%^&*()_+\\-=\\[\\]{}|;:,.<>?].*"); // Has special char
-                assertThat(rawPassword).hasSize(12); // Length is 12
-                return "hashed_" + rawPassword;
-            });
-            given(userRepository.save(any(User.class))).willReturn(testLearner);
-            given(userMapper.toResponse(testLearner)).willReturn(learnerResponse);
-            
-            // When
-            userService.createUser(createRequest, managerId, UserRole.MANAGER);
-            
-            // Then
-            verify(passwordEncoder).encode(anyString());
+            User deletedAdmin = User.builder()
+                    .email(createRequest.getEmail())
+                    .firstName("Old")
+                    .lastName("Admin")
+                    .role(UserRole.ADMIN)
+                    .status(UserStatus.INACTIVE)
+                    .deletedAt(LocalDateTime.now().minusDays(5))
+                    .deletedBy(adminId)
+                    .build();
+            ReflectionTestUtils.setField(deletedAdmin, "id", UUID.randomUUID());
+
+            given(userRepository.findByEmail(createRequest.getEmail())).willReturn(Optional.of(deletedAdmin));
+
+            // When/Then: createUser should throw DeletedUserExistsException because manager cannot restore admin
+            assertThatThrownBy(() ->
+                    userService.createUser(createRequest, managerId, UserRole.MANAGER)
+            ).isInstanceOf(DeletedUserExistsException.class)
+             .satisfies(ex -> {
+                 DeletedUserExistsException d = (DeletedUserExistsException) ex;
+                 assertThat(d.getDeletedUserInfo()).isNotNull();
+                 assertThat(d.getDeletedUserInfo().getRole()).isEqualTo(UserRole.ADMIN);
+             });
+
+            verify(userRepository, never()).save(any(User.class));
+            verify(emailService, never()).sendWelcomeEmailWithCredentials(anyString(), anyString(), anyString(), anyString());
         }
     }
 
@@ -496,7 +540,7 @@ class UserServiceImplTest {
             // Then
             verify(userRepository).save(userCaptor.capture());
             User deleted = userCaptor.getValue();
-            assertThat(deleted.getStatus()).isEqualTo(UserStatus.INACTIVE);
+            assertThat(deleted.getStatus()).isEqualTo(UserStatus.DELETED);
             assertThat(deleted.getDeletedAt()).isNotNull();
             assertThat(deleted.getDeletedBy()).isEqualTo(managerId);
         }
@@ -651,8 +695,8 @@ class UserServiceImplTest {
             given(userMapper.toResponse(testLearner)).willReturn(learnerResponse);
             
             // When
-            UserDetailResponse result = userService.getUserDetailById(learnerId);
-            
+            UserDetailResponse result = userService.getUserDetailById(UserRole.ADMIN, learnerId);
+
             // Then
             assertThat(result).isNotNull();
             assertThat(result.getUserInfo()).isEqualTo(learnerResponse);
@@ -671,13 +715,13 @@ class UserServiceImplTest {
                     .email(testTeacher.getEmail())
                     .role(UserRole.TEACHER)
                     .build();
-            
+
             given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
             given(userMapper.toResponse(testTeacher)).willReturn(teacherResponse);
-            
+
             // When
-            UserDetailResponse result = userService.getUserDetailById(teacherId);
-            
+            UserDetailResponse result = userService.getUserDetailById(UserRole.ADMIN, teacherId);
+
             // Then
             assertThat(result).isNotNull();
             assertThat(result.getUserInfo().getRole()).isEqualTo(UserRole.TEACHER);
