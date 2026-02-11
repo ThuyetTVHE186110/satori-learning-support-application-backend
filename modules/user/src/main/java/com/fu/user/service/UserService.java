@@ -145,6 +145,14 @@ public interface UserService {
      */
     UserResponse restoreUser(RestoreUserRequest request, UUID restoredByUserId, UserRole restorerRole);
 
+    /**
+     * Admin: Get deleted users
+     *
+     * @param pageable Pagination parameters
+     * @return Page of deleted user responses
+     */
+    Page<UserResponse> getDeletedUsers(Pageable pageable);
+
     // ==================== User Self-Service Operations ====================
 
     /**

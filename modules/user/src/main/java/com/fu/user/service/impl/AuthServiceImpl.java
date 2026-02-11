@@ -461,7 +461,7 @@ public class AuthServiceImpl implements AuthService {
         }
         if (user.getStatus() == UserStatus.SUSPENDED) {
             throw new BusinessException("ACCOUNT_SUSPENDED", 
-                    "Tài khoản của bạn đã bị chặn. Hãy liên hệ quản lý");
+                    "Tài khoản của bạn đã bị chặn. Hãy liên hệ trung tâm để được hỗ trợ.");
         }
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new BusinessException("ACCOUNT_INACTIVE", 
