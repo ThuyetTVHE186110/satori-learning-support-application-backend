@@ -4,11 +4,11 @@ import com.fu.course.dto.request.CreateCourseRequest;
 import com.fu.course.dto.request.UpdateCourseRequest;
 import com.fu.course.dto.response.CourseResponse;
 import com.fu.course.dto.response.CourseSummaryResponse;
-import com.fu.course.entity.Course;
 import com.fu.course.entity.Course.ContentStatus;
 import com.fu.course.entity.Course.JlptLevel;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.UUID;
@@ -22,6 +22,11 @@ public interface CourseService {
      * Create a new course (MANAGER only)
      */
     CourseResponse createCourse(CreateCourseRequest request, UUID managerId);
+
+    /**
+     * Create a new course with optional thumbnail upload (MANAGER only)
+     */
+    CourseResponse createCourse(CreateCourseRequest request, MultipartFile thumbnail, UUID managerId);
 
     /**
      * Update course (MANAGER only)
@@ -82,6 +87,11 @@ public interface CourseService {
      * Check if course exists by name
      */
     boolean existsByName(String name);
+
+    /**
+     * Update course thumbnail URL (MANAGER only)
+     */
+    CourseResponse updateThumbnail(UUID courseId, String thumbnailUrl, UUID managerId);
 
     /**
      * Get course statistics

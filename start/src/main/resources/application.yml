@@ -62,6 +62,12 @@ spring:
                 options:
                     model: text-embedding-3-small
 
+    # ==================== Multipart File Upload Configuration ====================
+    servlet:
+        multipart:
+            max-file-size: 5MB
+            max-request-size: 10MB
+
 # ==================== Japanese Learning Configuration ====================
 learning:
     jlpt:
@@ -115,6 +121,13 @@ app:
         from: ${EMAIL_FROM:noreply@satori-learning.com}
         from-name: ${EMAIL_FROM_NAME:Satori Learning}
         base-url: ${APP_BASE_URL:http://localhost:3000}
+
+    # Cloudinary Configuration
+    cloudinary:
+        enabled: ${CLOUDINARY_ENABLED:true}
+        cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+        api-key: ${CLOUDINARY_API_KEY:}
+        api-secret: ${CLOUDINARY_API_SECRET:}
 
 # ==================== Spring Mail Configuration ====================
 spring.mail:

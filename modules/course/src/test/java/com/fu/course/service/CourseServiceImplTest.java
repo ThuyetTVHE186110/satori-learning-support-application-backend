@@ -14,6 +14,7 @@ import com.fu.course.repository.CourseRepository;
 import com.fu.course.repository.LessonRepository;
 import com.fu.course.service.CourseService.CourseStatistics;
 import com.fu.course.service.impl.CourseServiceImpl;
+import com.fu.infrastructure.cloudinary.CloudinaryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -28,6 +29,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
@@ -55,6 +57,9 @@ class CourseServiceImplTest {
 
     @Mock
     private LessonRepository lessonRepository;
+
+    @Mock
+    private CloudinaryService cloudinaryService;
 
     @InjectMocks
     private CourseServiceImpl courseService;
@@ -110,7 +115,6 @@ class CourseServiceImplTest {
                 .name("Japanese N5 Course")
                 .description("Beginner Japanese course for N5 level")
                 .jlptLevel(JlptLevel.N5)
-                .thumbnailUrl("https://example.com/thumb.jpg")
                 .orderIndex(1)
                 .build();
 
@@ -129,8 +133,8 @@ class CourseServiceImplTest {
     class CreateCourseTests {
 
         @Test
-        @DisplayName("Should create course successfully")
-        void shouldCreateCourseSuccessfully() {
+        @DisplayName("Should create course successfully without thumbnail")
+        void shouldCreateCourseSuccessfullyWithoutThumbnail() {
             // Given
             given(courseRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
             given(courseMapper.toEntity(createRequest)).willReturn(testCourse);
@@ -147,10 +151,84 @@ class CourseServiceImplTest {
 
             verify(courseRepository).existsByNameIgnoreCase(createRequest.getName());
             verify(courseRepository).save(courseCaptor.capture());
+            verify(cloudinaryService, never()).uploadImage(any(), any());
 
             Course savedCourse = courseCaptor.getValue();
             assertThat(savedCourse.getCreatedBy()).isEqualTo(managerId);
             assertThat(savedCourse.getUpdatedBy()).isEqualTo(managerId);
+            assertThat(savedCourse.getThumbnailUrl()).isNull();
+        }
+
+        @Test
+        @DisplayName("Should create course successfully with thumbnail upload")
+        void shouldCreateCourseSuccessfullyWithThumbnail() {
+            // Given
+            MockMultipartFile thumbnailFile = new MockMultipartFile(
+                    "thumbnail", "thumb.jpg", "image/jpeg", new byte[1024]);
+            String uploadedUrl = "https://res.cloudinary.com/test/image/upload/v1/courses/thumbnails/thumb.jpg";
+
+            given(courseRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
+            given(cloudinaryService.uploadImage(thumbnailFile, "courses/thumbnails")).willReturn(uploadedUrl);
+            given(courseMapper.toEntity(createRequest)).willReturn(testCourse);
+            given(courseRepository.save(any(Course.class))).willReturn(testCourse);
+            given(courseMapper.toResponse(testCourse)).willReturn(testCourseResponse);
+
+            // When
+            CourseResponse result = courseService.createCourse(createRequest, thumbnailFile, managerId);
+
+            // Then
+            assertThat(result).isNotNull();
+
+            verify(cloudinaryService).uploadImage(thumbnailFile, "courses/thumbnails");
+            verify(courseRepository).save(courseCaptor.capture());
+
+            Course savedCourse = courseCaptor.getValue();
+            assertThat(savedCourse.getThumbnailUrl()).isEqualTo(uploadedUrl);
+            assertThat(savedCourse.getCreatedBy()).isEqualTo(managerId);
+            assertThat(savedCourse.getUpdatedBy()).isEqualTo(managerId);
+        }
+
+        @Test
+        @DisplayName("Should create course with null thumbnail (backward compatible)")
+        void shouldCreateCourseWithNullThumbnail() {
+            // Given
+            given(courseRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
+            given(courseMapper.toEntity(createRequest)).willReturn(testCourse);
+            given(courseRepository.save(any(Course.class))).willReturn(testCourse);
+            given(courseMapper.toResponse(testCourse)).willReturn(testCourseResponse);
+
+            // When
+            CourseResponse result = courseService.createCourse(createRequest, null, managerId);
+
+            // Then
+            assertThat(result).isNotNull();
+            verify(cloudinaryService, never()).uploadImage(any(), any());
+
+            verify(courseRepository).save(courseCaptor.capture());
+            assertThat(courseCaptor.getValue().getThumbnailUrl()).isNull();
+        }
+
+        @Test
+        @DisplayName("Should skip upload for empty thumbnail file")
+        void shouldSkipUploadForEmptyThumbnail() {
+            // Given
+            MockMultipartFile emptyFile = new MockMultipartFile(
+                    "thumbnail", "empty.jpg", "image/jpeg", new byte[0]);
+
+            given(courseRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
+            given(courseMapper.toEntity(createRequest)).willReturn(testCourse);
+            given(courseRepository.save(any(Course.class))).willReturn(testCourse);
+            given(courseMapper.toResponse(testCourse)).willReturn(testCourseResponse);
+
+            // When
+            CourseResponse result = courseService.createCourse(createRequest, emptyFile, managerId);
+
+            // Then
+            assertThat(result).isNotNull();
+            verify(cloudinaryService, never()).uploadImage(any(), any());
+
+            verify(courseRepository).save(courseCaptor.capture());
+            assertThat(courseCaptor.getValue().getThumbnailUrl()).isNull();
         }
 
         @Test
@@ -165,6 +243,24 @@ class CourseServiceImplTest {
                     .hasMessageContaining(createRequest.getName());
 
             verify(courseRepository, never()).save(any());
+            verify(cloudinaryService, never()).uploadImage(any(), any());
+        }
+
+        @Test
+        @DisplayName("Should throw exception when name exists even with thumbnail provided")
+        void shouldThrowExceptionWhenNameExistsWithThumbnail() {
+            // Given
+            MockMultipartFile thumbnailFile = new MockMultipartFile(
+                    "thumbnail", "thumb.jpg", "image/jpeg", new byte[1024]);
+
+            given(courseRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(true);
+
+            // When/Then
+            assertThatThrownBy(() -> courseService.createCourse(createRequest, thumbnailFile, managerId))
+                    .isInstanceOf(CourseNameAlreadyExistsException.class);
+
+            verify(courseRepository, never()).save(any());
+            verify(cloudinaryService, never()).uploadImage(any(), any());
         }
     }
 
@@ -447,6 +543,68 @@ class CourseServiceImplTest {
             // When/Then
             assertThatThrownBy(() -> courseService.deleteCourse(courseId, managerId))
                     .isInstanceOf(CourseNotFoundException.class);
+        }
+    }
+
+    // =====================================================
+    // UPDATE THUMBNAIL
+    // =====================================================
+
+    @Nested
+    @DisplayName("Update Thumbnail Tests")
+    class UpdateThumbnailTests {
+
+        @Test
+        @DisplayName("Should update thumbnail successfully")
+        void shouldUpdateThumbnailSuccessfully() {
+            // Given
+            String newThumbnailUrl = "https://res.cloudinary.com/test/image/upload/v1/courses/thumbnails/new-thumb.jpg";
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(courseRepository.save(any(Course.class))).willReturn(testCourse);
+            given(courseMapper.toResponse(testCourse)).willReturn(testCourseResponse);
+            given(lessonRepository.countByCourseIdAndDeletedAtIsNull(courseId)).willReturn(3L);
+
+            // When
+            CourseResponse result = courseService.updateThumbnail(courseId, newThumbnailUrl, managerId);
+
+            // Then
+            assertThat(result).isNotNull();
+            verify(courseRepository).save(courseCaptor.capture());
+
+            Course savedCourse = courseCaptor.getValue();
+            assertThat(savedCourse.getThumbnailUrl()).isEqualTo(newThumbnailUrl);
+            assertThat(savedCourse.getUpdatedBy()).isEqualTo(managerId);
+        }
+
+        @Test
+        @DisplayName("Should throw exception when course not found for thumbnail update")
+        void shouldThrowExceptionWhenCourseNotFound() {
+            // Given
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.empty());
+
+            // When/Then
+            assertThatThrownBy(() -> courseService.updateThumbnail(courseId, "https://example.com/new.jpg", managerId))
+                    .isInstanceOf(CourseNotFoundException.class);
+
+            verify(courseRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Should set lesson count and student count in response")
+        void shouldSetComputedFieldsInResponse() {
+            // Given
+            String newThumbnailUrl = "https://res.cloudinary.com/test/image/upload/v1/courses/thumbnails/thumb.jpg";
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(courseRepository.save(any(Course.class))).willReturn(testCourse);
+            given(courseMapper.toResponse(testCourse)).willReturn(testCourseResponse);
+            given(lessonRepository.countByCourseIdAndDeletedAtIsNull(courseId)).willReturn(5L);
+
+            // When
+            CourseResponse result = courseService.updateThumbnail(courseId, newThumbnailUrl, managerId);
+
+            // Then
+            assertThat(result.getLessonCount()).isEqualTo(5L);
+            assertThat(result.getStudentCount()).isEqualTo(0L);
         }
     }
 

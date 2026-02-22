@@ -26,6 +26,9 @@ services:
             - REDIS_PASSWORD=${REDIS_PASSWORD:-SatoriRedis2026!}
             - OPENAI_API_KEY=${OPENAI_API_KEY}
             - JWT_SECRET=${JWT_SECRET}
+            - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
+            - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
+            - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
         ports:
             - "8080:8080"
         networks:
