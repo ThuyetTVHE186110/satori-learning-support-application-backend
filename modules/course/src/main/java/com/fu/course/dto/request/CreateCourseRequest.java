@@ -29,7 +29,5 @@ public class CreateCourseRequest {
     @NotNull(message = "JLPT level is required")
     private JlptLevel jlptLevel;
 
-    private String thumbnailUrl;
-
     private Integer orderIndex;
 }

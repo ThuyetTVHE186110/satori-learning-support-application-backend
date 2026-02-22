@@ -10,6 +10,7 @@ import com.fu.course.entity.Course.ContentStatus;
 import com.fu.course.entity.Course.JlptLevel;
 import com.fu.course.service.CourseService;
 import com.fu.course.service.CourseService.CourseStatistics;
+import com.fu.infrastructure.cloudinary.CloudinaryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,10 +19,12 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.UUID;
 
@@ -39,18 +42,23 @@ import java.util.UUID;
 public class ManagerCourseController {
 
     private final CourseService courseService;
+    private final CloudinaryService cloudinaryService;
 
     /**
-     * Create a new course.
+     * Create a new course with optional thumbnail upload.
      * POST /api/v1/manager/courses
+     * Content-Type: multipart/form-data
+     *   - "request" part: JSON course data
+     *   - "thumbnail" part: image file (optional)
      */
-    @PostMapping
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<CourseResponse>> createCourse(
-            @Valid @RequestBody CreateCourseRequest request,
+            @Valid @RequestPart("request") CreateCourseRequest request,
+            @RequestPart(value = "thumbnail", required = false) MultipartFile thumbnail,
             @AuthenticationPrincipal UUID managerId) {
 
         log.info("Manager {} creating course: {}", managerId, request.getName());
-        CourseResponse response = courseService.createCourse(request, managerId);
+        CourseResponse response = courseService.createCourse(request, thumbnail, managerId);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Course created successfully", response));
     }
@@ -143,6 +151,26 @@ public class ManagerCourseController {
         log.info("Manager {} archiving course: {}", managerId, courseId);
         CourseResponse response = courseService.archiveCourse(courseId, managerId);
         return ResponseEntity.ok(ApiResponse.success("Course archived successfully", response));
+    }
+
+    /**
+     * Upload or update course thumbnail.
+     * POST /api/v1/manager/courses/{courseId}/thumbnail
+     */
+    @PostMapping("/{courseId}/thumbnail")
+    public ResponseEntity<ApiResponse<CourseResponse>> uploadThumbnail(
+            @PathVariable UUID courseId,
+            @RequestParam("file") MultipartFile file,
+            @AuthenticationPrincipal UUID managerId) {
+
+        log.info("Manager {} uploading thumbnail for course: {}", managerId, courseId);
+
+        // Upload image to Cloudinary
+        String thumbnailUrl = cloudinaryService.uploadImage(file, "courses/thumbnails");
+
+        // Update course with new thumbnail URL
+        CourseResponse response = courseService.updateThumbnail(courseId, thumbnailUrl, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Thumbnail uploaded successfully", response));
     }
 
     /**

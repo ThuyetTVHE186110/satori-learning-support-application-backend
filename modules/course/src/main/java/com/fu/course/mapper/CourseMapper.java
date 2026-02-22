@@ -21,6 +21,7 @@ public interface CourseMapper {
      * Map CreateCourseRequest to Course entity
      */
     @Mapping(target = "id", ignore = true)
+    @Mapping(target = "thumbnailUrl", ignore = true)  // Set by service after Cloudinary upload
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     @Mapping(target = "createdBy", ignore = true)
