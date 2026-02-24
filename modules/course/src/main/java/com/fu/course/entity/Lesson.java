@@ -4,6 +4,7 @@ import com.fu.infrastructure.persistence.SoftDeletableEntity;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
+import org.hibernate.annotations.ColumnTransformer;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -21,7 +22,8 @@ import java.util.UUID;
     @Index(name = "idx_lessons_course_id", columnList = "course_id"),
     @Index(name = "idx_lessons_status", columnList = "status"),
     @Index(name = "idx_lessons_lesson_type", columnList = "lesson_type"),
-    @Index(name = "idx_lessons_order_index", columnList = "order_index")
+    @Index(name = "idx_lessons_order_index", columnList = "order_index"),
+    @Index(name = "idx_lessons_import_id", columnList = "import_id")
 })
 @Getter
 @Setter
@@ -47,6 +49,7 @@ public class Lesson extends SoftDeletableEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "lesson_type", nullable = false, length = 20)
+    @ColumnTransformer(write = "CAST(? AS lesson_type)")
     private LessonType lessonType;
 
     /**
@@ -65,6 +68,10 @@ public class Lesson extends SoftDeletableEntity {
 
     // --- Curriculum Import (PDF/Doc upload) ---
 
+    /** Tracks which curriculum import created this lesson, if any. */
+    @Column(name = "import_id")
+    private UUID importId;
+
     @Column(name = "content_file_url", columnDefinition = "TEXT")
     private String contentFileUrl;
 
@@ -73,6 +80,7 @@ public class Lesson extends SoftDeletableEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "processing_status", length = 20)
+    @ColumnTransformer(write = "CAST(? AS processing_status)")
     @Builder.Default
     private ProcessingStatus processingStatus = ProcessingStatus.COMPLETED;
 
@@ -104,6 +112,7 @@ public class Lesson extends SoftDeletableEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20)
+    @ColumnTransformer(write = "CAST(? AS content_status)")
     @Builder.Default
     private ContentStatus status = ContentStatus.DRAFT;
 

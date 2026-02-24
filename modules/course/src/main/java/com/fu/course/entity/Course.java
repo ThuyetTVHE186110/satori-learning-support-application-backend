@@ -4,6 +4,7 @@ import com.fu.infrastructure.persistence.SoftDeletableEntity;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
+import org.hibernate.annotations.ColumnTransformer;
 
 /**
  * Course entity - Japanese courses (N5, N4, N3, N2, N1)
@@ -33,6 +34,7 @@ public class Course extends SoftDeletableEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "jlpt_level", nullable = false, length = 5)
+    @ColumnTransformer(write = "CAST(? AS jlpt_level)")
     private JlptLevel jlptLevel;
 
     @Column(name = "thumbnail_url", columnDefinition = "TEXT")
@@ -44,6 +46,7 @@ public class Course extends SoftDeletableEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20)
+    @ColumnTransformer(write = "CAST(? AS content_status)")
     @Builder.Default
     private ContentStatus status = ContentStatus.DRAFT;
 

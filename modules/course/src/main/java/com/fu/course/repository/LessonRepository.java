@@ -73,6 +73,11 @@ public interface LessonRepository extends JpaRepository<Lesson, UUID> {
 
     long countByCourseIdAndStatusAndDeletedAtIsNull(UUID courseId, ContentStatus status);
 
+    // ===== Find by import =====
+
+    @Query("SELECT l FROM Lesson l WHERE l.importId = :importId AND l.deletedAt IS NULL ORDER BY l.orderIndex ASC")
+    List<Lesson> findByImportIdAndNotDeleted(@Param("importId") UUID importId);
+
     // ===== Exists checks =====
 
     boolean existsByTitleIgnoreCaseAndCourseId(String title, UUID courseId);

@@ -4,6 +4,7 @@ import com.fu.infrastructure.persistence.SoftDeletableEntity;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
+import org.hibernate.annotations.ColumnTransformer;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -48,21 +49,25 @@ public class User extends SoftDeletableEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
+    @ColumnTransformer(write = "CAST(? AS gender)")
     private Gender gender;
 
     // Account status
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    @ColumnTransformer(write = "CAST(? AS user_role)")
     @Builder.Default
     private UserRole role = UserRole.LEARNER;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    @ColumnTransformer(write = "CAST(? AS user_status)")
     @Builder.Default
     private UserStatus status = UserStatus.PENDING_ACTIVATION;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "auth_provider", nullable = false)
+    @ColumnTransformer(write = "CAST(? AS auth_provider)")
     @Builder.Default
     private AuthProvider authProvider = AuthProvider.LOCAL;
 
