@@ -14,6 +14,7 @@
         <module>infrastructure</module>
         <module>modules/user</module>
         <module>modules/course</module>
+        <module>modules/curriculum-import</module>
         <module>start</module>
     </modules>
 
@@ -67,6 +68,11 @@
             <dependency>
                 <groupId>com.fu</groupId>
                 <artifactId>course</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fu</groupId>
+                <artifactId>curriculum-import</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

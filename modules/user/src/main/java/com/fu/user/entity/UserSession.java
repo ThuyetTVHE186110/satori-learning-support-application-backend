@@ -2,6 +2,7 @@ package com.fu.user.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.ColumnTransformer;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -57,6 +58,7 @@ public class UserSession {
      * Client IP address for security tracking.
      */
     @Column(name = "ip_address", columnDefinition = "inet")
+    @ColumnTransformer(write = "CAST(? AS inet)")
     private String ipAddress;
 
     /**

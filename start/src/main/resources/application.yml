@@ -62,6 +62,13 @@ spring:
                 options:
                     model: text-embedding-3-small
 
+    # ==================== File Upload Configuration ====================
+    servlet:
+        multipart:
+            enabled: true
+            max-file-size: 50MB
+            max-request-size: 55MB
+
 # ==================== Japanese Learning Configuration ====================
 learning:
     jlpt:
@@ -121,7 +128,7 @@ spring.mail:
     host: ${MAIL_HOST:smtp.gmail.com}
     port: ${MAIL_PORT:587}
     username: ${MAIL_USERNAME:nihongosatori@gmail.com}
-    password: ${MAIL_PASSWORD:optu ynye itst vhne}
+    password: ${MAIL_PASSWORD:wzsn ucsx jnsh mptd}
     properties:
         mail:
             smtp:
@@ -153,3 +160,48 @@ management:
             show-details: when-authorized
             probes:
                 enabled: true
+
+# ==================== Curriculum Import - Agentic RAG Configuration ====================
+curriculum-import:
+    agentic-rag:
+        # Minimum confidence for extraction (Corrective RAG threshold)
+        confidence-threshold: ${RAG_CONFIDENCE_THRESHOLD:0.6}
+        # Max re-extraction attempts per chunk
+        max-re-extractions: ${RAG_MAX_RE_EXTRACTIONS:2}
+        # Number of similar items for RAG context
+        rag-top-k: ${RAG_TOP_K:5}
+        # Minimum cosine similarity for RAG retrieval
+        rag-similarity-threshold: ${RAG_SIMILARITY_THRESHOLD:0.7}
+        # Enable parallel chunk processing
+        parallel-processing: ${RAG_PARALLEL_PROCESSING:true}
+        # Max chunks per parallel batch
+        parallel-batch-size: ${RAG_PARALLEL_BATCH_SIZE:3}
+        # Enable embedding generation
+        embedding-enabled: ${RAG_EMBEDDING_ENABLED:true}
+        # Embedding dimension (text-embedding-3-small = 1536)
+        embedding-dimension: 1536
+        # Enable content validation step
+        validation-enabled: ${RAG_VALIDATION_ENABLED:true}
+        # Enable RAG context retrieval before extraction
+        rag-retrieval-enabled: ${RAG_RETRIEVAL_ENABLED:true}
+        # Retry scheduler delay (ms)
+        retry-scheduler-delay-ms: ${RAG_RETRY_SCHEDULER_DELAY:30000}
+
+        # ===== Self-Reflection (Self-RAG, Asai et al. 2023) =====
+        # Enable LLM self-critique with reflection tokens
+        self-reflection-enabled: ${RAG_SELF_REFLECTION_ENABLED:true}
+        # Max source chars for reflection prompt (context window limit)
+        self-reflection-max-source-chars: ${RAG_SELF_REFLECTION_MAX_SOURCE_CHARS:4000}
+
+        # ===== Source Grounding Verification (CRAG anti-hallucination) =====
+        # Enable grounding cross-reference check
+        grounding-enabled: ${RAG_GROUNDING_ENABLED:true}
+        # Min grounding confidence (below = flagged as hallucinated)
+        grounding-threshold: ${RAG_GROUNDING_THRESHOLD:0.4}
+
+        # ===== Combined Scoring Weights (must sum to 1.0) =====
+        rule-based-weight: ${RAG_RULE_BASED_WEIGHT:0.30}
+        reflection-weight: ${RAG_REFLECTION_WEIGHT:0.35}
+        grounding-weight: ${RAG_GROUNDING_WEIGHT:0.35}
+        # Combined score below this triggers re-extraction
+        combined-re-extraction-threshold: ${RAG_COMBINED_RE_EXTRACTION_THRESHOLD:0.5}

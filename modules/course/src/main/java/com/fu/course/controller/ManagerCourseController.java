@@ -47,7 +47,7 @@ public class ManagerCourseController {
     @PostMapping
     public ResponseEntity<ApiResponse<CourseResponse>> createCourse(
             @Valid @RequestBody CreateCourseRequest request,
-            @AuthenticationPrincipal UUID managerId) {
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
         log.info("Manager {} creating course: {}", managerId, request.getName());
         CourseResponse response = courseService.createCourse(request, managerId);
@@ -63,7 +63,7 @@ public class ManagerCourseController {
     public ResponseEntity<ApiResponse<CourseResponse>> updateCourse(
             @PathVariable UUID courseId,
             @Valid @RequestBody UpdateCourseRequest request,
-            @AuthenticationPrincipal UUID managerId) {
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
         log.info("Manager {} updating course: {}", managerId, courseId);
         CourseResponse response = courseService.updateCourse(courseId, request, managerId);
@@ -124,7 +124,7 @@ public class ManagerCourseController {
     @PatchMapping("/{courseId}/publish")
     public ResponseEntity<ApiResponse<CourseResponse>> publishCourse(
             @PathVariable UUID courseId,
-            @AuthenticationPrincipal UUID managerId) {
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
         log.info("Manager {} publishing course: {}", managerId, courseId);
         CourseResponse response = courseService.publishCourse(courseId, managerId);
@@ -138,7 +138,7 @@ public class ManagerCourseController {
     @PatchMapping("/{courseId}/archive")
     public ResponseEntity<ApiResponse<CourseResponse>> archiveCourse(
             @PathVariable UUID courseId,
-            @AuthenticationPrincipal UUID managerId) {
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
         log.info("Manager {} archiving course: {}", managerId, courseId);
         CourseResponse response = courseService.archiveCourse(courseId, managerId);
@@ -152,7 +152,7 @@ public class ManagerCourseController {
     @DeleteMapping("/{courseId}")
     public ResponseEntity<ApiResponse<Void>> deleteCourse(
             @PathVariable UUID courseId,
-            @AuthenticationPrincipal UUID managerId) {
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
         log.info("Manager {} deleting course: {}", managerId, courseId);
         courseService.deleteCourse(courseId, managerId);

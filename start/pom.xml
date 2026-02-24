@@ -30,6 +30,10 @@
             <groupId>com.fu</groupId>
             <artifactId>course</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.fu</groupId>
+            <artifactId>curriculum-import</artifactId>
+        </dependency>
 
         <!-- Spring Boot -->
         <dependency>
