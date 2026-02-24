@@ -56,7 +56,7 @@ public class CurriculumImport extends BaseEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
-    @ColumnTransformer(write = "CAST(? AS processing_status)")
+    @ColumnTransformer(read = "status::varchar", write = "CAST(? AS processing_status)")
     @Builder.Default
     private ImportStatus status = ImportStatus.QUEUED;
 
