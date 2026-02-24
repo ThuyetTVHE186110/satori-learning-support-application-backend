@@ -15,11 +15,12 @@
         <module>modules/user</module>
         <module>modules/course</module>
         <module>modules/curriculum-import</module>
+        <module>modules/conversation</module>
         <module>start</module>
     </modules>
 
     <properties>
-        <java.version>23</java.version>
+        <java.version>21</java.version>
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -74,6 +75,11 @@
             <dependency>
                 <groupId>com.fu</groupId>
                 <artifactId>curriculum-import</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fu</groupId>
+                <artifactId>conversation</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

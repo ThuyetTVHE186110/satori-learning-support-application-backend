@@ -1,5 +1,6 @@
 package com.fu.course.dto.response;
 
+import com.fu.course.entity.Course.ContentStatus;
 import com.fu.course.entity.Course.JlptLevel;
 import com.fu.course.entity.GrammarPoint.GrammarCategory;
 import lombok.AllArgsConstructor;
@@ -40,6 +41,7 @@ public class GrammarPointResponse {
     private List<String> relatedGrammar;
     private List<String> tags;
     private String audioUrl;
+    private ContentStatus status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

@@ -1,5 +1,6 @@
 package com.fu.course.dto.response;
 
+import com.fu.course.entity.Course.ContentStatus;
 import com.fu.course.entity.Course.JlptLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -35,6 +36,7 @@ public class VocabularyResponse {
     private String imageUrl;
     private String usageNotes;
     private List<String> tags;
+    private ContentStatus status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

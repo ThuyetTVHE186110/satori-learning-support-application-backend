@@ -85,4 +85,10 @@ public class Vocabulary extends SoftDeletableEntity {
 
     @Column(name = "content_hash", length = 64)
     private String contentHash;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", columnDefinition = "content_status")
+    @ColumnTransformer(write = "CAST(? AS content_status)")
+    @Builder.Default
+    private Course.ContentStatus status = Course.ContentStatus.DRAFT;
 }

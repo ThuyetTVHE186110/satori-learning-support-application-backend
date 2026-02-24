@@ -1,6 +1,7 @@
 package com.fu.user.dto.auth;
 
 import com.fu.user.entity.UserRole;
+import com.fu.user.entity.UserStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -56,5 +57,6 @@ public class LoginResponse {
         private String fullName;
         private String avatarUrl;
         private UserRole role;
+        private UserStatus status;
     }
 }
