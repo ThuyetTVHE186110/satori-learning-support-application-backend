@@ -13,12 +13,14 @@ import com.fu.course.mapper.CourseMapper;
 import com.fu.course.repository.CourseRepository;
 import com.fu.course.repository.LessonRepository;
 import com.fu.course.service.CourseService;
+import com.fu.infrastructure.cloudinary.CloudinaryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.UUID;
@@ -35,10 +37,19 @@ public class CourseServiceImpl implements CourseService {
     private final CourseRepository courseRepository;
     private final CourseMapper courseMapper;
     private final LessonRepository lessonRepository;
+    private final CloudinaryService cloudinaryService;
+
+    private static final String THUMBNAIL_FOLDER = "courses/thumbnails";
 
     @Override
     @Transactional
     public CourseResponse createCourse(CreateCourseRequest request, UUID managerId) {
+        return createCourse(request, null, managerId);
+    }
+
+    @Override
+    @Transactional
+    public CourseResponse createCourse(CreateCourseRequest request, MultipartFile thumbnail, UUID managerId) {
         log.info("Creating course: {} by manager: {}", request.getName(), managerId);
 
         // Check if course name already exists
@@ -46,8 +57,16 @@ public class CourseServiceImpl implements CourseService {
             throw new CourseNameAlreadyExistsException(request.getName());
         }
 
+        // Upload thumbnail to Cloudinary if provided
+        String thumbnailUrl = null;
+        if (thumbnail != null && !thumbnail.isEmpty()) {
+            log.info("Uploading thumbnail for new course: {}", request.getName());
+            thumbnailUrl = cloudinaryService.uploadImage(thumbnail, THUMBNAIL_FOLDER);
+        }
+
         // Create course entity
         Course course = courseMapper.toEntity(request);
+        course.setThumbnailUrl(thumbnailUrl);
         course.setCreatedBy(managerId);
         course.setUpdatedBy(managerId);
 
@@ -188,6 +207,26 @@ public class CourseServiceImpl implements CourseService {
     @Override
     public boolean existsByName(String name) {
         return courseRepository.existsByNameIgnoreCase(name);
+    }
+
+    @Override
+    @Transactional
+    public CourseResponse updateThumbnail(UUID courseId, String thumbnailUrl, UUID managerId) {
+        log.info("Updating thumbnail for course: {} by manager: {}", courseId, managerId);
+
+        Course course = findCourseOrThrow(courseId);
+
+        course.setThumbnailUrl(thumbnailUrl);
+        course.setUpdatedBy(managerId);
+
+        Course updatedCourse = courseRepository.save(course);
+        log.info("Course thumbnail updated successfully: {}", courseId);
+
+        CourseResponse response = courseMapper.toResponse(updatedCourse);
+        response.setLessonCount(lessonRepository.countByCourseIdAndDeletedAtIsNull(courseId));
+        response.setStudentCount(0L);
+
+        return response;
     }
 
     @Override

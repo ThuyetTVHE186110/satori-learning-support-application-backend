@@ -123,6 +123,13 @@ app:
         from-name: ${EMAIL_FROM_NAME:Satori Learning}
         base-url: ${APP_BASE_URL:http://localhost:3000}
 
+    # Cloudinary Configuration
+    cloudinary:
+        enabled: ${CLOUDINARY_ENABLED:true}
+        cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+        api-key: ${CLOUDINARY_API_KEY:}
+        api-secret: ${CLOUDINARY_API_SECRET:}
+
 # ==================== Spring Mail Configuration ====================
 spring.mail:
     host: ${MAIL_HOST:smtp.gmail.com}

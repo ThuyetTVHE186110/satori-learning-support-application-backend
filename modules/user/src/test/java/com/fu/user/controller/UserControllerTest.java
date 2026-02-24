@@ -263,7 +263,7 @@ class UserControllerTest {
                     .totalClasses(0)
                     .build();
             
-            given(userService.getUserDetailById(testUserId)).willReturn(detailResponse);
+            given(userService.getUserDetailById(eq(UserRole.MANAGER), eq(testUserId))).willReturn(detailResponse);
 
             // When
             ResultActions result = mockMvc.perform(get("/api/v1/users/{id}/details", testUserId));
