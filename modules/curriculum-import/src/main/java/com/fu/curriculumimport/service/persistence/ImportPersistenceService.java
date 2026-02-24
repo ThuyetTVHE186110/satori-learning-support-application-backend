@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.course.entity.*;
 import com.fu.course.entity.Course.JlptLevel;
+import com.fu.course.entity.Course.ContentStatus;
 import com.fu.course.entity.GrammarPoint.GrammarCategory;
 import com.fu.course.repository.*;
 import com.fu.curriculumimport.entity.CurriculumImport;
@@ -200,6 +201,7 @@ public class ImportPersistenceService {
                             .jlptLevel(level)
                             .kanjiWriting(ev.getKanjiWriting())
                             .exampleSentences(serializeJson(ev.getExampleSentences()))
+                            .status(ContentStatus.DRAFT)
                             .createdBy(createdBy)
                             .build()));
         } catch (Exception e) {
@@ -228,6 +230,7 @@ public class ImportPersistenceService {
                             .category(parseGrammarCategory(eg.getCategory()))
                             .exampleSentences(serializeJson(eg.getExampleSentences()))
                             .commonMistakes(serializeJson(eg.getCommonMistakes()))
+                            .status(ContentStatus.DRAFT)
                             .createdBy(createdBy)
                             .build()));
         } catch (Exception e) {

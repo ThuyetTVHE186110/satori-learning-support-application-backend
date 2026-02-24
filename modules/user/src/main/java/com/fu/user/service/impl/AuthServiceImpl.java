@@ -500,6 +500,7 @@ public class AuthServiceImpl implements AuthService {
                 .fullName(user.getFullName())
                 .avatarUrl(user.getAvatarUrl())
                 .role(user.getRole())
+                .status(user.getStatus())
                 .build();
     }
 
