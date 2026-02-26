@@ -46,7 +46,7 @@ public class ManagerLessonController {
     @PostMapping
     public ResponseEntity<ApiResponse<LessonResponse>> createLesson(
             @Valid @RequestBody CreateLessonRequest request,
-            @AuthenticationPrincipal UUID managerId) {
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
         log.info("Manager {} creating lesson: {}", managerId, request.getTitle());
         LessonResponse response = lessonService.createLesson(request, managerId);
@@ -62,7 +62,7 @@ public class ManagerLessonController {
     public ResponseEntity<ApiResponse<LessonResponse>> updateLesson(
             @PathVariable UUID lessonId,
             @Valid @RequestBody UpdateLessonRequest request,
-            @AuthenticationPrincipal UUID managerId) {
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
         log.info("Manager {} updating lesson: {}", managerId, lessonId);
         LessonResponse response = lessonService.updateLesson(lessonId, request, managerId);
@@ -118,7 +118,7 @@ public class ManagerLessonController {
     @PatchMapping("/{lessonId}/publish")
     public ResponseEntity<ApiResponse<LessonResponse>> publishLesson(
             @PathVariable UUID lessonId,
-            @AuthenticationPrincipal UUID managerId) {
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
         log.info("Manager {} publishing lesson: {}", managerId, lessonId);
         LessonResponse response = lessonService.publishLesson(lessonId, managerId);
@@ -132,7 +132,7 @@ public class ManagerLessonController {
     @PatchMapping("/{lessonId}/archive")
     public ResponseEntity<ApiResponse<LessonResponse>> archiveLesson(
             @PathVariable UUID lessonId,
-            @AuthenticationPrincipal UUID managerId) {
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
         log.info("Manager {} archiving lesson: {}", managerId, lessonId);
         LessonResponse response = lessonService.archiveLesson(lessonId, managerId);
@@ -146,7 +146,7 @@ public class ManagerLessonController {
     @DeleteMapping("/{lessonId}")
     public ResponseEntity<ApiResponse<Void>> deleteLesson(
             @PathVariable UUID lessonId,
-            @AuthenticationPrincipal UUID managerId) {
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
         log.info("Manager {} deleting lesson: {}", managerId, lessonId);
         lessonService.deleteLesson(lessonId, managerId);
