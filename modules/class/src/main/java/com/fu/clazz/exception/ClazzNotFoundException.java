@@ -10,7 +10,7 @@ import java.util.UUID;
 public class ClazzNotFoundException extends ResourceNotFoundException {
 
     public ClazzNotFoundException(UUID classId) {
-        super("Class not found with ID: " + classId);
+        super("Không có lớp nào được tìm thấy với ID: " + classId);
     }
 
     public ClazzNotFoundException(String message) {

@@ -33,7 +33,7 @@ public interface ClazzService {
     ClassResponse getClassById(UUID classId);
 
     /**
-     * Get all classes with pagination
+     * Get all classes with pagination (including deleted)
      */
     Page<ClassSummaryResponse> getAllClasses(Pageable pageable);
 
@@ -53,29 +53,31 @@ public interface ClazzService {
     Page<ClassSummaryResponse> getClassesByTeacher(UUID teacherId, Pageable pageable);
 
     /**
+     * Get active classes by teacher ID (TEACHER view)
+     */
+    Page<ClassSummaryResponse> getActiveClassesByTeacher(UUID teacherId, Pageable pageable);
+
+    /**
+     * Get active classes by teacher ID and JLPT level (TEACHER view)
+     */
+    Page<ClassSummaryResponse> getActiveClassesByTeacherAndLevel(UUID teacherId, JlptLevel jlptLevel,
+            Pageable pageable);
+
+    /**
      * Search classes by keyword
      */
     Page<ClassSummaryResponse> searchClasses(String keyword, Pageable pageable);
 
     /**
-     * Activate a class (MANAGER only)
+     * Search classes by teacher ID and keyword
      */
-    ClassResponse activateClass(UUID classId, UUID managerId);
+    Page<ClassSummaryResponse> searchClassesByTeacher(UUID teacherId, String keyword, Pageable pageable);
 
     /**
-     * Deactivate a class (MANAGER only)
+     * Delete a class (MANAGER only) — soft delete: records deletion metadata
+     * (deletedAt, deletedBy). Does NOT change isActive status.
      */
-    ClassResponse deactivateClass(UUID classId, UUID managerId);
-
-    /**
-     * Soft delete a class (MANAGER only)
-     */
-    void deleteClass(UUID classId, UUID managerId);
-
-    /**
-     * Assign teacher to class (MANAGER only)
-     */
-    ClassResponse assignTeacher(UUID classId, UUID teacherId, UUID managerId);
+    ClassResponse deleteClass(UUID classId, UUID managerId);
 
     /**
      * Add a member to a class (MANAGER only)
@@ -91,5 +93,14 @@ public interface ClazzService {
      * Get active members of a class
      */
     Page<ClassMemberResponse> getClassMembers(UUID classId, Pageable pageable);
-}
 
+    /**
+     * Get class by ID for teacher (validates teacher ownership)
+     */
+    ClassResponse getClassByIdForTeacher(UUID classId, UUID teacherId);
+
+    /**
+     * Get class members for teacher (validates teacher ownership)
+     */
+    Page<ClassMemberResponse> getClassMembersForTeacher(UUID classId, UUID teacherId, Pageable pageable);
+}

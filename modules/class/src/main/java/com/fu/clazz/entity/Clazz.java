@@ -49,7 +49,7 @@ public class Clazz extends SoftDeletableEntity {
 
     @Column(name = "max_students")
     @Builder.Default
-    private Integer maxStudents = 50;
+    private Integer maxStudents = 8;
 
     @Column(name = "start_date")
     private LocalDate startDate;

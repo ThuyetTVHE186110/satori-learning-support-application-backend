@@ -35,7 +35,11 @@ public class ClassResponse {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
-    // Computed field
+    // Computed fields
     private Long memberCount;
-}
 
+    // Teacher info
+    private String teacherName;
+    private String teacherEmail;
+    private String teacherAvatarUrl;
+}

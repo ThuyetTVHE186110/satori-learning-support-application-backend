@@ -7,6 +7,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDate;
+import java.util.UUID;
 
 /**
  * Request DTO for updating a class
@@ -24,10 +25,13 @@ public class UpdateClassRequest {
     @Size(max = 5000, message = "Description must not exceed 5000 characters")
     private String description;
 
+    private UUID teacherId;
+
     private Integer maxStudents;
 
     private LocalDate startDate;
 
     private LocalDate endDate;
-}
 
+    private Boolean isActive;
+}

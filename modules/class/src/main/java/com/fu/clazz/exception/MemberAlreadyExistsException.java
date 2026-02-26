@@ -8,7 +8,7 @@ import com.fu.common.exception.BusinessException;
 public class MemberAlreadyExistsException extends BusinessException {
 
     public MemberAlreadyExistsException() {
-        super("MEMBER_ALREADY_EXISTS", "User is already a member of this class");
+        super("MEMBER_ALREADY_EXISTS", "Người dùng đã là thành viên của lớp học này");
     }
 }
 

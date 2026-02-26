@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
- * Response DTO for ClassMember entity
+ * Response DTO for ClassMember entity with basic user info
  */
 @Data
 @Builder
@@ -22,5 +22,10 @@ public class ClassMemberResponse {
     private UUID userId;
     private LocalDateTime joinedAt;
     private LocalDateTime removedAt;
-}
 
+    // Basic user info
+    private String fullName;
+    private String email;
+    private String avatarUrl;
+    private String role;
+}

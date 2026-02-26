@@ -23,10 +23,10 @@
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <spring-boot.version>3.3.5</spring-boot.version>
+        <spring-boot.version>3.4.0</spring-boot.version>
         <spring-ai.version>1.0.0-M4</spring-ai.version>
         <lombok.version>1.18.34</lombok.version>
-        <mapstruct.version>1.5.5.Final</mapstruct.version>
+        <mapstruct.version>1.6.2</mapstruct.version>
         <cloudinary.version>2.0.0</cloudinary.version>
     </properties>
 

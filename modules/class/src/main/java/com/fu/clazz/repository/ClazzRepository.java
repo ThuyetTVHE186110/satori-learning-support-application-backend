@@ -24,7 +24,6 @@ public interface ClazzRepository extends JpaRepository<Clazz, UUID> {
     @Query("SELECT c FROM Clazz c WHERE c.id = :id AND c.deletedAt IS NULL")
     Optional<Clazz> findByIdAndNotDeleted(@Param("id") UUID id);
 
-
     /**
      * Find all non-deleted classes with pagination
      */
@@ -47,31 +46,59 @@ public interface ClazzRepository extends JpaRepository<Clazz, UUID> {
     Page<Clazz> findByTeacherIdAndDeletedAtIsNull(UUID teacherId, Pageable pageable);
 
     /**
+     * Find active classes by teacher ID
+     */
+    Page<Clazz> findByTeacherIdAndIsActiveTrueAndDeletedAtIsNull(UUID teacherId, Pageable pageable);
+
+    /**
+     * Find active classes by teacher ID and JLPT level
+     */
+    Page<Clazz> findByTeacherIdAndJlptLevelAndIsActiveTrueAndDeletedAtIsNull(UUID teacherId, JlptLevel jlptLevel,
+                                                                             Pageable pageable);
+
+    /**
      * Search classes by name (case-insensitive)
      */
     @Query("SELECT c FROM Clazz c WHERE LOWER(c.name) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
-           "AND c.deletedAt IS NULL")
+            "AND c.deletedAt IS NULL")
     Page<Clazz> searchByName(@Param("keyword") String keyword, Pageable pageable);
+
+    /**
+     * Search classes by teacher ID and name (case-insensitive)
+     */
+    @Query("SELECT c FROM Clazz c WHERE c.teacherId = :teacherId " +
+            "AND LOWER(c.name) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+            "AND c.isActive = true AND c.deletedAt IS NULL")
+    Page<Clazz> searchByTeacherAndName(@Param("teacherId") UUID teacherId,
+                                       @Param("keyword") String keyword,
+                                       Pageable pageable);
 
     /**
      * Check if class code already exists (non-deleted)
      */
     @Query("SELECT CASE WHEN COUNT(c) > 0 THEN true ELSE false END FROM Clazz c " +
-           "WHERE c.code = :code AND c.deletedAt IS NULL")
+            "WHERE c.code = :code AND c.deletedAt IS NULL")
     boolean existsByCode(@Param("code") String code);
 
     /**
      * Check if class name already exists (case-insensitive, non-deleted)
      */
     @Query("SELECT CASE WHEN COUNT(c) > 0 THEN true ELSE false END FROM Clazz c " +
-           "WHERE LOWER(c.name) = LOWER(:name) AND c.deletedAt IS NULL")
+            "WHERE LOWER(c.name) = LOWER(:name) AND c.deletedAt IS NULL")
     boolean existsByNameIgnoreCase(@Param("name") String name);
 
     /**
      * Check if class name exists excluding specific class ID
      */
     @Query("SELECT CASE WHEN COUNT(c) > 0 THEN true ELSE false END FROM Clazz c " +
-           "WHERE LOWER(c.name) = LOWER(:name) AND c.id <> :excludeId AND c.deletedAt IS NULL")
+            "WHERE LOWER(c.name) = LOWER(:name) AND c.id <> :excludeId AND c.deletedAt IS NULL")
     boolean existsByNameIgnoreCaseAndIdNot(@Param("name") String name, @Param("excludeId") UUID excludeId);
-}
 
+    /**
+     * Find classes by active status (including deleted)
+     * @param isActive
+     * @param pageable
+     * @return Page of classes matching active status, including deleted classes
+     */
+    Page<Clazz> findByIsActive(Boolean isActive, Pageable pageable);
+}

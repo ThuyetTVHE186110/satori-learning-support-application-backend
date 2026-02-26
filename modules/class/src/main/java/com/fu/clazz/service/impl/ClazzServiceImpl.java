@@ -23,13 +23,18 @@ import com.fu.user.entity.UserRole;
 import com.fu.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Implementation of ClazzService
@@ -55,15 +60,37 @@ public class ClazzServiceImpl implements ClazzService {
     @Override
     @Transactional
     public ClassResponse createClass(CreateClassRequest request, UUID managerId) {
-        log.info("Creating class: {} by manager: {}", request.getName(), managerId);
+        log.info("Tạo lớp học: {} bởi quản lý: {}", request.getName(), managerId);
 
+        // Validate date range
+        if (request.getStartDate() != null && request.getStartDate().isBefore(java.time.LocalDate.now())) {
+            throw new BusinessException("INVALID_START_DATE",
+                    "Ngày bắt đầu phải ở tương lai.");
+        }
+
+        if (request.getStartDate() != null && request.getEndDate() != null
+                && !request.getEndDate().isAfter(request.getStartDate())) {
+            throw new BusinessException("INVALID_DATE_RANGE",
+                    "Ngày kết thúc phải sau ngày bắt đầu.");
+        }
+        // Check if class name already exists
+        if (clazzRepository.existsByNameIgnoreCase(request.getName())) {
+            throw new BusinessException("CLASS_NAME_EXISTS",
+                    "Tên lớp học đã tồn tại.");
+        }
         // Validate teacher exists and has TEACHER role
         User teacher = userRepository.findById(request.getTeacherId())
-                .orElseThrow(() -> new ResourceNotFoundException("Teacher not found with ID: " + request.getTeacherId()));
+                .orElseThrow(
+                        () -> new BusinessException("INVALID_TEACHER", "Giáo viên không tồn tại hoặc không hợp lệ."));
 
-        if (teacher.getRole() != UserRole.TEACHER) {
-            throw new BusinessException("INVALID_TEACHER_ROLE",
-                    "Only users with TEACHER role can be assigned as class teacher. User '" + teacher.getFullName() + "' has role: " + teacher.getRole());
+        if (teacher.getRole() != UserRole.TEACHER || teacher.getStatus() != com.fu.user.entity.UserStatus.ACTIVE) {
+            throw new BusinessException("INVALID_TEACHER",
+                    "Giáo viên không tồn tại hoặc không hợp lệ.");
+        }
+
+        // Validate description length
+        if (request.getDescription() != null && request.getDescription().length() > 5000) {
+            throw new BusinessException("INVALID_DESCRIPTION", "Mô tả không được vượt quá 5000 ký tự.");
         }
 
         // Generate unique join code
@@ -77,7 +104,7 @@ public class ClazzServiceImpl implements ClazzService {
 
         // Save class
         Clazz savedClazz = clazzRepository.save(clazz);
-        log.info("Class created successfully with ID: {} and code: {}", savedClazz.getId(), code);
+        log.info("Tạo lớp học thành công với ID: {} và mã lớp: {}", savedClazz.getId(), code);
 
         ClassResponse response = clazzMapper.toResponse(savedClazz);
         response.setMemberCount(0L);
@@ -87,7 +114,7 @@ public class ClazzServiceImpl implements ClazzService {
     @Override
     @Transactional
     public ClassResponse updateClass(UUID classId, UpdateClassRequest request, UUID managerId) {
-        log.info("Updating class: {} by manager: {}", classId, managerId);
+        log.info("Cập nhật lớp học: {} bởi quản lý: {}", classId, managerId);
 
         Clazz clazz = findClassOrThrow(classId);
 
@@ -96,58 +123,118 @@ public class ClazzServiceImpl implements ClazzService {
                 !request.getName().equalsIgnoreCase(clazz.getName()) &&
                 clazzRepository.existsByNameIgnoreCaseAndIdNot(request.getName(), classId)) {
             throw new BusinessException("CLASS_NAME_EXISTS",
-                    "Class with name '" + request.getName() + "' already exists");
+                    "Tên lớp học đã tồn tại.");
         }
 
-        // Update class
+        // Validate teacher if provided
+        if (request.getTeacherId() != null) {
+
+            User newTeacher = userRepository.findById(request.getTeacherId())
+                    .orElseThrow(() -> new BusinessException("INVALID_TEACHER",
+                            "Giáo viên không tồn tại hoặc không hợp lệ."));
+
+            if (newTeacher.getRole() != UserRole.TEACHER
+                    || newTeacher.getStatus() != com.fu.user.entity.UserStatus.ACTIVE) {
+                throw new BusinessException("INVALID_TEACHER",
+                        "Giáo viên không tồn tại hoặc không hợp lệ.");
+            }
+        }
+
+        // Validate description length
+        if (request.getDescription() != null && request.getDescription().length() > 5000) {
+            throw new BusinessException("INVALID_DESCRIPTION", "Mô tả không được vượt quá 5000 ký tự.");
+        }
+
+        // Validate date range (E3: startDate must be before endDate)
+        LocalDate effectiveStartDate = request.getStartDate() != null ? request.getStartDate() : clazz.getStartDate();
+        LocalDate effectiveEndDate = request.getEndDate() != null ? request.getEndDate() : clazz.getEndDate();
+        if (effectiveStartDate != null && effectiveEndDate != null
+                && !effectiveEndDate.isAfter(effectiveStartDate)) {
+            throw new BusinessException("INVALID_DATE_RANGE",
+                    "Ngày bắt đầu phải trước ngày kết thúc.");
+        }
+
+        // Validate capacity (E4: newMaxStudents >= currentMembers)
+        if (request.getMaxStudents() != null) {
+            long currentMembers = classMemberRepository.countActiveByClassId(classId);
+            if (request.getMaxStudents() < currentMembers) {
+                throw new BusinessException("CAPACITY_VIOLATION",
+                        "Số lượng học viên tối đa không thể nhỏ hơn số lượng học viên hiện tại đang theo học.");
+            }
+        }
+
+        // Update class (only non-null fields are mapped)
         clazzMapper.updateEntity(clazz, request);
         clazz.setUpdatedBy(managerId);
 
         Clazz updatedClazz = clazzRepository.save(clazz);
-        log.info("Class updated successfully: {}", classId);
+        log.info("Cập nhật lớp học thành công: {}", classId);
 
         return toResponseWithMemberCount(updatedClazz);
     }
 
     @Override
     public ClassResponse getClassById(UUID classId) {
-        log.debug("Fetching class by ID: {}", classId);
+        log.debug("Lấy thông tin lớp học theo ID: {}", classId);
         Clazz clazz = findClassOrThrow(classId);
         return toResponseWithMemberCount(clazz);
     }
 
     @Override
     public Page<ClassSummaryResponse> getAllClasses(Pageable pageable) {
-        log.debug("Fetching all classes with pagination");
+        log.debug("Lấy tất cả lớp học với phân trang");
         return clazzRepository.findAllNotDeleted(pageable)
                 .map(this::toSummaryWithMemberCount);
     }
 
     @Override
     public Page<ClassSummaryResponse> getClassesByActiveStatus(Boolean isActive, Pageable pageable) {
-        log.debug("Fetching classes by active status: {}", isActive);
+        log.debug("Lấy lớp học theo trạng thái hoạt động: {}", isActive);
         return clazzRepository.findByIsActiveAndDeletedAtIsNull(isActive, pageable)
                 .map(this::toSummaryWithMemberCount);
     }
 
     @Override
     public Page<ClassSummaryResponse> getClassesByJlptLevel(JlptLevel jlptLevel, Pageable pageable) {
-        log.debug("Fetching classes by JLPT level: {}", jlptLevel);
+        log.debug("Lấy lớp học theo cấp độ JLPT: {}", jlptLevel);
         return clazzRepository.findByJlptLevelAndDeletedAtIsNull(jlptLevel, pageable)
                 .map(this::toSummaryWithMemberCount);
     }
 
     @Override
     public Page<ClassSummaryResponse> getClassesByTeacher(UUID teacherId, Pageable pageable) {
-        log.debug("Fetching classes by teacher: {}", teacherId);
+        log.debug("Lấy lớp học theo giáo viên: {}", teacherId);
         return clazzRepository.findByTeacherIdAndDeletedAtIsNull(teacherId, pageable)
                 .map(this::toSummaryWithMemberCount);
     }
 
     @Override
+    public Page<ClassSummaryResponse> getActiveClassesByTeacher(UUID teacherId, Pageable pageable) {
+        log.debug("Lấy lớp học đang hoạt động theo giáo viên: {}", teacherId);
+        return clazzRepository.findByTeacherIdAndIsActiveTrueAndDeletedAtIsNull(teacherId, pageable)
+                .map(this::toSummaryWithMemberCount);
+    }
+
+    @Override
+    public Page<ClassSummaryResponse> getActiveClassesByTeacherAndLevel(UUID teacherId, JlptLevel jlptLevel,
+            Pageable pageable) {
+        log.debug("Lấy lớp học đang hoạt động theo giáo viên {} và cấp độ JLPT: {}", teacherId, jlptLevel);
+        return clazzRepository
+                .findByTeacherIdAndJlptLevelAndIsActiveTrueAndDeletedAtIsNull(teacherId, jlptLevel, pageable)
+                .map(this::toSummaryWithMemberCount);
+    }
+
+    @Override
     public Page<ClassSummaryResponse> searchClasses(String keyword, Pageable pageable) {
-        log.debug("Searching classes by keyword: {}", keyword);
+        log.debug("Tìm kiếm lớp học theo từ khóa: {}", keyword);
         return clazzRepository.searchByName(keyword, pageable)
+                .map(this::toSummaryWithMemberCount);
+    }
+
+    @Override
+    public Page<ClassSummaryResponse> searchClassesByTeacher(UUID teacherId, String keyword, Pageable pageable) {
+        log.debug("Tìm kiếm lớp học của giáo viên {} theo từ khóa: {}", teacherId, keyword);
+        return clazzRepository.searchByTeacherAndName(teacherId, keyword, pageable)
                 .map(this::toSummaryWithMemberCount);
     }
 
@@ -157,73 +244,19 @@ public class ClazzServiceImpl implements ClazzService {
 
     @Override
     @Transactional
-    public ClassResponse activateClass(UUID classId, UUID managerId) {
-        log.info("Activating class: {} by manager: {}", classId, managerId);
+    public ClassResponse deleteClass(UUID classId, UUID managerId) {
+        log.info("Xóa lớp học: {} bởi quản lý: {}", classId, managerId);
 
         Clazz clazz = findClassOrThrow(classId);
-        clazz.setIsActive(true);
-        clazz.setUpdatedBy(managerId);
 
-        Clazz updatedClazz = clazzRepository.save(clazz);
-        log.info("Class activated successfully: {}", classId);
-
-        return toResponseWithMemberCount(updatedClazz);
-    }
-
-    @Override
-    @Transactional
-    public ClassResponse deactivateClass(UUID classId, UUID managerId) {
-        log.info("Deactivating class: {} by manager: {}", classId, managerId);
-
-        Clazz clazz = findClassOrThrow(classId);
-        clazz.setIsActive(false);
-        clazz.setUpdatedBy(managerId);
-
-        Clazz updatedClazz = clazzRepository.save(clazz);
-        log.info("Class deactivated successfully: {}", classId);
-
-        return toResponseWithMemberCount(updatedClazz);
-    }
-
-    @Override
-    @Transactional
-    public void deleteClass(UUID classId, UUID managerId) {
-        log.info("Soft-deleting class: {} by manager: {}", classId, managerId);
-
-        Clazz clazz = findClassOrThrow(classId);
+        // Soft delete: stamp deletedAt + deletedBy
         clazz.softDelete(managerId);
-
-        clazzRepository.save(clazz);
-        log.info("Class soft-deleted successfully: {}", classId);
-    }
-
-    // =====================================================
-    // TEACHER ASSIGNMENT
-    // =====================================================
-
-    @Override
-    @Transactional
-    public ClassResponse assignTeacher(UUID classId, UUID teacherId, UUID managerId) {
-        log.info("Assigning teacher: {} to class: {} by manager: {}", teacherId, classId, managerId);
-
-        Clazz clazz = findClassOrThrow(classId);
-
-        // Validate user exists and has TEACHER role
-        User user = userRepository.findById(teacherId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + teacherId));
-
-        if (user.getRole() != UserRole.TEACHER) {
-            throw new BusinessException("INVALID_TEACHER_ROLE",
-                    "Only users with TEACHER role can be assigned as class teacher. User '" + user.getFullName() + "' has role: " + user.getRole());
-        }
-
-        clazz.setTeacherId(teacherId);
         clazz.setUpdatedBy(managerId);
 
-        Clazz updatedClazz = clazzRepository.save(clazz);
-        log.info("Teacher assigned successfully to class: {}", classId);
+        Clazz deletedClazz = clazzRepository.save(clazz);
+        log.info("Xóa lớp học thành công: {}", classId);
 
-        return toResponseWithMemberCount(updatedClazz);
+        return toResponseWithMemberCount(deletedClazz);
     }
 
     // =====================================================
@@ -233,23 +266,23 @@ public class ClazzServiceImpl implements ClazzService {
     @Override
     @Transactional
     public ClassMemberResponse addMember(UUID classId, AddMemberRequest request, UUID managerId) {
-        log.info("Adding member: {} to class: {} by manager: {}", request.getUserId(), classId, managerId);
+        log.info("Thêm thành viên: {} vào lớp học: {} bởi quản lý: {}", request.getUserId(), classId, managerId);
 
         Clazz clazz = findClassOrThrow(classId);
-
         // Validate user exists and has LEARNER role
         User user = userRepository.findById(request.getUserId())
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + request.getUserId()));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Không tìm thấy người dùng với ID: " + request.getUserId()));
 
         if (user.getRole() != UserRole.LEARNER) {
             throw new BusinessException("INVALID_MEMBER_ROLE",
-                    "Only users with LEARNER role can be added as class members. User '" + user.getFullName() + "' has role: " + user.getRole());
+                    "Chỉ người dùng có vai trò HỌC VIÊN mới được thêm vào lớp học.");
         }
 
         // Check if user is the teacher of the class
         if (clazz.getTeacherId() != null && clazz.getTeacherId().equals(request.getUserId())) {
             throw new BusinessException("USER_IS_TEACHER",
-                    "User is already the teacher of this class");
+                    "Người dùng đã là giáo viên của lớp này.");
         }
 
         validateClassAcceptingMembers(clazz);
@@ -260,65 +293,108 @@ public class ClazzServiceImpl implements ClazzService {
     @Override
     @Transactional
     public void removeMember(UUID classId, UUID userId, UUID managerId) {
-        log.info("Removing member: {} from class: {} by manager: {}", userId, classId, managerId);
+        log.info("Xóa thành viên: {} khỏi lớp học: {} bởi quản lý: {}", userId, classId, managerId);
 
         // Verify class exists
         findClassOrThrow(classId);
 
         ClassMember member = classMemberRepository.findByClassIdAndUserId(classId, userId)
                 .orElseThrow(() -> new BusinessException("MEMBER_NOT_FOUND",
-                        "User is not a member of this class"));
+                        "Học viên không phải là thành viên của lớp này."));
 
         if (member.getRemovedAt() != null) {
             throw new BusinessException("MEMBER_ALREADY_REMOVED",
-                    "User has already been removed from this class");
+                    "Học viên đã bị xóa khỏi lớp này trước đó.");
         }
 
         member.remove();
         classMemberRepository.save(member);
-        log.info("Member removed successfully from class: {}", classId);
+        log.info("Xóa thành viên thành công khỏi lớp học: {}", classId);
     }
-
 
     @Override
     public Page<ClassMemberResponse> getClassMembers(UUID classId, Pageable pageable) {
-        log.debug("Fetching members of class: {}", classId);
+        log.debug("Lấy danh sách thành viên của lớp: {}", classId);
 
         // Verify class exists
         findClassOrThrow(classId);
 
-        return classMemberRepository.findActiveByClassId(classId, pageable)
-                .map(clazzMapper::toMemberResponse);
+        Page<ClassMember> membersPage = classMemberRepository.findActiveByClassId(classId, pageable);
+
+        // Batch fetch user info to avoid N+1 queries
+        List<UUID> userIds = membersPage.getContent().stream()
+                .map(ClassMember::getUserId)
+                .toList();
+        Map<UUID, User> userMap = userRepository.findAllById(userIds).stream()
+                .collect(Collectors.toMap(User::getId, user -> user));
+
+        return membersPage.map(member -> {
+            ClassMemberResponse response = clazzMapper.toMemberResponse(member);
+            User user = userMap.get(member.getUserId());
+            if (user != null) {
+                response.setFullName(user.getFullName());
+                response.setEmail(user.getEmail());
+                response.setAvatarUrl(user.getAvatarUrl());
+                response.setRole(user.getRole() != null ? user.getRole().name() : null);
+            }
+            return response;
+        });
     }
 
+    @Override
+    public ClassResponse getClassByIdForTeacher(UUID classId, UUID teacherId) {
+        log.debug("Giáo viên {} xem chi tiết lớp: {}", teacherId, classId);
+        Clazz clazz = findClassOrThrow(classId);
+
+        if (!clazz.getTeacherId().equals(teacherId)) {
+            throw new BusinessException("ACCESS_DENIED", "Bạn không có quyền xem lớp học này.");
+        }
+
+        return toResponseWithMemberCount(clazz);
+    }
+
+    @Override
+    public Page<ClassMemberResponse> getClassMembersForTeacher(UUID classId, UUID teacherId, Pageable pageable) {
+        log.debug("Giáo viên {} xem thành viên lớp: {}", teacherId, classId);
+        Clazz clazz = findClassOrThrow(classId);
+
+        if (!clazz.getTeacherId().equals(teacherId)) {
+            throw new BusinessException("ACCESS_DENIED", "Bạn không có quyền xem thành viên của lớp học này.");
+        }
+
+        return getClassMembers(classId, pageable);
+    }
 
     // =====================================================
     // HELPER METHODS
     // =====================================================
 
     /**
-     * Find class or throw exception
+     * Find non-deleted class or throw exception (BR-73)
      */
     private Clazz findClassOrThrow(UUID classId) {
         return clazzRepository.findByIdAndNotDeleted(classId)
-                .orElseThrow(() -> new ClazzNotFoundException(classId));
+                .orElseThrow(() -> new ClazzNotFoundException("Lớp học không tồn tại."));
     }
 
     /**
      * Generate unique 8-character alphanumeric join code
      */
     private String generateUniqueCode() {
+        String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        java.security.SecureRandom random = new java.security.SecureRandom();
         for (int i = 0; i < MAX_CODE_GENERATION_ATTEMPTS; i++) {
-            String code = UUID.randomUUID().toString()
-                    .replace("-", "")
-                    .substring(0, CODE_LENGTH)
-                    .toUpperCase();
+            StringBuilder sb = new StringBuilder(CODE_LENGTH);
+            for (int j = 0; j < CODE_LENGTH; j++) {
+                sb.append(chars.charAt(random.nextInt(chars.length())));
+            }
+            String code = sb.toString();
             if (!clazzRepository.existsByCode(code)) {
                 return code;
             }
         }
         throw new BusinessException("CODE_GENERATION_FAILED",
-                "Failed to generate unique class code after " + MAX_CODE_GENERATION_ATTEMPTS + " attempts");
+                "Không thể tạo mã lớp học duy nhất sau " + MAX_CODE_GENERATION_ATTEMPTS + " lần thử");
     }
 
     /**
@@ -326,7 +402,7 @@ public class ClazzServiceImpl implements ClazzService {
      */
     private void validateClassAcceptingMembers(Clazz clazz) {
         if (!clazz.getIsActive()) {
-            throw new BusinessException("CLASS_INACTIVE", "Cannot join an inactive class");
+            throw new BusinessException("CLASS_INACTIVE", "Không thể thêm học viên vào lớp đã ngưng hoạt động.");
         }
 
         long currentMembers = classMemberRepository.countActiveByClassId(clazz.getId());
@@ -357,8 +433,19 @@ public class ClazzServiceImpl implements ClazzService {
         }
 
         ClassMember savedMember = classMemberRepository.save(member);
-        log.info("Member: {} added to class: {}", userId, clazz.getId());
-        return clazzMapper.toMemberResponse(savedMember);
+        log.info("Thêm thành viên: {} vào lớp học: {} thành công", userId, clazz.getId());
+
+        ClassMemberResponse response = clazzMapper.toMemberResponse(savedMember);
+
+        // Enrich with user info
+        userRepository.findById(userId).ifPresent(user -> {
+            response.setFullName(user.getFullName());
+            response.setEmail(user.getEmail());
+            response.setAvatarUrl(user.getAvatarUrl());
+            response.setRole(user.getRole().name());
+        });
+
+        return response;
     }
 
     /**
@@ -367,6 +454,16 @@ public class ClazzServiceImpl implements ClazzService {
     private ClassResponse toResponseWithMemberCount(Clazz clazz) {
         ClassResponse response = clazzMapper.toResponse(clazz);
         response.setMemberCount(classMemberRepository.countActiveByClassId(clazz.getId()));
+
+        // Enrich with teacher info
+        if (clazz.getTeacherId() != null) {
+            userRepository.findById(clazz.getTeacherId()).ifPresent(teacher -> {
+                response.setTeacherName(teacher.getFullName());
+                response.setTeacherEmail(teacher.getEmail());
+                response.setTeacherAvatarUrl(teacher.getAvatarUrl());
+            });
+        }
+
         return response;
     }
 
@@ -379,4 +476,3 @@ public class ClazzServiceImpl implements ClazzService {
         return response;
     }
 }
-

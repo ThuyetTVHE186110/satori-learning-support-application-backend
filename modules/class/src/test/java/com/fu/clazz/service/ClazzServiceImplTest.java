@@ -45,7 +45,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.*;
 
@@ -236,6 +237,92 @@ class ClazzServiceImplTest {
             assertThat(result).isNotNull();
             verify(clazzRepository, atLeast(2)).existsByCode(anyString());
         }
+
+        @Test
+        @DisplayName("Should throw exception when teacher is inactive or not found")
+        void shouldThrowExceptionWhenTeacherInactive() {
+            // Given
+            testTeacher.setStatus(UserStatus.INACTIVE);
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+            given(clazzRepository.existsByNameIgnoreCase(anyString())).willReturn(false);
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.createClass(createRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Giáo viên không tồn tại hoặc không hợp lệ");
+
+            verify(clazzRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Should throw exception when description exceeds 5000 characters")
+        void shouldThrowExceptionWhenDescriptionTooLong() {
+            // Given
+            String longDescription = "A".repeat(5001);
+            CreateClassRequest badRequest = CreateClassRequest.builder()
+                    .name("N5 Morning Class")
+                    .description(longDescription)
+                    .teacherId(teacherId)
+                    .jlptLevel(JlptLevel.N5)
+                    .maxStudents(30)
+                    .startDate(LocalDate.of(2026, 3, 1))
+                    .endDate(LocalDate.of(2026, 6, 30))
+                    .build();
+
+            given(clazzRepository.existsByNameIgnoreCase(anyString())).willReturn(false);
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.createClass(badRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Mô tả không được vượt quá 5000 ký tự");
+
+            verify(clazzRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Should throw exception when start date is in the past (E4)")
+        void shouldThrowExceptionWhenStartDateInPast() {
+            // Given
+            CreateClassRequest badDateRequest = CreateClassRequest.builder()
+                    .name("N5 Morning Class")
+                    .description("Beginner Japanese class")
+                    .teacherId(teacherId)
+                    .jlptLevel(JlptLevel.N5)
+                    .maxStudents(30)
+                    .startDate(LocalDate.now().minusDays(1)) // Past date
+                    .endDate(LocalDate.now().plusMonths(3))
+                    .build();
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.createClass(badDateRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Ngày bắt đầu phải ở tương lai.");
+
+            verify(clazzRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Should throw exception when end date is before start date (E3)")
+        void shouldThrowExceptionWhenEndDateBeforeStartDate() {
+            // Given
+            CreateClassRequest badDateRequest = CreateClassRequest.builder()
+                    .name("N5 Morning Class")
+                    .description("Beginner Japanese class")
+                    .teacherId(teacherId)
+                    .jlptLevel(JlptLevel.N5)
+                    .maxStudents(30)
+                    .startDate(LocalDate.now().plusDays(10))
+                    .endDate(LocalDate.now().plusDays(5)) // Before start date
+                    .build();
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.createClass(badDateRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Ngày kết thúc phải sau ngày bắt đầu.");
+
+            verify(clazzRepository, never()).save(any());
+        }
     }
 
     // =====================================================
@@ -289,7 +376,7 @@ class ClazzServiceImplTest {
             // When/Then
             assertThatThrownBy(() -> clazzService.updateClass(classId, updateRequest, managerId))
                     .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("already exists");
+                    .hasMessageContaining("đã tồn tại");
 
             verify(clazzRepository, never()).save(any());
         }
@@ -312,6 +399,88 @@ class ClazzServiceImplTest {
 
             // Then
             verify(clazzRepository, never()).existsByNameIgnoreCaseAndIdNot(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("Should throw when endDate is before startDate on update (E3)")
+        void shouldThrowWhenEndDateBeforeStartDateOnUpdate() {
+            // Given
+            UpdateClassRequest dateRequest = UpdateClassRequest.builder()
+                    .startDate(LocalDate.of(2026, 6, 1))
+                    .endDate(LocalDate.of(2026, 3, 1))
+                    .build();
+
+            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.updateClass(classId, dateRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Ngày bắt đầu phải trước ngày kết thúc");
+
+            verify(clazzRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Should throw when maxStudents is less than current members (E4)")
+        void shouldThrowWhenCapacityViolation() {
+            // Given
+            UpdateClassRequest capacityRequest = UpdateClassRequest.builder()
+                    .maxStudents(3)
+                    .build();
+
+            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.updateClass(classId, capacityRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Số lượng học viên tối đa không thể nhỏ hơn");
+
+            verify(clazzRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Should throw exception when new teacher is inactive")
+        void shouldThrowExceptionWhenNewTeacherInactive() {
+            // Given
+            UUID newTeacherId = UUID.randomUUID();
+            UpdateClassRequest newTeacherRequest = UpdateClassRequest.builder()
+                    .teacherId(newTeacherId)
+                    .build();
+
+            User inactiveTeacher = User.builder()
+                    .role(UserRole.TEACHER)
+                    .status(UserStatus.INACTIVE)
+                    .build();
+
+            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(userRepository.findById(newTeacherId)).willReturn(Optional.of(inactiveTeacher));
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.updateClass(classId, newTeacherRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Giáo viên không tồn tại hoặc không hợp lệ");
+
+            verify(clazzRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Should throw exception when description exceeds 5000 characters on update")
+        void shouldThrowExceptionWhenDescriptionTooLongOnUpdate() {
+            // Given
+            String longDescription = "A".repeat(5001);
+            UpdateClassRequest badRequest = UpdateClassRequest.builder()
+                    .description(longDescription)
+                    .build();
+
+            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.updateClass(classId, badRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Mô tả không được vượt quá 5000 ký tự");
+
+            verify(clazzRepository, never()).save(any());
         }
     }
 
@@ -375,7 +544,7 @@ class ClazzServiceImplTest {
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
-            assertThat(result.getContent().getFirst().getName()).isEqualTo("N5 Morning Class");
+            assertThat(result.getContent().get(0).getName()).isEqualTo("N5 Morning Class");
         }
 
         @Test
@@ -439,386 +608,638 @@ class ClazzServiceImplTest {
     class StatusManagementTests {
 
         @Test
-        @DisplayName("Should activate class successfully")
-        void shouldActivateClassSuccessfully() {
+        @DisplayName("Should delete class successfully (soft delete only, isActive unchanged)")
+        void shouldDeleteClassSuccessfully() {
             // Given
-            testClazz.setIsActive(false);
             given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
             given(clazzRepository.save(any(Clazz.class))).willReturn(testClazz);
 
-            ClassResponse activatedResponse = ClassResponse.builder()
+            ClassResponse deletedResponse = ClassResponse.builder()
                     .id(classId).isActive(true).build();
-            given(clazzMapper.toResponse(testClazz)).willReturn(activatedResponse);
+            given(clazzMapper.toResponse(testClazz)).willReturn(deletedResponse);
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
-
-            // When
-            ClassResponse result = clazzService.activateClass(classId, managerId);
-
-            // Then
-            verify(clazzRepository).save(clazzCaptor.capture());
-            assertThat(clazzCaptor.getValue().getIsActive()).isTrue();
-            assertThat(clazzCaptor.getValue().getUpdatedBy()).isEqualTo(managerId);
-        }
-
-        @Test
-        @DisplayName("Should deactivate class successfully")
-        void shouldDeactivateClassSuccessfully() {
-            // Given
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(clazzRepository.save(any(Clazz.class))).willReturn(testClazz);
-
-            ClassResponse deactivatedResponse = ClassResponse.builder()
-                    .id(classId).isActive(false).build();
-            given(clazzMapper.toResponse(testClazz)).willReturn(deactivatedResponse);
-            given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
-
-            // When
-            ClassResponse result = clazzService.deactivateClass(classId, managerId);
-
-            // Then
-            verify(clazzRepository).save(clazzCaptor.capture());
-            assertThat(clazzCaptor.getValue().getIsActive()).isFalse();
-            assertThat(clazzCaptor.getValue().getUpdatedBy()).isEqualTo(managerId);
-        }
-
-        @Test
-        @DisplayName("Should soft-delete class successfully")
-        void shouldSoftDeleteClassSuccessfully() {
-            // Given
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
 
             // When
             clazzService.deleteClass(classId, managerId);
 
             // Then
             verify(clazzRepository).save(clazzCaptor.capture());
-            Clazz deleted = clazzCaptor.getValue();
-            assertThat(deleted.isDeleted()).isTrue();
-            assertThat(deleted.getDeletedAt()).isNotNull();
-            assertThat(deleted.getDeletedBy()).isEqualTo(managerId);
+            Clazz captured = clazzCaptor.getValue();
+            assertThat(captured.getDeletedAt()).isNotNull();
+            assertThat(captured.getDeletedBy()).isEqualTo(managerId);
+            assertThat(captured.getUpdatedBy()).isEqualTo(managerId);
+            // isActive should NOT be changed by deleteClass
+            assertThat(captured.getIsActive()).isTrue();
         }
 
         @Test
-        @DisplayName("Should throw exception when deleting non-existent class")
-        void shouldThrowWhenDeletingNonExistentClass() {
+        @DisplayName("Should deactivate class via updateClass with isActive=false")
+        void shouldDeactivateClassViaUpdate() {
             // Given
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.empty());
-
-            // When/Then
-            assertThatThrownBy(() -> clazzService.deleteClass(classId, managerId))
-                    .isInstanceOf(ClazzNotFoundException.class);
-        }
-    }
-
-    // =====================================================
-    // TEACHER ASSIGNMENT
-    // =====================================================
-
-    @Nested
-    @DisplayName("Assign Teacher Tests")
-    class AssignTeacherTests {
-
-        @Test
-        @DisplayName("Should assign teacher successfully")
-        void shouldAssignTeacherSuccessfully() {
-            // Given
-            UUID newTeacherId = UUID.randomUUID();
-            User newTeacher = User.builder()
-                    .email("newteacher@example.com")
-                    .firstName("New")
-                    .lastName("Teacher")
-                    .role(UserRole.TEACHER)
-                    .status(UserStatus.ACTIVE)
+            UpdateClassRequest deactivateRequest = UpdateClassRequest.builder()
+                    .isActive(false)
                     .build();
-            ReflectionTestUtils.setField(newTeacher, "id", newTeacherId);
 
             given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(userRepository.findById(newTeacherId)).willReturn(Optional.of(newTeacher));
             given(clazzRepository.save(any(Clazz.class))).willReturn(testClazz);
             given(clazzMapper.toResponse(testClazz)).willReturn(testClassResponse);
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
 
             // When
-            ClassResponse result = clazzService.assignTeacher(classId, newTeacherId, managerId);
+            clazzService.updateClass(classId, deactivateRequest, managerId);
 
             // Then
+            verify(clazzMapper).updateEntity(testClazz, deactivateRequest);
             verify(clazzRepository).save(clazzCaptor.capture());
-            assertThat(clazzCaptor.getValue().getTeacherId()).isEqualTo(newTeacherId);
             assertThat(clazzCaptor.getValue().getUpdatedBy()).isEqualTo(managerId);
         }
 
         @Test
-        @DisplayName("Should throw when assigning teacher to non-existent class")
-        void shouldThrowWhenClassNotFound() {
-            // Given
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.empty());
-
-            // When/Then
-            assertThatThrownBy(() -> clazzService.assignTeacher(classId, teacherId, managerId))
-                    .isInstanceOf(ClazzNotFoundException.class);
-        }
-
-        @Test
-        @DisplayName("Should throw when assigning non-teacher user as teacher")
-        void shouldThrowWhenUserIsNotTeacher() {
-            // Given
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent)); // LEARNER role
-
-            // When/Then
-            assertThatThrownBy(() -> clazzService.assignTeacher(classId, studentId, managerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("TEACHER role");
-        }
-
-        @Test
-        @DisplayName("Should throw when assigned user not found")
-        void shouldThrowWhenTeacherUserNotFound() {
-            // Given
-            UUID unknownId = UUID.randomUUID();
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(userRepository.findById(unknownId)).willReturn(Optional.empty());
-
-            // When/Then
-            assertThatThrownBy(() -> clazzService.assignTeacher(classId, unknownId, managerId))
-                    .isInstanceOf(ResourceNotFoundException.class);
-        }
-    }
-
-    // =====================================================
-    // MEMBERSHIP MANAGEMENT
-    // =====================================================
-
-    @Nested
-    @DisplayName("Add Member Tests")
-    class AddMemberTests {
-
-        @Test
-        @DisplayName("Should add member successfully")
-        void shouldAddMemberSuccessfully() {
-            // Given
-            AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
-            given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
-            given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.empty());
-            given(classMemberRepository.save(any(ClassMember.class))).willReturn(testMember);
-            given(clazzMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
-
-            // When
-            ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
-
-            // Then
-            assertThat(result).isNotNull();
-            assertThat(result.getUserId()).isEqualTo(studentId);
-            assertThat(result.getClassId()).isEqualTo(classId);
-
-            verify(classMemberRepository).save(memberCaptor.capture());
-            assertThat(memberCaptor.getValue().getClassId()).isEqualTo(classId);
-            assertThat(memberCaptor.getValue().getUserId()).isEqualTo(studentId);
-        }
-
-        @Test
-        @DisplayName("Should throw exception when class is full")
-        void shouldThrowWhenClassIsFull() {
-            // Given
-            AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
-            given(classMemberRepository.countActiveByClassId(classId)).willReturn(30L); // maxStudents = 30
-
-            // When/Then
-            assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
-                    .isInstanceOf(ClassFullException.class);
-
-            verify(classMemberRepository, never()).save(any());
-        }
-
-        @Test
-        @DisplayName("Should throw exception when member already exists")
-        void shouldThrowWhenMemberAlreadyExists() {
-            // Given
-            AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
-            given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
-            given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.of(testMember));
-
-            // When/Then
-            assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
-                    .isInstanceOf(MemberAlreadyExistsException.class);
-        }
-
-        @Test
-        @DisplayName("Should re-join previously removed member")
-        void shouldReJoinRemovedMember() {
-            // Given
-            AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
-            ClassMember removedMember = ClassMember.builder()
-                    .classId(classId).userId(studentId)
-                    .joinedAt(LocalDateTime.now().minusDays(10))
-                    .removedAt(LocalDateTime.now().minusDays(1))
-                    .build();
-            ReflectionTestUtils.setField(removedMember, "id", UUID.randomUUID());
-
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
-            given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
-            given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.of(removedMember));
-            given(classMemberRepository.save(any(ClassMember.class))).willReturn(removedMember);
-            given(clazzMapper.toMemberResponse(removedMember)).willReturn(testMemberResponse);
-
-            // When
-            ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
-
-            // Then
-            assertThat(result).isNotNull();
-            verify(classMemberRepository).save(memberCaptor.capture());
-            assertThat(memberCaptor.getValue().getRemovedAt()).isNull(); // restored
-        }
-
-        @Test
-        @DisplayName("Should throw when adding to inactive class")
-        void shouldThrowWhenClassIsInactive() {
+        @DisplayName("Should activate class via updateClass with isActive=true")
+        void shouldActivateClassViaUpdate() {
             // Given
             testClazz.setIsActive(false);
-            AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
+            UpdateClassRequest activateRequest = UpdateClassRequest.builder()
+                    .isActive(true)
+                    .build();
+
             given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
-
-            // When/Then
-            assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("inactive");
-
-            verify(classMemberRepository, never()).save(any());
-        }
-
-        @Test
-        @DisplayName("Should throw when adding user with TEACHER role as member")
-        void shouldThrowWhenAddingTeacherAsMember() {
-            // Given
-            AddMemberRequest request = AddMemberRequest.builder().userId(teacherId).build();
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
-
-            // When/Then
-            assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("LEARNER role");
-
-            verify(classMemberRepository, never()).save(any());
-        }
-
-        @Test
-        @DisplayName("Should throw when adding non-existent user as member")
-        void shouldThrowWhenUserNotFound() {
-            // Given
-            UUID unknownId = UUID.randomUUID();
-            AddMemberRequest request = AddMemberRequest.builder().userId(unknownId).build();
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(userRepository.findById(unknownId)).willReturn(Optional.empty());
-
-            // When/Then
-            assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
-                    .isInstanceOf(ResourceNotFoundException.class);
-
-            verify(classMemberRepository, never()).save(any());
-        }
-    }
-
-    // =====================================================
-    // REMOVE MEMBER
-    // =====================================================
-
-    @Nested
-    @DisplayName("Remove Member Tests")
-    class RemoveMemberTests {
-
-        @Test
-        @DisplayName("Should remove member successfully")
-        void shouldRemoveMemberSuccessfully() {
-            // Given
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.of(testMember));
+            given(clazzRepository.save(any(Clazz.class))).willReturn(testClazz);
+            given(clazzMapper.toResponse(testClazz)).willReturn(testClassResponse);
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
 
             // When
-            clazzService.removeMember(classId, studentId, managerId);
+            clazzService.updateClass(classId, activateRequest, managerId);
 
             // Then
-            verify(classMemberRepository).save(memberCaptor.capture());
-            assertThat(memberCaptor.getValue().getRemovedAt()).isNotNull();
+            verify(clazzMapper).updateEntity(testClazz, activateRequest);
+            verify(clazzRepository).save(clazzCaptor.capture());
+            assertThat(clazzCaptor.getValue().getUpdatedBy()).isEqualTo(managerId);
         }
 
-        @Test
-        @DisplayName("Should throw when member not found")
-        void shouldThrowWhenMemberNotFound() {
-            // Given
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.empty());
+        // =====================================================
+        // MEMBERSHIP MANAGEMENT
+        // =====================================================
 
-            // When/Then
-            assertThatThrownBy(() -> clazzService.removeMember(classId, studentId, managerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("not a member");
+        @Nested
+        @DisplayName("Add Member Tests")
+        class AddMemberTests {
+
+            @Test
+            @DisplayName("Should add member successfully")
+            void shouldAddMemberSuccessfully() {
+                // Given
+                AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
+                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
+                given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
+                given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.empty());
+                given(classMemberRepository.save(any(ClassMember.class))).willReturn(testMember);
+                given(clazzMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
+
+                // When
+                ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
+
+                // Then
+                assertThat(result).isNotNull();
+                assertThat(result.getUserId()).isEqualTo(studentId);
+                assertThat(result.getClassId()).isEqualTo(classId);
+
+                verify(classMemberRepository).save(memberCaptor.capture());
+                assertThat(memberCaptor.getValue().getClassId()).isEqualTo(classId);
+                assertThat(memberCaptor.getValue().getUserId()).isEqualTo(studentId);
+            }
+
+            @Test
+            @DisplayName("Should throw exception when class is full")
+            void shouldThrowWhenClassIsFull() {
+                // Given
+                AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
+                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
+                given(classMemberRepository.countActiveByClassId(classId)).willReturn(30L); // maxStudents = 30
+
+                // When/Then
+                assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
+                        .isInstanceOf(ClassFullException.class);
+
+                verify(classMemberRepository, never()).save(any());
+            }
+
+            @Test
+            @DisplayName("Should throw exception when member already exists")
+            void shouldThrowWhenMemberAlreadyExists() {
+                // Given
+                AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
+                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
+                given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
+                given(classMemberRepository.findByClassIdAndUserId(classId, studentId))
+                        .willReturn(Optional.of(testMember));
+
+                // When/Then
+                assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
+                        .isInstanceOf(MemberAlreadyExistsException.class);
+            }
+
+            @Test
+            @DisplayName("Should re-join previously removed member")
+            void shouldReJoinRemovedMember() {
+                // Given
+                AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
+                ClassMember removedMember = ClassMember.builder()
+                        .classId(classId).userId(studentId)
+                        .joinedAt(LocalDateTime.now().minusDays(10))
+                        .removedAt(LocalDateTime.now().minusDays(1))
+                        .build();
+                ReflectionTestUtils.setField(removedMember, "id", UUID.randomUUID());
+
+                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
+                given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
+                given(classMemberRepository.findByClassIdAndUserId(classId, studentId))
+                        .willReturn(Optional.of(removedMember));
+                given(classMemberRepository.save(any(ClassMember.class))).willReturn(removedMember);
+                given(clazzMapper.toMemberResponse(removedMember)).willReturn(testMemberResponse);
+
+                // When
+                ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
+
+                // Then
+                assertThat(result).isNotNull();
+                verify(classMemberRepository).save(memberCaptor.capture());
+                assertThat(memberCaptor.getValue().getRemovedAt()).isNull(); // restored
+            }
+
+            @Test
+            @DisplayName("Should throw when adding to inactive class")
+            void shouldThrowWhenClassIsInactive() {
+                // Given
+                testClazz.setIsActive(false);
+                AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
+                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
+
+                // When/Then
+                assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
+                        .isInstanceOf(BusinessException.class)
+                        .hasMessageContaining("Không thể thêm học viên vào lớp ");
+
+                verify(classMemberRepository, never()).save(any());
+            }
+
+            @Test
+            @DisplayName("Should throw when adding user with TEACHER role as member")
+            void shouldThrowWhenAddingTeacherAsMember() {
+                // Given
+                AddMemberRequest request = AddMemberRequest.builder().userId(teacherId).build();
+                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+
+                // When/Then
+                assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
+                        .isInstanceOf(BusinessException.class)
+                        .hasMessageContaining("HỌC VIÊN");
+
+                verify(classMemberRepository, never()).save(any());
+            }
+
+            @Test
+            @DisplayName("Should throw when adding non-existent user as member")
+            void shouldThrowWhenUserNotFound() {
+                // Given
+                UUID unknownId = UUID.randomUUID();
+                AddMemberRequest request = AddMemberRequest.builder().userId(unknownId).build();
+                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(userRepository.findById(unknownId)).willReturn(Optional.empty());
+
+                // When/Then
+                assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
+                        .isInstanceOf(ResourceNotFoundException.class);
+
+                verify(classMemberRepository, never()).save(any());
+            }
         }
 
-        @Test
-        @DisplayName("Should throw when member already removed")
-        void shouldThrowWhenMemberAlreadyRemoved() {
-            // Given
-            ClassMember removedMember = ClassMember.builder()
-                    .classId(classId).userId(studentId)
-                    .removedAt(LocalDateTime.now())
-                    .build();
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.of(removedMember));
+        // =====================================================
+        // REMOVE MEMBER
+        // =====================================================
 
-            // When/Then
-            assertThatThrownBy(() -> clazzService.removeMember(classId, studentId, managerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("already been removed");
+        @Nested
+        @DisplayName("Remove Member Tests")
+        class RemoveMemberTests {
+
+            @Test
+            @DisplayName("Should remove member successfully")
+            void shouldRemoveMemberSuccessfully() {
+                // Given
+                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(classMemberRepository.findByClassIdAndUserId(classId, studentId))
+                        .willReturn(Optional.of(testMember));
+
+                // When
+                clazzService.removeMember(classId, studentId, managerId);
+
+                // Then
+                verify(classMemberRepository).save(memberCaptor.capture());
+                assertThat(memberCaptor.getValue().getRemovedAt()).isNotNull();
+            }
+
+            @Test
+            @DisplayName("Should throw when member not found")
+            void shouldThrowWhenMemberNotFound() {
+                // Given
+                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.empty());
+
+                // When/Then
+                assertThatThrownBy(() -> clazzService.removeMember(classId, studentId, managerId))
+                        .isInstanceOf(BusinessException.class)
+                        .hasMessageContaining("Học viên không phải là thành viên");
+            }
+
+            @Test
+            @DisplayName("Should throw when member already removed")
+            void shouldThrowWhenMemberAlreadyRemoved() {
+                // Given
+                ClassMember removedMember = ClassMember.builder()
+                        .classId(classId).userId(studentId)
+                        .removedAt(LocalDateTime.now())
+                        .build();
+                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(classMemberRepository.findByClassIdAndUserId(classId, studentId))
+                        .willReturn(Optional.of(removedMember));
+
+                // When/Then
+                assertThatThrownBy(() -> clazzService.removeMember(classId, studentId, managerId))
+                        .isInstanceOf(BusinessException.class)
+                        .hasMessageContaining("Học viên đã bị xóa khỏi lớp này trước đó");
+            }
+        }
+
+        // =====================================================
+        // GET CLASS MEMBERS
+        // =====================================================
+
+        @Nested
+        @DisplayName("Get Class Members Tests")
+        class GetMembersTests {
+
+            @Test
+            @DisplayName("Should get class members with pagination")
+            void shouldGetClassMembersWithPagination() {
+                // Given
+                Pageable pageable = PageRequest.of(0, 10);
+                Page<ClassMember> memberPage = new PageImpl<>(List.of(testMember), pageable, 1);
+                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(classMemberRepository.findActiveByClassId(classId, pageable)).willReturn(memberPage);
+                given(clazzMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
+
+                // When
+                Page<ClassMemberResponse> result = clazzService.getClassMembers(classId, pageable);
+
+                // Then
+                assertThat(result.getTotalElements()).isEqualTo(1);
+                assertThat(result.getContent().get(0).getUserId()).isEqualTo(studentId);
+            }
+
+            @Test
+            @DisplayName("Should throw when class not found for member listing")
+            void shouldThrowWhenClassNotFoundForMembers() {
+                // Given
+                Pageable pageable = PageRequest.of(0, 10);
+                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.empty());
+
+                // When/Then
+                assertThatThrownBy(() -> clazzService.getClassMembers(classId, pageable))
+                        .isInstanceOf(ClazzNotFoundException.class);
+            }
+        }
+
+        // =====================================================
+        // CREATE CLASS DATE VALIDATION
+        // =====================================================
+
+        @Nested
+        @DisplayName("Create Class Date Validation Tests")
+        class CreateClassDateValidationTests {
+            @Test
+            @DisplayName("Should throw when startDate is in the past")
+            void shouldThrowWhenStartDateInPast() {
+                CreateClassRequest req = CreateClassRequest.builder()
+                        .name("Lớp kiểm thử")
+                        .teacherId(teacherId)
+                        .jlptLevel(JlptLevel.N5)
+                        .maxStudents(30)
+                        .startDate(java.time.LocalDate.now().minusDays(1))
+                        .endDate(java.time.LocalDate.now().plusDays(10))
+                        .build();
+                // date validation occurs before any user lookup, so no stubbing needed
+                assertThatThrownBy(() -> clazzService.createClass(req, managerId))
+                        .isInstanceOf(BusinessException.class)
+                        .hasMessageContaining("Ngày bắt đầu phải ở tương lai");
+            }
+
+            @Test
+            @DisplayName("Should throw when endDate is before startDate")
+            void shouldThrowWhenEndDateBeforeStartDate() {
+                CreateClassRequest req = CreateClassRequest.builder()
+                        .name("Lớp kiểm thử")
+                        .teacherId(teacherId)
+                        .jlptLevel(JlptLevel.N5)
+                        .maxStudents(30)
+                        .startDate(java.time.LocalDate.now().plusDays(5))
+                        .endDate(java.time.LocalDate.now().plusDays(2))
+                        .build();
+                // date validation occurs before any user lookup, so no stubbing needed
+                assertThatThrownBy(() -> clazzService.createClass(req, managerId))
+                        .isInstanceOf(BusinessException.class)
+                        .hasMessageContaining("Ngày kết thúc phải sau ngày bắt đầu");
+            }
+
+            @Test
+            @DisplayName("Should not throw when startDate is today and endDate is after startDate")
+            void shouldNotThrowWhenValidDates() {
+                CreateClassRequest req = CreateClassRequest.builder()
+                        .name("Lớp kiểm thử")
+                        .teacherId(teacherId)
+                        .jlptLevel(JlptLevel.N5)
+                        .maxStudents(30)
+                        .startDate(java.time.LocalDate.now().plusDays(1))
+                        .endDate(java.time.LocalDate.now().plusDays(10))
+                        .build();
+                given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+                given(clazzRepository.existsByCode(anyString())).willReturn(false);
+                given(clazzMapper.toEntity(any())).willReturn(testClazz);
+                given(clazzRepository.save(any(Clazz.class))).willReturn(testClazz);
+                given(clazzMapper.toResponse(any())).willReturn(testClassResponse);
+                assertThatNoException().isThrownBy(() -> clazzService.createClass(req, managerId));
+            }
         }
     }
 
-
     // =====================================================
-    // GET CLASS MEMBERS
+    // GET CLASS MEMBERS (with user info enrichment)
     // =====================================================
 
     @Nested
     @DisplayName("Get Class Members Tests")
-    class GetMembersTests {
+    class GetClassMembersTests {
 
         @Test
-        @DisplayName("Should get class members with pagination")
-        void shouldGetClassMembersWithPagination() {
+        @DisplayName("Should get class members with user info")
+        void shouldGetClassMembersWithUserInfo() {
             // Given
             Pageable pageable = PageRequest.of(0, 10);
             Page<ClassMember> memberPage = new PageImpl<>(List.of(testMember), pageable, 1);
             given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
             given(classMemberRepository.findActiveByClassId(classId, pageable)).willReturn(memberPage);
             given(clazzMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
+            given(userRepository.findAllById(List.of(studentId))).willReturn(List.of(testStudent));
 
             // When
             Page<ClassMemberResponse> result = clazzService.getClassMembers(classId, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
-            assertThat(result.getContent().getFirst().getUserId()).isEqualTo(studentId);
+            ClassMemberResponse response = result.getContent().get(0);
+            assertThat(response.getFullName()).isEqualTo(testStudent.getFullName());
+            assertThat(response.getEmail()).isEqualTo("student@example.com");
+            assertThat(response.getRole()).isEqualTo("LEARNER");
         }
 
         @Test
-        @DisplayName("Should throw when class not found for member listing")
-        void shouldThrowWhenClassNotFoundForMembers() {
+        @DisplayName("Should handle missing user gracefully")
+        void shouldHandleMissingUserGracefully() {
             // Given
             Pageable pageable = PageRequest.of(0, 10);
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.empty());
+            Page<ClassMember> memberPage = new PageImpl<>(List.of(testMember), pageable, 1);
+            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classMemberRepository.findActiveByClassId(classId, pageable)).willReturn(memberPage);
+            given(clazzMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
+            given(userRepository.findAllById(List.of(studentId))).willReturn(List.of());
 
-            // When/Then
-            assertThatThrownBy(() -> clazzService.getClassMembers(classId, pageable))
+            // When
+            Page<ClassMemberResponse> result = clazzService.getClassMembers(classId, pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            ClassMemberResponse response = result.getContent().get(0);
+            assertThat(response.getFullName()).isNull();
+            assertThat(response.getEmail()).isNull();
+        }
+    }
+
+    // =====================================================
+    // TEACHER-SPECIFIC CLASS QUERIES
+    // =====================================================
+
+    @Nested
+    @DisplayName("Teacher Class Query Tests")
+    class TeacherClassQueryTests {
+
+        @Test
+        @DisplayName("Should get active classes by teacher")
+        void shouldGetActiveClassesByTeacher() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Clazz> classPage = new PageImpl<>(List.of(testClazz), pageable, 1);
+            given(clazzRepository.findByTeacherIdAndIsActiveTrueAndDeletedAtIsNull(teacherId, pageable))
+                    .willReturn(classPage);
+            given(clazzMapper.toSummaryResponse(testClazz)).willReturn(testSummaryResponse);
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
+
+            // When
+            Page<ClassSummaryResponse> result = clazzService.getActiveClassesByTeacher(teacherId, pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            assertThat(result.getContent().get(0).getName()).isEqualTo("N5 Morning Class");
+            verify(clazzRepository).findByTeacherIdAndIsActiveTrueAndDeletedAtIsNull(teacherId, pageable);
+        }
+
+        @Test
+        @DisplayName("Should get active classes by teacher and JLPT level")
+        void shouldGetActiveClassesByTeacherAndLevel() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Clazz> classPage = new PageImpl<>(List.of(testClazz), pageable, 1);
+            given(clazzRepository.findByTeacherIdAndJlptLevelAndIsActiveTrueAndDeletedAtIsNull(
+                    teacherId, JlptLevel.N5, pageable)).willReturn(classPage);
+            given(clazzMapper.toSummaryResponse(testClazz)).willReturn(testSummaryResponse);
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
+
+            // When
+            Page<ClassSummaryResponse> result = clazzService.getActiveClassesByTeacherAndLevel(
+                    teacherId, JlptLevel.N5, pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            verify(clazzRepository).findByTeacherIdAndJlptLevelAndIsActiveTrueAndDeletedAtIsNull(
+                    teacherId, JlptLevel.N5, pageable);
+        }
+
+        @Test
+        @DisplayName("Should search active classes by teacher and keyword")
+        void shouldSearchClassesByTeacher() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Clazz> classPage = new PageImpl<>(List.of(testClazz), pageable, 1);
+            given(clazzRepository.searchByTeacherAndName(teacherId, "N5", pageable)).willReturn(classPage);
+            given(clazzMapper.toSummaryResponse(testClazz)).willReturn(testSummaryResponse);
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
+
+            // When
+            Page<ClassSummaryResponse> result = clazzService.searchClassesByTeacher(teacherId, "N5", pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            verify(clazzRepository).searchByTeacherAndName(teacherId, "N5", pageable);
+        }
+
+        @Test
+        @DisplayName("Should return empty page when teacher has no active classes")
+        void shouldReturnEmptyPageWhenNoActiveClasses() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Clazz> emptyPage = new PageImpl<>(List.of(), pageable, 0);
+            given(clazzRepository.findByTeacherIdAndIsActiveTrueAndDeletedAtIsNull(teacherId, pageable))
+                    .willReturn(emptyPage);
+
+            // When
+            Page<ClassSummaryResponse> result = clazzService.getActiveClassesByTeacher(teacherId, pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(0);
+            assertThat(result.getContent()).isEmpty();
+        }
+    }
+
+    // =====================================================
+    // TEACHER OWNERSHIP VALIDATION
+    // =====================================================
+
+    @Nested
+    @DisplayName("Teacher Ownership Validation Tests")
+    class TeacherOwnershipTests {
+
+        @Test
+        @DisplayName("Should return class detail when teacher owns the class")
+        void shouldReturnClassDetailWhenTeacherOwns() {
+            // Given
+            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(clazzMapper.toResponse(testClazz)).willReturn(testClassResponse);
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+
+            // When
+            ClassResponse result = clazzService.getClassByIdForTeacher(classId, teacherId);
+
+            // Then
+            assertThat(result).isNotNull();
+            assertThat(result.getName()).isEqualTo("N5 Morning Class");
+            assertThat(result.getTeacherId()).isEqualTo(teacherId);
+        }
+
+        @Test
+        @DisplayName("Should throw ACCESS_DENIED when teacher does not own the class")
+        void shouldThrowAccessDeniedWhenTeacherDoesNotOwnClass() {
+            // Given
+            UUID otherTeacherId = UUID.randomUUID();
+            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+
+            // When / Then
+            assertThatThrownBy(() -> clazzService.getClassByIdForTeacher(classId, otherTeacherId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Bạn không có quyền xem lớp học này.");
+        }
+
+        @Test
+        @DisplayName("Should throw exception when class not found for teacher detail")
+        void shouldThrowWhenClassNotFoundForTeacher() {
+            // Given
+            UUID unknownClassId = UUID.randomUUID();
+            given(clazzRepository.findByIdAndNotDeleted(unknownClassId)).willReturn(Optional.empty());
+
+            // When / Then
+            assertThatThrownBy(() -> clazzService.getClassByIdForTeacher(unknownClassId, teacherId))
                     .isInstanceOf(ClazzNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("Should return class members when teacher owns the class")
+        void shouldReturnMembersWhenTeacherOwns() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<ClassMember> memberPage = new PageImpl<>(List.of(testMember), pageable, 1);
+            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classMemberRepository.findActiveByClassId(classId, pageable)).willReturn(memberPage);
+            given(clazzMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
+            given(userRepository.findAllById(List.of(studentId))).willReturn(List.of(testStudent));
+
+            // When
+            Page<ClassMemberResponse> result = clazzService.getClassMembersForTeacher(classId, teacherId, pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("Should throw ACCESS_DENIED when teacher views other class members")
+        void shouldThrowAccessDeniedWhenTeacherViewsOtherClassMembers() {
+            // Given
+            UUID otherTeacherId = UUID.randomUUID();
+            Pageable pageable = PageRequest.of(0, 10);
+            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+
+            // When / Then
+            assertThatThrownBy(() -> clazzService.getClassMembersForTeacher(classId, otherTeacherId, pageable))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Bạn không có quyền xem thành viên của lớp học này.");
+        }
+    }
+
+    // =====================================================
+    // TEACHER INFO ENRICHMENT IN CLASS RESPONSE
+    // =====================================================
+
+    @Nested
+    @DisplayName("Teacher Info Enrichment Tests")
+    class TeacherInfoEnrichmentTests {
+
+        @Test
+        @DisplayName("Should enrich ClassResponse with teacher info")
+        void shouldEnrichClassResponseWithTeacherInfo() {
+            // Given
+            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(clazzMapper.toResponse(testClazz)).willReturn(testClassResponse);
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+
+            // When
+            ClassResponse result = clazzService.getClassById(classId);
+
+            // Then
+            assertThat(result.getTeacherName()).isEqualTo(testTeacher.getFullName());
+            assertThat(result.getTeacherEmail()).isEqualTo("teacher@example.com");
+            assertThat(result.getTeacherAvatarUrl()).isNull();
+        }
+
+        @Test
+        @DisplayName("Should handle missing teacher gracefully")
+        void shouldHandleMissingTeacherGracefully() {
+            // Given
+            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(clazzMapper.toResponse(testClazz)).willReturn(testClassResponse);
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
+            given(userRepository.findById(teacherId)).willReturn(Optional.empty());
+
+            // When
+            ClassResponse result = clazzService.getClassById(classId);
+
+            // Then
+            assertThat(result.getTeacherName()).isNull();
+            assertThat(result.getTeacherEmail()).isNull();
         }
     }
 }
-
