@@ -530,72 +530,23 @@ class ClazzServiceImplTest {
     class ListAndSearchTests {
 
         @Test
-        @DisplayName("Should get all classes with pagination")
-        void shouldGetAllClassesWithPagination() {
+        @DisplayName("Should get classes with dynamic filters")
+        void shouldGetClassesWithDynamicFilters() {
             // Given
             Pageable pageable = PageRequest.of(0, 10);
             Page<Clazz> classPage = new PageImpl<>(List.of(testClazz), pageable, 1);
-            given(clazzRepository.findAllNotDeleted(pageable)).willReturn(classPage);
+            given(clazzRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class), eq(pageable)))
+                    .willReturn(classPage);
             given(clazzMapper.toSummaryResponse(testClazz)).willReturn(testSummaryResponse);
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
 
             // When
-            Page<ClassSummaryResponse> result = clazzService.getAllClasses(pageable);
+            Page<ClassSummaryResponse> result = clazzService.getClasses("N5", teacherId, true, JlptLevel.N5, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
             assertThat(result.getContent().get(0).getName()).isEqualTo("N5 Morning Class");
-        }
-
-        @Test
-        @DisplayName("Should get classes by active status")
-        void shouldGetClassesByActiveStatus() {
-            // Given
-            Pageable pageable = PageRequest.of(0, 10);
-            Page<Clazz> classPage = new PageImpl<>(List.of(testClazz), pageable, 1);
-            given(clazzRepository.findByIsActiveAndDeletedAtIsNull(true, pageable)).willReturn(classPage);
-            given(clazzMapper.toSummaryResponse(testClazz)).willReturn(testSummaryResponse);
-            given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
-
-            // When
-            Page<ClassSummaryResponse> result = clazzService.getClassesByActiveStatus(true, pageable);
-
-            // Then
-            assertThat(result.getTotalElements()).isEqualTo(1);
-        }
-
-        @Test
-        @DisplayName("Should get classes by JLPT level")
-        void shouldGetClassesByJlptLevel() {
-            // Given
-            Pageable pageable = PageRequest.of(0, 10);
-            Page<Clazz> classPage = new PageImpl<>(List.of(testClazz), pageable, 1);
-            given(clazzRepository.findByJlptLevelAndDeletedAtIsNull(JlptLevel.N5, pageable)).willReturn(classPage);
-            given(clazzMapper.toSummaryResponse(testClazz)).willReturn(testSummaryResponse);
-            given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
-
-            // When
-            Page<ClassSummaryResponse> result = clazzService.getClassesByJlptLevel(JlptLevel.N5, pageable);
-
-            // Then
-            assertThat(result.getTotalElements()).isEqualTo(1);
-        }
-
-        @Test
-        @DisplayName("Should search classes by keyword")
-        void shouldSearchClassesByKeyword() {
-            // Given
-            Pageable pageable = PageRequest.of(0, 10);
-            Page<Clazz> classPage = new PageImpl<>(List.of(testClazz), pageable, 1);
-            given(clazzRepository.searchByName("N5", pageable)).willReturn(classPage);
-            given(clazzMapper.toSummaryResponse(testClazz)).willReturn(testSummaryResponse);
-            given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
-
-            // When
-            Page<ClassSummaryResponse> result = clazzService.searchClasses("N5", pageable);
-
-            // Then
-            assertThat(result.getTotalElements()).isEqualTo(1);
+            verify(clazzRepository).findAll(any(org.springframework.data.jpa.domain.Specification.class), eq(pageable));
         }
     }
 
@@ -1039,75 +990,36 @@ class ClazzServiceImplTest {
     class TeacherClassQueryTests {
 
         @Test
-        @DisplayName("Should get active classes by teacher")
-        void shouldGetActiveClassesByTeacher() {
+        @DisplayName("Should get teacher classes with dynamic filters")
+        void shouldGetTeacherClassesWithDynamicFilters() {
             // Given
             Pageable pageable = PageRequest.of(0, 10);
             Page<Clazz> classPage = new PageImpl<>(List.of(testClazz), pageable, 1);
-            given(clazzRepository.findByTeacherIdAndIsActiveTrueAndDeletedAtIsNull(teacherId, pageable))
+            given(clazzRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class), eq(pageable)))
                     .willReturn(classPage);
             given(clazzMapper.toSummaryResponse(testClazz)).willReturn(testSummaryResponse);
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
 
             // When
-            Page<ClassSummaryResponse> result = clazzService.getActiveClassesByTeacher(teacherId, pageable);
+            Page<ClassSummaryResponse> result = clazzService.getClasses(null, teacherId, true, null, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
             assertThat(result.getContent().get(0).getName()).isEqualTo("N5 Morning Class");
-            verify(clazzRepository).findByTeacherIdAndIsActiveTrueAndDeletedAtIsNull(teacherId, pageable);
+            verify(clazzRepository).findAll(any(org.springframework.data.jpa.domain.Specification.class), eq(pageable));
         }
 
         @Test
-        @DisplayName("Should get active classes by teacher and JLPT level")
-        void shouldGetActiveClassesByTeacherAndLevel() {
-            // Given
-            Pageable pageable = PageRequest.of(0, 10);
-            Page<Clazz> classPage = new PageImpl<>(List.of(testClazz), pageable, 1);
-            given(clazzRepository.findByTeacherIdAndJlptLevelAndIsActiveTrueAndDeletedAtIsNull(
-                    teacherId, JlptLevel.N5, pageable)).willReturn(classPage);
-            given(clazzMapper.toSummaryResponse(testClazz)).willReturn(testSummaryResponse);
-            given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
-
-            // When
-            Page<ClassSummaryResponse> result = clazzService.getActiveClassesByTeacherAndLevel(
-                    teacherId, JlptLevel.N5, pageable);
-
-            // Then
-            assertThat(result.getTotalElements()).isEqualTo(1);
-            verify(clazzRepository).findByTeacherIdAndJlptLevelAndIsActiveTrueAndDeletedAtIsNull(
-                    teacherId, JlptLevel.N5, pageable);
-        }
-
-        @Test
-        @DisplayName("Should search active classes by teacher and keyword")
-        void shouldSearchClassesByTeacher() {
-            // Given
-            Pageable pageable = PageRequest.of(0, 10);
-            Page<Clazz> classPage = new PageImpl<>(List.of(testClazz), pageable, 1);
-            given(clazzRepository.searchByTeacherAndName(teacherId, "N5", pageable)).willReturn(classPage);
-            given(clazzMapper.toSummaryResponse(testClazz)).willReturn(testSummaryResponse);
-            given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
-
-            // When
-            Page<ClassSummaryResponse> result = clazzService.searchClassesByTeacher(teacherId, "N5", pageable);
-
-            // Then
-            assertThat(result.getTotalElements()).isEqualTo(1);
-            verify(clazzRepository).searchByTeacherAndName(teacherId, "N5", pageable);
-        }
-
-        @Test
-        @DisplayName("Should return empty page when teacher has no active classes")
+        @DisplayName("Should return empty page when teacher has no classes")
         void shouldReturnEmptyPageWhenNoActiveClasses() {
             // Given
             Pageable pageable = PageRequest.of(0, 10);
             Page<Clazz> emptyPage = new PageImpl<>(List.of(), pageable, 0);
-            given(clazzRepository.findByTeacherIdAndIsActiveTrueAndDeletedAtIsNull(teacherId, pageable))
+            given(clazzRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class), eq(pageable)))
                     .willReturn(emptyPage);
 
             // When
-            Page<ClassSummaryResponse> result = clazzService.getActiveClassesByTeacher(teacherId, pageable);
+            Page<ClassSummaryResponse> result = clazzService.getClasses(null, teacherId, true, null, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(0);
