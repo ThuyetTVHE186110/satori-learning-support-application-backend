@@ -18,20 +18,19 @@ import java.util.Map;
 /**
  * Specialized Vocabulary Extraction Agent.
  *
- * Designed for chunks classified as VOCABULARY content.
- * Uses a focused prompt optimized for extracting:
- * - Japanese text (kanji/kana)
- * - Readings (hiragana)
- * - Romaji transliteration
- * - Vietnamese and English meanings
- * - Part of speech
- * - JLPT level
- * - Example sentences (trilingual)
+ * <h3>Key capabilities</h3>
+ * <ul>
+ *   <li>Extracts Japanese vocabulary (kanji/kana), reading (hiragana), romaji,
+ *       part of speech, example sentences.</li>
+ *   <li><b>Japanese-only slides:</b> when a slide or document page lists words
+ *       WITHOUT meanings (common in PPTX slides), the agent infers Vietnamese and
+ *       English meanings from the lesson context, JLPT level, and surrounding
+ *       content.  All inferred meanings are tagged {@code meaningSource=AI_INFERRED}
+ *       so managers can verify them during the review step.</li>
+ *   <li>Supports Corrective-RAG re-extraction with structured feedback.</li>
+ * </ul>
  *
- * Accepts optional RAG context to avoid duplicating already-extracted vocabulary
- * and to provide consistent formatting.
- *
- * Reference: Agentic RAG specialized worker pattern
+ * <p>Reference: Agentic RAG specialized worker pattern (Asai et al. 2023 Self-RAG)
  */
 @Service
 @Slf4j
@@ -41,187 +40,277 @@ public class VocabularyExtractionAgent {
     private final OpenAiChatModel chatModel;
     private final ObjectMapper objectMapper;
 
+    // ── System prompt ────────────────────────────────────────────────────────
+
     private static final String SYSTEM_PROMPT = """
-            You are an expert Japanese vocabulary extractor for language learning.
-            Extract ALL vocabulary items from the given textbook content with precise readings and meanings.
-            
-            You MUST respond ONLY with valid JSON. No explanations, no markdown code fences.
-            
-            Quality requirements:
-            - Every Japanese word MUST have a hiragana reading
-            - Meanings must be provided in BOTH Vietnamese and English
-            - Part of speech must be accurate (noun, verb, adjective, adverb, particle, etc.)
-            - Example sentences should demonstrate natural usage
-            - Flag whether each word is a key vocabulary item for the lesson
+            You are an expert Japanese vocabulary extractor for a language-learning platform.
+            Your input is Japanese textbook content — it may be a text-based PDF, a scanned PDF, or a PowerPoint slide.
+
+            ═══ CRITICAL RULE — MEANINGS ═══
+            The source text may NOT contain Vietnamese or English meanings.
+            This is especially common with PowerPoint slides that only list Japanese words.
+
+            • If a meaning IS present in the source text → extract it exactly.
+              Set "meaningSource": "SOURCE".
+
+            • If a meaning is NOT present →  infer the most accurate meaning using:
+                1. The lesson topic / slide title (provided in the prompt).
+                2. The JLPT level context.
+                3. Your knowledge of standard Japanese vocabulary.
+              Set "meaningSource": "AI_INFERRED".
+
+            You MUST always provide both meaningVi (Vietnamese) and meaningEn (English).
+            NEVER leave meanings empty. NEVER write "unknown" or "N/A".
+
+            ═══ OTHER RULES ═══
+            • Every Japanese word MUST have a hiragana reading (ふりがな).
+            • Part of speech must be precise (noun/verb/i-adjective/na-adjective/
+              adverb/particle/conjunction/interjection/counter/prefix/suffix/expression).
+            • Include example sentences where possible; derive from the slide if present,
+              otherwise construct a natural example appropriate for the JLPT level.
+            • Respond ONLY with valid JSON — no markdown, no explanations.
             """;
 
+    // ── Extraction prompt ────────────────────────────────────────────────────
+
     private static final String EXTRACTION_PROMPT = """
-            Extract ALL vocabulary from this Japanese textbook content (pages %d-%d).
-            Target JLPT level: %s
-            
-            Content:
-            ---
+            Extract ALL vocabulary items from the following Japanese learning content.
+
+            Slide / Page: %d-%d
+            JLPT Level: %s
+            Lesson topic / title: %s
+            Source type: %s
             %s
-            ---
+
+            ─── CONTENT ────────────────────────────────────────────────────────
             %s
-            
-            Return JSON array:
+            ─────────────────────────────────────────────────────────────────────
+
+            %s
+
+            Return this exact JSON structure:
             {
               "vocabulary": [
                 {
-                  "japaneseText": "日本語",
-                  "reading": "にほんご",
-                  "romaji": "nihongo",
-                  "meaningVi": "Tiếng Nhật",
-                  "meaningEn": "Japanese language",
+                  "japaneseText": "待合室",
+                  "reading": "まちあいしつ",
+                  "romaji": "machiaishitsu",
+                  "meaningVi": "Phòng chờ",
+                  "meaningEn": "Waiting room",
                   "partOfSpeech": "noun",
                   "jlptLevel": "%s",
-                  "kanjiWriting": "日本語",
+                  "kanjiWriting": "待合室",
                   "exampleSentences": [
-                    {"jp": "日本語を勉強します。", "vi": "Tôi học tiếng Nhật.", "en": "I study Japanese."}
+                    {
+                      "jp": "待合室で少々お待ちください。",
+                      "vi": "Vui lòng chờ một chút ở phòng chờ.",
+                      "en": "Please wait a moment in the waiting room."
+                    }
                   ],
-                  "isKeyWord": true
+                  "isKeyWord": true,
+                  "meaningSource": "SOURCE"
                 }
               ],
-              "confidence": 0.0-1.0
+              "confidence": 0.9
             }
-            
-            Part of speech values: noun, verb, i-adjective, na-adjective, adverb, particle, 
-            conjunction, interjection, counter, prefix, suffix, expression
+
+            Use "meaningSource": "SOURCE" if the meaning was in the content above.
+            Use "meaningSource": "AI_INFERRED" if you inferred the meaning from context.
             """;
 
+    // ── RAG context template ─────────────────────────────────────────────────
+
     private static final String RAG_CONTEXT_TEMPLATE = """
-            
-            EXISTING VOCABULARY (avoid duplicating these):
+
+            VOCABULARY ALREADY IN DATABASE (skip duplicates, maintain consistency):
             %s
             """;
 
-    /**
-     * Extract vocabulary from a chunk with optional RAG context.
-     */
-    public ExtractionResult extractVocabulary(DocumentChunk chunk, String jlptLevel, RagContext ragContext) {
-        long startTime = System.currentTimeMillis();
+    // ── Public API ───────────────────────────────────────────────────────────
 
+    /**
+     * Extract vocabulary from a chunk, with optional RAG context.
+     */
+    public ExtractionResult extractVocabulary(DocumentChunk chunk, String jlptLevel,
+                                               RagContext ragContext) {
+        long t0 = System.currentTimeMillis();
         try {
             String ragSection = formatRagContext(ragContext);
-            String userPrompt = String.format(EXTRACTION_PROMPT,
-                    chunk.getPageStart(), chunk.getPageEnd(),
-                    jlptLevel, chunk.getContent(), ragSection, jlptLevel);
+            String prompt = buildPrompt(chunk, jlptLevel, ragSection, "");
 
-            ChatClient chatClient = ChatClient.builder(chatModel).build();
-            String response = chatClient.prompt()
+            String response = ChatClient.builder(chatModel).build()
+                    .prompt()
                     .system(SYSTEM_PROMPT)
-                    .user(userPrompt)
+                    .user(prompt)
                     .call()
                     .content();
 
-            long processingTime = System.currentTimeMillis() - startTime;
-            return parseResponse(response, chunk.getChunkIndex(), processingTime);
-
+            return parseResponse(response, chunk.getChunkIndex(), System.currentTimeMillis() - t0);
         } catch (Exception e) {
             log.error("Vocabulary extraction failed for chunk {}: {}", chunk.getChunkIndex(), e.getMessage());
-            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - startTime);
+            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - t0);
         }
     }
 
     /**
-     * Re-extract with validation feedback (Corrective RAG).
+     * Re-extract with Corrective-RAG validation feedback.
      */
     public ExtractionResult reExtractWithFeedback(DocumentChunk chunk, String jlptLevel,
-                                                    RagContext ragContext, String validationFeedback) {
-        long startTime = System.currentTimeMillis();
-
+                                                   RagContext ragContext,
+                                                   String validationFeedback) {
+        long t0 = System.currentTimeMillis();
         try {
             String ragSection = formatRagContext(ragContext);
-            String feedbackSection = "\n\nPREVIOUS EXTRACTION ISSUES (please fix):\n" + validationFeedback;
+            String feedbackSection = "\n\nPREVIOUS EXTRACTION ISSUES — please fix ALL of these:\n"
+                    + validationFeedback;
 
-            String userPrompt = String.format(EXTRACTION_PROMPT,
-                    chunk.getPageStart(), chunk.getPageEnd(),
-                    jlptLevel, chunk.getContent(), ragSection + feedbackSection, jlptLevel);
+            String prompt = buildPrompt(chunk, jlptLevel, ragSection, feedbackSection);
 
-            ChatClient chatClient = ChatClient.builder(chatModel).build();
-            String response = chatClient.prompt()
-                    .system(SYSTEM_PROMPT + "\nIMPORTANT: Fix the issues noted in the feedback.")
-                    .user(userPrompt)
+            String response = ChatClient.builder(chatModel).build()
+                    .prompt()
+                    .system(SYSTEM_PROMPT + "\nIMPORTANT: You MUST fix every issue noted below.")
+                    .user(prompt)
                     .call()
                     .content();
 
-            long processingTime = System.currentTimeMillis() - startTime;
-            return parseResponse(response, chunk.getChunkIndex(), processingTime);
-
+            return parseResponse(response, chunk.getChunkIndex(), System.currentTimeMillis() - t0);
         } catch (Exception e) {
             log.error("Vocabulary re-extraction failed for chunk {}: {}", chunk.getChunkIndex(), e.getMessage());
-            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - startTime);
+            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - t0);
         }
     }
 
-    private ExtractionResult parseResponse(String jsonResponse, int chunkIndex, long processingTimeMs) {
-        try {
-            String cleaned = cleanJson(jsonResponse);
-            Map<String, Object> parsed = objectMapper.readValue(cleaned, new TypeReference<>() {});
+    // ── Prompt construction ──────────────────────────────────────────────────
 
+    private String buildPrompt(DocumentChunk chunk, String jlptLevel,
+                                String ragSection, String feedbackSection) {
+        String lessonTopic = inferLessonTopic(chunk);
+        String sourceType = describeSourceType(chunk.getChunkType());
+
+        return String.format(EXTRACTION_PROMPT,
+                chunk.getPageStart(), chunk.getPageEnd(),
+                jlptLevel,
+                lessonTopic,
+                sourceType,
+                ragSection + feedbackSection,
+                chunk.getContent(),
+                buildMeaningHint(chunk),
+                jlptLevel);
+    }
+
+    /**
+     * Attempt to extract a lesson topic from the chunk header (PPTX slides
+     * are formatted as "[SLIDE N] タイトル: <title>").
+     */
+    private String inferLessonTopic(DocumentChunk chunk) {
+        String content = chunk.getContent();
+        if (content == null) return "unknown";
+        // PPTX structured format: first line contains the title
+        String firstLine = content.lines().findFirst().orElse("").trim();
+        if (firstLine.contains("タイトル:")) {
+            return firstLine.substring(firstLine.indexOf("タイトル:") + 5).trim();
+        }
+        if (firstLine.contains("[SLIDE")) {
+            return firstLine;
+        }
+        // Fallback: first 120 chars
+        return content.substring(0, Math.min(120, content.length())).replaceAll("\\s+", " ").trim();
+    }
+
+    private String describeSourceType(String chunkType) {
+        if (chunkType == null) return "text-based PDF";
+        return switch (chunkType) {
+            case "SLIDE"   -> "PowerPoint slide (vocabulary list may NOT include meanings — infer them)";
+            case "SCANNED" -> "scanned PDF page extracted via OCR (text quality may be imperfect)";
+            default        -> "text-based PDF";
+        };
+    }
+
+    /**
+     * Additional hint injected into the prompt when the chunk source is a slide
+     * (likely no meanings → the AI needs an explicit reminder).
+     */
+    private String buildMeaningHint(DocumentChunk chunk) {
+        if ("SLIDE".equals(chunk.getChunkType())) {
+            return """
+                    ⚠ IMPORTANT: This is a PowerPoint slide. \
+                    The vocabulary list likely has NO meanings. \
+                    For every word without an explicit meaning, set "meaningSource": "AI_INFERRED" \
+                    and generate an accurate meaning based on the lesson topic and JLPT level.""";
+        }
+        return "";
+    }
+
+    // ── Response parsing ─────────────────────────────────────────────────────
+
+    private ExtractionResult parseResponse(String json, int chunkIndex, long ms) {
+        try {
+            Map<String, Object> parsed = objectMapper.readValue(cleanJson(json), new TypeReference<>() {});
             double confidence = ((Number) parsed.getOrDefault("confidence", 0.5)).doubleValue();
 
-            List<ExtractionResult.ExtractedVocabulary> vocabulary = parseField(parsed, "vocabulary",
-                    new TypeReference<>() {});
+            List<ExtractionResult.ExtractedVocabulary> vocab = parseField(
+                    parsed, "vocabulary", new TypeReference<>() {});
+
+            // Default meaningSource to AI_INFERRED for any item that is missing it
+            if (vocab != null) {
+                vocab.forEach(v -> {
+                    if (v.getMeaningSource() == null || v.getMeaningSource().isBlank()) {
+                        v.setMeaningSource("AI_INFERRED");
+                    }
+                });
+            }
 
             return ExtractionResult.builder()
                     .chunkIndex(chunkIndex)
                     .confidence(confidence)
-                    .tokensUsed(estimateTokens(jsonResponse))
-                    .processingTimeMs(processingTimeMs)
+                    .tokensUsed(estimateTokens(json))
+                    .processingTimeMs(ms)
                     .lessons(Collections.emptyList())
-                    .vocabulary(vocabulary != null ? vocabulary : Collections.emptyList())
+                    .vocabulary(vocab != null ? vocab : Collections.emptyList())
                     .grammarPoints(Collections.emptyList())
                     .build();
 
         } catch (JsonProcessingException e) {
-            log.error("Failed to parse vocab extraction response for chunk {}: {}", chunkIndex, e.getMessage());
-            return emptyResult(chunkIndex, processingTimeMs);
+            log.error("Failed to parse vocab response for chunk {}: {}", chunkIndex, e.getMessage());
+            return emptyResult(chunkIndex, ms);
         }
     }
 
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
     private String formatRagContext(RagContext ragContext) {
         if (ragContext == null || !ragContext.hasContext()) return "";
-
         StringBuilder sb = new StringBuilder();
         for (RagContext.SimilarItem item : ragContext.getSimilarItems()) {
             if ("VOCABULARY".equals(item.getContentType())) {
                 sb.append("- ").append(item.getTextContent()).append("\n");
             }
         }
-
         return sb.isEmpty() ? "" : String.format(RAG_CONTEXT_TEMPLATE, sb);
     }
 
     private <T> T parseField(Map<String, Object> parsed, String field, TypeReference<T> type) {
         try {
             if (!parsed.containsKey(field)) return null;
-            String json = objectMapper.writeValueAsString(parsed.get(field));
-            return objectMapper.readValue(json, type);
+            return objectMapper.readValue(objectMapper.writeValueAsString(parsed.get(field)), type);
         } catch (JsonProcessingException e) {
             return null;
         }
     }
 
-    private ExtractionResult emptyResult(int chunkIndex, long processingTimeMs) {
+    private ExtractionResult emptyResult(int chunkIndex, long ms) {
         return ExtractionResult.builder()
-                .chunkIndex(chunkIndex)
-                .confidence(0.0)
-                .tokensUsed(0)
-                .processingTimeMs(processingTimeMs)
-                .lessons(Collections.emptyList())
-                .vocabulary(Collections.emptyList())
-                .grammarPoints(Collections.emptyList())
-                .build();
+                .chunkIndex(chunkIndex).confidence(0.0).tokensUsed(0).processingTimeMs(ms)
+                .lessons(Collections.emptyList()).vocabulary(Collections.emptyList())
+                .grammarPoints(Collections.emptyList()).build();
     }
 
     private String cleanJson(String json) {
-        String cleaned = json.strip();
-        if (cleaned.startsWith("```json")) cleaned = cleaned.substring(7);
-        if (cleaned.startsWith("```")) cleaned = cleaned.substring(3);
-        if (cleaned.endsWith("```")) cleaned = cleaned.substring(0, cleaned.length() - 3);
-        return cleaned.strip();
+        String s = json.strip();
+        if (s.startsWith("```json")) s = s.substring(7);
+        if (s.startsWith("```"))    s = s.substring(3);
+        if (s.endsWith("```"))      s = s.substring(0, s.length() - 3);
+        return s.strip();
     }
 
     private int estimateTokens(String text) {

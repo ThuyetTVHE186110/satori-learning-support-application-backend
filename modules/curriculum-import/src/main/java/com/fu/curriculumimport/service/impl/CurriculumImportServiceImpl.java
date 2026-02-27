@@ -29,6 +29,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -334,20 +335,39 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
 
     // --- Helper methods ---
 
-    private static final long MAX_FILE_SIZE_BYTES = 50L * 1024 * 1024; // 50 MB
+    /** 100 MB — PPTX with embedded images can be larger than plain PDFs. */
+    private static final long MAX_FILE_SIZE_BYTES = 100L * 1024 * 1024;
+
+    private static final Set<String> ACCEPTED_MIME_TYPES = Set.of(
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+            "application/zip"   // some browsers report PPTX as generic zip
+    );
+
+    private static final Set<String> ACCEPTED_EXTENSIONS = Set.of(".pdf", ".pptx");
 
     private void validateImportFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new InvalidImportFileException("File is required and must not be empty");
         }
-        String contentType = file.getContentType();
-        if (contentType == null || !contentType.equalsIgnoreCase("application/pdf")) {
+
+        String contentType = file.getContentType() == null ? "" : file.getContentType().toLowerCase();
+        String filename    = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
+        boolean mimeOk     = ACCEPTED_MIME_TYPES.contains(contentType);
+        boolean extOk      = ACCEPTED_EXTENSIONS.stream().anyMatch(filename::endsWith);
+
+        if (!mimeOk && !extOk) {
             throw new InvalidImportFileException(
-                    "Only PDF files are accepted. Received: " + contentType);
+                    "Only PDF and PPTX files are accepted. Received MIME type: " + contentType
+                            + ", filename: " + file.getOriginalFilename());
         }
+
         if (file.getSize() > MAX_FILE_SIZE_BYTES) {
-            throw new InvalidImportFileException(
-                    "File size exceeds the 50 MB limit. Received: " + file.getSize() + " bytes");
+            throw new InvalidImportFileException(String.format(
+                    "File size %.1f MB exceeds the maximum limit of %d MB.",
+                    file.getSize() / (1024.0 * 1024.0),
+                    MAX_FILE_SIZE_BYTES / (1024 * 1024)));
         }
     }
 
