@@ -15,6 +15,7 @@ import com.fu.clazz.exception.MemberAlreadyExistsException;
 import com.fu.clazz.mapper.ClazzMapper;
 import com.fu.clazz.repository.ClassMemberRepository;
 import com.fu.clazz.repository.ClazzRepository;
+import com.fu.clazz.repository.specification.ClazzSpecification;
 import com.fu.clazz.service.ClazzService;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
@@ -23,7 +24,6 @@ import com.fu.user.entity.UserRole;
 import com.fu.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -181,60 +181,18 @@ public class ClazzServiceImpl implements ClazzService {
     }
 
     @Override
-    public Page<ClassSummaryResponse> getAllClasses(Pageable pageable) {
-        log.debug("Lấy tất cả lớp học với phân trang");
-        return clazzRepository.findAllNotDeleted(pageable)
-                .map(this::toSummaryWithMemberCount);
-    }
+    public Page<ClassSummaryResponse> getClasses(String keyword, UUID teacherId, Boolean isActive, JlptLevel level,
+                                                 Pageable pageable) {
+        log.debug("Lấy danh sách lớp học với bộ lọc động");
 
-    @Override
-    public Page<ClassSummaryResponse> getClassesByActiveStatus(Boolean isActive, Pageable pageable) {
-        log.debug("Lấy lớp học theo trạng thái hoạt động: {}", isActive);
-        return clazzRepository.findByIsActiveAndDeletedAtIsNull(isActive, pageable)
-                .map(this::toSummaryWithMemberCount);
-    }
+        org.springframework.data.jpa.domain.Specification<Clazz> spec = org.springframework.data.jpa.domain.Specification
+                .where(ClazzSpecification.isNotDeleted())
+                .and(ClazzSpecification.hasKeyword(keyword))
+                .and(ClazzSpecification.hasTeacherId(teacherId))
+                .and(ClazzSpecification.hasIsActive(isActive))
+                .and(ClazzSpecification.hasJlptLevel(level));
 
-    @Override
-    public Page<ClassSummaryResponse> getClassesByJlptLevel(JlptLevel jlptLevel, Pageable pageable) {
-        log.debug("Lấy lớp học theo cấp độ JLPT: {}", jlptLevel);
-        return clazzRepository.findByJlptLevelAndDeletedAtIsNull(jlptLevel, pageable)
-                .map(this::toSummaryWithMemberCount);
-    }
-
-    @Override
-    public Page<ClassSummaryResponse> getClassesByTeacher(UUID teacherId, Pageable pageable) {
-        log.debug("Lấy lớp học theo giáo viên: {}", teacherId);
-        return clazzRepository.findByTeacherIdAndDeletedAtIsNull(teacherId, pageable)
-                .map(this::toSummaryWithMemberCount);
-    }
-
-    @Override
-    public Page<ClassSummaryResponse> getActiveClassesByTeacher(UUID teacherId, Pageable pageable) {
-        log.debug("Lấy lớp học đang hoạt động theo giáo viên: {}", teacherId);
-        return clazzRepository.findByTeacherIdAndIsActiveTrueAndDeletedAtIsNull(teacherId, pageable)
-                .map(this::toSummaryWithMemberCount);
-    }
-
-    @Override
-    public Page<ClassSummaryResponse> getActiveClassesByTeacherAndLevel(UUID teacherId, JlptLevel jlptLevel,
-            Pageable pageable) {
-        log.debug("Lấy lớp học đang hoạt động theo giáo viên {} và cấp độ JLPT: {}", teacherId, jlptLevel);
-        return clazzRepository
-                .findByTeacherIdAndJlptLevelAndIsActiveTrueAndDeletedAtIsNull(teacherId, jlptLevel, pageable)
-                .map(this::toSummaryWithMemberCount);
-    }
-
-    @Override
-    public Page<ClassSummaryResponse> searchClasses(String keyword, Pageable pageable) {
-        log.debug("Tìm kiếm lớp học theo từ khóa: {}", keyword);
-        return clazzRepository.searchByName(keyword, pageable)
-                .map(this::toSummaryWithMemberCount);
-    }
-
-    @Override
-    public Page<ClassSummaryResponse> searchClassesByTeacher(UUID teacherId, String keyword, Pageable pageable) {
-        log.debug("Tìm kiếm lớp học của giáo viên {} theo từ khóa: {}", teacherId, keyword);
-        return clazzRepository.searchByTeacherAndName(teacherId, keyword, pageable)
+        return clazzRepository.findAll(spec, pageable)
                 .map(this::toSummaryWithMemberCount);
     }
 
