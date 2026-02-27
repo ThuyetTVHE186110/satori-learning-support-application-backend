@@ -16,6 +16,7 @@
         <module>modules/course</module>
         <module>modules/curriculum-import</module>
         <module>modules/conversation</module>
+        <module>modules/class</module>
         <module>start</module>
     </modules>
 
@@ -27,7 +28,7 @@
         <spring-boot.version>3.3.5</spring-boot.version>
         <spring-ai.version>1.0.0-M4</spring-ai.version>
         <lombok.version>1.18.34</lombok.version>
-        <mapstruct.version>1.5.5.Final</mapstruct.version>
+        <mapstruct.version>1.6.2</mapstruct.version>
         <cloudinary.version>2.0.0</cloudinary.version>
     </properties>
 
@@ -80,6 +81,11 @@
             <dependency>
                 <groupId>com.fu</groupId>
                 <artifactId>conversation</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fu</groupId>
+                <artifactId>class</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

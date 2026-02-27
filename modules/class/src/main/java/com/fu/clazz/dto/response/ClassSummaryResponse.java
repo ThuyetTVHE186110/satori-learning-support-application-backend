@@ -1,0 +1,29 @@
+package com.fu.clazz.dto.response;
+
+import com.fu.clazz.entity.Clazz.JlptLevel;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.UUID;
+
+/**
+ * Summary response for class list (lighter than full ClassResponse)
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ClassSummaryResponse {
+
+    private UUID id;
+    private String name;
+    private String code;
+    private UUID teacherId;
+    private JlptLevel jlptLevel;
+    private Boolean isActive;
+
+    private Long memberCount;
+}
+

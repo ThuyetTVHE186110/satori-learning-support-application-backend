@@ -1,5 +1,6 @@
 package com.fu.user.security;
 
+import com.fu.infrastructure.config.AuditingConfig;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserStatus;
 import lombok.Getter;
@@ -14,9 +15,12 @@ import java.util.UUID;
 /**
  * Custom UserDetails implementation for Spring Security.
  * Wraps User entity with security-related information.
+ *
+ * Implements AuditingConfig.UserPrincipal so that Spring Data JPA Auditing
+ * can extract the user UUID for @CreatedBy and @LastModifiedBy fields.
  */
 @Getter
-public class CustomUserDetails implements UserDetails {
+public class CustomUserDetails implements UserDetails, AuditingConfig.UserPrincipal {
 
     private final UUID id;
     private final String email;
