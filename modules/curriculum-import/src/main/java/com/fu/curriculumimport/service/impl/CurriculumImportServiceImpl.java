@@ -17,7 +17,9 @@ import com.fu.curriculumimport.mapper.CurriculumImportMapper;
 import com.fu.curriculumimport.repository.CurriculumImportRepository;
 import com.fu.curriculumimport.repository.ImportChunkRepository;
 import com.fu.curriculumimport.service.CurriculumImportService;
+import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import com.fu.curriculumimport.service.orchestrator.ImportOrchestrator;
+import com.fu.curriculumimport.service.persistence.ImportPersistenceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -49,6 +51,8 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
     private final GrammarPointRepository grammarPointRepository;
     private final CurriculumImportMapper importMapper;
     private final ImportOrchestrator orchestrator;
+    private final ImportPersistenceService persistenceService;
+    private final EmbeddingService embeddingService;
 
     @Override
     @Transactional
@@ -186,9 +190,14 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
         CurriculumImport importEntity = findImportOrThrow(importId);
 
         if (importEntity.getStatus() == ImportStatus.COMPLETED ||
-                importEntity.getStatus() == ImportStatus.CANCELLED) {
+                importEntity.getStatus() == ImportStatus.CANCELLED ||
+                importEntity.getStatus() == ImportStatus.ROLLED_BACK) {
             throw new ImportStateException(
                     "Cannot cancel an already " + importEntity.getStatus().name().toLowerCase() + " import");
+        }
+        if (importEntity.getStatus() == ImportStatus.PENDING_APPROVAL) {
+            throw new ImportStateException(
+                    "Import is awaiting approval. Use the reject endpoint to cancel it.");
         }
 
         // Request async cancellation of the running import
@@ -330,6 +339,78 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
 
         CurriculumImportResponse response = importMapper.toResponse(importEntity);
         response.setCourseName(course.getName());
+        return response;
+    }
+
+    @Override
+    @Transactional
+    public CurriculumImportResponse approveImport(UUID importId, UUID managerId) {
+        log.info("Manager {} approving import: {}", managerId, importId);
+        CurriculumImport importEntity = findImportOrThrow(importId);
+
+        if (importEntity.getStatus() != ImportStatus.PENDING_APPROVAL) {
+            throw new ImportStateException(
+                    "Can only approve imports in PENDING_APPROVAL status. Current status: "
+                            + importEntity.getStatus());
+        }
+
+        importEntity.markCompleted();
+        importRepository.save(importEntity);
+        log.info("Import {} approved and marked COMPLETED", importId);
+
+        CurriculumImportResponse response = importMapper.toResponse(importEntity);
+        enrichWithCourseName(response, importEntity.getCourseId());
+        return response;
+    }
+
+    @Override
+    @Transactional
+    public CurriculumImportResponse rejectImport(UUID importId, UUID managerId) {
+        log.info("Manager {} rejecting import: {}", managerId, importId);
+        CurriculumImport importEntity = findImportOrThrow(importId);
+
+        if (importEntity.getStatus() != ImportStatus.PENDING_APPROVAL) {
+            throw new ImportStateException(
+                    "Can only reject imports in PENDING_APPROVAL status. Current status: "
+                            + importEntity.getStatus());
+        }
+
+        persistenceService.softDeleteLessonsByImportId(importId, managerId);
+        embeddingService.purgeEmbeddingsByImportId(importId);
+        importEntity.markCancelled();
+        importRepository.save(importEntity);
+        log.info("Import {} rejected and marked CANCELLED; lessons soft-deleted, embeddings purged", importId);
+
+        CurriculumImportResponse response = importMapper.toResponse(importEntity);
+        enrichWithCourseName(response, importEntity.getCourseId());
+        return response;
+    }
+
+    @Override
+    @Transactional
+    public CurriculumImportResponse rollbackImport(UUID importId, UUID managerId) {
+        log.info("Manager {} rolling back import: {}", managerId, importId);
+        CurriculumImport importEntity = findImportOrThrow(importId);
+
+        if (importEntity.getStatus() != ImportStatus.COMPLETED) {
+            throw new ImportStateException(
+                    "Can only rollback imports in COMPLETED status. Current status: "
+                            + importEntity.getStatus());
+        }
+
+        // 1. Soft-delete lessons + clean up join tables
+        persistenceService.softDeleteLessonsByImportId(importId, managerId);
+
+        // 2. Purge embeddings created by this import
+        embeddingService.purgeEmbeddingsByImportId(importId);
+
+        // 3. Mark as rolled back
+        importEntity.markRolledBack();
+        importRepository.save(importEntity);
+        log.info("Import {} rolled back: lessons soft-deleted, embeddings purged", importId);
+
+        CurriculumImportResponse response = importMapper.toResponse(importEntity);
+        enrichWithCourseName(response, importEntity.getCourseId());
         return response;
     }
 

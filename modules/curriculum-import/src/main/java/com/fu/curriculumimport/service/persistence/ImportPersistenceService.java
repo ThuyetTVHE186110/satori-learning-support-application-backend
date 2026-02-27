@@ -183,6 +183,32 @@ public class ImportPersistenceService {
     }
 
     /**
+     * Soft-delete all non-deleted lessons that belong to a rejected/rolled-back import.
+     * Also hard-deletes the LessonVocabulary and LessonGrammar join records
+     * to prevent orphaned rows.
+     * Vocabulary and GrammarPoint entities are shared resources and are NOT deleted.
+     *
+     * @param importId  the import whose lessons should be removed
+     * @param managerId the manager performing the rejection/rollback
+     */
+    @Transactional
+    public void softDeleteLessonsByImportId(UUID importId, UUID managerId) {
+        List<com.fu.course.entity.Lesson> lessons = lessonRepository.findByImportIdAndNotDeleted(importId);
+        int joinRecordsRemoved = 0;
+        for (com.fu.course.entity.Lesson lesson : lessons) {
+            // Clean up join tables before soft-deleting the lesson
+            lessonVocabularyRepository.deleteByLessonId(lesson.getId());
+            lessonGrammarRepository.deleteByLessonId(lesson.getId());
+            joinRecordsRemoved++;
+
+            lesson.softDelete(managerId);
+            lessonRepository.save(lesson);
+        }
+        log.info("Soft-deleted {} lessons (cleaned up join records for {}) for import {}",
+                lessons.size(), joinRecordsRemoved, importId);
+    }
+
+    /**
      * Find existing vocabulary or create new one (dedup by japanese_text + jlpt_level).
      */
     private Vocabulary findOrCreateVocabulary(ExtractionResult.ExtractedVocabulary ev, UUID createdBy) {

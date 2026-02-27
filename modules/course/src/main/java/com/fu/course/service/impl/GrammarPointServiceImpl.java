@@ -1,5 +1,6 @@
 package com.fu.course.service.impl;
 
+import com.fu.common.event.ContentEmbeddingEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.course.dto.request.CreateGrammarPointRequest;
@@ -12,6 +13,7 @@ import com.fu.course.repository.GrammarPointRepository;
 import com.fu.course.service.GrammarPointService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -31,6 +33,7 @@ import java.util.UUID;
 public class GrammarPointServiceImpl implements GrammarPointService {
 
     private final GrammarPointRepository grammarPointRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     @Transactional
@@ -98,6 +101,13 @@ public class GrammarPointServiceImpl implements GrammarPointService {
         grammar.setUpdatedBy(managerId);
 
         GrammarPoint saved = grammarPointRepository.save(grammar);
+
+        eventPublisher.publishEvent(ContentEmbeddingEvent.forGrammarUpdate(
+                this, saved.getId(),
+                saved.getPattern(), saved.getMeaningEn(), saved.getMeaningVi(),
+                saved.getShortExplanation(),
+                saved.getJlptLevel() != null ? saved.getJlptLevel().name() : "N5"));
+
         return toResponse(saved);
     }
 
@@ -111,6 +121,7 @@ public class GrammarPointServiceImpl implements GrammarPointService {
     public void deleteGrammarPoint(UUID grammarPointId, UUID managerId) {
         log.info("Manager {} soft-deleting grammar point: {}", managerId, grammarPointId);
         GrammarPoint grammar = findOrThrow(grammarPointId);
+        eventPublisher.publishEvent(ContentEmbeddingEvent.forDelete(this, grammarPointId, "GRAMMAR"));
         grammar.softDelete(managerId);
         grammarPointRepository.save(grammar);
     }

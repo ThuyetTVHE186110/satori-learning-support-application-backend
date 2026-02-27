@@ -290,13 +290,13 @@ public class ImportOrchestrator {
 
             persistenceService.persistExtractedContent(importEntity, allResults);
 
-            // === COMPLETE ===
+            // === PENDING APPROVAL ===
             importEntity.setTokensUsed(totalTokens.get());
             importEntity.setActualCostUsd(estimateCost(totalTokens.get()));
-            importEntity.markCompleted();
+            importEntity.markPendingApproval();
             persistenceService.updateImportProgress(importEntity);
 
-            log.info("[{}] ✅ Import completed! Lessons: {}, Vocab: {}, Grammar: {}, " +
+            log.info("[{}] ✅ Import ready for manager approval! Lessons: {}, Vocab: {}, Grammar: {}, " +
                             "Embeddings: {}, Validations: {}/{}, Re-extractions: {}, Hallucinated: {}",
                     importId,
                     importEntity.getLessonsCreated(),

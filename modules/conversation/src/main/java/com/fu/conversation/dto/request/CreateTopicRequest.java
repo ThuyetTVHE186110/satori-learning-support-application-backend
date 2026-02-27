@@ -49,7 +49,7 @@ public class CreateTopicRequest {
     private Integer difficultyScore = 1;
 
     @Builder.Default
-    private Boolean isRoleplay = false;
+    private Boolean isRoleplay = true;
 
     private String roleplayContext;
 

@@ -127,6 +127,52 @@ public class ManagerCurriculumImportController {
     }
 
     /**
+     * Approve a PENDING_APPROVAL import.
+     * Transitions import status to COMPLETED; draft content remains in DB.
+     * POST /api/v1/manager/curriculum-imports/{importId}/approve
+     */
+    @PostMapping("/{importId}/approve")
+    public ResponseEntity<ApiResponse<CurriculumImportResponse>> approveImport(
+            @PathVariable UUID importId,
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
+
+        log.info("Manager {} approving import: {}", managerId, importId);
+        CurriculumImportResponse response = importService.approveImport(importId, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Import approved successfully", response));
+    }
+
+    /**
+     * Reject a PENDING_APPROVAL import.
+     * Soft-deletes all lessons from this import and transitions status to CANCELLED.
+     * POST /api/v1/manager/curriculum-imports/{importId}/reject
+     */
+    @PostMapping("/{importId}/reject")
+    public ResponseEntity<ApiResponse<CurriculumImportResponse>> rejectImport(
+            @PathVariable UUID importId,
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
+
+        log.info("Manager {} rejecting import: {}", managerId, importId);
+        CurriculumImportResponse response = importService.rejectImport(importId, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Import rejected and lessons removed", response));
+    }
+
+    /**
+     * Rollback a COMPLETED import.
+     * Soft-deletes lessons, purges embeddings, and transitions status to ROLLED_BACK.
+     * Vocabulary and grammar points are retained as shared resources.
+     * POST /api/v1/manager/curriculum-imports/{importId}/rollback
+     */
+    @PostMapping("/{importId}/rollback")
+    public ResponseEntity<ApiResponse<CurriculumImportResponse>> rollbackImport(
+            @PathVariable UUID importId,
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
+
+        log.info("Manager {} rolling back import: {}", managerId, importId);
+        CurriculumImportResponse response = importService.rollbackImport(importId, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Import rolled back successfully", response));
+    }
+
+    /**
      * Link a completed import to a course (or reassign to a different course).
      * Useful when an import was initiated without a courseId.
      * PATCH /api/v1/manager/curriculum-imports/{importId}/link-course?courseId=...
