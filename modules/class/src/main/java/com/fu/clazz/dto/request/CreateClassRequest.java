@@ -26,7 +26,6 @@ public class CreateClassRequest {
     @Size(min = 3, max = 255, message = "Class name must be between 3 and 255 characters")
     private String name;
 
-    @Size(max = 5000, message = "Description must not exceed 5000 characters")
     private String description;
 
     @NotNull(message = "Teacher ID is required")
