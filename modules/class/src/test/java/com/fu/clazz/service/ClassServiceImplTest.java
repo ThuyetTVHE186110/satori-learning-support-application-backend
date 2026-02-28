@@ -236,32 +236,6 @@ class ClassServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should throw exception when description exceeds 5000 characters")
-        void shouldThrowExceptionWhenDescriptionTooLong() {
-            // Given
-            String longDescription = "A".repeat(5001);
-            CreateClassRequest badRequest = CreateClassRequest.builder()
-                    .name("N5 Morning Class")
-                    .description(longDescription)
-                    .teacherId(teacherId)
-                    .jlptLevel(JlptLevel.N5)
-                    .maxStudents(30)
-                    .startDate(LocalDate.of(2026, 3, 1))
-                    .endDate(LocalDate.of(2026, 6, 30))
-                    .build();
-
-            given(classRepository.existsByNameIgnoreCase(anyString())).willReturn(false);
-            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
-
-            // When/Then
-            assertThatThrownBy(() -> clazzService.createClass(badRequest, managerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("Mô tả không được vượt quá 5000 ký tự");
-
-            verify(classRepository, never()).save(any());
-        }
-
-        @Test
         @DisplayName("Should throw exception when start date is in the past (E4)")
         void shouldThrowExceptionWhenStartDateInPast() {
             // Given
@@ -445,24 +419,6 @@ class ClassServiceImplTest {
             verify(classRepository, never()).save(any());
         }
 
-        @Test
-        @DisplayName("Should throw exception when description exceeds 5000 characters on update")
-        void shouldThrowExceptionWhenDescriptionTooLongOnUpdate() {
-            // Given
-            String longDescription = "A".repeat(5001);
-            UpdateClassRequest badRequest = UpdateClassRequest.builder()
-                    .description(longDescription)
-                    .build();
-
-            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-
-            // When/Then
-            assertThatThrownBy(() -> clazzService.updateClass(classId, badRequest, managerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("Mô tả không được vượt quá 5000 ký tự");
-
-            verify(classRepository, never()).save(any());
-        }
     }
 
     // =====================================================

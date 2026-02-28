@@ -50,8 +50,6 @@ public class ClassServiceImpl implements ClassService {
     private final ClassMapper classMapper;
     private final UserRepository userRepository;
 
-    private static final int CODE_LENGTH = 8;
-
     // =====================================================
     // CLASS CRUD
     // =====================================================
@@ -85,11 +83,6 @@ public class ClassServiceImpl implements ClassService {
         if (teacher.getRole() != UserRole.TEACHER || teacher.getStatus() != com.fu.user.entity.UserStatus.ACTIVE) {
             throw new BusinessException("INVALID_TEACHER",
                     "Giáo viên không tồn tại hoặc không hợp lệ.");
-        }
-
-        // Validate description length
-        if (request.getDescription() != null && request.getDescription().length() > 5000) {
-            throw new BusinessException("INVALID_DESCRIPTION", "Mô tả không được vượt quá 5000 ký tự.");
         }
 
         // Generate unique join code
@@ -137,11 +130,6 @@ public class ClassServiceImpl implements ClassService {
                 throw new BusinessException("INVALID_TEACHER",
                         "Giáo viên không tồn tại hoặc không hợp lệ.");
             }
-        }
-
-        // Validate description length
-        if (request.getDescription() != null && request.getDescription().length() > 5000) {
-            throw new BusinessException("INVALID_DESCRIPTION", "Mô tả không được vượt quá 5000 ký tự.");
         }
 
         // Validate date range (E3: startDate must be before endDate)
