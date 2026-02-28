@@ -10,13 +10,13 @@ import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.entity.Clazz.JlptLevel;
 import com.fu.clazz.exception.ClassFullException;
-import com.fu.clazz.exception.ClazzNotFoundException;
+import com.fu.clazz.exception.ClassNotFoundException;
 import com.fu.clazz.exception.MemberAlreadyExistsException;
-import com.fu.clazz.mapper.ClazzMapper;
+import com.fu.clazz.mapper.ClassMapper;
 import com.fu.clazz.repository.ClassMemberRepository;
-import com.fu.clazz.repository.ClazzRepository;
-import com.fu.clazz.repository.specification.ClazzSpecification;
-import com.fu.clazz.service.ClazzService;
+import com.fu.clazz.repository.ClassRepository;
+import com.fu.clazz.repository.specification.ClassSpecification;
+import com.fu.clazz.service.ClassService;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.user.entity.User;
@@ -43,11 +43,11 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 @Transactional(readOnly = true)
-public class ClazzServiceImpl implements ClazzService {
+public class ClassServiceImpl implements ClassService {
 
-    private final ClazzRepository clazzRepository;
+    private final ClassRepository classRepository;
     private final ClassMemberRepository classMemberRepository;
-    private final ClazzMapper clazzMapper;
+    private final ClassMapper classMapper;
     private final UserRepository userRepository;
 
     private static final int CODE_LENGTH = 8;
@@ -74,7 +74,7 @@ public class ClazzServiceImpl implements ClazzService {
                     "Ngày kết thúc phải sau ngày bắt đầu.");
         }
         // Check if class name already exists
-        if (clazzRepository.existsByNameIgnoreCase(request.getName())) {
+        if (classRepository.existsByNameIgnoreCase(request.getName())) {
             throw new BusinessException("CLASS_NAME_EXISTS",
                     "Tên lớp học đã tồn tại.");
         }
@@ -97,16 +97,16 @@ public class ClazzServiceImpl implements ClazzService {
         String code = generateUniqueCode();
 
         // Create class entity
-        Clazz clazz = clazzMapper.toEntity(request);
+        Clazz clazz = classMapper.toEntity(request);
         clazz.setCode(code);
         clazz.setCreatedBy(managerId);
         clazz.setUpdatedBy(managerId);
 
         // Save class
-        Clazz savedClazz = clazzRepository.save(clazz);
+        Clazz savedClazz = classRepository.save(clazz);
         log.info("Tạo lớp học thành công với ID: {} và mã lớp: {}", savedClazz.getId(), code);
 
-        ClassResponse response = clazzMapper.toResponse(savedClazz);
+        ClassResponse response = classMapper.toResponse(savedClazz);
         response.setMemberCount(0L);
         return response;
     }
@@ -121,7 +121,7 @@ public class ClazzServiceImpl implements ClazzService {
         // Check if new name conflicts with existing classes
         if (request.getName() != null &&
                 !request.getName().equalsIgnoreCase(clazz.getName()) &&
-                clazzRepository.existsByNameIgnoreCaseAndIdNot(request.getName(), classId)) {
+                classRepository.existsByNameIgnoreCaseAndIdNot(request.getName(), classId)) {
             throw new BusinessException("CLASS_NAME_EXISTS",
                     "Tên lớp học đã tồn tại.");
         }
@@ -164,10 +164,10 @@ public class ClazzServiceImpl implements ClazzService {
         }
 
         // Update class (only non-null fields are mapped)
-        clazzMapper.updateEntity(clazz, request);
+        classMapper.updateEntity(clazz, request);
         clazz.setUpdatedBy(managerId);
 
-        Clazz updatedClazz = clazzRepository.save(clazz);
+        Clazz updatedClazz = classRepository.save(clazz);
         log.info("Cập nhật lớp học thành công: {}", classId);
 
         return toResponseWithMemberCount(updatedClazz);
@@ -186,13 +186,13 @@ public class ClazzServiceImpl implements ClazzService {
         log.debug("Lấy danh sách lớp học với bộ lọc động");
 
         org.springframework.data.jpa.domain.Specification<Clazz> spec = org.springframework.data.jpa.domain.Specification
-                .where(ClazzSpecification.isNotDeleted())
-                .and(ClazzSpecification.hasKeyword(keyword))
-                .and(ClazzSpecification.hasTeacherId(teacherId))
-                .and(ClazzSpecification.hasIsActive(isActive))
-                .and(ClazzSpecification.hasJlptLevel(level));
+                .where(ClassSpecification.isNotDeleted())
+                .and(ClassSpecification.hasKeyword(keyword))
+                .and(ClassSpecification.hasTeacherId(teacherId))
+                .and(ClassSpecification.hasIsActive(isActive))
+                .and(ClassSpecification.hasJlptLevel(level));
 
-        return clazzRepository.findAll(spec, pageable)
+        return classRepository.findAll(spec, pageable)
                 .map(this::toSummaryWithMemberCount);
     }
 
@@ -211,7 +211,7 @@ public class ClazzServiceImpl implements ClazzService {
         clazz.softDelete(managerId);
         clazz.setUpdatedBy(managerId);
 
-        Clazz deletedClazz = clazzRepository.save(clazz);
+        Clazz deletedClazz = classRepository.save(clazz);
         log.info("Xóa lớp học thành công: {}", classId);
 
         return toResponseWithMemberCount(deletedClazz);
@@ -287,7 +287,7 @@ public class ClazzServiceImpl implements ClazzService {
                 .collect(Collectors.toMap(User::getId, user -> user));
 
         return membersPage.map(member -> {
-            ClassMemberResponse response = clazzMapper.toMemberResponse(member);
+            ClassMemberResponse response = classMapper.toMemberResponse(member);
             User user = userMap.get(member.getUserId());
             if (user != null) {
                 response.setFullName(user.getFullName());
@@ -331,8 +331,8 @@ public class ClazzServiceImpl implements ClazzService {
      * Find non-deleted class or throw exception (BR-73)
      */
     private Clazz findClassOrThrow(UUID classId) {
-        return clazzRepository.findByIdAndNotDeleted(classId)
-                .orElseThrow(() -> new ClazzNotFoundException("Lớp học không tồn tại."));
+        return classRepository.findByIdAndNotDeleted(classId)
+                .orElseThrow(() -> new ClassNotFoundException("Lớp học không tồn tại."));
     }
 
     /**
@@ -347,7 +347,7 @@ public class ClazzServiceImpl implements ClazzService {
                 sb.append(chars.charAt(random.nextInt(chars.length())));
             }
             String code = sb.toString();
-            if (!clazzRepository.existsByCode(code)) {
+            if (!classRepository.existsByCode(code)) {
                 return code;
             }
         }
@@ -393,7 +393,7 @@ public class ClazzServiceImpl implements ClazzService {
         ClassMember savedMember = classMemberRepository.save(member);
         log.info("Thêm thành viên: {} vào lớp học: {} thành công", userId, clazz.getId());
 
-        ClassMemberResponse response = clazzMapper.toMemberResponse(savedMember);
+        ClassMemberResponse response = classMapper.toMemberResponse(savedMember);
 
         // Enrich with user info
         userRepository.findById(userId).ifPresent(user -> {
@@ -410,7 +410,7 @@ public class ClazzServiceImpl implements ClazzService {
      * Map to ClassResponse with computed memberCount
      */
     private ClassResponse toResponseWithMemberCount(Clazz clazz) {
-        ClassResponse response = clazzMapper.toResponse(clazz);
+        ClassResponse response = classMapper.toResponse(clazz);
         response.setMemberCount(classMemberRepository.countActiveByClassId(clazz.getId()));
 
         // Enrich with teacher info
@@ -429,7 +429,7 @@ public class ClazzServiceImpl implements ClazzService {
      * Map to ClassSummaryResponse with computed memberCount
      */
     private ClassSummaryResponse toSummaryWithMemberCount(Clazz clazz) {
-        ClassSummaryResponse response = clazzMapper.toSummaryResponse(clazz);
+        ClassSummaryResponse response = classMapper.toSummaryResponse(clazz);
         response.setMemberCount(classMemberRepository.countActiveByClassId(clazz.getId()));
         return response;
     }

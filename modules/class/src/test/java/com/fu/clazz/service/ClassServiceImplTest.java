@@ -10,12 +10,12 @@ import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.entity.Clazz.JlptLevel;
 import com.fu.clazz.exception.ClassFullException;
-import com.fu.clazz.exception.ClazzNotFoundException;
+import com.fu.clazz.exception.ClassNotFoundException;
 import com.fu.clazz.exception.MemberAlreadyExistsException;
-import com.fu.clazz.mapper.ClazzMapper;
+import com.fu.clazz.mapper.ClassMapper;
 import com.fu.clazz.repository.ClassMemberRepository;
-import com.fu.clazz.repository.ClazzRepository;
-import com.fu.clazz.service.impl.ClazzServiceImpl;
+import com.fu.clazz.repository.ClassRepository;
+import com.fu.clazz.service.impl.ClassServiceImpl;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.user.entity.User;
@@ -56,22 +56,22 @@ import static org.mockito.Mockito.*;
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("ClazzService Unit Tests")
-class ClazzServiceImplTest {
+class ClassServiceImplTest {
 
     @Mock
-    private ClazzRepository clazzRepository;
+    private ClassRepository classRepository;
 
     @Mock
     private ClassMemberRepository classMemberRepository;
 
     @Mock
-    private ClazzMapper clazzMapper;
+    private ClassMapper classMapper;
 
     @Mock
     private UserRepository userRepository;
 
     @InjectMocks
-    private ClazzServiceImpl clazzService;
+    private ClassServiceImpl clazzService;
 
     @Captor
     private ArgumentCaptor<Clazz> clazzCaptor;
@@ -199,10 +199,10 @@ class ClazzServiceImplTest {
         void shouldCreateClassSuccessfully() {
             // Given
             given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
-            given(clazzRepository.existsByCode(anyString())).willReturn(false);
-            given(clazzMapper.toEntity(createRequest)).willReturn(testClazz);
-            given(clazzRepository.save(any(Clazz.class))).willReturn(testClazz);
-            given(clazzMapper.toResponse(testClazz)).willReturn(testClassResponse);
+            given(classRepository.existsByCode(anyString())).willReturn(false);
+            given(classMapper.toEntity(createRequest)).willReturn(testClazz);
+            given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
+            given(classMapper.toResponse(testClazz)).willReturn(testClassResponse);
 
             // When
             ClassResponse result = clazzService.createClass(createRequest, managerId);
@@ -213,7 +213,7 @@ class ClazzServiceImplTest {
             assertThat(result.getJlptLevel()).isEqualTo(JlptLevel.N5);
             assertThat(result.getMemberCount()).isEqualTo(0L);
 
-            verify(clazzRepository).save(clazzCaptor.capture());
+            verify(classRepository).save(clazzCaptor.capture());
             Clazz savedClazz = clazzCaptor.getValue();
             assertThat(savedClazz.getCode()).isNotBlank();
             assertThat(savedClazz.getCreatedBy()).isEqualTo(managerId);
@@ -225,17 +225,17 @@ class ClazzServiceImplTest {
         void shouldRetryCodeGenerationOnConflict() {
             // Given - first code exists, second does not
             given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
-            given(clazzRepository.existsByCode(anyString())).willReturn(true, false);
-            given(clazzMapper.toEntity(createRequest)).willReturn(testClazz);
-            given(clazzRepository.save(any(Clazz.class))).willReturn(testClazz);
-            given(clazzMapper.toResponse(testClazz)).willReturn(testClassResponse);
+            given(classRepository.existsByCode(anyString())).willReturn(true, false);
+            given(classMapper.toEntity(createRequest)).willReturn(testClazz);
+            given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
+            given(classMapper.toResponse(testClazz)).willReturn(testClassResponse);
 
             // When
             ClassResponse result = clazzService.createClass(createRequest, managerId);
 
             // Then
             assertThat(result).isNotNull();
-            verify(clazzRepository, atLeast(2)).existsByCode(anyString());
+            verify(classRepository, atLeast(2)).existsByCode(anyString());
         }
 
         @Test
@@ -244,14 +244,14 @@ class ClazzServiceImplTest {
             // Given
             testTeacher.setStatus(UserStatus.INACTIVE);
             given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
-            given(clazzRepository.existsByNameIgnoreCase(anyString())).willReturn(false);
+            given(classRepository.existsByNameIgnoreCase(anyString())).willReturn(false);
 
             // When/Then
             assertThatThrownBy(() -> clazzService.createClass(createRequest, managerId))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Giáo viên không tồn tại hoặc không hợp lệ");
 
-            verify(clazzRepository, never()).save(any());
+            verify(classRepository, never()).save(any());
         }
 
         @Test
@@ -269,7 +269,7 @@ class ClazzServiceImplTest {
                     .endDate(LocalDate.of(2026, 6, 30))
                     .build();
 
-            given(clazzRepository.existsByNameIgnoreCase(anyString())).willReturn(false);
+            given(classRepository.existsByNameIgnoreCase(anyString())).willReturn(false);
             given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
 
             // When/Then
@@ -277,7 +277,7 @@ class ClazzServiceImplTest {
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Mô tả không được vượt quá 5000 ký tự");
 
-            verify(clazzRepository, never()).save(any());
+            verify(classRepository, never()).save(any());
         }
 
         @Test
@@ -299,7 +299,7 @@ class ClazzServiceImplTest {
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Ngày bắt đầu phải ở tương lai.");
 
-            verify(clazzRepository, never()).save(any());
+            verify(classRepository, never()).save(any());
         }
 
         @Test
@@ -321,7 +321,7 @@ class ClazzServiceImplTest {
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Ngày kết thúc phải sau ngày bắt đầu.");
 
-            verify(clazzRepository, never()).save(any());
+            verify(classRepository, never()).save(any());
         }
     }
 
@@ -337,10 +337,10 @@ class ClazzServiceImplTest {
         @DisplayName("Should update class successfully")
         void shouldUpdateClassSuccessfully() {
             // Given
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(clazzRepository.existsByNameIgnoreCaseAndIdNot("Updated N5 Class", classId)).willReturn(false);
-            given(clazzRepository.save(any(Clazz.class))).willReturn(testClazz);
-            given(clazzMapper.toResponse(testClazz)).willReturn(testClassResponse);
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.existsByNameIgnoreCaseAndIdNot("Updated N5 Class", classId)).willReturn(false);
+            given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
+            given(classMapper.toResponse(testClazz)).willReturn(testClassResponse);
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
 
             // When
@@ -348,8 +348,8 @@ class ClazzServiceImplTest {
 
             // Then
             assertThat(result).isNotNull();
-            verify(clazzMapper).updateEntity(testClazz, updateRequest);
-            verify(clazzRepository).save(clazzCaptor.capture());
+            verify(classMapper).updateEntity(testClazz, updateRequest);
+            verify(classRepository).save(clazzCaptor.capture());
             assertThat(clazzCaptor.getValue().getUpdatedBy()).isEqualTo(managerId);
         }
 
@@ -357,28 +357,28 @@ class ClazzServiceImplTest {
         @DisplayName("Should throw exception when class not found for update")
         void shouldThrowExceptionWhenClassNotFound() {
             // Given
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.empty());
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.empty());
 
             // When/Then
             assertThatThrownBy(() -> clazzService.updateClass(classId, updateRequest, managerId))
-                    .isInstanceOf(ClazzNotFoundException.class);
+                    .isInstanceOf(ClassNotFoundException.class);
 
-            verify(clazzRepository, never()).save(any());
+            verify(classRepository, never()).save(any());
         }
 
         @Test
         @DisplayName("Should throw exception when new name already exists")
         void shouldThrowExceptionWhenNewNameExists() {
             // Given
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(clazzRepository.existsByNameIgnoreCaseAndIdNot("Updated N5 Class", classId)).willReturn(true);
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.existsByNameIgnoreCaseAndIdNot("Updated N5 Class", classId)).willReturn(true);
 
             // When/Then
             assertThatThrownBy(() -> clazzService.updateClass(classId, updateRequest, managerId))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("đã tồn tại");
 
-            verify(clazzRepository, never()).save(any());
+            verify(classRepository, never()).save(any());
         }
 
         @Test
@@ -389,16 +389,16 @@ class ClazzServiceImplTest {
                     .description("Only update description")
                     .build();
 
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(clazzRepository.save(any(Clazz.class))).willReturn(testClazz);
-            given(clazzMapper.toResponse(testClazz)).willReturn(testClassResponse);
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
+            given(classMapper.toResponse(testClazz)).willReturn(testClassResponse);
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
 
             // When
             clazzService.updateClass(classId, requestWithoutName, managerId);
 
             // Then
-            verify(clazzRepository, never()).existsByNameIgnoreCaseAndIdNot(anyString(), any());
+            verify(classRepository, never()).existsByNameIgnoreCaseAndIdNot(anyString(), any());
         }
 
         @Test
@@ -410,14 +410,14 @@ class ClazzServiceImplTest {
                     .endDate(LocalDate.of(2026, 3, 1))
                     .build();
 
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
 
             // When/Then
             assertThatThrownBy(() -> clazzService.updateClass(classId, dateRequest, managerId))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Ngày bắt đầu phải trước ngày kết thúc");
 
-            verify(clazzRepository, never()).save(any());
+            verify(classRepository, never()).save(any());
         }
 
         @Test
@@ -428,7 +428,7 @@ class ClazzServiceImplTest {
                     .maxStudents(3)
                     .build();
 
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
 
             // When/Then
@@ -436,7 +436,7 @@ class ClazzServiceImplTest {
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Số lượng học viên tối đa không thể nhỏ hơn");
 
-            verify(clazzRepository, never()).save(any());
+            verify(classRepository, never()).save(any());
         }
 
         @Test
@@ -453,7 +453,7 @@ class ClazzServiceImplTest {
                     .status(UserStatus.INACTIVE)
                     .build();
 
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
             given(userRepository.findById(newTeacherId)).willReturn(Optional.of(inactiveTeacher));
 
             // When/Then
@@ -461,7 +461,7 @@ class ClazzServiceImplTest {
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Giáo viên không tồn tại hoặc không hợp lệ");
 
-            verify(clazzRepository, never()).save(any());
+            verify(classRepository, never()).save(any());
         }
 
         @Test
@@ -473,14 +473,14 @@ class ClazzServiceImplTest {
                     .description(longDescription)
                     .build();
 
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
 
             // When/Then
             assertThatThrownBy(() -> clazzService.updateClass(classId, badRequest, managerId))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Mô tả không được vượt quá 5000 ký tự");
 
-            verify(clazzRepository, never()).save(any());
+            verify(classRepository, never()).save(any());
         }
     }
 
@@ -496,8 +496,8 @@ class ClazzServiceImplTest {
         @DisplayName("Should get class by ID successfully")
         void shouldGetClassByIdSuccessfully() {
             // Given
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(clazzMapper.toResponse(testClazz)).willReturn(testClassResponse);
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classMapper.toResponse(testClazz)).willReturn(testClassResponse);
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
 
             // When
@@ -513,11 +513,11 @@ class ClazzServiceImplTest {
         @DisplayName("Should throw exception when class not found")
         void shouldThrowWhenClassNotFound() {
             // Given
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.empty());
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.empty());
 
             // When/Then
             assertThatThrownBy(() -> clazzService.getClassById(classId))
-                    .isInstanceOf(ClazzNotFoundException.class);
+                    .isInstanceOf(ClassNotFoundException.class);
         }
     }
 
@@ -535,9 +535,9 @@ class ClazzServiceImplTest {
             // Given
             Pageable pageable = PageRequest.of(0, 10);
             Page<Clazz> classPage = new PageImpl<>(List.of(testClazz), pageable, 1);
-            given(clazzRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class), eq(pageable)))
+            given(classRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class), eq(pageable)))
                     .willReturn(classPage);
-            given(clazzMapper.toSummaryResponse(testClazz)).willReturn(testSummaryResponse);
+            given(classMapper.toSummaryResponse(testClazz)).willReturn(testSummaryResponse);
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
 
             // When
@@ -546,7 +546,7 @@ class ClazzServiceImplTest {
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
             assertThat(result.getContent().get(0).getName()).isEqualTo("N5 Morning Class");
-            verify(clazzRepository).findAll(any(org.springframework.data.jpa.domain.Specification.class), eq(pageable));
+            verify(classRepository).findAll(any(org.springframework.data.jpa.domain.Specification.class), eq(pageable));
         }
     }
 
@@ -562,19 +562,19 @@ class ClazzServiceImplTest {
         @DisplayName("Should delete class successfully (soft delete only, isActive unchanged)")
         void shouldDeleteClassSuccessfully() {
             // Given
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(clazzRepository.save(any(Clazz.class))).willReturn(testClazz);
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
 
             ClassResponse deletedResponse = ClassResponse.builder()
                     .id(classId).isActive(true).build();
-            given(clazzMapper.toResponse(testClazz)).willReturn(deletedResponse);
+            given(classMapper.toResponse(testClazz)).willReturn(deletedResponse);
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
 
             // When
             clazzService.deleteClass(classId, managerId);
 
             // Then
-            verify(clazzRepository).save(clazzCaptor.capture());
+            verify(classRepository).save(clazzCaptor.capture());
             Clazz captured = clazzCaptor.getValue();
             assertThat(captured.getDeletedAt()).isNotNull();
             assertThat(captured.getDeletedBy()).isEqualTo(managerId);
@@ -591,17 +591,17 @@ class ClazzServiceImplTest {
                     .isActive(false)
                     .build();
 
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(clazzRepository.save(any(Clazz.class))).willReturn(testClazz);
-            given(clazzMapper.toResponse(testClazz)).willReturn(testClassResponse);
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
+            given(classMapper.toResponse(testClazz)).willReturn(testClassResponse);
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
 
             // When
             clazzService.updateClass(classId, deactivateRequest, managerId);
 
             // Then
-            verify(clazzMapper).updateEntity(testClazz, deactivateRequest);
-            verify(clazzRepository).save(clazzCaptor.capture());
+            verify(classMapper).updateEntity(testClazz, deactivateRequest);
+            verify(classRepository).save(clazzCaptor.capture());
             assertThat(clazzCaptor.getValue().getUpdatedBy()).isEqualTo(managerId);
         }
 
@@ -614,17 +614,17 @@ class ClazzServiceImplTest {
                     .isActive(true)
                     .build();
 
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(clazzRepository.save(any(Clazz.class))).willReturn(testClazz);
-            given(clazzMapper.toResponse(testClazz)).willReturn(testClassResponse);
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
+            given(classMapper.toResponse(testClazz)).willReturn(testClassResponse);
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
 
             // When
             clazzService.updateClass(classId, activateRequest, managerId);
 
             // Then
-            verify(clazzMapper).updateEntity(testClazz, activateRequest);
-            verify(clazzRepository).save(clazzCaptor.capture());
+            verify(classMapper).updateEntity(testClazz, activateRequest);
+            verify(classRepository).save(clazzCaptor.capture());
             assertThat(clazzCaptor.getValue().getUpdatedBy()).isEqualTo(managerId);
         }
 
@@ -641,12 +641,12 @@ class ClazzServiceImplTest {
             void shouldAddMemberSuccessfully() {
                 // Given
                 AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
-                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
                 given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
                 given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
                 given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.empty());
                 given(classMemberRepository.save(any(ClassMember.class))).willReturn(testMember);
-                given(clazzMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
+                given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
 
                 // When
                 ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
@@ -666,7 +666,7 @@ class ClazzServiceImplTest {
             void shouldThrowWhenClassIsFull() {
                 // Given
                 AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
-                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
                 given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
                 given(classMemberRepository.countActiveByClassId(classId)).willReturn(30L); // maxStudents = 30
 
@@ -682,7 +682,7 @@ class ClazzServiceImplTest {
             void shouldThrowWhenMemberAlreadyExists() {
                 // Given
                 AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
-                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
                 given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
                 given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
                 given(classMemberRepository.findByClassIdAndUserId(classId, studentId))
@@ -705,13 +705,13 @@ class ClazzServiceImplTest {
                         .build();
                 ReflectionTestUtils.setField(removedMember, "id", UUID.randomUUID());
 
-                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
                 given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
                 given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
                 given(classMemberRepository.findByClassIdAndUserId(classId, studentId))
                         .willReturn(Optional.of(removedMember));
                 given(classMemberRepository.save(any(ClassMember.class))).willReturn(removedMember);
-                given(clazzMapper.toMemberResponse(removedMember)).willReturn(testMemberResponse);
+                given(classMapper.toMemberResponse(removedMember)).willReturn(testMemberResponse);
 
                 // When
                 ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
@@ -728,7 +728,7 @@ class ClazzServiceImplTest {
                 // Given
                 testClazz.setIsActive(false);
                 AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
-                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
                 given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
 
                 // When/Then
@@ -744,7 +744,7 @@ class ClazzServiceImplTest {
             void shouldThrowWhenAddingTeacherAsMember() {
                 // Given
                 AddMemberRequest request = AddMemberRequest.builder().userId(teacherId).build();
-                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
                 given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
 
                 // When/Then
@@ -761,7 +761,7 @@ class ClazzServiceImplTest {
                 // Given
                 UUID unknownId = UUID.randomUUID();
                 AddMemberRequest request = AddMemberRequest.builder().userId(unknownId).build();
-                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
                 given(userRepository.findById(unknownId)).willReturn(Optional.empty());
 
                 // When/Then
@@ -784,7 +784,7 @@ class ClazzServiceImplTest {
             @DisplayName("Should remove member successfully")
             void shouldRemoveMemberSuccessfully() {
                 // Given
-                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
                 given(classMemberRepository.findByClassIdAndUserId(classId, studentId))
                         .willReturn(Optional.of(testMember));
 
@@ -800,7 +800,7 @@ class ClazzServiceImplTest {
             @DisplayName("Should throw when member not found")
             void shouldThrowWhenMemberNotFound() {
                 // Given
-                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
                 given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.empty());
 
                 // When/Then
@@ -817,7 +817,7 @@ class ClazzServiceImplTest {
                         .classId(classId).userId(studentId)
                         .removedAt(LocalDateTime.now())
                         .build();
-                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
                 given(classMemberRepository.findByClassIdAndUserId(classId, studentId))
                         .willReturn(Optional.of(removedMember));
 
@@ -842,9 +842,9 @@ class ClazzServiceImplTest {
                 // Given
                 Pageable pageable = PageRequest.of(0, 10);
                 Page<ClassMember> memberPage = new PageImpl<>(List.of(testMember), pageable, 1);
-                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
                 given(classMemberRepository.findActiveByClassId(classId, pageable)).willReturn(memberPage);
-                given(clazzMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
+                given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
 
                 // When
                 Page<ClassMemberResponse> result = clazzService.getClassMembers(classId, pageable);
@@ -859,11 +859,11 @@ class ClazzServiceImplTest {
             void shouldThrowWhenClassNotFoundForMembers() {
                 // Given
                 Pageable pageable = PageRequest.of(0, 10);
-                given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.empty());
+                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.empty());
 
                 // When/Then
                 assertThatThrownBy(() -> clazzService.getClassMembers(classId, pageable))
-                        .isInstanceOf(ClazzNotFoundException.class);
+                        .isInstanceOf(ClassNotFoundException.class);
             }
         }
 
@@ -920,10 +920,10 @@ class ClazzServiceImplTest {
                         .endDate(java.time.LocalDate.now().plusDays(10))
                         .build();
                 given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
-                given(clazzRepository.existsByCode(anyString())).willReturn(false);
-                given(clazzMapper.toEntity(any())).willReturn(testClazz);
-                given(clazzRepository.save(any(Clazz.class))).willReturn(testClazz);
-                given(clazzMapper.toResponse(any())).willReturn(testClassResponse);
+                given(classRepository.existsByCode(anyString())).willReturn(false);
+                given(classMapper.toEntity(any())).willReturn(testClazz);
+                given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
+                given(classMapper.toResponse(any())).willReturn(testClassResponse);
                 assertThatNoException().isThrownBy(() -> clazzService.createClass(req, managerId));
             }
         }
@@ -943,9 +943,9 @@ class ClazzServiceImplTest {
             // Given
             Pageable pageable = PageRequest.of(0, 10);
             Page<ClassMember> memberPage = new PageImpl<>(List.of(testMember), pageable, 1);
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
             given(classMemberRepository.findActiveByClassId(classId, pageable)).willReturn(memberPage);
-            given(clazzMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
+            given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
             given(userRepository.findAllById(List.of(studentId))).willReturn(List.of(testStudent));
 
             // When
@@ -965,9 +965,9 @@ class ClazzServiceImplTest {
             // Given
             Pageable pageable = PageRequest.of(0, 10);
             Page<ClassMember> memberPage = new PageImpl<>(List.of(testMember), pageable, 1);
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
             given(classMemberRepository.findActiveByClassId(classId, pageable)).willReturn(memberPage);
-            given(clazzMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
+            given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
             given(userRepository.findAllById(List.of(studentId))).willReturn(List.of());
 
             // When
@@ -995,9 +995,9 @@ class ClazzServiceImplTest {
             // Given
             Pageable pageable = PageRequest.of(0, 10);
             Page<Clazz> classPage = new PageImpl<>(List.of(testClazz), pageable, 1);
-            given(clazzRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class), eq(pageable)))
+            given(classRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class), eq(pageable)))
                     .willReturn(classPage);
-            given(clazzMapper.toSummaryResponse(testClazz)).willReturn(testSummaryResponse);
+            given(classMapper.toSummaryResponse(testClazz)).willReturn(testSummaryResponse);
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
 
             // When
@@ -1006,7 +1006,7 @@ class ClazzServiceImplTest {
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
             assertThat(result.getContent().get(0).getName()).isEqualTo("N5 Morning Class");
-            verify(clazzRepository).findAll(any(org.springframework.data.jpa.domain.Specification.class), eq(pageable));
+            verify(classRepository).findAll(any(org.springframework.data.jpa.domain.Specification.class), eq(pageable));
         }
 
         @Test
@@ -1015,7 +1015,7 @@ class ClazzServiceImplTest {
             // Given
             Pageable pageable = PageRequest.of(0, 10);
             Page<Clazz> emptyPage = new PageImpl<>(List.of(), pageable, 0);
-            given(clazzRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class), eq(pageable)))
+            given(classRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class), eq(pageable)))
                     .willReturn(emptyPage);
 
             // When
@@ -1039,8 +1039,8 @@ class ClazzServiceImplTest {
         @DisplayName("Should return class detail when teacher owns the class")
         void shouldReturnClassDetailWhenTeacherOwns() {
             // Given
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(clazzMapper.toResponse(testClazz)).willReturn(testClassResponse);
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classMapper.toResponse(testClazz)).willReturn(testClassResponse);
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
             given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
 
@@ -1058,7 +1058,7 @@ class ClazzServiceImplTest {
         void shouldThrowAccessDeniedWhenTeacherDoesNotOwnClass() {
             // Given
             UUID otherTeacherId = UUID.randomUUID();
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
 
             // When / Then
             assertThatThrownBy(() -> clazzService.getClassByIdForTeacher(classId, otherTeacherId))
@@ -1071,11 +1071,11 @@ class ClazzServiceImplTest {
         void shouldThrowWhenClassNotFoundForTeacher() {
             // Given
             UUID unknownClassId = UUID.randomUUID();
-            given(clazzRepository.findByIdAndNotDeleted(unknownClassId)).willReturn(Optional.empty());
+            given(classRepository.findByIdAndNotDeleted(unknownClassId)).willReturn(Optional.empty());
 
             // When / Then
             assertThatThrownBy(() -> clazzService.getClassByIdForTeacher(unknownClassId, teacherId))
-                    .isInstanceOf(ClazzNotFoundException.class);
+                    .isInstanceOf(ClassNotFoundException.class);
         }
 
         @Test
@@ -1084,9 +1084,9 @@ class ClazzServiceImplTest {
             // Given
             Pageable pageable = PageRequest.of(0, 10);
             Page<ClassMember> memberPage = new PageImpl<>(List.of(testMember), pageable, 1);
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
             given(classMemberRepository.findActiveByClassId(classId, pageable)).willReturn(memberPage);
-            given(clazzMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
+            given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
             given(userRepository.findAllById(List.of(studentId))).willReturn(List.of(testStudent));
 
             // When
@@ -1102,7 +1102,7 @@ class ClazzServiceImplTest {
             // Given
             UUID otherTeacherId = UUID.randomUUID();
             Pageable pageable = PageRequest.of(0, 10);
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
 
             // When / Then
             assertThatThrownBy(() -> clazzService.getClassMembersForTeacher(classId, otherTeacherId, pageable))
@@ -1123,8 +1123,8 @@ class ClazzServiceImplTest {
         @DisplayName("Should enrich ClassResponse with teacher info")
         void shouldEnrichClassResponseWithTeacherInfo() {
             // Given
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(clazzMapper.toResponse(testClazz)).willReturn(testClassResponse);
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classMapper.toResponse(testClazz)).willReturn(testClassResponse);
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
             given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
 
@@ -1141,8 +1141,8 @@ class ClazzServiceImplTest {
         @DisplayName("Should handle missing teacher gracefully")
         void shouldHandleMissingTeacherGracefully() {
             // Given
-            given(clazzRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(clazzMapper.toResponse(testClazz)).willReturn(testClassResponse);
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classMapper.toResponse(testClazz)).willReturn(testClassResponse);
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
             given(userRepository.findById(teacherId)).willReturn(Optional.empty());
 

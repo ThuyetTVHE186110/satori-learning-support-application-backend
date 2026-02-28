@@ -13,7 +13,7 @@ import org.mapstruct.*;
  * Mapper for Clazz and ClassMember entities
  */
 @Mapper(componentModel = "spring", unmappedTargetPolicy = ReportingPolicy.IGNORE, nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
-public interface ClazzMapper {
+public interface ClassMapper {
 
     /**
      * Map CreateClassRequest to Clazz entity

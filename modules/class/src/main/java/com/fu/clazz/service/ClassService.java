@@ -15,7 +15,7 @@ import java.util.UUID;
 /**
  * Service interface for Class management
  */
-public interface ClazzService {
+public interface ClassService {
 
     /**
      * Create a new class (MANAGER only)
