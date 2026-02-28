@@ -51,7 +51,6 @@ public class ClassServiceImpl implements ClassService {
     private final UserRepository userRepository;
 
     private static final int CODE_LENGTH = 8;
-    private static final int MAX_CODE_GENERATION_ATTEMPTS = 10;
 
     // =====================================================
     // CLASS CRUD
@@ -182,7 +181,7 @@ public class ClassServiceImpl implements ClassService {
 
     @Override
     public Page<ClassSummaryResponse> getClasses(String keyword, UUID teacherId, Boolean isActive, JlptLevel level,
-                                                 Pageable pageable) {
+            Pageable pageable) {
         log.debug("Lấy danh sách lớp học với bộ lọc động");
 
         org.springframework.data.jpa.domain.Specification<Clazz> spec = org.springframework.data.jpa.domain.Specification
@@ -339,20 +338,7 @@ public class ClassServiceImpl implements ClassService {
      * Generate unique 8-character alphanumeric join code
      */
     private String generateUniqueCode() {
-        String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        java.security.SecureRandom random = new java.security.SecureRandom();
-        for (int i = 0; i < MAX_CODE_GENERATION_ATTEMPTS; i++) {
-            StringBuilder sb = new StringBuilder(CODE_LENGTH);
-            for (int j = 0; j < CODE_LENGTH; j++) {
-                sb.append(chars.charAt(random.nextInt(chars.length())));
-            }
-            String code = sb.toString();
-            if (!classRepository.existsByCode(code)) {
-                return code;
-            }
-        }
-        throw new BusinessException("CODE_GENERATION_FAILED",
-                "Không thể tạo mã lớp học duy nhất sau " + MAX_CODE_GENERATION_ATTEMPTS + " lần thử");
+        return UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
 
     /**
