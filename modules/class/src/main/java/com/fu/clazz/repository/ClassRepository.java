@@ -17,7 +17,7 @@ import java.util.UUID;
  * Repository for Clazz entity
  */
 @Repository
-public interface ClazzRepository extends JpaRepository<Clazz, UUID>, JpaSpecificationExecutor<Clazz> {
+public interface ClassRepository extends JpaRepository<Clazz, UUID>, JpaSpecificationExecutor<Clazz> {
 
         /**
          * Find class by ID (non-deleted)
