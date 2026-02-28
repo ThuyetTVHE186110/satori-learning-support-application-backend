@@ -199,7 +199,6 @@ class ClassServiceImplTest {
         void shouldCreateClassSuccessfully() {
             // Given
             given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
-            given(classRepository.existsByCode(anyString())).willReturn(false);
             given(classMapper.toEntity(createRequest)).willReturn(testClazz);
             given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
             given(classMapper.toResponse(testClazz)).willReturn(testClassResponse);
@@ -218,24 +217,6 @@ class ClassServiceImplTest {
             assertThat(savedClazz.getCode()).isNotBlank();
             assertThat(savedClazz.getCreatedBy()).isEqualTo(managerId);
             assertThat(savedClazz.getUpdatedBy()).isEqualTo(managerId);
-        }
-
-        @Test
-        @DisplayName("Should generate unique code with retry")
-        void shouldRetryCodeGenerationOnConflict() {
-            // Given - first code exists, second does not
-            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
-            given(classRepository.existsByCode(anyString())).willReturn(true, false);
-            given(classMapper.toEntity(createRequest)).willReturn(testClazz);
-            given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
-            given(classMapper.toResponse(testClazz)).willReturn(testClassResponse);
-
-            // When
-            ClassResponse result = clazzService.createClass(createRequest, managerId);
-
-            // Then
-            assertThat(result).isNotNull();
-            verify(classRepository, atLeast(2)).existsByCode(anyString());
         }
 
         @Test
@@ -920,7 +901,6 @@ class ClassServiceImplTest {
                         .endDate(java.time.LocalDate.now().plusDays(10))
                         .build();
                 given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
-                given(classRepository.existsByCode(anyString())).willReturn(false);
                 given(classMapper.toEntity(any())).willReturn(testClazz);
                 given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
                 given(classMapper.toResponse(any())).willReturn(testClassResponse);
