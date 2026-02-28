@@ -7,13 +7,13 @@ import java.util.UUID;
 /**
  * Exception thrown when class is not found
  */
-public class ClazzNotFoundException extends ResourceNotFoundException {
+public class ClassNotFoundException extends ResourceNotFoundException {
 
-    public ClazzNotFoundException(UUID classId) {
+    public ClassNotFoundException(UUID classId) {
         super("Không có lớp nào được tìm thấy với ID: " + classId);
     }
 
-    public ClazzNotFoundException(String message) {
+    public ClassNotFoundException(String message) {
         super(message);
     }
 }

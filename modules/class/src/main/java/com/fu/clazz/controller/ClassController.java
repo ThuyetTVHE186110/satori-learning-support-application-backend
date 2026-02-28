@@ -7,7 +7,7 @@ import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
 import com.fu.clazz.entity.Clazz.JlptLevel;
-import com.fu.clazz.service.ClazzService;
+import com.fu.clazz.service.ClassService;
 import com.fu.common.response.ApiResponse;
 import com.fu.common.response.PageResponse;
 import jakarta.validation.Valid;
@@ -44,7 +44,7 @@ import java.util.UUID;
 @PreAuthorize("hasAnyRole('MANAGER', 'TEACHER')")
 public class ClassController {
 
-    private final ClazzService clazzService;
+    private final ClassService clazzService;
 
     // =====================================================
     // READ OPERATIONS (MANAGER + TEACHER)
