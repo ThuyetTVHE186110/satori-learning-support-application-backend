@@ -11,7 +11,7 @@ import lombok.NoArgsConstructor;
 /**
  * Request DTO for resetting password with reset token.
  * UC-07: Forgot Password - Step 3: Reset Password with Token
- * 
+ * <p>
  * Flow:
  * 1. User requests OTP via /forgot-password
  * 2. User verifies OTP via /verify-otp → receives resetToken
@@ -29,8 +29,8 @@ public class ResetPasswordRequest {
     @NotBlank(message = "Hãy nhập mật khẩu mới")
     @Size(min = 8, message = "Mật khẩu phải có ít nhất 8 ký tự")
     @Pattern(
-        regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,}$",
-        message = "Mật khẩu phải bao gồm chữ hoa, chữ thường và số"
+            regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[\\W_]).{8,}$",
+            message = "Mật khẩu phải bao gồm chữ hoa, chữ thường, số và ký tự đặc biệt"
     )
     private String newPassword;
 
