@@ -214,23 +214,16 @@ public class ClassServiceImpl implements ClassService {
         log.info("Thêm thành viên: {} vào lớp học: {} bởi quản lý: {}", request.getUserId(), classId, managerId);
 
         Clazz clazz = findClassOrThrow(classId);
+        validateClassAcceptingMembers(clazz);
         // Validate user exists and has LEARNER role
         User user = userRepository.findById(request.getUserId())
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        "Không tìm thấy người dùng với ID: " + request.getUserId()));
+                        "Không tìm thấy học viên."));
 
         if (user.getRole() != UserRole.LEARNER) {
             throw new BusinessException("INVALID_MEMBER_ROLE",
                     "Chỉ người dùng có vai trò HỌC VIÊN mới được thêm vào lớp học.");
         }
-
-        // Check if user is the teacher of the class
-        if (clazz.getTeacherId() != null && clazz.getTeacherId().equals(request.getUserId())) {
-            throw new BusinessException("USER_IS_TEACHER",
-                    "Người dùng đã là giáo viên của lớp này.");
-        }
-
-        validateClassAcceptingMembers(clazz);
 
         return addMemberToClass(clazz, request.getUserId());
     }
