@@ -299,6 +299,12 @@ public class AuthServiceImpl implements AuthService {
                     "Mật khẩu hiện tại không chính xác");
         }
 
+        // Prevent reusing the current password
+        if (passwordEncoder.matches(request.getNewPassword(), user.getPasswordHash())) {
+            throw new BusinessException("PASSWORD_REUSE",
+                    "Mật khẩu mới không được trùng với mật khẩu cũ.");
+        }
+
         // Update password
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
         user.setLastPasswordChangeAt(LocalDateTime.now());
