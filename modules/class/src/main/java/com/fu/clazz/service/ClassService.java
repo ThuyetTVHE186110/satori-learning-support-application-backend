@@ -15,7 +15,7 @@ import java.util.UUID;
 /**
  * Service interface for Class management
  */
-public interface ClazzService {
+public interface ClassService {
 
     /**
      * Create a new class (MANAGER only)
@@ -33,45 +33,10 @@ public interface ClazzService {
     ClassResponse getClassById(UUID classId);
 
     /**
-     * Get all classes with pagination (including deleted)
+     * Get classes with dynamic filters (combines all options with AND)
      */
-    Page<ClassSummaryResponse> getAllClasses(Pageable pageable);
-
-    /**
-     * Get classes by active status
-     */
-    Page<ClassSummaryResponse> getClassesByActiveStatus(Boolean isActive, Pageable pageable);
-
-    /**
-     * Get classes by JLPT level
-     */
-    Page<ClassSummaryResponse> getClassesByJlptLevel(JlptLevel jlptLevel, Pageable pageable);
-
-    /**
-     * Get classes by teacher ID
-     */
-    Page<ClassSummaryResponse> getClassesByTeacher(UUID teacherId, Pageable pageable);
-
-    /**
-     * Get active classes by teacher ID (TEACHER view)
-     */
-    Page<ClassSummaryResponse> getActiveClassesByTeacher(UUID teacherId, Pageable pageable);
-
-    /**
-     * Get active classes by teacher ID and JLPT level (TEACHER view)
-     */
-    Page<ClassSummaryResponse> getActiveClassesByTeacherAndLevel(UUID teacherId, JlptLevel jlptLevel,
+    Page<ClassSummaryResponse> getClasses(String keyword, UUID teacherId, Boolean isActive, JlptLevel level,
             Pageable pageable);
-
-    /**
-     * Search classes by keyword
-     */
-    Page<ClassSummaryResponse> searchClasses(String keyword, Pageable pageable);
-
-    /**
-     * Search classes by teacher ID and keyword
-     */
-    Page<ClassSummaryResponse> searchClassesByTeacher(UUID teacherId, String keyword, Pageable pageable);
 
     /**
      * Delete a class (MANAGER only) — soft delete: records deletion metadata

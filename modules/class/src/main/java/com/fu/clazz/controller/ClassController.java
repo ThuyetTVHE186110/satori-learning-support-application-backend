@@ -7,7 +7,7 @@ import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
 import com.fu.clazz.entity.Clazz.JlptLevel;
-import com.fu.clazz.service.ClazzService;
+import com.fu.clazz.service.ClassService;
 import com.fu.common.response.ApiResponse;
 import com.fu.common.response.PageResponse;
 import jakarta.validation.Valid;
@@ -44,7 +44,7 @@ import java.util.UUID;
 @PreAuthorize("hasAnyRole('MANAGER', 'TEACHER')")
 public class ClassController {
 
-    private final ClazzService clazzService;
+    private final ClassService clazzService;
 
     // =====================================================
     // READ OPERATIONS (MANAGER + TEACHER)
@@ -72,27 +72,11 @@ public class ClassController {
         Page<ClassSummaryResponse> classPage;
 
         if (isManager()) {
-            // MANAGER: full access with filter priority (BR-75)
-            if (keyword != null && !keyword.isBlank()) {
-                classPage = clazzService.searchClasses(keyword.trim(), pageable);
-            } else if (teacherId != null) {
-                classPage = clazzService.getClassesByTeacher(teacherId, pageable);
-            } else if (isActive != null) {
-                classPage = clazzService.getClassesByActiveStatus(isActive, pageable);
-            } else if (level != null) {
-                classPage = clazzService.getClassesByJlptLevel(level, pageable);
-            } else {
-                classPage = clazzService.getAllClasses(pageable);
-            }
+            // MANAGER: full access with dynamic filters combined by AND
+            classPage = clazzService.getClasses(keyword, teacherId, isActive, level, pageable);
         } else {
-            // TEACHER: only their own active classes
-            if (keyword != null && !keyword.isBlank()) {
-                classPage = clazzService.searchClassesByTeacher(userId, keyword.trim(), pageable);
-            } else if (level != null) {
-                classPage = clazzService.getActiveClassesByTeacherAndLevel(userId, level, pageable);
-            } else {
-                classPage = clazzService.getActiveClassesByTeacher(userId, pageable);
-            }
+            // TEACHER: only their own active classes (force filter)
+            classPage = clazzService.getClasses(keyword, userId, true, level, pageable);
         }
 
         PageResponse<ClassSummaryResponse> pageResponse = PageResponse.of(

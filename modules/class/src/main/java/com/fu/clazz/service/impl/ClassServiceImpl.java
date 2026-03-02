@@ -10,12 +10,13 @@ import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.entity.Clazz.JlptLevel;
 import com.fu.clazz.exception.ClassFullException;
-import com.fu.clazz.exception.ClazzNotFoundException;
+import com.fu.clazz.exception.ClassNotFoundException;
 import com.fu.clazz.exception.MemberAlreadyExistsException;
-import com.fu.clazz.mapper.ClazzMapper;
+import com.fu.clazz.mapper.ClassMapper;
 import com.fu.clazz.repository.ClassMemberRepository;
-import com.fu.clazz.repository.ClazzRepository;
-import com.fu.clazz.service.ClazzService;
+import com.fu.clazz.repository.ClassRepository;
+import com.fu.clazz.repository.specification.ClassSpecification;
+import com.fu.clazz.service.ClassService;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.user.entity.User;
@@ -23,7 +24,6 @@ import com.fu.user.entity.UserRole;
 import com.fu.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -43,15 +43,12 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 @Transactional(readOnly = true)
-public class ClazzServiceImpl implements ClazzService {
+public class ClassServiceImpl implements ClassService {
 
-    private final ClazzRepository clazzRepository;
+    private final ClassRepository classRepository;
     private final ClassMemberRepository classMemberRepository;
-    private final ClazzMapper clazzMapper;
+    private final ClassMapper classMapper;
     private final UserRepository userRepository;
-
-    private static final int CODE_LENGTH = 8;
-    private static final int MAX_CODE_GENERATION_ATTEMPTS = 10;
 
     // =====================================================
     // CLASS CRUD
@@ -74,7 +71,7 @@ public class ClazzServiceImpl implements ClazzService {
                     "Ngày kết thúc phải sau ngày bắt đầu.");
         }
         // Check if class name already exists
-        if (clazzRepository.existsByNameIgnoreCase(request.getName())) {
+        if (classRepository.existsByNameIgnoreCase(request.getName())) {
             throw new BusinessException("CLASS_NAME_EXISTS",
                     "Tên lớp học đã tồn tại.");
         }
@@ -88,25 +85,20 @@ public class ClazzServiceImpl implements ClazzService {
                     "Giáo viên không tồn tại hoặc không hợp lệ.");
         }
 
-        // Validate description length
-        if (request.getDescription() != null && request.getDescription().length() > 5000) {
-            throw new BusinessException("INVALID_DESCRIPTION", "Mô tả không được vượt quá 5000 ký tự.");
-        }
-
         // Generate unique join code
         String code = generateUniqueCode();
 
         // Create class entity
-        Clazz clazz = clazzMapper.toEntity(request);
+        Clazz clazz = classMapper.toEntity(request);
         clazz.setCode(code);
         clazz.setCreatedBy(managerId);
         clazz.setUpdatedBy(managerId);
 
         // Save class
-        Clazz savedClazz = clazzRepository.save(clazz);
+        Clazz savedClazz = classRepository.save(clazz);
         log.info("Tạo lớp học thành công với ID: {} và mã lớp: {}", savedClazz.getId(), code);
 
-        ClassResponse response = clazzMapper.toResponse(savedClazz);
+        ClassResponse response = classMapper.toResponse(savedClazz);
         response.setMemberCount(0L);
         return response;
     }
@@ -121,7 +113,7 @@ public class ClazzServiceImpl implements ClazzService {
         // Check if new name conflicts with existing classes
         if (request.getName() != null &&
                 !request.getName().equalsIgnoreCase(clazz.getName()) &&
-                clazzRepository.existsByNameIgnoreCaseAndIdNot(request.getName(), classId)) {
+                classRepository.existsByNameIgnoreCaseAndIdNot(request.getName(), classId)) {
             throw new BusinessException("CLASS_NAME_EXISTS",
                     "Tên lớp học đã tồn tại.");
         }
@@ -138,11 +130,6 @@ public class ClazzServiceImpl implements ClazzService {
                 throw new BusinessException("INVALID_TEACHER",
                         "Giáo viên không tồn tại hoặc không hợp lệ.");
             }
-        }
-
-        // Validate description length
-        if (request.getDescription() != null && request.getDescription().length() > 5000) {
-            throw new BusinessException("INVALID_DESCRIPTION", "Mô tả không được vượt quá 5000 ký tự.");
         }
 
         // Validate date range (E3: startDate must be before endDate)
@@ -164,10 +151,10 @@ public class ClazzServiceImpl implements ClazzService {
         }
 
         // Update class (only non-null fields are mapped)
-        clazzMapper.updateEntity(clazz, request);
+        classMapper.updateEntity(clazz, request);
         clazz.setUpdatedBy(managerId);
 
-        Clazz updatedClazz = clazzRepository.save(clazz);
+        Clazz updatedClazz = classRepository.save(clazz);
         log.info("Cập nhật lớp học thành công: {}", classId);
 
         return toResponseWithMemberCount(updatedClazz);
@@ -181,60 +168,18 @@ public class ClazzServiceImpl implements ClazzService {
     }
 
     @Override
-    public Page<ClassSummaryResponse> getAllClasses(Pageable pageable) {
-        log.debug("Lấy tất cả lớp học với phân trang");
-        return clazzRepository.findAllNotDeleted(pageable)
-                .map(this::toSummaryWithMemberCount);
-    }
-
-    @Override
-    public Page<ClassSummaryResponse> getClassesByActiveStatus(Boolean isActive, Pageable pageable) {
-        log.debug("Lấy lớp học theo trạng thái hoạt động: {}", isActive);
-        return clazzRepository.findByIsActiveAndDeletedAtIsNull(isActive, pageable)
-                .map(this::toSummaryWithMemberCount);
-    }
-
-    @Override
-    public Page<ClassSummaryResponse> getClassesByJlptLevel(JlptLevel jlptLevel, Pageable pageable) {
-        log.debug("Lấy lớp học theo cấp độ JLPT: {}", jlptLevel);
-        return clazzRepository.findByJlptLevelAndDeletedAtIsNull(jlptLevel, pageable)
-                .map(this::toSummaryWithMemberCount);
-    }
-
-    @Override
-    public Page<ClassSummaryResponse> getClassesByTeacher(UUID teacherId, Pageable pageable) {
-        log.debug("Lấy lớp học theo giáo viên: {}", teacherId);
-        return clazzRepository.findByTeacherIdAndDeletedAtIsNull(teacherId, pageable)
-                .map(this::toSummaryWithMemberCount);
-    }
-
-    @Override
-    public Page<ClassSummaryResponse> getActiveClassesByTeacher(UUID teacherId, Pageable pageable) {
-        log.debug("Lấy lớp học đang hoạt động theo giáo viên: {}", teacherId);
-        return clazzRepository.findByTeacherIdAndIsActiveTrueAndDeletedAtIsNull(teacherId, pageable)
-                .map(this::toSummaryWithMemberCount);
-    }
-
-    @Override
-    public Page<ClassSummaryResponse> getActiveClassesByTeacherAndLevel(UUID teacherId, JlptLevel jlptLevel,
+    public Page<ClassSummaryResponse> getClasses(String keyword, UUID teacherId, Boolean isActive, JlptLevel level,
             Pageable pageable) {
-        log.debug("Lấy lớp học đang hoạt động theo giáo viên {} và cấp độ JLPT: {}", teacherId, jlptLevel);
-        return clazzRepository
-                .findByTeacherIdAndJlptLevelAndIsActiveTrueAndDeletedAtIsNull(teacherId, jlptLevel, pageable)
-                .map(this::toSummaryWithMemberCount);
-    }
+        log.debug("Lấy danh sách lớp học với bộ lọc động");
 
-    @Override
-    public Page<ClassSummaryResponse> searchClasses(String keyword, Pageable pageable) {
-        log.debug("Tìm kiếm lớp học theo từ khóa: {}", keyword);
-        return clazzRepository.searchByName(keyword, pageable)
-                .map(this::toSummaryWithMemberCount);
-    }
+        org.springframework.data.jpa.domain.Specification<Clazz> spec = org.springframework.data.jpa.domain.Specification
+                .where(ClassSpecification.isNotDeleted())
+                .and(ClassSpecification.hasKeyword(keyword))
+                .and(ClassSpecification.hasTeacherId(teacherId))
+                .and(ClassSpecification.hasIsActive(isActive))
+                .and(ClassSpecification.hasJlptLevel(level));
 
-    @Override
-    public Page<ClassSummaryResponse> searchClassesByTeacher(UUID teacherId, String keyword, Pageable pageable) {
-        log.debug("Tìm kiếm lớp học của giáo viên {} theo từ khóa: {}", teacherId, keyword);
-        return clazzRepository.searchByTeacherAndName(teacherId, keyword, pageable)
+        return classRepository.findAll(spec, pageable)
                 .map(this::toSummaryWithMemberCount);
     }
 
@@ -253,7 +198,7 @@ public class ClazzServiceImpl implements ClazzService {
         clazz.softDelete(managerId);
         clazz.setUpdatedBy(managerId);
 
-        Clazz deletedClazz = clazzRepository.save(clazz);
+        Clazz deletedClazz = classRepository.save(clazz);
         log.info("Xóa lớp học thành công: {}", classId);
 
         return toResponseWithMemberCount(deletedClazz);
@@ -269,23 +214,16 @@ public class ClazzServiceImpl implements ClazzService {
         log.info("Thêm thành viên: {} vào lớp học: {} bởi quản lý: {}", request.getUserId(), classId, managerId);
 
         Clazz clazz = findClassOrThrow(classId);
+        validateClassAcceptingMembers(clazz);
         // Validate user exists and has LEARNER role
         User user = userRepository.findById(request.getUserId())
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        "Không tìm thấy người dùng với ID: " + request.getUserId()));
+                        "Không tìm thấy học viên."));
 
         if (user.getRole() != UserRole.LEARNER) {
             throw new BusinessException("INVALID_MEMBER_ROLE",
                     "Chỉ người dùng có vai trò HỌC VIÊN mới được thêm vào lớp học.");
         }
-
-        // Check if user is the teacher of the class
-        if (clazz.getTeacherId() != null && clazz.getTeacherId().equals(request.getUserId())) {
-            throw new BusinessException("USER_IS_TEACHER",
-                    "Người dùng đã là giáo viên của lớp này.");
-        }
-
-        validateClassAcceptingMembers(clazz);
 
         return addMemberToClass(clazz, request.getUserId());
     }
@@ -329,7 +267,7 @@ public class ClazzServiceImpl implements ClazzService {
                 .collect(Collectors.toMap(User::getId, user -> user));
 
         return membersPage.map(member -> {
-            ClassMemberResponse response = clazzMapper.toMemberResponse(member);
+            ClassMemberResponse response = classMapper.toMemberResponse(member);
             User user = userMap.get(member.getUserId());
             if (user != null) {
                 response.setFullName(user.getFullName());
@@ -373,28 +311,15 @@ public class ClazzServiceImpl implements ClazzService {
      * Find non-deleted class or throw exception (BR-73)
      */
     private Clazz findClassOrThrow(UUID classId) {
-        return clazzRepository.findByIdAndNotDeleted(classId)
-                .orElseThrow(() -> new ClazzNotFoundException("Lớp học không tồn tại."));
+        return classRepository.findByIdAndNotDeleted(classId)
+                .orElseThrow(() -> new ClassNotFoundException("Lớp học không tồn tại."));
     }
 
     /**
      * Generate unique 8-character alphanumeric join code
      */
     private String generateUniqueCode() {
-        String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        java.security.SecureRandom random = new java.security.SecureRandom();
-        for (int i = 0; i < MAX_CODE_GENERATION_ATTEMPTS; i++) {
-            StringBuilder sb = new StringBuilder(CODE_LENGTH);
-            for (int j = 0; j < CODE_LENGTH; j++) {
-                sb.append(chars.charAt(random.nextInt(chars.length())));
-            }
-            String code = sb.toString();
-            if (!clazzRepository.existsByCode(code)) {
-                return code;
-            }
-        }
-        throw new BusinessException("CODE_GENERATION_FAILED",
-                "Không thể tạo mã lớp học duy nhất sau " + MAX_CODE_GENERATION_ATTEMPTS + " lần thử");
+        return UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
 
     /**
@@ -435,7 +360,7 @@ public class ClazzServiceImpl implements ClazzService {
         ClassMember savedMember = classMemberRepository.save(member);
         log.info("Thêm thành viên: {} vào lớp học: {} thành công", userId, clazz.getId());
 
-        ClassMemberResponse response = clazzMapper.toMemberResponse(savedMember);
+        ClassMemberResponse response = classMapper.toMemberResponse(savedMember);
 
         // Enrich with user info
         userRepository.findById(userId).ifPresent(user -> {
@@ -452,7 +377,7 @@ public class ClazzServiceImpl implements ClazzService {
      * Map to ClassResponse with computed memberCount
      */
     private ClassResponse toResponseWithMemberCount(Clazz clazz) {
-        ClassResponse response = clazzMapper.toResponse(clazz);
+        ClassResponse response = classMapper.toResponse(clazz);
         response.setMemberCount(classMemberRepository.countActiveByClassId(clazz.getId()));
 
         // Enrich with teacher info
@@ -471,7 +396,7 @@ public class ClazzServiceImpl implements ClazzService {
      * Map to ClassSummaryResponse with computed memberCount
      */
     private ClassSummaryResponse toSummaryWithMemberCount(Clazz clazz) {
-        ClassSummaryResponse response = clazzMapper.toSummaryResponse(clazz);
+        ClassSummaryResponse response = classMapper.toSummaryResponse(clazz);
         response.setMemberCount(classMemberRepository.countActiveByClassId(clazz.getId()));
         return response;
     }

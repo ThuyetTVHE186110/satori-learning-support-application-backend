@@ -417,7 +417,7 @@ public class AuthServiceImpl implements AuthService {
     // ==================== Private Helper Methods ====================
 
     private LoginResponse createSessionAndGenerateTokens(User user, DeviceInfo deviceInfo,
-                                                         String ipAddress, String userAgent) {
+            String ipAddress, String userAgent) {
         // Detect device info from User-Agent and client-provided DeviceInfo
         // This properly distinguishes between Mobile App and Web Browser sessions
         Map<String, Object> detectedDeviceInfo = DeviceDetector.detectDevice(userAgent, deviceInfo);
