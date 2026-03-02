@@ -18,7 +18,6 @@ import java.util.UUID;
  */
 @Entity
 @Table(name = "classes", schema = "user_management", indexes = {
-        @Index(name = "idx_classes_code", columnList = "code"),
         @Index(name = "idx_classes_course_id", columnList = "course_id"),
         @Index(name = "idx_classes_teacher_id", columnList = "teacher_id"),
         @Index(name = "idx_classes_jlpt_level", columnList = "jlpt_level"),

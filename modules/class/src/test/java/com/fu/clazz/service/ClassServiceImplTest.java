@@ -117,7 +117,6 @@ class ClassServiceImplTest {
         testClazz = Clazz.builder()
                 .name("N5 Morning Class")
                 .description("Beginner Japanese class")
-                .code("ABC12345")
                 .teacherId(teacherId)
                 .courseId(courseId)
                 .maxStudents(30)
@@ -131,7 +130,6 @@ class ClassServiceImplTest {
                 .id(classId)
                 .name("N5 Morning Class")
                 .description("Beginner Japanese class")
-                .code("ABC12345")
                 .teacherId(teacherId)
                 .courseId(courseId)
                 .courseName("N5 Beginners")
@@ -147,7 +145,6 @@ class ClassServiceImplTest {
         testSummaryResponse = ClassSummaryResponse.builder()
                 .id(classId)
                 .name("N5 Morning Class")
-                .code("ABC12345")
                 .teacherId(teacherId)
                 .courseId(courseId)
                 .courseName("N5 Beginners")
@@ -233,9 +230,23 @@ class ClassServiceImplTest {
 
             verify(classRepository).save(clazzCaptor.capture());
             Clazz savedClazz = clazzCaptor.getValue();
-            assertThat(savedClazz.getCode()).isNotBlank();
             assertThat(savedClazz.getCreatedBy()).isEqualTo(managerId);
             assertThat(savedClazz.getUpdatedBy()).isEqualTo(managerId);
+        }
+
+        @Test
+        @DisplayName("Should set courseId when creating class")
+        void shouldPersistCourseId() {
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+            given(courseRepository.findById(courseId)).willReturn(Optional.of(testCourse));
+            given(classMapper.toEntity(createRequest)).willReturn(testClazz);
+            given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
+            given(classMapper.toResponse(testClazz)).willReturn(testClassResponse);
+
+            clazzService.createClass(createRequest, managerId);
+
+            verify(classRepository).save(clazzCaptor.capture());
+            assertThat(clazzCaptor.getValue().getCourseId()).isEqualTo(courseId);
         }
 
         @Test
@@ -304,6 +315,47 @@ class ClassServiceImplTest {
             assertThatThrownBy(() -> clazzService.createClass(badDateRequest, managerId))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Ngày kết thúc phải sau ngày bắt đầu.");
+
+            verify(classRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Should throw exception when course not found")
+        void shouldThrowWhenCourseNotFound() {
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+            given(courseRepository.findById(courseId)).willReturn(Optional.empty());
+
+            assertThatThrownBy(() -> clazzService.createClass(createRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Khóa học không tồn tại");
+
+            verify(classRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Should throw exception when course is deleted")
+        void shouldThrowWhenCourseDeleted() {
+            testCourse.setDeletedAt(LocalDateTime.now());
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+            given(courseRepository.findById(courseId)).willReturn(Optional.of(testCourse));
+
+            assertThatThrownBy(() -> clazzService.createClass(createRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Khóa học đã bị xóa");
+
+            verify(classRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Should throw exception when course is not published")
+        void shouldThrowWhenCourseNotPublished() {
+            testCourse.setStatus(Course.ContentStatus.DRAFT);
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+            given(courseRepository.findById(courseId)).willReturn(Optional.of(testCourse));
+
+            assertThatThrownBy(() -> clazzService.createClass(createRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("xuất bản");
 
             verify(classRepository, never()).save(any());
         }
