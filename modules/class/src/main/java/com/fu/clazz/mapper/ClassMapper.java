@@ -36,7 +36,6 @@ public interface ClassMapper {
     @BeanMapping(nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "code", ignore = true) // Cannot change code
-    @Mapping(target = "jlptLevel", ignore = true) // Cannot change JLPT level
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     @Mapping(target = "createdBy", ignore = true)
@@ -49,12 +48,18 @@ public interface ClassMapper {
      * Map Clazz entity to ClassResponse
      */
     @Mapping(target = "memberCount", ignore = true) // Set by service
+    @Mapping(target = "courseName", ignore = true) // Set by service
+    @Mapping(target = "courseLevel", ignore = true) // Set by service
+    @Mapping(target = "courseStatus", ignore = true) // Set by service
     ClassResponse toResponse(Clazz clazz);
 
     /**
      * Map Clazz entity to ClassSummaryResponse
      */
     @Mapping(target = "memberCount", ignore = true) // Set by service
+    @Mapping(target = "courseName", ignore = true) // Set by service
+    @Mapping(target = "courseLevel", ignore = true) // Set by service
+    @Mapping(target = "courseStatus", ignore = true) // Set by service
     ClassSummaryResponse toSummaryResponse(Clazz clazz);
 
     /**
