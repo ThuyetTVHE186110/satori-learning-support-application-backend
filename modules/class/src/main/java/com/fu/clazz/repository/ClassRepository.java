@@ -68,12 +68,6 @@ public interface ClassRepository extends JpaRepository<Clazz, UUID>, JpaSpecific
                         @Param("keyword") String keyword,
                         Pageable pageable);
 
-        /**
-         * Check if class code already exists (non-deleted)
-         */
-        @Query("SELECT CASE WHEN COUNT(c) > 0 THEN true ELSE false END FROM Clazz c " +
-                        "WHERE c.code = :code AND c.deletedAt IS NULL")
-        boolean existsByCode(@Param("code") String code);
 
         /**
          * Check if class name already exists (case-insensitive, non-deleted)

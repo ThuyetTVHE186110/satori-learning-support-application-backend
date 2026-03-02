@@ -67,7 +67,7 @@ CREATE TABLE user_management.users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email VARCHAR(255) NOT NULL UNIQUE,
     password_hash VARCHAR(255),
-    
+
     -- Profile information
     first_name VARCHAR(100),
     last_name VARCHAR(100),
@@ -76,13 +76,13 @@ CREATE TABLE user_management.users (
     phone_number VARCHAR(20),
     date_of_birth DATE,
     gender gender,
-    
+
     -- Account status
     role user_role NOT NULL DEFAULT 'LEARNER',
     status user_status NOT NULL DEFAULT 'PENDING_ACTIVATION',
     auth_provider auth_provider NOT NULL DEFAULT 'LOCAL',
     google_id VARCHAR(255) UNIQUE,
-    
+
     -- Activation & Security
     activation_token VARCHAR(255),
     activation_token_expires_at TIMESTAMP WITH TIME ZONE,
@@ -91,7 +91,7 @@ CREATE TABLE user_management.users (
     last_password_change_at TIMESTAMP WITH TIME ZONE,
     failed_login_attempts INT DEFAULT 0,
     locked_until TIMESTAMP WITH TIME ZONE,
-    
+
     -- Metadata
     last_login_at TIMESTAMP WITH TIME ZONE,
     email_verified_at TIMESTAMP WITH TIME ZONE,
@@ -104,29 +104,29 @@ CREATE TABLE user_management.users (
 CREATE TABLE user_management.user_learning_preferences (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
-    
+
     -- Learning goals
     target_jlpt_level jlpt_level DEFAULT 'N5',
     daily_study_goal_minutes INT DEFAULT 30,
     preferred_study_time VARCHAR(20), -- 'morning', 'afternoon', 'evening', 'night'
-    
+
     -- AI Practice Context Settings
     preferred_topics TEXT[], -- Array of preferred conversation topics
     learning_pace VARCHAR(20) DEFAULT 'normal', -- 'slow', 'normal', 'fast'
     preferred_formality VARCHAR(20) DEFAULT 'polite', -- 'casual', 'polite', 'formal'
     conversation_style VARCHAR(50), -- 'practical', 'creative', 'business', 'travel'
-    
+
     -- Notification preferences
     streak_reminder_enabled BOOLEAN DEFAULT TRUE,
     reminder_time TIME DEFAULT '20:00',
-    
+
     -- AI personalization data (JSONB for flexibility)
     weak_points JSONB DEFAULT '[]'::JSONB, -- Array of weak pronunciation/grammar points
     strong_points JSONB DEFAULT '[]'::JSONB,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
+
     UNIQUE(user_id)
 );
 
@@ -135,16 +135,13 @@ CREATE TABLE user_management.classes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    code VARCHAR(20) UNIQUE NOT NULL, -- Class join code
-    
     teacher_id UUID NOT NULL REFERENCES user_management.users(id),
-    
-    jlpt_level jlpt_level,
+    course_id UUID,
     max_students INT DEFAULT 50,
-    
+
     start_date DATE,
     end_date DATE,
-    
+
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -155,10 +152,10 @@ CREATE TABLE user_management.class_members (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     class_id UUID NOT NULL REFERENCES user_management.classes(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
-    
+
     joined_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     removed_at TIMESTAMP WITH TIME ZONE,
-    
+
     UNIQUE(class_id, user_id)
 );
 
@@ -167,10 +164,10 @@ CREATE TABLE user_management.class_members (
 CREATE TABLE user_management.user_sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
-    
+
     -- Token storage (session reference for JWT validation)
     refresh_token VARCHAR(512),
-    
+
     -- Device information as JSONB for flexible storage
     -- For Mobile App: {
     --   "platform": "app",
@@ -189,11 +186,11 @@ CREATE TABLE user_management.user_sessions (
     --   "browser_version": "120.0.0"
     -- }
     device_info JSONB,
-    
+
     -- Client network information
     ip_address INET,
     user_agent VARCHAR(500),
-    
+
     -- Timestamps
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -207,7 +204,7 @@ CREATE INDEX idx_user_sessions_refresh_token ON user_management.user_sessions(re
 CREATE INDEX idx_user_sessions_expires_at ON user_management.user_sessions(expires_at);
 -- Partial index for active (non-revoked) sessions
 -- Note: expires_at filtering done at query time (CURRENT_TIMESTAMP is not IMMUTABLE)
-CREATE INDEX idx_user_sessions_active ON user_management.user_sessions(user_id) 
+CREATE INDEX idx_user_sessions_active ON user_management.user_sessions(user_id)
     WHERE revoked_at IS NULL;
 
 -- ==========================================================================
@@ -220,13 +217,13 @@ CREATE TABLE learning_content.courses (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    
+
     jlpt_level jlpt_level NOT NULL,
     thumbnail_url TEXT,
-    
+
     order_index INT DEFAULT 0,
     status content_status DEFAULT 'DRAFT',
-    
+
     created_by UUID REFERENCES user_management.users(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -236,32 +233,32 @@ CREATE TABLE learning_content.courses (
 CREATE TABLE learning_content.lessons (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     course_id UUID NOT NULL REFERENCES learning_content.courses(id) ON DELETE CASCADE,
-    
+
     title VARCHAR(255) NOT NULL,
     title_japanese VARCHAR(255),
     description TEXT,
     lesson_type lesson_type NOT NULL,
-    
+
     -- Content
     content JSONB, -- Flexible content structure
     objectives TEXT[], -- Learning objectives
-    
+
     -- Curriculum Import (PDF/Doc upload)
     content_file_url TEXT,
     content_file_name VARCHAR(255),
     processing_status processing_status DEFAULT 'COMPLETED',
     processed_at TIMESTAMP WITH TIME ZONE,
     processing_error TEXT,
-    
+
     -- Page info (for imported curriculum)
     page_start INT,
     page_end INT,
-    
+
     order_index INT DEFAULT 0,
     estimated_duration_minutes INT DEFAULT 30,
-    
+
     status content_status DEFAULT 'DRAFT',
-    
+
     created_by UUID REFERENCES user_management.users(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -270,16 +267,16 @@ CREATE TABLE learning_content.lessons (
 -- Vocabulary items (for quiz questions)
 CREATE TABLE learning_content.vocabulary (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    
+
     japanese_text VARCHAR(255) NOT NULL,
     reading VARCHAR(255), -- Hiragana reading
     romaji VARCHAR(255), -- Romaji reading
     meaning_vi TEXT, -- Vietnamese meaning
     meaning_en TEXT, -- English meaning
-    
+
     part_of_speech VARCHAR(50),
     jlpt_level jlpt_level,
-    
+
     -- Extended vocabulary info
     kanji_writing VARCHAR(255),
     example_sentences JSONB DEFAULT '[]'::JSONB,
@@ -287,55 +284,55 @@ CREATE TABLE learning_content.vocabulary (
     antonyms TEXT[],
     audio_url TEXT,
     image_url TEXT,
-    
+
     -- Usage notes
     usage_notes TEXT,
     common_collocations JSONB DEFAULT '[]'::JSONB,
-    
+
     tags TEXT[],
     content_hash VARCHAR(64),
-    
+
     created_by UUID REFERENCES user_management.users(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
+
     UNIQUE(japanese_text, jlpt_level)
 );
 
 -- Grammar points (for quiz questions)
 CREATE TABLE learning_content.grammar_points (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    
+
     pattern VARCHAR(255) NOT NULL,
     pattern_reading VARCHAR(255),
     pattern_romaji VARCHAR(255),
-    
+
     meaning_vi TEXT,
     meaning_en TEXT,
     short_explanation TEXT,
     detailed_explanation TEXT,
-    
+
     structure JSONB,
     conjugation_rules JSONB,
     formation_rules TEXT,
-    
+
     example_sentences JSONB DEFAULT '[]'::JSONB,
     common_mistakes JSONB DEFAULT '[]'::JSONB,
     tips TEXT,
     related_grammar TEXT[],
-    
+
     jlpt_level jlpt_level,
     category grammar_category DEFAULT 'OTHER',
     difficulty_score INT DEFAULT 1,
-    
+
     tags TEXT[],
     audio_url TEXT,
     content_hash VARCHAR(64),
-    
+
     created_by UUID REFERENCES user_management.users(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
+
     UNIQUE(pattern, jlpt_level)
 );
 
@@ -344,10 +341,10 @@ CREATE TABLE learning_content.lesson_vocabulary (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     lesson_id UUID NOT NULL REFERENCES learning_content.lessons(id) ON DELETE CASCADE,
     vocabulary_id UUID NOT NULL REFERENCES learning_content.vocabulary(id) ON DELETE CASCADE,
-    
+
     order_index INT DEFAULT 0,
     is_key_word BOOLEAN DEFAULT FALSE,
-    
+
     UNIQUE(lesson_id, vocabulary_id)
 );
 
@@ -356,10 +353,10 @@ CREATE TABLE learning_content.lesson_grammar (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     lesson_id UUID NOT NULL REFERENCES learning_content.lessons(id) ON DELETE CASCADE,
     grammar_id UUID NOT NULL REFERENCES learning_content.grammar_points(id) ON DELETE CASCADE,
-    
+
     order_index INT DEFAULT 0,
     is_key_point BOOLEAN DEFAULT FALSE,
-    
+
     UNIQUE(lesson_id, grammar_id)
 );
 
@@ -371,28 +368,28 @@ CREATE TABLE learning_content.lesson_grammar (
 -- Pronunciation Topics (thay thế lesson-based)
 CREATE TABLE pronunciation.pronunciation_topics (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    
+
     name VARCHAR(255) NOT NULL,
     name_japanese VARCHAR(255),
     description TEXT,
-    
+
     -- Topic category
     category pronunciation_topic_category NOT NULL,
-    
+
     -- Classification
     jlpt_level jlpt_level,
     difficulty_score INT DEFAULT 1, -- 1-5
-    
+
     -- Learning focus
     focus_sounds TEXT[], -- e.g., ['あ', 'い', 'う'] or ['r/l distinction']
     tips TEXT,
     video_tutorial_url TEXT,
-    
+
     -- Display
     thumbnail_url TEXT,
     order_index INT DEFAULT 0,
     status content_status DEFAULT 'DRAFT',
-    
+
     created_by UUID REFERENCES user_management.users(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -402,34 +399,34 @@ CREATE TABLE pronunciation.pronunciation_topics (
 CREATE TABLE pronunciation.pronunciation_items (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     topic_id UUID NOT NULL REFERENCES pronunciation.pronunciation_topics(id) ON DELETE CASCADE,
-    
+
     title VARCHAR(255) NOT NULL,
     description TEXT,
-    
+
     -- Target sound/word
     japanese_text VARCHAR(500) NOT NULL,
     reading VARCHAR(500), -- Hiragana reading
     romaji VARCHAR(500),
     meaning_vi TEXT,
     meaning_en TEXT,
-    
+
     phonetic_guide TEXT, -- IPA or detailed phonetic guide
-    
+
     -- Reference audio
     reference_audio_url TEXT NOT NULL,
     slow_audio_url TEXT,
-    
+
     -- Scoring criteria
     target_sounds TEXT[], -- Specific sounds to focus on
     common_mistakes JSONB DEFAULT '[]'::JSONB,
     tips TEXT,
-    
+
     -- Difficulty
     difficulty_score INT DEFAULT 1, -- 1-5
-    
+
     status content_status DEFAULT 'DRAFT',
     order_index INT DEFAULT 0,
-    
+
     created_by UUID REFERENCES user_management.users(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -440,23 +437,23 @@ CREATE TABLE pronunciation.user_topic_progress (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
     topic_id UUID NOT NULL REFERENCES pronunciation.pronunciation_topics(id) ON DELETE CASCADE,
-    
+
     -- Progress
     items_practiced INT DEFAULT 0,
     items_mastered INT DEFAULT 0,
     total_items INT DEFAULT 0,
     completion_percentage DECIMAL(5,2) DEFAULT 0,
-    
+
     -- Best scores
     best_accuracy_score DECIMAL(5,2) DEFAULT 0,
     best_fluency_score DECIMAL(5,2) DEFAULT 0,
     best_overall_score DECIMAL(5,2) DEFAULT 0,
-    
+
     last_practiced_at TIMESTAMP WITH TIME ZONE,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
+
     UNIQUE(user_id, topic_id)
 );
 
@@ -465,25 +462,25 @@ CREATE TABLE pronunciation.user_item_progress (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
     item_id UUID NOT NULL REFERENCES pronunciation.pronunciation_items(id) ON DELETE CASCADE,
-    
+
     -- Best scores
     best_accuracy_score DECIMAL(5,2) DEFAULT 0,
     best_fluency_score DECIMAL(5,2) DEFAULT 0,
     best_prosody_score DECIMAL(5,2) DEFAULT 0,
     best_overall_score DECIMAL(5,2) DEFAULT 0,
-    
+
     -- Practice stats
     total_attempts INT DEFAULT 0,
     successful_attempts INT DEFAULT 0, -- Score >= threshold
     last_practiced_at TIMESTAMP WITH TIME ZONE,
-    
+
     -- Learning state
     is_mastered BOOLEAN DEFAULT FALSE,
     mastered_at TIMESTAMP WITH TIME ZONE,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
+
     UNIQUE(user_id, item_id)
 );
 
@@ -492,15 +489,15 @@ CREATE TABLE pronunciation.pronunciation_attempts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
     item_id UUID NOT NULL REFERENCES pronunciation.pronunciation_items(id) ON DELETE CASCADE,
-    
+
     -- Audio recordings
     user_audio_url TEXT,
     reference_audio_url TEXT,
-    
+
     -- Target text
     target_text VARCHAR(500) NOT NULL,
     target_reading VARCHAR(500),
-    
+
     -- AI Analysis Results (JSONB for flexibility)
     analysis JSONB DEFAULT '{}'::JSONB,
     /*
@@ -523,7 +520,7 @@ CREATE TABLE pronunciation.pronunciation_attempts (
         ]
     }
     */
-    
+
     -- AI Feedback (JSONB)
     feedback JSONB DEFAULT '{}'::JSONB,
     /*
@@ -537,13 +534,13 @@ CREATE TABLE pronunciation.pronunciation_attempts (
         "nextSteps": ["Practice minimal pairs"]
     }
     */
-    
+
     -- Environment info
     environment_info JSONB DEFAULT '{}'::JSONB,
-    
+
     -- Metadata
     processing_time_ms INT,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -559,30 +556,30 @@ CREATE INDEX idx_pronunciation_attempts_analysis ON pronunciation.pronunciation_
 -- Conversation topics (for AI practice)
 CREATE TABLE speaking.conversation_topics (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    
+
     title VARCHAR(255) NOT NULL,
     title_japanese VARCHAR(255),
     description TEXT,
-    
+
     -- Topic context
     scenario TEXT,
     vocabulary_hints JSONB DEFAULT '[]'::JSONB,
     grammar_points JSONB DEFAULT '[]'::JSONB,
     useful_expressions JSONB DEFAULT '[]'::JSONB,
-    
+
     -- Classification
     category VARCHAR(100), -- 'daily_life', 'travel', 'business', 'school', etc.
     jlpt_level jlpt_level,
     difficulty_score INT DEFAULT 1,
-    
+
     -- For roleplay
     is_roleplay BOOLEAN DEFAULT FALSE,
     roleplay_context JSONB,
-    
+
     thumbnail_url TEXT,
     status content_status DEFAULT 'DRAFT',
     order_index INT DEFAULT 0,
-    
+
     created_by UUID REFERENCES user_management.users(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -593,25 +590,25 @@ CREATE TABLE speaking.user_conversation_progress (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
     topic_id UUID NOT NULL REFERENCES speaking.conversation_topics(id) ON DELETE CASCADE,
-    
+
     -- Practice stats
     total_sessions INT DEFAULT 0,
     total_messages_sent INT DEFAULT 0,
-    
+
     -- Best scores
     best_fluency_score DECIMAL(5,2) DEFAULT 0,
     best_accuracy_score DECIMAL(5,2) DEFAULT 0,
     best_vocabulary_score DECIMAL(5,2) DEFAULT 0,
     best_overall_score DECIMAL(5,2) DEFAULT 0,
-    
+
     -- Learning state
     last_practiced_at TIMESTAMP WITH TIME ZONE,
     is_completed BOOLEAN DEFAULT FALSE,
     completed_at TIMESTAMP WITH TIME ZONE,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
+
     UNIQUE(user_id, topic_id)
 );
 
@@ -624,13 +621,13 @@ CREATE TABLE speaking.user_conversation_progress (
 CREATE TABLE ai_conversation.conversation_sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
-    
+
     session_type session_type NOT NULL,
-    
+
     -- Topic reference (optional - can be free talk)
     topic_id UUID REFERENCES speaking.conversation_topics(id),
     assignment_id UUID, -- Reference to assignment if part of assignment
-    
+
     -- Session context (JSONB for flexibility)
     context JSONB DEFAULT '{}'::JSONB,
     /*
@@ -646,10 +643,10 @@ CREATE TABLE ai_conversation.conversation_sessions (
         "grammarFocus": ["～をください", "～はありますか"]
     }
     */
-    
+
     -- Session status
     status session_status DEFAULT 'ACTIVE',
-    
+
     -- Scoring & Feedback (JSONB)
     feedback JSONB DEFAULT '{}'::JSONB,
     /*
@@ -665,17 +662,17 @@ CREATE TABLE ai_conversation.conversation_sessions (
         "summary": "Great conversation practice..."
     }
     */
-    
+
     -- Stats
     message_count INT DEFAULT 0,
     user_message_count INT DEFAULT 0,
     hints_used INT DEFAULT 0,
     corrections_count INT DEFAULT 0,
     duration_seconds INT DEFAULT 0,
-    
+
     -- Timestamps
     completed_at TIMESTAMP WITH TIME ZONE,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -684,19 +681,19 @@ CREATE TABLE ai_conversation.conversation_sessions (
 CREATE TABLE ai_conversation.conversation_messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     session_id UUID NOT NULL REFERENCES ai_conversation.conversation_sessions(id) ON DELETE CASCADE,
-    
+
     role message_role NOT NULL,
-    
+
     -- Content
     content TEXT NOT NULL, -- Original message content
     japanese_content TEXT, -- Japanese version
     translation TEXT, -- Vietnamese/English translation
     romaji TEXT, -- Romaji reading
-    
+
     -- Audio
     audio_url TEXT,
     user_audio_url TEXT,
-    
+
     -- AI Corrections (JSONB array)
     corrections JSONB DEFAULT '[]'::JSONB,
     /*
@@ -711,7 +708,7 @@ CREATE TABLE ai_conversation.conversation_messages (
         }
     ]
     */
-    
+
     -- Vocabulary used (JSONB array)
     vocabulary_used JSONB DEFAULT '[]'::JSONB,
     /*
@@ -720,12 +717,12 @@ CREATE TABLE ai_conversation.conversation_messages (
         {"word": "食べる", "reading": "たべる", "meaning": "to eat", "isNew": true}
     ]
     */
-    
+
     -- Message metadata
     is_hint_request BOOLEAN DEFAULT FALSE,
     sequence_number INT NOT NULL,
     processing_time_ms INT,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -742,13 +739,13 @@ CREATE INDEX idx_conversation_messages_content ON ai_conversation.conversation_m
 -- Translation Cache (previously MongoDB)
 CREATE TABLE ai_conversation.translation_cache (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    
+
     source_text TEXT NOT NULL,
     source_language VARCHAR(5) NOT NULL, -- 'ja', 'vi', 'en'
     target_language VARCHAR(5) NOT NULL,
-    
+
     translated_text TEXT NOT NULL,
-    
+
     -- For words
     is_word BOOLEAN DEFAULT FALSE,
     word_info JSONB DEFAULT '{}'::JSONB,
@@ -761,13 +758,13 @@ CREATE TABLE ai_conversation.translation_cache (
         "examples": [...]
     }
     */
-    
+
     -- Cache metadata
     hit_count INT DEFAULT 0,
     last_accessed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
+
     UNIQUE(source_text, source_language, target_language)
 );
 
@@ -782,12 +779,12 @@ CREATE INDEX idx_translation_cache_ttl ON ai_conversation.translation_cache(last
 -- Quiz Questions (generated from curriculum)
 CREATE TABLE assignment.quiz_questions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    
+
     -- Question content
     question_text TEXT NOT NULL,
     question_japanese TEXT,
     question_type VARCHAR(50) NOT NULL, -- 'multiple_choice', 'fill_blank', 'matching', 'true_false', 'ordering'
-    
+
     -- Options for multiple choice (JSONB)
     options JSONB DEFAULT '[]'::JSONB,
     /*
@@ -797,31 +794,31 @@ CREATE TABLE assignment.quiz_questions (
         {"id": "B", "text": "食べます", "isCorrect": false}
     ]
     */
-    
+
     -- Correct answer
     correct_answer TEXT, -- For fill_blank, true_false
     correct_answers JSONB, -- For matching, ordering: [{"left": "A", "right": "1"}]
-    
+
     -- Explanation
     explanation TEXT,
     explanation_vi TEXT,
-    
+
     -- Source
     vocabulary_id UUID REFERENCES learning_content.vocabulary(id),
     grammar_id UUID REFERENCES learning_content.grammar_points(id),
     lesson_id UUID REFERENCES learning_content.lessons(id),
-    
+
     -- Classification
     jlpt_level jlpt_level,
     difficulty_score INT DEFAULT 1,
     tags TEXT[],
-    
+
     -- Media
     audio_url TEXT,
     image_url TEXT,
-    
+
     status content_status DEFAULT 'DRAFT',
-    
+
     created_by UUID REFERENCES user_management.users(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -830,37 +827,37 @@ CREATE TABLE assignment.quiz_questions (
 -- Assignments (quiz/test)
 CREATE TABLE assignment.assignments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    
+
     title VARCHAR(255) NOT NULL,
     description TEXT,
     instructions TEXT,
-    
+
     assignment_type assignment_type NOT NULL,
-    
+
     -- Timing
     start_date TIMESTAMP WITH TIME ZONE,
     due_date TIMESTAMP WITH TIME ZONE NOT NULL,
     time_limit_minutes INT, -- NULL = no limit
     late_submission_allowed BOOLEAN DEFAULT FALSE,
     late_submission_penalty_percent INT DEFAULT 0,
-    
+
     -- Scoring
     max_score INT DEFAULT 100,
     passing_score INT DEFAULT 60,
-    
+
     -- Quiz settings
     shuffle_questions BOOLEAN DEFAULT FALSE,
     shuffle_options BOOLEAN DEFAULT FALSE,
     show_correct_answers BOOLEAN DEFAULT TRUE, -- After submission
     allow_retry BOOLEAN DEFAULT FALSE,
     max_retries INT DEFAULT 1,
-    
+
     -- Content references (link to lesson for quiz generation)
     lesson_id UUID REFERENCES learning_content.lessons(id),
     question_count INT DEFAULT 10, -- How many questions to include
-    
+
     status assignment_status DEFAULT 'DRAFT',
-    
+
     created_by UUID NOT NULL REFERENCES user_management.users(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -871,10 +868,10 @@ CREATE TABLE assignment.assignment_questions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     assignment_id UUID NOT NULL REFERENCES assignment.assignments(id) ON DELETE CASCADE,
     question_id UUID NOT NULL REFERENCES assignment.quiz_questions(id) ON DELETE CASCADE,
-    
+
     order_index INT DEFAULT 0,
     points INT DEFAULT 10, -- Points for this question
-    
+
     UNIQUE(assignment_id, question_id)
 );
 
@@ -882,13 +879,13 @@ CREATE TABLE assignment.assignment_questions (
 CREATE TABLE assignment.assignment_targets (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     assignment_id UUID NOT NULL REFERENCES assignment.assignments(id) ON DELETE CASCADE,
-    
+
     class_id UUID REFERENCES user_management.classes(id) ON DELETE CASCADE,
     user_id UUID REFERENCES user_management.users(id) ON DELETE CASCADE,
-    
+
     assigned_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     assigned_by UUID REFERENCES user_management.users(id),
-    
+
     CHECK (class_id IS NOT NULL OR user_id IS NOT NULL)
 );
 
@@ -897,14 +894,14 @@ CREATE TABLE assignment.assignment_submissions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     assignment_id UUID NOT NULL REFERENCES assignment.assignments(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
-    
+
     status submission_status DEFAULT 'NOT_STARTED',
     attempt_number INT DEFAULT 1,
-    
+
     -- Progress
     started_at TIMESTAMP WITH TIME ZONE,
     submitted_at TIMESTAMP WITH TIME ZONE,
-    
+
     -- Scoring
     score DECIMAL(5,2),
     correct_count INT DEFAULT 0,
@@ -912,10 +909,10 @@ CREATE TABLE assignment.assignment_submissions (
     feedback TEXT,
     graded_by UUID REFERENCES user_management.users(id),
     graded_at TIMESTAMP WITH TIME ZONE,
-    
+
     -- Time tracking
     time_spent_seconds INT DEFAULT 0,
-    
+
     -- Answers (JSONB)
     answers JSONB DEFAULT '[]'::JSONB,
     /*
@@ -924,10 +921,10 @@ CREATE TABLE assignment.assignment_submissions (
         {"questionId": "uuid", "selectedAnswer": "A", "isCorrect": true, "timeSpent": 15}
     ]
     */
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
+
     UNIQUE(assignment_id, user_id, attempt_number)
 );
 
@@ -940,26 +937,26 @@ CREATE TABLE progress.daily_activity (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
     activity_date DATE NOT NULL,
-    
+
     -- Time spent
     total_study_minutes INT DEFAULT 0,
     pronunciation_minutes INT DEFAULT 0,
     conversation_minutes INT DEFAULT 0,
     quiz_minutes INT DEFAULT 0,
-    
+
     -- Practice counts
     pronunciation_attempts INT DEFAULT 0,
     conversation_messages INT DEFAULT 0,
     quizzes_completed INT DEFAULT 0,
-    
+
     -- Scores
     avg_pronunciation_score DECIMAL(5,2),
     avg_conversation_score DECIMAL(5,2),
     avg_quiz_score DECIMAL(5,2),
-    
+
     -- EXP earned
     exp_earned INT DEFAULT 0,
-    
+
     -- Detailed analytics (JSONB)
     analytics JSONB DEFAULT '{}'::JSONB,
     /*
@@ -974,10 +971,10 @@ CREATE TABLE progress.daily_activity (
         ]
     }
     */
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
+
     UNIQUE(user_id, activity_date)
 );
 
@@ -985,29 +982,29 @@ CREATE TABLE progress.daily_activity (
 CREATE TABLE progress.user_progress (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
-    
+
     -- Current level
     current_jlpt_level jlpt_level DEFAULT 'N5',
-    
+
     -- Overall stats
     total_study_minutes INT DEFAULT 0,
     total_pronunciation_attempts INT DEFAULT 0,
     total_conversation_sessions INT DEFAULT 0,
     total_quizzes_completed INT DEFAULT 0,
-    
+
     -- Average scores
     avg_pronunciation_accuracy DECIMAL(5,2) DEFAULT 0,
     avg_conversation_fluency DECIMAL(5,2) DEFAULT 0,
     avg_quiz_score DECIMAL(5,2) DEFAULT 0,
-    
+
     -- Mastery counts
     pronunciation_topics_completed INT DEFAULT 0,
     pronunciation_items_mastered INT DEFAULT 0,
     conversation_topics_completed INT DEFAULT 0,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
+
     UNIQUE(user_id)
 );
 
@@ -1015,22 +1012,22 @@ CREATE TABLE progress.user_progress (
 CREATE TABLE progress.user_mistakes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
-    
+
     mistake_type VARCHAR(50) NOT NULL, -- 'pronunciation', 'grammar', 'vocabulary'
     mistake_category VARCHAR(100), -- specific sound, grammar point, etc.
-    
+
     -- Details
     original_text TEXT,
     correct_text TEXT,
     explanation TEXT,
-    
+
     occurrence_count INT DEFAULT 1,
     last_occurred_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
+
     -- Resolution
     is_resolved BOOLEAN DEFAULT FALSE,
     resolved_at TIMESTAMP WITH TIME ZONE,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -1045,24 +1042,24 @@ CREATE INDEX idx_user_mistakes_user_type ON progress.user_mistakes(user_id, mist
 CREATE TABLE gamification.user_stats (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
-    
+
     -- Points
     total_exp INT DEFAULT 0,
     current_level INT DEFAULT 1,
     exp_to_next_level INT DEFAULT 100,
-    
+
     -- Currency
     coins INT DEFAULT 0,
-    
+
     -- Streaks
     current_streak INT DEFAULT 0,
     longest_streak INT DEFAULT 0,
     streak_last_date DATE,
     streak_freeze_count INT DEFAULT 0,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
+
     UNIQUE(user_id)
 );
 
@@ -1070,40 +1067,40 @@ CREATE TABLE gamification.user_stats (
 CREATE TABLE gamification.streak_history (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
-    
+
     streak_date DATE NOT NULL,
     streak_count INT NOT NULL,
-    
+
     activity_type VARCHAR(50),
     exp_earned INT DEFAULT 0,
     freeze_used BOOLEAN DEFAULT FALSE,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
+
     UNIQUE(user_id, streak_date)
 );
 
 -- Badges definition
 CREATE TABLE gamification.badges (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    
+
     name VARCHAR(100) NOT NULL,
     name_japanese VARCHAR(100),
     description TEXT,
-    
+
     badge_type badge_type NOT NULL,
-    
+
     requirement_type VARCHAR(50),
     requirement_value INT,
     requirement_details JSONB,
-    
+
     icon_url TEXT,
     color VARCHAR(20),
     rarity item_rarity DEFAULT 'COMMON',
-    
+
     exp_reward INT DEFAULT 0,
     coin_reward INT DEFAULT 0,
-    
+
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -1113,10 +1110,10 @@ CREATE TABLE gamification.user_badges (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
     badge_id UUID NOT NULL REFERENCES gamification.badges(id) ON DELETE CASCADE,
-    
+
     earned_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     is_featured BOOLEAN DEFAULT FALSE,
-    
+
     UNIQUE(user_id, badge_id)
 );
 
@@ -1124,20 +1121,20 @@ CREATE TABLE gamification.user_badges (
 CREATE TABLE gamification.leaderboard (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
-    
+
     global_rank INT,
     weekly_rank INT,
     class_rank INT,
-    
+
     total_exp INT DEFAULT 0,
     weekly_exp INT DEFAULT 0,
     monthly_exp INT DEFAULT 0,
-    
+
     period_start DATE,
     period_end DATE,
-    
+
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
+
     UNIQUE(user_id, period_start)
 );
 
@@ -1145,17 +1142,17 @@ CREATE TABLE gamification.leaderboard (
 CREATE TABLE gamification.reward_transactions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
-    
+
     transaction_type transaction_type NOT NULL,
     reward_type reward_type NOT NULL,
-    
+
     amount INT NOT NULL,
     balance_after INT,
-    
+
     source_type VARCHAR(50),
     source_id UUID,
     description TEXT,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1168,27 +1165,27 @@ CREATE INDEX idx_reward_transactions_user ON gamification.reward_transactions(us
 -- Shop items
 CREATE TABLE shop.items (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    
+
     name VARCHAR(255) NOT NULL,
     name_japanese VARCHAR(255),
     description TEXT,
-    
+
     item_type item_type NOT NULL,
     rarity item_rarity DEFAULT 'COMMON',
-    
+
     price_coins INT DEFAULT 0,
     price_real_money DECIMAL(10,2),
-    
+
     is_available BOOLEAN DEFAULT TRUE,
     available_from TIMESTAMP WITH TIME ZONE,
     available_until TIMESTAMP WITH TIME ZONE,
     stock_limit INT,
-    
+
     thumbnail_url TEXT,
     preview_url TEXT,
-    
+
     item_data JSONB,
-    
+
     created_by UUID REFERENCES user_management.users(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -1199,15 +1196,15 @@ CREATE TABLE shop.user_items (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
     item_id UUID NOT NULL REFERENCES shop.items(id) ON DELETE CASCADE,
-    
+
     purchased_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     price_paid INT,
-    
+
     is_equipped BOOLEAN DEFAULT FALSE,
     equipped_at TIMESTAMP WITH TIME ZONE,
-    
+
     quantity INT DEFAULT 1,
-    
+
     UNIQUE(user_id, item_id)
 );
 
@@ -1216,14 +1213,14 @@ CREATE TABLE shop.purchase_history (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
     item_id UUID NOT NULL REFERENCES shop.items(id),
-    
+
     quantity INT DEFAULT 1,
     total_price INT NOT NULL,
     payment_method VARCHAR(50),
-    
+
     payment_reference VARCHAR(255),
     payment_status VARCHAR(50),
-    
+
     purchased_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1235,37 +1232,37 @@ CREATE TABLE shop.purchase_history (
 CREATE TABLE system_admin.usage_statistics (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     stat_date DATE NOT NULL,
-    
+
     total_users INT DEFAULT 0,
     active_users INT DEFAULT 0,
     new_users INT DEFAULT 0,
-    
+
     total_sessions INT DEFAULT 0,
     total_pronunciation_practices INT DEFAULT 0,
     total_conversation_sessions INT DEFAULT 0,
     total_quizzes_completed INT DEFAULT 0,
-    
+
     avg_response_time_ms INT,
     error_count INT DEFAULT 0,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
+
     UNIQUE(stat_date)
 );
 
 -- Import history
 CREATE TABLE system_admin.import_history (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    
+
     import_type VARCHAR(50) NOT NULL,
     file_name VARCHAR(255),
-    
+
     total_records INT DEFAULT 0,
     successful_records INT DEFAULT 0,
     failed_records INT DEFAULT 0,
-    
+
     error_details JSONB,
-    
+
     imported_by UUID REFERENCES user_management.users(id),
     imported_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -1273,42 +1270,42 @@ CREATE TABLE system_admin.import_history (
 -- Curriculum imports
 CREATE TABLE system_admin.curriculum_imports (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    
+
     original_filename VARCHAR(255) NOT NULL,
     file_url TEXT NOT NULL,
     file_size_bytes BIGINT,
     file_type VARCHAR(50),
     total_pages INT,
-    
+
     course_id UUID REFERENCES learning_content.courses(id),
-    
+
     status processing_status NOT NULL DEFAULT 'QUEUED',
     current_step VARCHAR(50),
-    
+
     progress_percent DECIMAL(5,2) DEFAULT 0,
     pages_processed INT DEFAULT 0,
     chunks_created INT DEFAULT 0,
     embeddings_created INT DEFAULT 0,
-    
+
     lessons_created INT DEFAULT 0,
     grammar_points_created INT DEFAULT 0,
     vocabulary_created INT DEFAULT 0,
     quiz_questions_created INT DEFAULT 0,
-    
+
     queued_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     started_at TIMESTAMP WITH TIME ZONE,
     completed_at TIMESTAMP WITH TIME ZONE,
     estimated_completion_at TIMESTAMP WITH TIME ZONE,
-    
+
     estimated_cost_usd DECIMAL(10,4),
     actual_cost_usd DECIMAL(10,4),
     tokens_used INT DEFAULT 0,
-    
+
     error_message TEXT,
     error_details JSONB,
     retry_count INT DEFAULT 0,
     max_retries INT DEFAULT 3,
-    
+
     created_by UUID NOT NULL REFERENCES user_management.users(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -1321,25 +1318,25 @@ CREATE INDEX idx_curriculum_imports_course ON system_admin.curriculum_imports(co
 CREATE TABLE system_admin.import_chunks (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     import_id UUID NOT NULL REFERENCES system_admin.curriculum_imports(id) ON DELETE CASCADE,
-    
+
     chunk_index INT NOT NULL,
     chunk_type VARCHAR(50),
     content TEXT NOT NULL,
-    
+
     page_start INT,
     page_end INT,
-    
+
     status VARCHAR(20) DEFAULT 'PENDING',
-    
+
     extracted_data JSONB,
     extraction_confidence DECIMAL(3,2),
-    
+
     embedding_id UUID,
-    
+
     token_count INT,
     processing_time_ms INT,
     error_message TEXT,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     processed_at TIMESTAMP WITH TIME ZONE
@@ -1350,18 +1347,18 @@ CREATE INDEX idx_import_chunks_import ON system_admin.import_chunks(import_id, s
 -- Audit log
 CREATE TABLE system_admin.audit_log (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    
+
     user_id UUID REFERENCES user_management.users(id),
     action VARCHAR(100) NOT NULL,
     entity_type VARCHAR(100),
     entity_id UUID,
-    
+
     old_values JSONB,
     new_values JSONB,
-    
+
     ip_address INET,
     user_agent TEXT,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1372,22 +1369,22 @@ CREATE INDEX idx_audit_log_entity ON system_admin.audit_log(entity_type, entity_
 CREATE TABLE system_admin.notification_queue (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
-    
+
     notification_type VARCHAR(50) NOT NULL, -- 'STREAK_REMINDER', 'ASSIGNMENT_DUE', etc.
-    
+
     title VARCHAR(255),
     body TEXT,
     data JSONB DEFAULT '{}'::JSONB,
-    
+
     status VARCHAR(20) DEFAULT 'PENDING', -- 'PENDING', 'SENT', 'FAILED', 'CANCELLED'
     channel VARCHAR(20), -- 'PUSH', 'EMAIL', 'IN_APP'
-    
+
     scheduled_at TIMESTAMP WITH TIME ZONE NOT NULL,
     sent_at TIMESTAMP WITH TIME ZONE,
-    
+
     retry_count INT DEFAULT 0,
     last_error TEXT,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1402,47 +1399,50 @@ CREATE INDEX idx_notification_queue_status ON system_admin.notification_queue(st
 CREATE TABLE progress.user_embeddings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES user_management.users(id) ON DELETE CASCADE,
-    
+
     embedding vector(1536),
     embedding_type VARCHAR(50) NOT NULL,
-    
+
     metadata JSONB,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_user_embeddings_vector ON progress.user_embeddings 
+CREATE INDEX idx_user_embeddings_vector ON progress.user_embeddings
 USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 
 -- Content embeddings
 CREATE TABLE progress.content_embeddings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    
+
     content_type VARCHAR(50) NOT NULL,
     content_id UUID NOT NULL,
-    
+
     embedding vector(1536),
     text_content TEXT NOT NULL,
-    
+
     metadata JSONB DEFAULT '{}'::JSONB,
-    
+
     chunk_index INT,
     import_id UUID,
-    
+
     token_count INT,
-    
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
+
     UNIQUE(content_type, content_id, chunk_index)
 );
 
-CREATE INDEX idx_content_embeddings_vector ON progress.content_embeddings 
+CREATE INDEX idx_content_embeddings_vector ON progress.content_embeddings
 USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 CREATE INDEX idx_content_embeddings_type ON progress.content_embeddings(content_type);
 CREATE INDEX idx_content_embeddings_metadata ON progress.content_embeddings USING gin(metadata);
 
+
+-- ====================FOREIGN KEY =========================================
+ALTER TABLE user_management.classes ADD CONSTRAINT fk_classes_course FOREIGN KEY (course_id) REFERENCES learning_content.courses(id);
 -- ==========================================================================
 -- ==================== ADDITIONAL INDEXES ==================================
 -- ==========================================================================
@@ -1514,12 +1514,12 @@ DO $$
 DECLARE
     t text;
 BEGIN
-    FOR t IN 
-        SELECT table_schema || '.' || table_name 
-        FROM information_schema.columns 
-        WHERE column_name = 'updated_at' 
-        AND table_schema IN ('user_management', 'learning_content', 'pronunciation', 
-                            'speaking', 'assignment', 'progress', 'gamification', 
+    FOR t IN
+        SELECT table_schema || '.' || table_name
+        FROM information_schema.columns
+        WHERE column_name = 'updated_at'
+        AND table_schema IN ('user_management', 'learning_content', 'pronunciation',
+                            'speaking', 'assignment', 'progress', 'gamification',
                             'shop', 'ai_conversation')
     LOOP
         EXECUTE format('
@@ -1609,7 +1609,7 @@ INSERT INTO gamification.badges (name, name_japanese, description, badge_type, r
 
 -- Default conversation topics
 INSERT INTO speaking.conversation_topics (title, title_japanese, description, scenario, category, jlpt_level, difficulty_score, is_roleplay, vocabulary_hints, grammar_points, useful_expressions, order_index, status) VALUES
-('Self Introduction', '自己紹介', 'Practice introducing yourself in Japanese', 'You are meeting someone new at a language exchange event.', 'daily_life', 'N5', 1, false, 
+('Self Introduction', '自己紹介', 'Practice introducing yourself in Japanese', 'You are meeting someone new at a language exchange event.', 'daily_life', 'N5', 1, false,
     '[{"word": "名前", "reading": "なまえ", "meaning": "name"}, {"word": "出身", "reading": "しゅっしん", "meaning": "hometown"}]'::JSONB,
     '["～です", "～と申します"]'::JSONB,
     '["はじめまして", "よろしくお願いします", "～から来ました"]'::JSONB, 1, 'PUBLISHED'),
