@@ -520,6 +520,24 @@ class UserServiceImplTest {
             // Then
             verify(userRepository).save(any(User.class));
         }
+
+        @Test
+        @DisplayName("Should reject updating status to DELETED")
+        void shouldRejectUpdatingStatusToDeleted() {
+            UUID learnerId = (UUID) ReflectionTestUtils.getField(testLearner, "id");
+            UpdateUserRequest request = UpdateUserRequest.builder()
+                    .status(UserStatus.DELETED)
+                    .build();
+
+            given(userRepository.findById(learnerId)).willReturn(Optional.of(testLearner));
+
+            assertThatThrownBy(() ->
+                    userService.updateUser(learnerId, request, adminId, UserRole.ADMIN)
+            ).isInstanceOf(BusinessException.class)
+             .hasMessageContaining("Không thể cập nhật trạng thái thành DELETED");
+
+            verify(userRepository, never()).save(any(User.class));
+        }
     }
 
     @Nested
@@ -727,6 +745,20 @@ class UserServiceImplTest {
             assertThat(result.getUserInfo().getRole()).isEqualTo(UserRole.TEACHER);
             assertThat(result.getTaughtClasses()).isEmpty(); // Empty until class module available
             assertThat(result.getTotalClasses()).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("Manager should not view manager detail")
+        void managerShouldNotViewManagerDetail() {
+            UUID managerId2 = (UUID) ReflectionTestUtils.getField(testManager, "id");
+            given(userRepository.findById(managerId2)).willReturn(Optional.of(testManager));
+
+            assertThatThrownBy(() ->
+                    userService.getUserDetailById(UserRole.MANAGER, managerId2)
+            ).isInstanceOf(BusinessException.class)
+             .hasMessageContaining("không có quyền xem chi tiết tài khoản Manager/Admin");
+
+            verify(userMapper, never()).toResponse(any(User.class));
         }
     }
 
