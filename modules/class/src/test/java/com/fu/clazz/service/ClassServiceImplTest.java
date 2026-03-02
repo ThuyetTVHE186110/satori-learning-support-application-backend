@@ -140,6 +140,7 @@ class ClassServiceImplTest {
                 .endDate(LocalDate.now().plusMonths(4))
                 .isActive(true)
                 .memberCount(0L)
+                .teacherPhoneNumber("0123456789")
                 .build();
 
         testSummaryResponse = ClassSummaryResponse.builder()
@@ -187,6 +188,7 @@ class ClassServiceImplTest {
                 .email("teacher@example.com")
                 .firstName("Test")
                 .lastName("Teacher")
+                .phoneNumber("0123456789")
                 .role(UserRole.TEACHER)
                 .status(UserStatus.ACTIVE)
                 .build();
