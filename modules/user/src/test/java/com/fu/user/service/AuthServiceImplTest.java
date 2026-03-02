@@ -1,7 +1,6 @@
 package com.fu.user.service;
 
 import com.fu.common.exception.BusinessException;
-import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.infrastructure.email.EmailService;
 import com.fu.user.dto.auth.*;
 import com.fu.user.entity.*;
@@ -25,17 +24,14 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.anyInt;
 
 /**
  * Unit tests for AuthServiceImpl.
@@ -68,6 +64,9 @@ class AuthServiceImplTest {
     @Mock
     private FirebaseAuth firebaseAuth;
 
+    @Mock
+    private LoginAttemptService loginAttemptService;
+
     @InjectMocks
     private AuthServiceImpl authService;
 
@@ -86,7 +85,7 @@ class AuthServiceImplTest {
     @BeforeEach
     void setUp() {
         userId = UUID.randomUUID();
-        
+
         testUser = User.builder()
                 .email("test@example.com")
                 .passwordHash("hashedPassword")
@@ -99,13 +98,13 @@ class AuthServiceImplTest {
                 .failedLoginAttempts(0)
                 .build();
         ReflectionTestUtils.setField(testUser, "id", userId);
-        
+
         deviceInfo = DeviceInfo.builder()
                 .deviceType("desktop")
                 .os("Windows 11")
                 .browser("Chrome")
                 .build();
-        
+
         testSession = UserSession.builder()
                 .user(testUser)
                 .refreshToken("refresh-token")
@@ -218,29 +217,30 @@ class AuthServiceImplTest {
             request.setEmail("test@example.com");
             request.setPassword("ValidPassword123!");
             request.setDeviceInfo(deviceInfo);
-            
+
             String accessToken = "jwt-access-token";
             String refreshToken = "jwt-refresh-token";
-            
+
             given(userRepository.findByEmail(request.getEmail())).willReturn(Optional.of(testUser));
-            given(passwordEncoder.matches(request.getPassword(), testUser.getPasswordHash())).willReturn(true);
+            given(passwordEncoder.matches(request.getPassword(), testUser.getPasswordHash()))
+                    .willReturn(true);
             given(jwtService.generateAccessToken(eq(testUser), any(UUID.class))).willReturn(accessToken);
             given(jwtService.generateRefreshToken(any(UUID.class))).willReturn(refreshToken);
             given(sessionRepository.save(any(UserSession.class))).willReturn(testSession);
-            
+
             // When
             LoginResponse result = authService.login(request, "127.0.0.1", "Chrome");
-            
+
             // Then
             assertThat(result).isNotNull();
             assertThat(result.getAccessToken()).isEqualTo(accessToken);
             assertThat(result.getRefreshToken()).isEqualTo(refreshToken);
-            
+
             verify(userRepository).save(userCaptor.capture());
             User savedUser = userCaptor.getValue();
             assertThat(savedUser.getFailedLoginAttempts()).isEqualTo(0);
             assertThat(savedUser.getLastLoginAt()).isNotNull();
-            
+
             verify(sessionRepository, times(2)).save(any(UserSession.class));
         }
 
@@ -252,18 +252,23 @@ class AuthServiceImplTest {
             request.setEmail("test@example.com");
             request.setPassword("WrongPassword");
             request.setDeviceInfo(deviceInfo);
-            
+
             given(userRepository.findByEmail(request.getEmail())).willReturn(Optional.of(testUser));
-            given(passwordEncoder.matches(request.getPassword(), testUser.getPasswordHash())).willReturn(false);
-            
+            given(passwordEncoder.matches(request.getPassword(), testUser.getPasswordHash()))
+                    .willReturn(false);
+
+            doAnswer(invocation -> {
+                User u = invocation.getArgument(0);
+                u.setFailedLoginAttempts(u.getFailedLoginAttempts() + 1);
+                return null;
+            }).when(loginAttemptService).handleFailedLogin(any(User.class));
+
             // When/Then
-            assertThatThrownBy(() -> 
-                authService.login(request, "127.0.0.1", "Chrome")
-            )
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("email hoặc mật khẩu");
-            
-            verify(userRepository).save(userCaptor.capture());
+            assertThatThrownBy(() -> authService.login(request, "127.0.0.1", "Chrome"))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("email hoặc mật khẩu");
+
+            verify(loginAttemptService).handleFailedLogin(userCaptor.capture());
             User savedUser = userCaptor.getValue();
             assertThat(savedUser.getFailedLoginAttempts()).isEqualTo(1);
         }
@@ -387,17 +392,24 @@ class AuthServiceImplTest {
             request.setEmail("test@example.com");
             request.setPassword("WrongPassword");
             request.setDeviceInfo(deviceInfo);
-            
+
             given(userRepository.findByEmail(request.getEmail())).willReturn(Optional.of(testUser));
-            given(passwordEncoder.matches(request.getPassword(), testUser.getPasswordHash())).willReturn(false);
-            
+            given(passwordEncoder.matches(request.getPassword(), testUser.getPasswordHash()))
+                    .willReturn(false);
+
+            doAnswer(invocation -> {
+                User u = invocation.getArgument(0);
+                u.setFailedLoginAttempts(u.getFailedLoginAttempts() + 1);
+                u.setLockedUntil(LocalDateTime.now().plusMinutes(30));
+                return null;
+            }).when(loginAttemptService).handleFailedLogin(any(User.class));
+
             // When/Then
-            assertThatThrownBy(() -> 
-                authService.login(request, "127.0.0.1", "Chrome")
-            )
-            .isInstanceOf(BusinessException.class);
-            
-            verify(userRepository).save(userCaptor.capture());
+            assertThatThrownBy(() -> authService.login(request, "127.0.0.1", "Chrome"))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("khóa");
+
+            verify(loginAttemptService).handleFailedLogin(userCaptor.capture());
             User savedUser = userCaptor.getValue();
             assertThat(savedUser.getFailedLoginAttempts()).isEqualTo(5);
             assertThat(savedUser.getLockedUntil()).isNotNull();
@@ -412,14 +424,12 @@ class AuthServiceImplTest {
             request.setEmail("test@example.com");
             request.setPassword("password");
             request.setDeviceInfo(deviceInfo);
-            
+
             given(userRepository.findByEmail(request.getEmail())).willReturn(Optional.of(testUser));
-            
+
             // When/Then
-            assertThatThrownBy(() -> 
-                authService.login(request, "127.0.0.1", "Chrome")
-            )
-            .isInstanceOf(BusinessException.class);
+            assertThatThrownBy(() -> authService.login(request, "127.0.0.1", "Chrome"))
+                    .isInstanceOf(BusinessException.class);
         }
 
         @Test
@@ -433,6 +443,7 @@ class AuthServiceImplTest {
             request.setDeviceInfo(deviceInfo);
 
             given(userRepository.findByEmail(request.getEmail())).willReturn(Optional.of(testUser));
+
 
             // When/Then
             assertThatThrownBy(() ->
@@ -549,14 +560,15 @@ class AuthServiceImplTest {
             // Given
             ForgotPasswordRequest request = new ForgotPasswordRequest();
             request.setEmail("test@example.com");
-            
+
             given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
             given(userRepository.save(any(User.class))).willReturn(testUser);
-            doNothing().when(emailService).sendPasswordResetOtp(anyString(), anyString(), anyString(), anyInt());
-            
+            doNothing().when(emailService).sendPasswordResetOtp(anyString(), anyString(), anyString(),
+                    anyInt());
+
             // When
             authService.forgotPassword(request);
-            
+
             // Then
             verify(userRepository).save(userCaptor.capture());
             User savedUser = userCaptor.getValue();
@@ -564,13 +576,12 @@ class AuthServiceImplTest {
             assertThat(savedUser.getPasswordResetToken()).hasSize(6);
             assertThat(savedUser.getPasswordResetToken()).matches("\\d{6}"); // 6 digits
             assertThat(savedUser.getPasswordResetTokenExpiresAt()).isAfter(LocalDateTime.now());
-            
+
             verify(emailService).sendPasswordResetOtp(
                     eq("test@example.com"),
                     anyString(),
                     anyString(),
-                    eq(10)
-            );
+                    eq(10));
         }
 
         @Test
@@ -579,16 +590,15 @@ class AuthServiceImplTest {
             // Given
             ForgotPasswordRequest request = new ForgotPasswordRequest();
             request.setEmail("nonexistent@example.com");
-            
+
             given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.empty());
-            
+
             // When/Then - Should not throw exception (security best practice)
-            assertThatNoException().isThrownBy(() -> 
-                authService.forgotPassword(request)
-            );
-            
+            assertThatNoException().isThrownBy(() -> authService.forgotPassword(request));
+
             verify(userRepository, never()).save(any(User.class));
-            verify(emailService, never()).sendPasswordResetOtp(anyString(), anyString(), anyString(), anyInt());
+            verify(emailService, never()).sendPasswordResetOtp(anyString(), anyString(), anyString(),
+                    anyInt());
         }
 
         @Test
@@ -599,15 +609,14 @@ class AuthServiceImplTest {
             testUser.setPasswordHash(null); // Google-only account
             ForgotPasswordRequest request = new ForgotPasswordRequest();
             request.setEmail("test@example.com");
-            
+
             given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
-            
+
             // When/Then - Should not throw exception or send email
-            assertThatNoException().isThrownBy(() -> 
-                authService.forgotPassword(request)
-            );
-            
-            verify(emailService, never()).sendPasswordResetOtp(anyString(), anyString(), anyString(), anyInt());
+            assertThatNoException().isThrownBy(() -> authService.forgotPassword(request));
+
+            verify(emailService, never()).sendPasswordResetOtp(anyString(), anyString(), anyString(),
+                    anyInt());
         }
     }
 
@@ -621,23 +630,23 @@ class AuthServiceImplTest {
             // Given
             testUser.setPasswordResetToken("123456");
             testUser.setPasswordResetTokenExpiresAt(LocalDateTime.now().plusMinutes(10));
-            
+
             VerifyOtpRequest request = new VerifyOtpRequest();
             request.setEmail("test@example.com");
             request.setOtp("123456");
-            
+
             given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
             given(userRepository.save(any(User.class))).willReturn(testUser);
-            
+
             // When
             VerifyOtpResponse response = authService.verifyOtp(request);
-            
+
             // Then
             assertThat(response).isNotNull();
             assertThat(response.getResetToken()).isNotNull();
             assertThat(response.getEmail()).isEqualTo("test@example.com");
             assertThat(response.getExpiresInSeconds()).isEqualTo(300); // 5 minutes
-            
+
             verify(userRepository).save(userCaptor.capture());
             User savedUser = userCaptor.getValue();
             assertThat(savedUser.getPasswordResetToken()).isNotEqualTo("123456"); // Token changed to UUID
@@ -650,19 +659,17 @@ class AuthServiceImplTest {
             // Given
             testUser.setPasswordResetToken("123456");
             testUser.setPasswordResetTokenExpiresAt(LocalDateTime.now().plusMinutes(10));
-            
+
             VerifyOtpRequest request = new VerifyOtpRequest();
             request.setEmail("test@example.com");
             request.setOtp("999999");
-            
+
             given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
-            
+
             // When/Then
-            assertThatThrownBy(() -> 
-                authService.verifyOtp(request)
-            )
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("OTP");
+            assertThatThrownBy(() -> authService.verifyOtp(request))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("OTP");
         }
 
         @Test
@@ -671,19 +678,17 @@ class AuthServiceImplTest {
             // Given
             testUser.setPasswordResetToken("123456");
             testUser.setPasswordResetTokenExpiresAt(LocalDateTime.now().minusMinutes(1)); // Expired
-            
+
             VerifyOtpRequest request = new VerifyOtpRequest();
             request.setEmail("test@example.com");
             request.setOtp("123456");
-            
+
             given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
-            
+
             // When/Then
-            assertThatThrownBy(() -> 
-                authService.verifyOtp(request)
-            )
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("hết hạn");
+            assertThatThrownBy(() -> authService.verifyOtp(request))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("hết hạn");
         }
     }
 
@@ -698,31 +703,30 @@ class AuthServiceImplTest {
             String resetToken = UUID.randomUUID().toString();
             testUser.setPasswordResetToken(resetToken);
             testUser.setPasswordResetTokenExpiresAt(LocalDateTime.now().plusMinutes(5));
-            
+
             ResetPasswordRequest request = new ResetPasswordRequest();
             request.setResetToken(resetToken);
             request.setNewPassword("NewPassword123!");
             request.setConfirmPassword("NewPassword123!");
-            
+
             given(userRepository.findByPasswordResetToken(resetToken)).willReturn(Optional.of(testUser));
             given(passwordEncoder.encode(request.getNewPassword())).willReturn("newHashedPassword");
             given(userRepository.save(any(User.class))).willReturn(testUser);
             doNothing().when(emailService).sendPasswordChangedNotification(anyString(), anyString());
-            
+
             // When
             authService.resetPassword(request);
-            
+
             // Then
             verify(userRepository).save(userCaptor.capture());
             User savedUser = userCaptor.getValue();
             assertThat(savedUser.getPasswordHash()).isEqualTo("newHashedPassword");
             assertThat(savedUser.getPasswordResetToken()).isNull();
             assertThat(savedUser.getPasswordResetTokenExpiresAt()).isNull();
-            
+
             verify(emailService).sendPasswordChangedNotification(
                     eq("test@example.com"),
-                    anyString()
-            );
+                    anyString());
         }
 
         @Test
@@ -733,15 +737,13 @@ class AuthServiceImplTest {
             request.setResetToken("invalid-token");
             request.setNewPassword("NewPassword123!");
             request.setConfirmPassword("NewPassword123!");
-            
+
             given(userRepository.findByPasswordResetToken("invalid-token")).willReturn(Optional.empty());
-            
+
             // When/Then
-            assertThatThrownBy(() -> 
-                authService.resetPassword(request)
-            )
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Token");
+            assertThatThrownBy(() -> authService.resetPassword(request))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Token");
         }
 
         @Test
@@ -751,21 +753,19 @@ class AuthServiceImplTest {
             String resetToken = UUID.randomUUID().toString();
             testUser.setPasswordResetToken(resetToken);
             testUser.setPasswordResetTokenExpiresAt(LocalDateTime.now().minusMinutes(1)); // Expired
-            
+
             ResetPasswordRequest request = new ResetPasswordRequest();
             request.setResetToken(resetToken);
             request.setNewPassword("NewPassword123!");
             request.setConfirmPassword("NewPassword123!");
-            
+
             given(userRepository.findByPasswordResetToken(resetToken)).willReturn(Optional.of(testUser));
             given(userRepository.save(any(User.class))).willReturn(testUser);
-            
+
             // When/Then
-            assertThatThrownBy(() -> 
-                authService.resetPassword(request)
-            )
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("hết hạn");
+            assertThatThrownBy(() -> authService.resetPassword(request))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("hết hạn");
         }
     }
 
@@ -781,26 +781,26 @@ class AuthServiceImplTest {
             request.setCurrentPassword("OldPassword123!");
             request.setNewPassword("NewPassword456@");
             request.setConfirmPassword("NewPassword456@");
-            
+
             given(userRepository.findById(userId)).willReturn(Optional.of(testUser));
-            given(passwordEncoder.matches(request.getCurrentPassword(), testUser.getPasswordHash())).willReturn(true);
+            given(passwordEncoder.matches(request.getCurrentPassword(), testUser.getPasswordHash()))
+                    .willReturn(true);
             given(passwordEncoder.encode(request.getNewPassword())).willReturn("newHashedPassword");
             given(userRepository.save(any(User.class))).willReturn(testUser);
             doNothing().when(emailService).sendPasswordChangedNotification(anyString(), anyString());
-            
+
             // When
             UUID currentSessionId = UUID.randomUUID();
             authService.changePassword(userId, request, currentSessionId);
-            
+
             // Then
             verify(userRepository).save(userCaptor.capture());
             User savedUser = userCaptor.getValue();
             assertThat(savedUser.getPasswordHash()).isEqualTo("newHashedPassword");
-            
+
             verify(emailService).sendPasswordChangedNotification(
                     eq("test@example.com"),
-                    anyString()
-            );
+                    anyString());
         }
 
         @Test
@@ -811,18 +811,17 @@ class AuthServiceImplTest {
             request.setCurrentPassword("WrongPassword");
             request.setNewPassword("NewPassword456@");
             request.setConfirmPassword("NewPassword456@");
-            
+
             given(userRepository.findById(userId)).willReturn(Optional.of(testUser));
-            given(passwordEncoder.matches(request.getCurrentPassword(), testUser.getPasswordHash())).willReturn(false);
-            
+            given(passwordEncoder.matches(request.getCurrentPassword(), testUser.getPasswordHash()))
+                    .willReturn(false);
+
             // When/Then
             UUID currentSessionId = UUID.randomUUID();
-            assertThatThrownBy(() -> 
-                authService.changePassword(userId, request, currentSessionId)
-            )
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("hiện tại");
-            
+            assertThatThrownBy(() -> authService.changePassword(userId, request, currentSessionId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("hiện tại");
+
             verify(userRepository, never()).save(any(User.class));
         }
 
@@ -835,15 +834,40 @@ class AuthServiceImplTest {
             ChangePasswordRequest request = new ChangePasswordRequest();
             request.setCurrentPassword("password");
             request.setNewPassword("newPassword");
-            
+
             given(userRepository.findById(userId)).willReturn(Optional.of(testUser));
-            
+
             // When/Then
             UUID currentSessionId = UUID.randomUUID();
-            assertThatThrownBy(() -> 
-                authService.changePassword(userId, request, currentSessionId)
-            )
-            .isInstanceOf(BusinessException.class);
+            assertThatThrownBy(() -> authService.changePassword(userId, request, currentSessionId))
+                    .isInstanceOf(BusinessException.class);
+        }
+
+
+        // Java
+        @Test
+        @DisplayName("Should reject change password when new password matches current password")
+        void shouldRejectReuseOldPassword() {
+            // Given
+            ChangePasswordRequest request = new ChangePasswordRequest();
+            request.setCurrentPassword("OldPassword123!");
+            request.setNewPassword("OldPassword123!");
+            request.setConfirmPassword("OldPassword123!");
+
+            given(userRepository.findById(userId)).willReturn(Optional.of(testUser));
+            given(passwordEncoder.matches(request.getCurrentPassword(), testUser.getPasswordHash()))
+                    .willReturn(true);
+            // Simulate reuse: new password matches existing hash
+            given(passwordEncoder.matches(request.getNewPassword(), testUser.getPasswordHash())).willReturn(true);
+
+            // When/Then
+            UUID currentSessionId = UUID.randomUUID();
+            assertThatThrownBy(() -> authService.changePassword(userId, request, currentSessionId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("trùng");
+
+            verify(userRepository, never()).save(any(User.class));
+            verify(emailService, never()).sendPasswordChangedNotification(anyString(), anyString());
         }
     }
 
@@ -857,24 +881,24 @@ class AuthServiceImplTest {
             // Given
             testUser.setAuthProvider(AuthProvider.GOOGLE);
             testUser.setGoogleId("google-user-id");
-            
+
             GoogleLoginRequest request = new GoogleLoginRequest();
             request.setIdToken("firebase-id-token");
             request.setDeviceInfo(deviceInfo);
-            
+
             FirebaseToken mockToken = mock(FirebaseToken.class);
             given(firebaseAuth.verifyIdToken(request.getIdToken())).willReturn(mockToken);
             given(mockToken.getEmail()).willReturn("test@example.com");
             given(mockToken.getUid()).willReturn("google-user-id");
-            
+
             given(userRepository.findByGoogleId("google-user-id")).willReturn(Optional.of(testUser));
             given(jwtService.generateAccessToken(eq(testUser), any(UUID.class))).willReturn("access-token");
             given(jwtService.generateRefreshToken(any(UUID.class))).willReturn("refresh-token");
             given(sessionRepository.save(any(UserSession.class))).willReturn(testSession);
-            
+
             // When
             LoginResponse result = authService.loginWithGoogle(request, "127.0.0.1", "Chrome");
-            
+
             // Then
             assertThat(result).isNotNull();
             assertThat(result.getAccessToken()).isNotNull();
@@ -888,21 +912,19 @@ class AuthServiceImplTest {
             GoogleLoginRequest request = new GoogleLoginRequest();
             request.setIdToken("firebase-id-token");
             request.setDeviceInfo(deviceInfo);
-            
+
             FirebaseToken mockToken = mock(FirebaseToken.class);
             given(firebaseAuth.verifyIdToken(request.getIdToken())).willReturn(mockToken);
             given(mockToken.getEmail()).willReturn("newuser@gmail.com");
             given(mockToken.getUid()).willReturn("new-google-id");
-            
+
             given(userRepository.findByGoogleId("new-google-id")).willReturn(Optional.empty());
             given(userRepository.findByEmail("newuser@gmail.com")).willReturn(Optional.empty());
-            
+
             // When/Then
-            assertThatThrownBy(() -> 
-                authService.loginWithGoogle(request, "127.0.0.1", "Chrome")
-            )
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("chưa được đăng ký");
+            assertThatThrownBy(() -> authService.loginWithGoogle(request, "127.0.0.1", "Chrome"))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("chưa được đăng ký");
         }
 
         @Test
@@ -912,15 +934,13 @@ class AuthServiceImplTest {
             GoogleLoginRequest request = new GoogleLoginRequest();
             request.setIdToken("invalid-token");
             request.setDeviceInfo(deviceInfo);
-            
+
             given(firebaseAuth.verifyIdToken(request.getIdToken()))
                     .willThrow(new RuntimeException("Invalid token"));
-            
+
             // When/Then
-            assertThatThrownBy(() -> 
-                authService.loginWithGoogle(request, "127.0.0.1", "Chrome")
-            )
-            .isInstanceOf(BusinessException.class);
+            assertThatThrownBy(() -> authService.loginWithGoogle(request, "127.0.0.1", "Chrome"))
+                    .isInstanceOf(BusinessException.class);
         }
     }
 
@@ -937,13 +957,13 @@ class AuthServiceImplTest {
                     .logoutAll(false)
                     .build();
             UUID sessionId = (UUID) ReflectionTestUtils.getField(testSession, "id");
-            
+
             given(jwtService.validateRefreshToken("refresh-token")).willReturn(sessionId);
             given(sessionRepository.findById(sessionId)).willReturn(Optional.of(testSession));
-            
+
             // When
             authService.logout(userId, request);
-            
+
             // Then
             assertThat(testSession.getRevokedAt()).isNotNull();
         }
@@ -955,10 +975,10 @@ class AuthServiceImplTest {
             LogoutRequest request = LogoutRequest.builder()
                     .logoutAll(true)
                     .build();
-            
+
             // When
             authService.logout(userId, request);
-            
+
             // Then
             verify(sessionRepository).revokeAllSessionsByUserId(eq(userId), any(LocalDateTime.class));
         }
@@ -976,15 +996,15 @@ class AuthServiceImplTest {
             request.setRefreshToken("valid-refresh-token");
             String newAccessToken = "new-access-token";
             UUID sessionId = (UUID) ReflectionTestUtils.getField(testSession, "id");
-            
+
             given(jwtService.validateRefreshToken("valid-refresh-token")).willReturn(sessionId);
             given(sessionRepository.findById(sessionId))
                     .willReturn(Optional.of(testSession));
             given(jwtService.generateAccessToken(eq(testUser), eq(sessionId))).willReturn(newAccessToken);
-            
+
             // When
             LoginResponse result = authService.refreshToken(request);
-            
+
             // Then
             assertThat(result).isNotNull();
             assertThat(result.getAccessToken()).isEqualTo(newAccessToken);
@@ -997,15 +1017,13 @@ class AuthServiceImplTest {
             // Given
             RefreshTokenRequest request = new RefreshTokenRequest();
             request.setRefreshToken("expired-token");
-            
+
             given(jwtService.validateRefreshToken("expired-token")).willReturn(null);
-            
+
             // When/Then
-            assertThatThrownBy(() -> 
-                authService.refreshToken(request)
-            )
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("hết hạn");
+            assertThatThrownBy(() -> authService.refreshToken(request))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("hết hạn");
         }
 
         @Test
@@ -1014,15 +1032,13 @@ class AuthServiceImplTest {
             // Given
             RefreshTokenRequest request = new RefreshTokenRequest();
             request.setRefreshToken("invalid-token");
-            
+
             given(jwtService.validateRefreshToken("invalid-token")).willReturn(null);
-            
+
             // When/Then
-            assertThatThrownBy(() -> 
-                authService.refreshToken(request)
-            )
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Refresh token");
+            assertThatThrownBy(() -> authService.refreshToken(request))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Refresh token");
         }
     }
 }
