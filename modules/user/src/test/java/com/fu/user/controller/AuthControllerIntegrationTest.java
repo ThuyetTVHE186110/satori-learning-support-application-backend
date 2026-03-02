@@ -499,8 +499,8 @@ class AuthControllerIntegrationTest {
             otpRequest.setEmail("learner@test.com");
 
             mockMvc.perform(post("/api/v1/auth/forgot-password")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(otpRequest)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(otpRequest)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true));
 
@@ -515,15 +515,15 @@ class AuthControllerIntegrationTest {
             verifyRequest.setOtp(otp);
 
             MvcResult verifyResult = mockMvc.perform(post("/api/v1/auth/verify-otp")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(verifyRequest)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(verifyRequest)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.resetToken").isNotEmpty())
                     .andExpect(jsonPath("$.data.expiresInSeconds").value(300))
                     .andReturn();
 
             String resetToken = objectMapper.readTree(
-                    verifyResult.getResponse().getContentAsString())
+                            verifyResult.getResponse().getContentAsString())
                     .path("data").path("resetToken").asText();
 
             // Step 4: Reset password
@@ -534,8 +534,8 @@ class AuthControllerIntegrationTest {
                     .build();
 
             mockMvc.perform(post("/api/v1/auth/reset-password")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(resetRequest)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(resetRequest)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.message").value("Đặt lại mật khẩu thành công"));
@@ -546,8 +546,8 @@ class AuthControllerIntegrationTest {
             loginRequest.setPassword("NewPass@1");
 
             mockMvc.perform(post("/api/v1/auth/login")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(loginRequest)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(loginRequest)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.accessToken").isNotEmpty());
 
@@ -573,8 +573,8 @@ class AuthControllerIntegrationTest {
             verifyRequest.setOtp("000000");
 
             mockMvc.perform(post("/api/v1/auth/verify-otp")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(verifyRequest)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(verifyRequest)))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.code").value("INVALID_OTP"))
                     .andExpect(jsonPath("$.message").value("Mã OTP không hợp lệ"));
@@ -597,8 +597,8 @@ class AuthControllerIntegrationTest {
             verifyRequest.setOtp("123456");
 
             mockMvc.perform(post("/api/v1/auth/verify-otp")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(verifyRequest)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(verifyRequest)))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.code").value("OTP_EXPIRED"))
                     .andExpect(jsonPath("$.message").value("Mã OTP đã hết hạn"));
@@ -617,8 +617,8 @@ class AuthControllerIntegrationTest {
                     .build();
 
             mockMvc.perform(post("/api/v1/auth/reset-password")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(req)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(req)))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("INVALID_TOKEN"));
@@ -636,8 +636,8 @@ class AuthControllerIntegrationTest {
             ForgotPasswordRequest fpReq = new ForgotPasswordRequest();
             fpReq.setEmail("learner@test.com");
             mockMvc.perform(post("/api/v1/auth/forgot-password")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(fpReq)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(fpReq)))
                     .andExpect(status().isOk());
 
             // Step 2: Read OTP from DB
@@ -650,13 +650,13 @@ class AuthControllerIntegrationTest {
             verifyReq.setOtp(otp);
 
             MvcResult verifyResult = mockMvc.perform(post("/api/v1/auth/verify-otp")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(verifyReq)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(verifyReq)))
                     .andExpect(status().isOk())
                     .andReturn();
 
             String resetToken = objectMapper.readTree(
-                    verifyResult.getResponse().getContentAsString())
+                            verifyResult.getResponse().getContentAsString())
                     .path("data").path("resetToken").asText();
 
             // Step 4: Expire the resetToken directly in DB
@@ -672,8 +672,8 @@ class AuthControllerIntegrationTest {
                     .build();
 
             mockMvc.perform(post("/api/v1/auth/reset-password")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(resetReq)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(resetReq)))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("TOKEN_EXPIRED"));
@@ -700,13 +700,13 @@ class AuthControllerIntegrationTest {
             verifyReq.setOtp(otp);
 
             MvcResult verifyResult = mockMvc.perform(post("/api/v1/auth/verify-otp")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(verifyReq)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(verifyReq)))
                     .andExpect(status().isOk())
                     .andReturn();
 
             String resetToken = objectMapper.readTree(
-                    verifyResult.getResponse().getContentAsString())
+                            verifyResult.getResponse().getContentAsString())
                     .path("data").path("resetToken").asText();
 
             // Step 2: First use — succeeds
@@ -717,8 +717,8 @@ class AuthControllerIntegrationTest {
                     .build();
 
             mockMvc.perform(post("/api/v1/auth/reset-password")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(firstReset)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(firstReset)))
                     .andExpect(status().isOk());
 
             // Step 3: Second use with SAME token — must fail
@@ -729,8 +729,8 @@ class AuthControllerIntegrationTest {
                     .build();
 
             mockMvc.perform(post("/api/v1/auth/reset-password")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(secondReset)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(secondReset)))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("INVALID_TOKEN"));
@@ -749,8 +749,8 @@ class AuthControllerIntegrationTest {
                     .build();
 
             mockMvc.perform(post("/api/v1/auth/reset-password")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(resetRequest)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(resetRequest)))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false));
         }
@@ -777,13 +777,13 @@ class AuthControllerIntegrationTest {
             verifyReq.setOtp(otp);
 
             MvcResult verifyResult = mockMvc.perform(post("/api/v1/auth/verify-otp")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(verifyReq)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(verifyReq)))
                     .andExpect(status().isOk())
                     .andReturn();
 
             String resetToken = objectMapper.readTree(
-                    verifyResult.getResponse().getContentAsString())
+                            verifyResult.getResponse().getContentAsString())
                     .path("data").path("resetToken").asText();
 
             // Submit mismatched passwords
@@ -794,14 +794,14 @@ class AuthControllerIntegrationTest {
                     .build();
 
             mockMvc.perform(post("/api/v1/auth/reset-password")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(resetReq)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(resetReq)))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("PASSWORD_MISMATCH"))
                     .andExpect(jsonPath("$.message").value("Mật khẩu xác nhận không khớp"));
         }
-
+    }
     // =========================================================================
     // Section 3 — CHANGE PASSWORD POST /api/v1/auth/change-password
     // =========================================================================

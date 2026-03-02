@@ -96,12 +96,6 @@ public class AuthServiceImpl implements AuthService {
 
         // A6.3: Verify password
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
-<<<<<<< HEAD
-            handleFailedLogin(user);
-            log.warn("Login failed - wrong password for: {}", request.getEmail());
-            throw new BusinessException("INVALID_CREDENTIALS",
-                    "Sai email hoặc mật khẩu. Hãy thử lại");
-=======
             loginAttemptService.handleFailedLogin(user);
 
             if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(LocalDateTime.now())) {
@@ -113,7 +107,6 @@ public class AuthServiceImpl implements AuthService {
                 throw new BusinessException("INVALID_CREDENTIALS",
                         "Sai email hoặc mật khẩu. Hãy thử lại");
             }
->>>>>>> 932f041 (fix: implement login attempt handling and account locking mechanism)
         }
 
         // Reset failed login attempts on successful login
@@ -424,7 +417,7 @@ public class AuthServiceImpl implements AuthService {
     // ==================== Private Helper Methods ====================
 
     private LoginResponse createSessionAndGenerateTokens(User user, DeviceInfo deviceInfo,
-            String ipAddress, String userAgent) {
+                                                         String ipAddress, String userAgent) {
         // Detect device info from User-Agent and client-provided DeviceInfo
         // This properly distinguishes between Mobile App and Web Browser sessions
         Map<String, Object> detectedDeviceInfo = DeviceDetector.detectDevice(userAgent, deviceInfo);
@@ -459,20 +452,6 @@ public class AuthServiceImpl implements AuthService {
                 .build();
     }
 
-<<<<<<< HEAD
-    private void handleFailedLogin(User user) {
-        user.setFailedLoginAttempts(user.getFailedLoginAttempts() + 1);
-
-        if (user.getFailedLoginAttempts() >= maxFailedAttempts) {
-            user.setLockedUntil(LocalDateTime.now().plusMinutes(lockDurationMinutes));
-            log.warn("Account locked due to {} failed attempts: {}", maxFailedAttempts, user.getEmail());
-        }
-
-        userRepository.save(user);
-    }
-
-=======
->>>>>>> 932f041 (fix: implement login attempt handling and account locking mechanism)
     private void validateAccountStatus(User user) {
         if (user.isDeleted()) {
             throw new BusinessException("ACCOUNT_DELETED", "Tài khoản không tồn tại");
