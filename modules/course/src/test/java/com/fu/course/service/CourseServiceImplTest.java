@@ -87,7 +87,7 @@ class CourseServiceImplTest {
                 .jlptLevel(JlptLevel.N5)
                 .thumbnailUrl("https://example.com/thumb.jpg")
                 .orderIndex(1)
-                .status(ContentStatus.DRAFT)
+                .status(Course.ContentStatus.DRAFT)
                 .build();
         ReflectionTestUtils.setField(testCourse, "id", courseId);
 
@@ -282,12 +282,50 @@ class CourseServiceImplTest {
             given(courseMapper.toResponse(testCourse)).willReturn(testCourseResponse);
 
             // When
-            CourseResponse result = courseService.updateCourse(courseId, updateRequest, managerId);
+            CourseResponse result = courseService.updateCourse(courseId, updateRequest, null, managerId);
 
             // Then
             assertThat(result).isNotNull();
             verify(courseMapper).updateEntity(testCourse, updateRequest);
             verify(courseRepository).save(courseCaptor.capture());
+            assertThat(courseCaptor.getValue().getUpdatedBy()).isEqualTo(managerId);
+        }
+
+        @Test
+        @DisplayName("Should update course successfully with new thumbnail")
+        void shouldUpdateCourseSuccessfullyWithNewThumbnail() {
+            // Given
+            MockMultipartFile thumbnailFile = new MockMultipartFile(
+                    "thumbnail", "new-thumb.jpg", "image/jpeg", new byte[1024]);
+            String uploadedUrl = "https://res.cloudinary.com/test/image/upload/v1/courses/thumbnails/new-thumb.jpg";
+
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(courseRepository.existsByNameIgnoreCaseAndIdNot("Updated N5 Course", courseId)).willReturn(false);
+            given(cloudinaryService.uploadImage(thumbnailFile, "courses/thumbnails")).willReturn(uploadedUrl);
+            given(cloudinaryService.extractPublicId(testCourse.getThumbnailUrl())).willReturn("old-thumb-id");
+            // deleteImage is void, just need to verify it's called
+            given(courseRepository.save(any(Course.class))).willReturn(testCourse);
+            
+            CourseResponse updatedResponse = CourseResponse.builder()
+                .id(courseId)
+                .name("Updated N5 Course")
+                .thumbnailUrl(uploadedUrl)
+                .build();
+            given(courseMapper.toResponse(testCourse)).willReturn(updatedResponse);
+
+            // When
+            CourseResponse result = courseService.updateCourse(courseId, updateRequest, thumbnailFile, managerId);
+
+            // Then
+            assertThat(result).isNotNull();
+            assertThat(result.getThumbnailUrl()).isEqualTo(uploadedUrl);
+            
+            verify(cloudinaryService).uploadImage(thumbnailFile, "courses/thumbnails");
+            verify(cloudinaryService).extractPublicId("https://example.com/thumb.jpg");
+            verify(cloudinaryService).deleteImage("old-thumb-id");
+            verify(courseMapper).updateEntity(testCourse, updateRequest);
+            verify(courseRepository).save(courseCaptor.capture());
+            assertThat(courseCaptor.getValue().getThumbnailUrl()).isEqualTo(uploadedUrl);
             assertThat(courseCaptor.getValue().getUpdatedBy()).isEqualTo(managerId);
         }
 
@@ -298,7 +336,7 @@ class CourseServiceImplTest {
             given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.empty());
 
             // When/Then
-            assertThatThrownBy(() -> courseService.updateCourse(courseId, updateRequest, managerId))
+            assertThatThrownBy(() -> courseService.updateCourse(courseId, updateRequest, null, managerId))
                     .isInstanceOf(CourseNotFoundException.class);
 
             verify(courseRepository, never()).save(any());
@@ -312,7 +350,7 @@ class CourseServiceImplTest {
             given(courseRepository.existsByNameIgnoreCaseAndIdNot("Updated N5 Course", courseId)).willReturn(true);
 
             // When/Then
-            assertThatThrownBy(() -> courseService.updateCourse(courseId, updateRequest, managerId))
+            assertThatThrownBy(() -> courseService.updateCourse(courseId, updateRequest, null, managerId))
                     .isInstanceOf(CourseNameAlreadyExistsException.class);
 
             verify(courseRepository, never()).save(any());
@@ -331,7 +369,7 @@ class CourseServiceImplTest {
             given(courseMapper.toResponse(testCourse)).willReturn(testCourseResponse);
 
             // When
-            courseService.updateCourse(courseId, requestWithoutName, managerId);
+            courseService.updateCourse(courseId, requestWithoutName, null, managerId);
 
             // Then
             verify(courseRepository, never()).existsByNameIgnoreCaseAndIdNot(anyString(), any());
@@ -411,7 +449,7 @@ class CourseServiceImplTest {
             given(courseMapper.toSummaryResponse(testCourse)).willReturn(testSummaryResponse);
 
             // When
-            Page<CourseSummaryResponse> result = courseService.getCoursesByStatus(ContentStatus.DRAFT, pageable);
+            Page<CourseSummaryResponse> result = courseService.getCoursesByStatus(Course.ContentStatus.DRAFT, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
@@ -623,7 +661,7 @@ class CourseServiceImplTest {
             given(courseRepository.count()).willReturn(10L);
             given(courseRepository.countByStatusAndDeletedAtIsNull(ContentStatus.PUBLISHED)).willReturn(5L);
             given(courseRepository.countByStatusAndDeletedAtIsNull(ContentStatus.DRAFT)).willReturn(3L);
-            given(courseRepository.countByStatusAndDeletedAtIsNull(ContentStatus.ARCHIVED)).willReturn(2L);
+            given(courseRepository.countByStatusAndDeletedAtIsNull(Course.ContentStatus.ARCHIVED)).willReturn(2L);
             given(courseRepository.countByJlptLevelAndDeletedAtIsNull(JlptLevel.N5)).willReturn(3L);
             given(courseRepository.countByJlptLevelAndDeletedAtIsNull(JlptLevel.N4)).willReturn(2L);
             given(courseRepository.countByJlptLevelAndDeletedAtIsNull(JlptLevel.N3)).willReturn(2L);

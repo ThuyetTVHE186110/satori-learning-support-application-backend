@@ -1,6 +1,6 @@
 package com.fu.course.dto.response;
 
-import com.fu.course.entity.Course.ContentStatus;
+import com.fu.course.entity.Course;
 import com.fu.course.entity.Course.JlptLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -25,7 +25,7 @@ public class CourseResponse {
     private JlptLevel jlptLevel;
     private String thumbnailUrl;
     private Integer orderIndex;
-    private ContentStatus status;
+    private Course.ContentStatus status;
     
     private UUID createdBy;
     private UUID updatedBy;

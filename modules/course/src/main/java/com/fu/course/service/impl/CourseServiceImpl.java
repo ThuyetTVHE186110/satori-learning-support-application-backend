@@ -79,7 +79,7 @@ public class CourseServiceImpl implements CourseService {
 
     @Override
     @Transactional
-    public CourseResponse updateCourse(UUID courseId, UpdateCourseRequest request, UUID managerId) {
+    public CourseResponse updateCourse(UUID courseId, UpdateCourseRequest request, MultipartFile thumbnail, UUID managerId) {
         log.info("Updating course: {} by manager: {}", courseId, managerId);
 
         // Find course
@@ -90,6 +90,27 @@ public class CourseServiceImpl implements CourseService {
             !request.getName().equalsIgnoreCase(course.getName()) &&
             courseRepository.existsByNameIgnoreCaseAndIdNot(request.getName(), courseId)) {
             throw new CourseNameAlreadyExistsException(request.getName());
+        }
+
+        // Handle thumbnail upload if a new file is provided
+        if (thumbnail != null && !thumbnail.isEmpty()) {
+            log.info("Uploading new thumbnail for course: {}", courseId);
+            String thumbnailUrl = cloudinaryService.uploadImage(thumbnail, THUMBNAIL_FOLDER);
+            
+            // Delete old thumbnail if it exists
+            if (course.getThumbnailUrl() != null) {
+                try {
+                    String oldPublicId = cloudinaryService.extractPublicId(course.getThumbnailUrl());
+                    if (oldPublicId != null) {
+                        cloudinaryService.deleteImage(oldPublicId);
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to delete old thumbnail: {}", e.getMessage());
+                    // Continue with update even if old thumbnail deletion fails
+                }
+            }
+            
+            course.setThumbnailUrl(thumbnailUrl);
         }
 
         // Update course
@@ -123,7 +144,7 @@ public class CourseServiceImpl implements CourseService {
     }
 
     @Override
-    public Page<CourseSummaryResponse> getCoursesByStatus(ContentStatus status, Pageable pageable) {
+    public Page<CourseSummaryResponse> getCoursesByStatus(Course.ContentStatus status, Pageable pageable) {
         log.debug("Fetching courses by status: {}", status);
         return courseRepository.findByStatusAndDeletedAtIsNull(status, pageable)
             .map(courseMapper::toSummaryResponse);
@@ -167,7 +188,7 @@ public class CourseServiceImpl implements CourseService {
         log.info("Publishing course: {} by manager: {}", courseId, managerId);
         
         Course course = findCourseOrThrow(courseId);
-        course.setStatus(ContentStatus.PUBLISHED);
+        course.setStatus(Course.ContentStatus.PUBLISHED);
         course.setUpdatedBy(managerId);
         
         Course updatedCourse = courseRepository.save(course);
@@ -234,8 +255,8 @@ public class CourseServiceImpl implements CourseService {
         log.debug("Fetching course statistics");
         
         long totalCourses = courseRepository.count();
-        long publishedCourses = courseRepository.countByStatusAndDeletedAtIsNull(ContentStatus.PUBLISHED);
-        long draftCourses = courseRepository.countByStatusAndDeletedAtIsNull(ContentStatus.DRAFT);
+        long publishedCourses = courseRepository.countByStatusAndDeletedAtIsNull(Course.ContentStatus.PUBLISHED);
+        long draftCourses = courseRepository.countByStatusAndDeletedAtIsNull(Course.ContentStatus.DRAFT);
         long archivedCourses = courseRepository.countByStatusAndDeletedAtIsNull(ContentStatus.ARCHIVED);
         
         long n5Courses = courseRepository.countByJlptLevelAndDeletedAtIsNull(JlptLevel.N5);

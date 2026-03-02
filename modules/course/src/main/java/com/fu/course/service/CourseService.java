@@ -31,7 +31,7 @@ public interface CourseService {
     /**
      * Update course (MANAGER only)
      */
-    CourseResponse updateCourse(UUID courseId, UpdateCourseRequest request, UUID managerId);
+    CourseResponse updateCourse(UUID courseId, UpdateCourseRequest request, MultipartFile thumbnail, UUID managerId);
 
     /**
      * Get course by ID

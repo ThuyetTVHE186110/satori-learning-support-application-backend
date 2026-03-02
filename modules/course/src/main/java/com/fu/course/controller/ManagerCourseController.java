@@ -64,17 +64,19 @@ public class ManagerCourseController {
     }
 
     /**
-     * Update an existing course.
+     * Update an existing course with optional thumbnail upload.
      * PUT /api/v1/manager/courses/{courseId}
+     * Content-Type: multipart/form-data
      */
-    @PutMapping("/{courseId}")
+    @PutMapping(value = "/{courseId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<CourseResponse>> updateCourse(
             @PathVariable UUID courseId,
-            @Valid @RequestBody UpdateCourseRequest request,
+            @Valid @RequestPart("request") UpdateCourseRequest request,
+            @RequestPart(value = "thumbnail", required = false) MultipartFile thumbnail,
             @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
         log.info("Manager {} updating course: {}", managerId, courseId);
-        CourseResponse response = courseService.updateCourse(courseId, request, managerId);
+        CourseResponse response = courseService.updateCourse(courseId, request, thumbnail, managerId);
         return ResponseEntity.ok(ApiResponse.success("Course updated successfully", response));
     }
 
