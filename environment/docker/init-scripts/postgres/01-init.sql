@@ -726,7 +726,8 @@ CREATE TABLE ai_conversation.conversation_messages (
     sequence_number INT NOT NULL,
     processing_time_ms INT,
     
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_conversation_sessions_user ON ai_conversation.conversation_sessions(user_id, created_at DESC);

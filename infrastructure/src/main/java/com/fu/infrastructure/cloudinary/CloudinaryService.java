@@ -33,4 +33,14 @@ public interface CloudinaryService {
      * @return the extracted public ID, or null if extraction fails
      */
     String extractPublicId(String url);
+
+    /**
+     * Upload an audio file to Cloudinary.
+     * Uses resource_type "video" (Cloudinary convention for audio files).
+     *
+     * @param file   the audio file to upload
+     * @param folder the Cloudinary folder to store the audio in
+     * @return the secure URL of the uploaded audio
+     */
+    String uploadAudio(MultipartFile file, String folder);
 }

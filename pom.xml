@@ -17,6 +17,8 @@
         <module>modules/curriculum-import</module>
         <module>modules/conversation</module>
         <module>modules/class</module>
+        <module>modules/pronunciation</module>
+        <module>modules/roleplay</module>
         <module>start</module>
     </modules>
 
@@ -86,6 +88,16 @@
             <dependency>
                 <groupId>com.fu</groupId>
                 <artifactId>class</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fu</groupId>
+                <artifactId>pronunciation</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fu</groupId>
+                <artifactId>roleplay</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

@@ -112,6 +112,37 @@ services:
             retries: 5
             start_period: 180s # Allow time for model download on first start
 
+    # ==================== Japanese Pronunciation Assessment Microservice ====================
+    # Assesses pitch accent and mora timing for Japanese speech using pyopenjtalk + librosa.
+    # First build installs pyopenjtalk (compiles from source, ~3-5 min); subsequent starts are fast.
+    jp-pronunciation:
+        build:
+            context: ./docker/jp-pronunciation-service
+            dockerfile: Dockerfile
+        container_name: satori-jp-pronunciation
+        restart: unless-stopped
+        ports:
+            - "8091:8091"
+        networks:
+            - satori-network
+        deploy:
+            resources:
+                limits:
+                    memory: 2G
+                    cpus: "2.0"
+                reservations:
+                    memory: 512M
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8091/health'')" || exit 1',
+                ]
+            interval: 30s
+            timeout: 10s
+            retries: 5
+            start_period: 60s
+
 networks:
     satori-network:
         driver: bridge

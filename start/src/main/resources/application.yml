@@ -227,3 +227,26 @@ curriculum-import:
         grounding-weight: ${RAG_GROUNDING_WEIGHT:0.35}
         # Combined score below this triggers re-extraction
         combined-re-extraction-threshold: ${RAG_COMBINED_RE_EXTRACTION_THRESHOLD:0.5}
+
+# ==================== Pronunciation Assessment (SpeechSuper) ====================
+pronunciation:
+    speechsuper:
+        app-key: ${SPEECHSUPER_APP_KEY:}
+        secret-key: ${SPEECHSUPER_SECRET_KEY:}
+        base-url: ${SPEECHSUPER_BASE_URL:https://api.speechsuper.com}
+        timeout: ${SPEECHSUPER_TIMEOUT:30000}
+    japanese:
+        enabled: ${JP_PRONUNCIATION_ENABLED:true}
+        service-url: ${JP_PRONUNCIATION_SERVICE_URL:http://localhost:8091}
+        timeout: ${JP_PRONUNCIATION_TIMEOUT:30000}
+        speech-super-weight: ${JP_PRONUNCIATION_SPEECH_SUPER_WEIGHT:0.6}
+        japanese-assessment-weight: ${JP_PRONUNCIATION_JAPANESE_WEIGHT:0.4}
+
+# ==================== Roleplay Module Configuration ====================
+roleplay:
+    max-messages: ${ROLEPLAY_MAX_MESSAGES:50}
+    max-active-sessions: ${ROLEPLAY_MAX_ACTIVE_SESSIONS:3}
+    scoring:
+        mission-weight: ${ROLEPLAY_MISSION_WEIGHT:0.35}
+        pronunciation-weight: ${ROLEPLAY_PRONUNCIATION_WEIGHT:0.30}
+        language-weight: ${ROLEPLAY_LANGUAGE_WEIGHT:0.35}

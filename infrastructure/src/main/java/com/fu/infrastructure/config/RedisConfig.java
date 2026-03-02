@@ -36,6 +36,8 @@ public class RedisConfig {
     public static final String CACHE_VOCABULARY = "vocabulary";
     public static final String CACHE_USER_PROGRESS = "user_progress";
     public static final String CACHE_PERSONALIZATION = "personalization";
+    public static final String CACHE_ROLEPLAY_HISTORY = "roleplay_history";
+    public static final String CACHE_ROLEPLAY_SESSION = "roleplay_session";
 
     @Bean
     public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory) {
@@ -86,6 +88,12 @@ public class RedisConfig {
         
         // Personalization recommendations cache - 15 minutes TTL
         cacheConfigurations.put(CACHE_PERSONALIZATION, defaultConfig.entryTtl(Duration.ofMinutes(15)));
+
+        // Roleplay history cache - 2 hours TTL
+        cacheConfigurations.put(CACHE_ROLEPLAY_HISTORY, defaultConfig.entryTtl(Duration.ofHours(2)));
+
+        // Roleplay session cache - 1 hour TTL
+        cacheConfigurations.put(CACHE_ROLEPLAY_SESSION, defaultConfig.entryTtl(Duration.ofHours(1)));
 
         return RedisCacheManager.builder(connectionFactory)
                 .cacheDefaults(defaultConfig)
