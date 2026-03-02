@@ -38,9 +38,6 @@ public class Clazz extends SoftDeletableEntity {
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 
-    @Column(name = "code", nullable = false, unique = true, length = 20)
-    private String code;
-
     @Column(name = "course_id", nullable = false)
     private UUID courseId;
 

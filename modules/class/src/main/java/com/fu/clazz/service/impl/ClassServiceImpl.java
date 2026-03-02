@@ -104,7 +104,6 @@ public class ClassServiceImpl implements ClassService {
 
         // Create class entity
         Clazz clazz = classMapper.toEntity(request);
-        clazz.setCode(code);
         clazz.setCourseId(course.getId());
         clazz.setCreatedBy(managerId);
         clazz.setUpdatedBy(managerId);
@@ -427,6 +426,11 @@ public class ClassServiceImpl implements ClassService {
                 response.setCourseName(course.getName());
                 response.setCourseLevel(course.getJlptLevel() != null ? course.getJlptLevel().name() : null);
                 response.setCourseStatus(course.getStatus() != null ? course.getStatus().name() : null);
+            });
+        }
+        if (clazz.getTeacherId() != null) {
+            userRepository.findById(clazz.getTeacherId()).ifPresent(teacher -> {
+                response.setTeacherName(teacher.getFullName());
             });
         }
 

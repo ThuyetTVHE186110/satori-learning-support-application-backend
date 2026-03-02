@@ -20,11 +20,11 @@ public class ClassSummaryResponse {
     private String name;
     private String code;
     private UUID teacherId;
+    private String teacherName;
     private UUID courseId;
     private String courseName;
     private String courseLevel;
     private String courseStatus;
     private Boolean isActive;
-
     private Long memberCount;
 }
