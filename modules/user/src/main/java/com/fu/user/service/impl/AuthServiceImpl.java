@@ -9,6 +9,7 @@ import com.fu.user.repository.UserRepository;
 import com.fu.user.repository.UserSessionRepository;
 import com.fu.user.security.JwtService;
 import com.fu.user.service.AuthService;
+import com.fu.user.service.LoginAttemptService;
 import com.fu.user.util.DeviceDetector;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseToken;
@@ -41,12 +42,7 @@ public class AuthServiceImpl implements AuthService {
     private final EmailService emailService;
     // Firebase Auth is optional - may be null if not configured
     private final Optional<FirebaseAuth> firebaseAuth;
-
-    @Value("${app.security.max-failed-attempts:5}")
-    private int maxFailedAttempts;
-
-    @Value("${app.security.lock-duration-minutes:30}")
-    private int lockDurationMinutes;
+    private final LoginAttemptService loginAttemptService;
 
     @Value("${app.security.otp-expiration-minutes:1}")
     private int otpExpirationMinutes;
@@ -100,10 +96,24 @@ public class AuthServiceImpl implements AuthService {
 
         // A6.3: Verify password
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+<<<<<<< HEAD
             handleFailedLogin(user);
             log.warn("Login failed - wrong password for: {}", request.getEmail());
             throw new BusinessException("INVALID_CREDENTIALS",
                     "Sai email hoặc mật khẩu. Hãy thử lại");
+=======
+            loginAttemptService.handleFailedLogin(user);
+
+            if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(LocalDateTime.now())) {
+                log.warn("Login failed - account just locked due to max attempts: {}", request.getEmail());
+                throw new BusinessException("ACCOUNT_LOCKED",
+                        "Tài khoản đã bị khóa tạm thời. Vui lòng thử lại sau");
+            } else {
+                log.warn("Login failed - wrong password for: {}", request.getEmail());
+                throw new BusinessException("INVALID_CREDENTIALS",
+                        "Sai email hoặc mật khẩu. Hãy thử lại");
+            }
+>>>>>>> 932f041 (fix: implement login attempt handling and account locking mechanism)
         }
 
         // Reset failed login attempts on successful login
@@ -449,6 +459,7 @@ public class AuthServiceImpl implements AuthService {
                 .build();
     }
 
+<<<<<<< HEAD
     private void handleFailedLogin(User user) {
         user.setFailedLoginAttempts(user.getFailedLoginAttempts() + 1);
 
@@ -460,6 +471,8 @@ public class AuthServiceImpl implements AuthService {
         userRepository.save(user);
     }
 
+=======
+>>>>>>> 932f041 (fix: implement login attempt handling and account locking mechanism)
     private void validateAccountStatus(User user) {
         if (user.isDeleted()) {
             throw new BusinessException("ACCOUNT_DELETED", "Tài khoản không tồn tại");
