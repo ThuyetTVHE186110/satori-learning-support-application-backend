@@ -221,8 +221,8 @@ public class UserServiceImpl implements UserService {
             return userRepository.findAll(pageable)
                     .map(userMapper::toResponse);
         } else {
-            // Manager sees only active users
-            return userRepository.findAllActive(pageable)
+            // Manager sees only active users with role LEARNER or TEACHER
+            return userRepository.findAllActive(pageable, Arrays.asList(UserRole.LEARNER, UserRole.TEACHER))
                     .map(userMapper::toResponse);
         }
     }
