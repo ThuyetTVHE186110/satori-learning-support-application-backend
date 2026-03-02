@@ -104,12 +104,11 @@ public class ClassServiceImpl implements ClassService {
         clazz.setCourseId(course.getId());
         clazz.setCreatedBy(managerId);
         clazz.setUpdatedBy(managerId);
-
         // Save class
         Clazz savedClazz = classRepository.save(clazz);
         log.info("Tạo lớp học thành công với ID: {}", savedClazz.getId());
 
-        ClassResponse response = classMapper.toResponse(savedClazz);
+        ClassResponse response = toResponseWithMemberCount(clazz);
         response.setMemberCount(0L);
         return response;
     }
@@ -390,6 +389,7 @@ public class ClassServiceImpl implements ClassService {
                 response.setTeacherName(teacher.getFullName());
                 response.setTeacherEmail(teacher.getEmail());
                 response.setTeacherAvatarUrl(teacher.getAvatarUrl());
+                response.setTeacherPhoneNumber(teacher.getPhoneNumber());
             });
         }
 
