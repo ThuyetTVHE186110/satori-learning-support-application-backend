@@ -43,21 +43,21 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
      * Find all active users (not soft-deleted) with pagination
      * Default for UC-01: View User List
      */
-    @Query("SELECT u FROM User u WHERE u.deletedAt IS NULL ORDER BY u.createdAt DESC")
-    Page<User> findAllActive(Pageable pageable);
+    @Query("SELECT u FROM User u WHERE u.deletedAt IS NULL AND u.role IN :allowedRoles ORDER BY u.createdAt DESC ")
+    Page<User> findAllActive(Pageable pageable, @Param("allowedRoles") java.util.List<UserRole> allowedRoles);
 
     /**
      * Search users by keyword (name or email) with optional filters
      * Supports UC-01 alternatives: search, filter by role/status
      */
     @Query("SELECT u FROM User u WHERE u.deletedAt IS NULL " +
-           "AND (:keyword IS NULL OR :keyword = '' OR " +
-           "     LOWER(u.firstName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
-           "     LOWER(u.lastName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
-           "     LOWER(u.displayName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
-           "     LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
-           "AND (:role IS NULL OR u.role = :role) " +
-           "AND (:status IS NULL OR u.status = :status)")
+            "AND (:#{#keyword == null || #keyword.length() == 0} = true OR " +
+            "     LOWER(u.firstName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "     LOWER(u.lastName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "     LOWER(u.displayName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "     LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+            "AND (:#{#role == null} = true OR u.role = :role) " +
+            "AND (:#{#status == null} = true OR u.status = :status)")
     Page<User> searchUsers(
             @Param("keyword") String keyword,
             @Param("role") UserRole role,
@@ -99,14 +99,14 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
      * Manager can only see LEARNER and TEACHER
      */
     @Query("SELECT u FROM User u WHERE u.deletedAt IS NULL " +
-           "AND (:keyword IS NULL OR :keyword = '' OR " +
-           "     LOWER(u.firstName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
-           "     LOWER(u.lastName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
-           "     LOWER(u.displayName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
-           "     LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
-           "AND (:role IS NULL OR u.role = :role) " +
-           "AND (:status IS NULL OR u.status = :status) " +
-           "AND u.role IN :allowedRoles")
+            "AND (:#{#keyword == null || #keyword.length() == 0} = true OR " +
+            "     LOWER(u.firstName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "     LOWER(u.lastName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "     LOWER(u.displayName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "     LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+            "AND (:#{#role == null} = true OR u.role = :role) " +
+            "AND (:#{#status == null} = true OR u.status = :status) " +
+            "AND u.role IN :allowedRoles")
     Page<User> searchUsersByRoles(
             @Param("keyword") String keyword,
             @Param("role") UserRole role,

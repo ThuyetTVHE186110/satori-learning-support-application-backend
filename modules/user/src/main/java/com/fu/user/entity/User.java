@@ -5,6 +5,8 @@ import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.hibernate.annotations.ColumnTransformer;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -54,14 +56,14 @@ public class User extends SoftDeletableEntity {
 
     // Account status
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    @ColumnTransformer(write = "CAST(? AS user_role)")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(columnDefinition = "user_role", nullable = false)
     @Builder.Default
     private UserRole role = UserRole.LEARNER;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    @ColumnTransformer(write = "CAST(? AS user_status)")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(columnDefinition = "user_status", nullable = false)
     @Builder.Default
     private UserStatus status = UserStatus.PENDING_ACTIVATION;
 
