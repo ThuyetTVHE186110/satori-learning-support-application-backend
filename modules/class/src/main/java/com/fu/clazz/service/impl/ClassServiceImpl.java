@@ -99,9 +99,6 @@ public class ClassServiceImpl implements ClassService {
             throw new BusinessException("INVALID_COURSE_STATUS", "Chỉ có thể tạo lớp học cho khóa học đã được xuất bản (PUBLISHED).");
         }
 
-        // Generate unique join code
-        String code = generateUniqueCode();
-
         // Create class entity
         Clazz clazz = classMapper.toEntity(request);
         clazz.setCourseId(course.getId());
@@ -110,7 +107,7 @@ public class ClassServiceImpl implements ClassService {
 
         // Save class
         Clazz savedClazz = classRepository.save(clazz);
-        log.info("Tạo lớp học thành công với ID: {} và mã lớp: {}", savedClazz.getId(), code);
+        log.info("Tạo lớp học thành công với ID: {}", savedClazz.getId());
 
         ClassResponse response = classMapper.toResponse(savedClazz);
         response.setMemberCount(0L);
@@ -328,12 +325,6 @@ public class ClassServiceImpl implements ClassService {
                 .orElseThrow(() -> new ClassNotFoundException("Lớp học không tồn tại."));
     }
 
-    /**
-     * Generate unique 8-character alphanumeric join code
-     */
-    private String generateUniqueCode() {
-        return UUID.randomUUID().toString().substring(0, 8).toUpperCase();
-    }
 
     /**
      * Validate that the class is active and not full
