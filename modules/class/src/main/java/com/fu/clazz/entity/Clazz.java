@@ -18,10 +18,11 @@ import java.util.UUID;
  */
 @Entity
 @Table(name = "classes", schema = "user_management", indexes = {
-    @Index(name = "idx_classes_code", columnList = "code"),
-    @Index(name = "idx_classes_teacher_id", columnList = "teacher_id"),
-    @Index(name = "idx_classes_jlpt_level", columnList = "jlpt_level"),
-    @Index(name = "idx_classes_is_active", columnList = "is_active")
+        @Index(name = "idx_classes_code", columnList = "code"),
+        @Index(name = "idx_classes_course_id", columnList = "course_id"),
+        @Index(name = "idx_classes_teacher_id", columnList = "teacher_id"),
+        @Index(name = "idx_classes_jlpt_level", columnList = "jlpt_level"),
+        @Index(name = "idx_classes_is_active", columnList = "is_active")
 })
 @Getter
 @Setter
@@ -37,15 +38,11 @@ public class Clazz extends SoftDeletableEntity {
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 
-    @Column(name = "code", nullable = false, unique = true, length = 20)
-    private String code;
+    @Column(name = "course_id", nullable = false)
+    private UUID courseId;
 
     @Column(name = "teacher_id", nullable = false)
     private UUID teacherId;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "jlpt_level", length = 5)
-    private JlptLevel jlptLevel;
 
     @Column(name = "max_students")
     @Builder.Default
@@ -61,11 +58,4 @@ public class Clazz extends SoftDeletableEntity {
     @Builder.Default
     private Boolean isActive = true;
 
-    /**
-     * JLPT Level enum
-     */
-    public enum JlptLevel {
-        N5, N4, N3, N2, N1
-    }
 }
-

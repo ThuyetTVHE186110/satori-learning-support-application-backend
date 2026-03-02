@@ -24,6 +24,11 @@
         </dependency>
         <dependency>
             <groupId>com.fu</groupId>
+            <artifactId>course</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fu</groupId>
             <artifactId>user</artifactId>
         </dependency>
         <dependency>

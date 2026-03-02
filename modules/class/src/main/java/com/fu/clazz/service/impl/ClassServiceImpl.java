@@ -8,7 +8,6 @@ import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
 import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.entity.Clazz;
-import com.fu.clazz.entity.Clazz.JlptLevel;
 import com.fu.clazz.exception.ClassFullException;
 import com.fu.clazz.exception.ClassNotFoundException;
 import com.fu.clazz.exception.MemberAlreadyExistsException;
@@ -19,6 +18,8 @@ import com.fu.clazz.repository.specification.ClassSpecification;
 import com.fu.clazz.service.ClassService;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
+import com.fu.course.entity.Course;
+import com.fu.course.repository.CourseRepository;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.repository.UserRepository;
@@ -49,6 +50,7 @@ public class ClassServiceImpl implements ClassService {
     private final ClassMemberRepository classMemberRepository;
     private final ClassMapper classMapper;
     private final UserRepository userRepository;
+    private final CourseRepository courseRepository;
 
     // =====================================================
     // CLASS CRUD
@@ -85,12 +87,24 @@ public class ClassServiceImpl implements ClassService {
                     "Giáo viên không tồn tại hoặc không hợp lệ.");
         }
 
+        // Validate Course exists, is PUBLISHED, and not deleted
+        Course course = courseRepository.findById(request.getCourseId())
+                .orElseThrow(() -> new BusinessException("INVALID_COURSE", "Khóa học không tồn tại."));
+
+        if (course.getDeletedAt() != null) {
+            throw new BusinessException("INVALID_COURSE", "Khóa học đã bị xóa.");
+        }
+
+        if (course.getStatus() != Course.ContentStatus.PUBLISHED) {
+            throw new BusinessException("INVALID_COURSE_STATUS", "Chỉ có thể tạo lớp học cho khóa học đã được xuất bản (PUBLISHED).");
+        }
+
         // Generate unique join code
         String code = generateUniqueCode();
 
         // Create class entity
         Clazz clazz = classMapper.toEntity(request);
-        clazz.setCode(code);
+        clazz.setCourseId(course.getId());
         clazz.setCreatedBy(managerId);
         clazz.setUpdatedBy(managerId);
 
@@ -168,16 +182,15 @@ public class ClassServiceImpl implements ClassService {
     }
 
     @Override
-    public Page<ClassSummaryResponse> getClasses(String keyword, UUID teacherId, Boolean isActive, JlptLevel level,
-            Pageable pageable) {
+    public Page<ClassSummaryResponse> getClasses(String keyword, UUID teacherId, UUID courseId, Boolean isActive, Pageable pageable) {
         log.debug("Lấy danh sách lớp học với bộ lọc động");
 
         org.springframework.data.jpa.domain.Specification<Clazz> spec = org.springframework.data.jpa.domain.Specification
                 .where(ClassSpecification.isNotDeleted())
                 .and(ClassSpecification.hasKeyword(keyword))
                 .and(ClassSpecification.hasTeacherId(teacherId))
-                .and(ClassSpecification.hasIsActive(isActive))
-                .and(ClassSpecification.hasJlptLevel(level));
+                .and(ClassSpecification.hasCourseId(courseId))
+                .and(ClassSpecification.hasIsActive(isActive));
 
         return classRepository.findAll(spec, pageable)
                 .map(this::toSummaryWithMemberCount);
@@ -389,6 +402,15 @@ public class ClassServiceImpl implements ClassService {
             });
         }
 
+        // Enrich with course info
+        if (clazz.getCourseId() != null) {
+            courseRepository.findById(clazz.getCourseId()).ifPresent(course -> {
+                response.setCourseName(course.getName());
+                response.setCourseLevel(course.getJlptLevel() != null ? course.getJlptLevel().name() : null);
+                response.setCourseStatus(course.getStatus() != null ? course.getStatus().name() : null);
+            });
+        }
+
         return response;
     }
 
@@ -398,6 +420,20 @@ public class ClassServiceImpl implements ClassService {
     private ClassSummaryResponse toSummaryWithMemberCount(Clazz clazz) {
         ClassSummaryResponse response = classMapper.toSummaryResponse(clazz);
         response.setMemberCount(classMemberRepository.countActiveByClassId(clazz.getId()));
+
+        if (clazz.getCourseId() != null) {
+            courseRepository.findById(clazz.getCourseId()).ifPresent(course -> {
+                response.setCourseName(course.getName());
+                response.setCourseLevel(course.getJlptLevel() != null ? course.getJlptLevel().name() : null);
+                response.setCourseStatus(course.getStatus() != null ? course.getStatus().name() : null);
+            });
+        }
+        if (clazz.getTeacherId() != null) {
+            userRepository.findById(clazz.getTeacherId()).ifPresent(teacher -> {
+                response.setTeacherName(teacher.getFullName());
+            });
+        }
+
         return response;
     }
 }

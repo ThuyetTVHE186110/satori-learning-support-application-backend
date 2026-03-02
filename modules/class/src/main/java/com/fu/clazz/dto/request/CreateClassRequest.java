@@ -1,6 +1,5 @@
 package com.fu.clazz.dto.request;
 
-import com.fu.clazz.entity.Clazz.JlptLevel;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -31,7 +30,8 @@ public class CreateClassRequest {
     @NotNull(message = "Teacher ID is required")
     private UUID teacherId;
 
-    private JlptLevel jlptLevel;
+    @NotNull(message = "Course ID is required")
+    private UUID courseId;
 
     private Integer maxStudents;
 
@@ -39,4 +39,3 @@ public class CreateClassRequest {
 
     private LocalDate endDate;
 }
-
