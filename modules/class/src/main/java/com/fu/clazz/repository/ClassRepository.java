@@ -1,7 +1,6 @@
 package com.fu.clazz.repository;
 
 import com.fu.clazz.entity.Clazz;
-import com.fu.clazz.entity.Clazz.JlptLevel;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -39,7 +38,7 @@ public interface ClassRepository extends JpaRepository<Clazz, UUID>, JpaSpecific
         /**
          * Find classes by JLPT level
          */
-        Page<Clazz> findByJlptLevelAndDeletedAtIsNull(JlptLevel jlptLevel, Pageable pageable);
+    Page<Clazz> findByDeletedAtIsNull(Pageable pageable);
 
         /**
          * Find classes by teacher ID
@@ -51,11 +50,6 @@ public interface ClassRepository extends JpaRepository<Clazz, UUID>, JpaSpecific
          */
         Page<Clazz> findByTeacherIdAndIsActiveTrueAndDeletedAtIsNull(UUID teacherId, Pageable pageable);
 
-        /**
-         * Find active classes by teacher ID and JLPT level
-         */
-        Page<Clazz> findByTeacherIdAndJlptLevelAndIsActiveTrueAndDeletedAtIsNull(UUID teacherId, JlptLevel jlptLevel,
-                        Pageable pageable);
 
         /**
          * Search classes by name (case-insensitive)
