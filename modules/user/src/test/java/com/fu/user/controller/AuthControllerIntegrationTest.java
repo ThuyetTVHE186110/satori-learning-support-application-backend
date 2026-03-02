@@ -322,10 +322,10 @@ class AuthControllerIntegrationTest {
         }
 
         /**
-         * TC_AUTH_LG_008 — Expired access token on a protected endpoint → HTTP 400.
+         * TC_AUTH_LG_008 — Expired access token on a protected endpoint → HTTP 401.
          * Generates a token signed with the same secret but expiry in the past.
          *
-         * filter chain (active in @SpringBootTest) returns 400 for expired JWT.
+         * filter chain (active in @SpringBootTest) returns 401 for expired JWT.
          * Assertions follow actual code behavior.
          */
         @Test
