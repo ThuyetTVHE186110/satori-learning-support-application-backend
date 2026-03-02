@@ -24,11 +24,6 @@ public class LoginRequest {
     private String email;
 
     @NotBlank(message = "Hãy nhập mật khẩu")
-    @Size(min = 8, message = "Mật khẩu phải có ít nhất 8 ký tự")
-    @Pattern(
-            regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[\\W_]).{8,}$",
-            message = "Mật khẩu phải bao gồm chữ hoa, chữ thường, số và ký tự đặc biệt"
-    )
     private String password;
 
     /**

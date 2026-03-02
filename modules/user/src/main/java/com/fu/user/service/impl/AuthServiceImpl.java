@@ -9,6 +9,7 @@ import com.fu.user.repository.UserRepository;
 import com.fu.user.repository.UserSessionRepository;
 import com.fu.user.security.JwtService;
 import com.fu.user.service.AuthService;
+import com.fu.user.service.LoginAttemptService;
 import com.fu.user.util.DeviceDetector;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseToken;
@@ -41,12 +42,7 @@ public class AuthServiceImpl implements AuthService {
     private final EmailService emailService;
     // Firebase Auth is optional - may be null if not configured
     private final Optional<FirebaseAuth> firebaseAuth;
-
-    @Value("${app.security.max-failed-attempts:5}")
-    private int maxFailedAttempts;
-
-    @Value("${app.security.lock-duration-minutes:30}")
-    private int lockDurationMinutes;
+    private final LoginAttemptService loginAttemptService;
 
     @Value("${app.security.otp-expiration-minutes:1}")
     private int otpExpirationMinutes;
@@ -66,44 +62,51 @@ public class AuthServiceImpl implements AuthService {
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> {
                     log.warn("Login failed - email not found: {}", request.getEmail());
-                    return new BusinessException("INVALID_CREDENTIALS", 
+                    return new BusinessException("INVALID_CREDENTIALS",
                             "Sai email hoặc mật khẩu. Hãy thử lại");
                 });
 
         // Check if account is soft-deleted
         if (user.isDeleted()) {
             log.warn("Login failed - account deleted: {}", request.getEmail());
-            throw new BusinessException("ACCOUNT_DELETED", 
+            throw new BusinessException("ACCOUNT_DELETED",
                     "Tài khoản không tồn tại");
         }
 
         // E6.4: Check if account is suspended
         if (user.getStatus() == UserStatus.SUSPENDED) {
             log.warn("Login failed - account suspended: {}", request.getEmail());
-            throw new BusinessException("ACCOUNT_SUSPENDED", 
+            throw new BusinessException("ACCOUNT_SUSPENDED",
                     "Tài khoản của bạn đã bị chặn. Hãy liên hệ quản lý");
         }
 
         // Check if account is pending activation
         if (user.getStatus() == UserStatus.PENDING_ACTIVATION) {
             log.warn("Login failed - account pending activation: {}", request.getEmail());
-            throw new BusinessException("ACCOUNT_NOT_ACTIVATED", 
+            throw new BusinessException("ACCOUNT_NOT_ACTIVATED",
                     "Tài khoản chưa được kích hoạt. Vui lòng kiểm tra email");
         }
 
         // Check if account is locked
         if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(LocalDateTime.now())) {
             log.warn("Login failed - account locked until: {}", user.getLockedUntil());
-            throw new BusinessException("ACCOUNT_LOCKED", 
+            throw new BusinessException("ACCOUNT_LOCKED",
                     "Tài khoản đã bị khóa tạm thời. Vui lòng thử lại sau");
         }
 
         // A6.3: Verify password
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
-            handleFailedLogin(user);
-            log.warn("Login failed - wrong password for: {}", request.getEmail());
-            throw new BusinessException("INVALID_CREDENTIALS", 
-                    "Sai email hoặc mật khẩu. Hãy thử lại");
+            loginAttemptService.handleFailedLogin(user);
+
+            if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(LocalDateTime.now())) {
+                log.warn("Login failed - account just locked due to max attempts: {}", request.getEmail());
+                throw new BusinessException("ACCOUNT_LOCKED",
+                        "Tài khoản đã bị khóa tạm thời. Vui lòng thử lại sau");
+            } else {
+                log.warn("Login failed - wrong password for: {}", request.getEmail());
+                throw new BusinessException("INVALID_CREDENTIALS",
+                        "Sai email hoặc mật khẩu. Hãy thử lại");
+            }
         }
 
         // Reset failed login attempts on successful login
@@ -139,7 +142,7 @@ public class AuthServiceImpl implements AuthService {
                 .or(() -> userRepository.findByEmail(email))
                 .orElseThrow(() -> {
                     log.warn("Google login failed - user not found: {}", email);
-                    return new BusinessException("USER_NOT_FOUND", 
+                    return new BusinessException("USER_NOT_FOUND",
                             "Email chưa được đăng ký trong hệ thống. Vui lòng liên hệ quản lý");
                 });
 
@@ -190,11 +193,10 @@ public class AuthServiceImpl implements AuthService {
 
         // Send OTP via email
         emailService.sendPasswordResetOtp(
-                user.getEmail(), 
-                user.getFullName(), 
-                otp, 
-                otpExpirationMinutes
-        );
+                user.getEmail(),
+                user.getFullName(),
+                otp,
+                otpExpirationMinutes);
         log.info("OTP sent to user: {}", user.getEmail());
     }
 
@@ -204,18 +206,18 @@ public class AuthServiceImpl implements AuthService {
         log.info("Verify OTP for email: {}", request.getEmail());
 
         User user = userRepository.findActiveByEmail(request.getEmail())
-                .orElseThrow(() -> new BusinessException("INVALID_REQUEST", 
+                .orElseThrow(() -> new BusinessException("INVALID_REQUEST",
                         "Yêu cầu không hợp lệ"));
 
         // Verify OTP
-        if (user.getPasswordResetToken() == null || 
-            !user.getPasswordResetToken().equals(request.getOtp())) {
+        if (user.getPasswordResetToken() == null ||
+                !user.getPasswordResetToken().equals(request.getOtp())) {
             throw new BusinessException("INVALID_OTP", "Mã OTP không hợp lệ");
         }
 
         // Check OTP expiration
-        if (user.getPasswordResetTokenExpiresAt() == null || 
-            user.getPasswordResetTokenExpiresAt().isBefore(LocalDateTime.now())) {
+        if (user.getPasswordResetTokenExpiresAt() == null ||
+                user.getPasswordResetTokenExpiresAt().isBefore(LocalDateTime.now())) {
             throw new BusinessException("OTP_EXPIRED", "Mã OTP đã hết hạn");
         }
 
@@ -241,18 +243,18 @@ public class AuthServiceImpl implements AuthService {
 
         // Validate password confirmation
         if (!request.getNewPassword().equals(request.getConfirmPassword())) {
-            throw new BusinessException("PASSWORD_MISMATCH", 
+            throw new BusinessException("PASSWORD_MISMATCH",
                     "Mật khẩu xác nhận không khớp");
         }
 
         // Find user by reset token
         User user = userRepository.findByPasswordResetToken(request.getResetToken())
-                .orElseThrow(() -> new BusinessException("INVALID_TOKEN", 
+                .orElseThrow(() -> new BusinessException("INVALID_TOKEN",
                         "Token đặt lại mật khẩu không hợp lệ hoặc đã hết hạn"));
 
         // Check reset token expiration
-        if (user.getPasswordResetTokenExpiresAt() == null || 
-            user.getPasswordResetTokenExpiresAt().isBefore(LocalDateTime.now())) {
+        if (user.getPasswordResetTokenExpiresAt() == null ||
+                user.getPasswordResetTokenExpiresAt().isBefore(LocalDateTime.now())) {
             // Clear expired token
             user.setPasswordResetToken(null);
             user.setPasswordResetTokenExpiresAt(null);
@@ -290,13 +292,13 @@ public class AuthServiceImpl implements AuthService {
 
         // Validate password confirmation
         if (!request.getNewPassword().equals(request.getConfirmPassword())) {
-            throw new BusinessException("PASSWORD_MISMATCH", 
+            throw new BusinessException("PASSWORD_MISMATCH",
                     "Mật khẩu xác nhận không khớp");
         }
 
         // Verify current password
         if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
-            throw new BusinessException("WRONG_PASSWORD", 
+            throw new BusinessException("WRONG_PASSWORD",
                     "Mật khẩu hiện tại không chính xác");
         }
 
@@ -332,14 +334,14 @@ public class AuthServiceImpl implements AuthService {
         // Validate refresh token format
         UUID sessionId = jwtService.validateRefreshToken(request.getRefreshToken());
         if (sessionId == null) {
-            throw new BusinessException("INVALID_REFRESH_TOKEN", 
+            throw new BusinessException("INVALID_REFRESH_TOKEN",
                     "Refresh token không hợp lệ hoặc đã hết hạn");
         }
 
         // Find active session
         UserSession session = sessionRepository.findById(sessionId)
                 .filter(UserSession::isActive)
-                .orElseThrow(() -> new BusinessException("SESSION_EXPIRED", 
+                .orElseThrow(() -> new BusinessException("SESSION_EXPIRED",
                         "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại"));
 
         User user = session.getUser();
@@ -395,7 +397,7 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public List<SessionResponse> getActiveSessions(UUID userId, UUID currentSessionId) {
         List<UserSession> sessions = sessionRepository.findActiveSessionsByUserId(userId, LocalDateTime.now());
-        
+
         return sessions.stream()
                 .map(session -> mapToSessionResponse(session, session.getId().equals(currentSessionId)))
                 .collect(Collectors.toList());
@@ -406,7 +408,7 @@ public class AuthServiceImpl implements AuthService {
     public void revokeSession(UUID userId, UUID sessionId) {
         UserSession session = sessionRepository.findByIdAndUserId(sessionId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Session", "id", sessionId));
-        
+
         session.revoke();
         sessionRepository.save(session);
         log.info("Session {} revoked for user {}", sessionId, userId);
@@ -414,12 +416,12 @@ public class AuthServiceImpl implements AuthService {
 
     // ==================== Private Helper Methods ====================
 
-    private LoginResponse createSessionAndGenerateTokens(User user, DeviceInfo deviceInfo, 
-                                                          String ipAddress, String userAgent) {
+    private LoginResponse createSessionAndGenerateTokens(User user, DeviceInfo deviceInfo,
+            String ipAddress, String userAgent) {
         // Detect device info from User-Agent and client-provided DeviceInfo
         // This properly distinguishes between Mobile App and Web Browser sessions
         Map<String, Object> detectedDeviceInfo = DeviceDetector.detectDevice(userAgent, deviceInfo);
-        
+
         // Create session
         UserSession session = UserSession.builder()
                 .user(user)
@@ -428,7 +430,7 @@ public class AuthServiceImpl implements AuthService {
                 .userAgent(userAgent)
                 .expiresAt(LocalDateTime.now().plusSeconds(jwtService.getRefreshTokenExpirationMs() / 1000))
                 .build();
-        
+
         session = sessionRepository.save(session);
 
         // Generate tokens
@@ -450,42 +452,31 @@ public class AuthServiceImpl implements AuthService {
                 .build();
     }
 
-    private void handleFailedLogin(User user) {
-        user.setFailedLoginAttempts(user.getFailedLoginAttempts() + 1);
-        
-        if (user.getFailedLoginAttempts() >= maxFailedAttempts) {
-            user.setLockedUntil(LocalDateTime.now().plusMinutes(lockDurationMinutes));
-            log.warn("Account locked due to {} failed attempts: {}", maxFailedAttempts, user.getEmail());
-        }
-        
-        userRepository.save(user);
-    }
-
     private void validateAccountStatus(User user) {
         if (user.isDeleted()) {
             throw new BusinessException("ACCOUNT_DELETED", "Tài khoản không tồn tại");
         }
         if (user.getStatus() == UserStatus.SUSPENDED) {
-            throw new BusinessException("ACCOUNT_SUSPENDED", 
+            throw new BusinessException("ACCOUNT_SUSPENDED",
                     "Tài khoản của bạn đã bị chặn. Hãy liên hệ trung tâm để được hỗ trợ.");
         }
         if (user.getStatus() != UserStatus.ACTIVE) {
-            throw new BusinessException("ACCOUNT_INACTIVE", 
+            throw new BusinessException("ACCOUNT_INACTIVE",
                     "Tài khoản chưa được kích hoạt");
         }
     }
 
     private FirebaseToken verifyGoogleIdToken(String idToken) {
         if (firebaseAuth.isEmpty()) {
-            throw new BusinessException("GOOGLE_AUTH_NOT_CONFIGURED", 
+            throw new BusinessException("GOOGLE_AUTH_NOT_CONFIGURED",
                     "Đăng nhập Google chưa được cấu hình");
         }
-        
+
         try {
             return firebaseAuth.get().verifyIdToken(idToken);
         } catch (Exception e) {
             log.error("Failed to verify Google ID token: {}", e.getMessage());
-            throw new BusinessException("INVALID_GOOGLE_TOKEN", 
+            throw new BusinessException("INVALID_GOOGLE_TOKEN",
                     "Token Google không hợp lệ");
         }
     }
@@ -513,10 +504,10 @@ public class AuthServiceImpl implements AuthService {
     private SessionResponse mapToSessionResponse(UserSession session, boolean isCurrent) {
         // Convert stored device info back to DTO using DeviceDetector utility
         DeviceInfo deviceInfo = DeviceDetector.fromMap(session.getDeviceInfo());
-        
+
         // Get human-readable device description
         String deviceDescription = DeviceDetector.getDeviceDescription(session.getDeviceInfo());
-        
+
         return SessionResponse.builder()
                 .id(session.getId())
                 .deviceInfo(deviceInfo)

@@ -64,6 +64,9 @@ class AuthServiceImplTest {
     @Mock
     private FirebaseAuth firebaseAuth;
 
+    @Mock
+    private LoginAttemptService loginAttemptService;
+
     @InjectMocks
     private AuthServiceImpl authService;
 
@@ -110,7 +113,7 @@ class AuthServiceImplTest {
                 .build();
         ReflectionTestUtils.setField(testSession, "id", UUID.randomUUID());
 
-        // Set default expiration minutes
+        // Set default security values that normally come from @Value
         ReflectionTestUtils.setField(authService, "otpExpirationMinutes", 10);
 
         // Inject Optional<FirebaseAuth> for Google auth tests
@@ -134,7 +137,8 @@ class AuthServiceImplTest {
             String refreshToken = "jwt-refresh-token";
 
             given(userRepository.findByEmail(request.getEmail())).willReturn(Optional.of(testUser));
-            given(passwordEncoder.matches(request.getPassword(), testUser.getPasswordHash())).willReturn(true);
+            given(passwordEncoder.matches(request.getPassword(), testUser.getPasswordHash()))
+                    .willReturn(true);
             given(jwtService.generateAccessToken(eq(testUser), any(UUID.class))).willReturn(accessToken);
             given(jwtService.generateRefreshToken(any(UUID.class))).willReturn(refreshToken);
             given(sessionRepository.save(any(UserSession.class))).willReturn(testSession);
@@ -165,16 +169,21 @@ class AuthServiceImplTest {
             request.setDeviceInfo(deviceInfo);
 
             given(userRepository.findByEmail(request.getEmail())).willReturn(Optional.of(testUser));
-            given(passwordEncoder.matches(request.getPassword(), testUser.getPasswordHash())).willReturn(false);
+            given(passwordEncoder.matches(request.getPassword(), testUser.getPasswordHash()))
+                    .willReturn(false);
+
+            doAnswer(invocation -> {
+                User u = invocation.getArgument(0);
+                u.setFailedLoginAttempts(u.getFailedLoginAttempts() + 1);
+                return null;
+            }).when(loginAttemptService).handleFailedLogin(any(User.class));
 
             // When/Then
-            assertThatThrownBy(() ->
-                    authService.login(request, "127.0.0.1", "Chrome")
-            )
+            assertThatThrownBy(() -> authService.login(request, "127.0.0.1", "Chrome"))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("email hoặc mật khẩu");
 
-            verify(userRepository).save(userCaptor.capture());
+            verify(loginAttemptService).handleFailedLogin(userCaptor.capture());
             User savedUser = userCaptor.getValue();
             assertThat(savedUser.getFailedLoginAttempts()).isEqualTo(1);
         }
@@ -190,15 +199,22 @@ class AuthServiceImplTest {
             request.setDeviceInfo(deviceInfo);
 
             given(userRepository.findByEmail(request.getEmail())).willReturn(Optional.of(testUser));
-            given(passwordEncoder.matches(request.getPassword(), testUser.getPasswordHash())).willReturn(false);
+            given(passwordEncoder.matches(request.getPassword(), testUser.getPasswordHash()))
+                    .willReturn(false);
+
+            doAnswer(invocation -> {
+                User u = invocation.getArgument(0);
+                u.setFailedLoginAttempts(u.getFailedLoginAttempts() + 1);
+                u.setLockedUntil(LocalDateTime.now().plusMinutes(30));
+                return null;
+            }).when(loginAttemptService).handleFailedLogin(any(User.class));
 
             // When/Then
-            assertThatThrownBy(() ->
-                    authService.login(request, "127.0.0.1", "Chrome")
-            )
-                    .isInstanceOf(BusinessException.class);
+            assertThatThrownBy(() -> authService.login(request, "127.0.0.1", "Chrome"))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("khóa");
 
-            verify(userRepository).save(userCaptor.capture());
+            verify(loginAttemptService).handleFailedLogin(userCaptor.capture());
             User savedUser = userCaptor.getValue();
             assertThat(savedUser.getFailedLoginAttempts()).isEqualTo(5);
             assertThat(savedUser.getLockedUntil()).isNotNull();
@@ -217,9 +233,7 @@ class AuthServiceImplTest {
             given(userRepository.findByEmail(request.getEmail())).willReturn(Optional.of(testUser));
 
             // When/Then
-            assertThatThrownBy(() ->
-                    authService.login(request, "127.0.0.1", "Chrome")
-            )
+            assertThatThrownBy(() -> authService.login(request, "127.0.0.1", "Chrome"))
                     .isInstanceOf(BusinessException.class);
         }
 
@@ -236,9 +250,7 @@ class AuthServiceImplTest {
             given(userRepository.findByEmail(request.getEmail())).willReturn(Optional.of(testUser));
 
             // When/Then
-            assertThatThrownBy(() ->
-                    authService.login(request, "127.0.0.1", "Chrome")
-            )
+            assertThatThrownBy(() -> authService.login(request, "127.0.0.1", "Chrome"))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("khóa");
         }
@@ -257,7 +269,8 @@ class AuthServiceImplTest {
 
             given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
             given(userRepository.save(any(User.class))).willReturn(testUser);
-            doNothing().when(emailService).sendPasswordResetOtp(anyString(), anyString(), anyString(), anyInt());
+            doNothing().when(emailService).sendPasswordResetOtp(anyString(), anyString(), anyString(),
+                    anyInt());
 
             // When
             authService.forgotPassword(request);
@@ -274,8 +287,7 @@ class AuthServiceImplTest {
                     eq("test@example.com"),
                     anyString(),
                     anyString(),
-                    eq(10)
-            );
+                    eq(10));
         }
 
         @Test
@@ -288,12 +300,11 @@ class AuthServiceImplTest {
             given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.empty());
 
             // When/Then - Should not throw exception (security best practice)
-            assertThatNoException().isThrownBy(() ->
-                    authService.forgotPassword(request)
-            );
+            assertThatNoException().isThrownBy(() -> authService.forgotPassword(request));
 
             verify(userRepository, never()).save(any(User.class));
-            verify(emailService, never()).sendPasswordResetOtp(anyString(), anyString(), anyString(), anyInt());
+            verify(emailService, never()).sendPasswordResetOtp(anyString(), anyString(), anyString(),
+                    anyInt());
         }
 
         @Test
@@ -308,11 +319,10 @@ class AuthServiceImplTest {
             given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
 
             // When/Then - Should not throw exception or send email
-            assertThatNoException().isThrownBy(() ->
-                    authService.forgotPassword(request)
-            );
+            assertThatNoException().isThrownBy(() -> authService.forgotPassword(request));
 
-            verify(emailService, never()).sendPasswordResetOtp(anyString(), anyString(), anyString(), anyInt());
+            verify(emailService, never()).sendPasswordResetOtp(anyString(), anyString(), anyString(),
+                    anyInt());
         }
     }
 
@@ -363,9 +373,7 @@ class AuthServiceImplTest {
             given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
 
             // When/Then
-            assertThatThrownBy(() ->
-                    authService.verifyOtp(request)
-            )
+            assertThatThrownBy(() -> authService.verifyOtp(request))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("OTP");
         }
@@ -384,9 +392,7 @@ class AuthServiceImplTest {
             given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
 
             // When/Then
-            assertThatThrownBy(() ->
-                    authService.verifyOtp(request)
-            )
+            assertThatThrownBy(() -> authService.verifyOtp(request))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("hết hạn");
         }
@@ -426,8 +432,7 @@ class AuthServiceImplTest {
 
             verify(emailService).sendPasswordChangedNotification(
                     eq("test@example.com"),
-                    anyString()
-            );
+                    anyString());
         }
 
         @Test
@@ -442,9 +447,7 @@ class AuthServiceImplTest {
             given(userRepository.findByPasswordResetToken("invalid-token")).willReturn(Optional.empty());
 
             // When/Then
-            assertThatThrownBy(() ->
-                    authService.resetPassword(request)
-            )
+            assertThatThrownBy(() -> authService.resetPassword(request))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Token");
         }
@@ -466,9 +469,7 @@ class AuthServiceImplTest {
             given(userRepository.save(any(User.class))).willReturn(testUser);
 
             // When/Then
-            assertThatThrownBy(() ->
-                    authService.resetPassword(request)
-            )
+            assertThatThrownBy(() -> authService.resetPassword(request))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("hết hạn");
         }
@@ -488,7 +489,8 @@ class AuthServiceImplTest {
             request.setConfirmPassword("NewPassword456@");
 
             given(userRepository.findById(userId)).willReturn(Optional.of(testUser));
-            given(passwordEncoder.matches(request.getCurrentPassword(), testUser.getPasswordHash())).willReturn(true);
+            given(passwordEncoder.matches(request.getCurrentPassword(), testUser.getPasswordHash()))
+                    .willReturn(true);
             given(passwordEncoder.encode(request.getNewPassword())).willReturn("newHashedPassword");
             given(userRepository.save(any(User.class))).willReturn(testUser);
             doNothing().when(emailService).sendPasswordChangedNotification(anyString(), anyString());
@@ -504,8 +506,7 @@ class AuthServiceImplTest {
 
             verify(emailService).sendPasswordChangedNotification(
                     eq("test@example.com"),
-                    anyString()
-            );
+                    anyString());
         }
 
         @Test
@@ -518,13 +519,12 @@ class AuthServiceImplTest {
             request.setConfirmPassword("NewPassword456@");
 
             given(userRepository.findById(userId)).willReturn(Optional.of(testUser));
-            given(passwordEncoder.matches(request.getCurrentPassword(), testUser.getPasswordHash())).willReturn(false);
+            given(passwordEncoder.matches(request.getCurrentPassword(), testUser.getPasswordHash()))
+                    .willReturn(false);
 
             // When/Then
             UUID currentSessionId = UUID.randomUUID();
-            assertThatThrownBy(() ->
-                    authService.changePassword(userId, request, currentSessionId)
-            )
+            assertThatThrownBy(() -> authService.changePassword(userId, request, currentSessionId))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("hiện tại");
 
@@ -545,38 +545,36 @@ class AuthServiceImplTest {
 
             // When/Then
             UUID currentSessionId = UUID.randomUUID();
-            assertThatThrownBy(() ->
-                    authService.changePassword(userId, request, currentSessionId)
-            )
+            assertThatThrownBy(() -> authService.changePassword(userId, request, currentSessionId))
                     .isInstanceOf(BusinessException.class);
         }
-    }
 
-    // Java
-    @Test
-    @DisplayName("Should reject change password when new password matches current password")
-    void shouldRejectReuseOldPassword() {
-        // Given
-        ChangePasswordRequest request = new ChangePasswordRequest();
-        request.setCurrentPassword("OldPassword123!");
-        request.setNewPassword("OldPassword123!");
-        request.setConfirmPassword("OldPassword123!");
 
-        given(userRepository.findById(userId)).willReturn(Optional.of(testUser));
-        given(passwordEncoder.matches(request.getCurrentPassword(), testUser.getPasswordHash())).willReturn(true);
-        // Simulate reuse: new password matches existing hash
-        given(passwordEncoder.matches(request.getNewPassword(), testUser.getPasswordHash())).willReturn(true);
+        // Java
+        @Test
+        @DisplayName("Should reject change password when new password matches current password")
+        void shouldRejectReuseOldPassword() {
+            // Given
+            ChangePasswordRequest request = new ChangePasswordRequest();
+            request.setCurrentPassword("OldPassword123!");
+            request.setNewPassword("OldPassword123!");
+            request.setConfirmPassword("OldPassword123!");
 
-        // When/Then
-        UUID currentSessionId = UUID.randomUUID();
-        assertThatThrownBy(() ->
-                authService.changePassword(userId, request, currentSessionId)
-        )
-                .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("trùng");
+            given(userRepository.findById(userId)).willReturn(Optional.of(testUser));
+            given(passwordEncoder.matches(request.getCurrentPassword(), testUser.getPasswordHash()))
+                    .willReturn(true);
+            // Simulate reuse: new password matches existing hash
+            given(passwordEncoder.matches(request.getNewPassword(), testUser.getPasswordHash())).willReturn(true);
 
-        verify(userRepository, never()).save(any(User.class));
-        verify(emailService, never()).sendPasswordChangedNotification(anyString(), anyString());
+            // When/Then
+            UUID currentSessionId = UUID.randomUUID();
+            assertThatThrownBy(() -> authService.changePassword(userId, request, currentSessionId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("trùng");
+
+            verify(userRepository, never()).save(any(User.class));
+            verify(emailService, never()).sendPasswordChangedNotification(anyString(), anyString());
+        }
     }
 
     @Nested
@@ -630,9 +628,7 @@ class AuthServiceImplTest {
             given(userRepository.findByEmail("newuser@gmail.com")).willReturn(Optional.empty());
 
             // When/Then
-            assertThatThrownBy(() ->
-                    authService.loginWithGoogle(request, "127.0.0.1", "Chrome")
-            )
+            assertThatThrownBy(() -> authService.loginWithGoogle(request, "127.0.0.1", "Chrome"))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("chưa được đăng ký");
         }
@@ -649,9 +645,7 @@ class AuthServiceImplTest {
                     .willThrow(new RuntimeException("Invalid token"));
 
             // When/Then
-            assertThatThrownBy(() ->
-                    authService.loginWithGoogle(request, "127.0.0.1", "Chrome")
-            )
+            assertThatThrownBy(() -> authService.loginWithGoogle(request, "127.0.0.1", "Chrome"))
                     .isInstanceOf(BusinessException.class);
         }
     }
@@ -733,9 +727,7 @@ class AuthServiceImplTest {
             given(jwtService.validateRefreshToken("expired-token")).willReturn(null);
 
             // When/Then
-            assertThatThrownBy(() ->
-                    authService.refreshToken(request)
-            )
+            assertThatThrownBy(() -> authService.refreshToken(request))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("hết hạn");
         }
@@ -750,9 +742,7 @@ class AuthServiceImplTest {
             given(jwtService.validateRefreshToken("invalid-token")).willReturn(null);
 
             // When/Then
-            assertThatThrownBy(() ->
-                    authService.refreshToken(request)
-            )
+            assertThatThrownBy(() -> authService.refreshToken(request))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Refresh token");
         }
