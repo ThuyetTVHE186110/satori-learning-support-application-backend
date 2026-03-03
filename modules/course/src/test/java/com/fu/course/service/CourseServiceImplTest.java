@@ -1,5 +1,6 @@
 package com.fu.course.service;
 
+import com.fu.common.exception.BusinessException;
 import com.fu.course.dto.request.CreateCourseRequest;
 import com.fu.course.dto.request.UpdateCourseRequest;
 import com.fu.course.dto.response.CourseResponse;
@@ -373,6 +374,130 @@ class CourseServiceImplTest {
 
             // Then
             verify(courseRepository, never()).existsByNameIgnoreCaseAndIdNot(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("Should update course status to ACTIVE inline")
+        void shouldUpdateStatusToActive() {
+            // Given
+            UpdateCourseRequest statusRequest = UpdateCourseRequest.builder()
+                    .status(CourseStatus.ACTIVE)
+                    .build();
+
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(courseRepository.save(any(Course.class))).willReturn(testCourse);
+
+            CourseResponse activeResponse = CourseResponse.builder()
+                    .id(courseId)
+                    .status(CourseStatus.ACTIVE)
+                    .build();
+            given(courseMapper.toResponse(testCourse)).willReturn(activeResponse);
+
+            // When
+            CourseResponse result = courseService.updateCourse(courseId, statusRequest, null, managerId);
+
+            // Then
+            assertThat(result.getStatus()).isEqualTo(CourseStatus.ACTIVE);
+            verify(courseMapper).updateEntity(testCourse, statusRequest);
+            verify(courseRepository).save(courseCaptor.capture());
+            assertThat(courseCaptor.getValue().getUpdatedBy()).isEqualTo(managerId);
+        }
+
+        @Test
+        @DisplayName("Should update course status to INACTIVE inline")
+        void shouldUpdateStatusToInactive() {
+            // Given
+            testCourse.setStatus(CourseStatus.ACTIVE); // start active
+            UpdateCourseRequest statusRequest = UpdateCourseRequest.builder()
+                    .status(CourseStatus.INACTIVE)
+                    .build();
+
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(courseRepository.save(any(Course.class))).willReturn(testCourse);
+
+            CourseResponse inactiveResponse = CourseResponse.builder()
+                    .id(courseId)
+                    .status(CourseStatus.INACTIVE)
+                    .build();
+            given(courseMapper.toResponse(testCourse)).willReturn(inactiveResponse);
+
+            // When
+            CourseResponse result = courseService.updateCourse(courseId, statusRequest, null, managerId);
+
+            // Then
+            assertThat(result.getStatus()).isEqualTo(CourseStatus.INACTIVE);
+            verify(courseMapper).updateEntity(testCourse, statusRequest);
+            verify(courseRepository).save(any(Course.class));
+        }
+
+        @Test
+        @DisplayName("Should reject updating status to DELETED")
+        void shouldRejectUpdatingStatusToDeleted() {
+            // Given
+            UpdateCourseRequest deletedRequest = UpdateCourseRequest.builder()
+                    .status(CourseStatus.DELETED)
+                    .build();
+
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+
+            // When/Then
+            assertThatThrownBy(() -> courseService.updateCourse(courseId, deletedRequest, null, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Không thể cập nhật trạng thái thành DELETED");
+
+            verify(courseRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Should update name and status together")
+        void shouldUpdateNameAndStatusTogether() {
+            // Given
+            UpdateCourseRequest combinedRequest = UpdateCourseRequest.builder()
+                    .name("New Course Name")
+                    .status(CourseStatus.ACTIVE)
+                    .build();
+
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(courseRepository.existsByNameIgnoreCaseAndIdNot("New Course Name", courseId)).willReturn(false);
+            given(courseRepository.save(any(Course.class))).willReturn(testCourse);
+
+            CourseResponse updatedResponse = CourseResponse.builder()
+                    .id(courseId)
+                    .name("New Course Name")
+                    .status(CourseStatus.ACTIVE)
+                    .build();
+            given(courseMapper.toResponse(testCourse)).willReturn(updatedResponse);
+
+            // When
+            CourseResponse result = courseService.updateCourse(courseId, combinedRequest, null, managerId);
+
+            // Then
+            assertThat(result.getName()).isEqualTo("New Course Name");
+            assertThat(result.getStatus()).isEqualTo(CourseStatus.ACTIVE);
+            verify(courseMapper).updateEntity(testCourse, combinedRequest);
+            verify(courseRepository).save(courseCaptor.capture());
+            assertThat(courseCaptor.getValue().getUpdatedBy()).isEqualTo(managerId);
+        }
+
+        @Test
+        @DisplayName("Should allow update with null status (no status change)")
+        void shouldAllowNullStatus() {
+            // Given
+            UpdateCourseRequest noStatusRequest = UpdateCourseRequest.builder()
+                    .description("Updated description only")
+                    .build();
+
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(courseRepository.save(any(Course.class))).willReturn(testCourse);
+            given(courseMapper.toResponse(testCourse)).willReturn(testCourseResponse);
+
+            // When
+            CourseResponse result = courseService.updateCourse(courseId, noStatusRequest, null, managerId);
+
+            // Then
+            assertThat(result).isNotNull();
+            verify(courseMapper).updateEntity(testCourse, noStatusRequest);
+            verify(courseRepository).save(any(Course.class));
         }
     }
 

@@ -31,13 +31,14 @@ public interface CourseMapper {
     Course toEntity(CreateCourseRequest request);
 
     /**
-     * Update Course entity from UpdateCourseRequest
-     * Only updates non-null fields
+     * Update Course entity from UpdateCourseRequest.
+     * Only updates non-null fields.
+     * Status can be changed inline (ACTIVE/INACTIVE) — validated by service.
      */
     @BeanMapping(nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
     @Mapping(target = "id", ignore = true)
-    @Mapping(target = "jlptLevel", ignore = true)  // Cannot change JLPT level
-    @Mapping(target = "status", ignore = true)     // Status changed via separate endpoint
+    @Mapping(target = "jlptLevel", ignore = true)      // Cannot change JLPT level
+    @Mapping(target = "thumbnailUrl", ignore = true)    // Managed by service (Cloudinary)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     @Mapping(target = "createdBy", ignore = true)
