@@ -67,4 +67,9 @@ public interface ClassService {
      * Get class members for teacher (validates teacher ownership)
      */
     Page<ClassMemberResponse> getClassMembersForTeacher(UUID classId, UUID teacherId, Pageable pageable);
+
+    /**
+     * Get eligible learners to add to a class (Active or Inactive, and not currently an active member)
+     */
+    Page<com.fu.user.dto.UserResponse> getEligibleLearners(UUID classId, String keyword, Pageable pageable);
 }

@@ -126,4 +126,24 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
      */
     @Query("SELECT u FROM User u WHERE u.email = :email AND u.deletedAt IS NOT NULL")
     Optional<User> findDeletedByEmail(@Param("email") String email);
+
+    /**
+     * Find eligible learners for a specific class (Active or Inactive, and not currently an active member)
+     */
+    @Query("SELECT u FROM User u WHERE u.deletedAt IS NULL " +
+            "AND u.role = 'LEARNER' " +
+            "AND u.status IN ('ACTIVE', 'INACTIVE') " +
+            "AND (:#{#keyword == null || #keyword.length() == 0} = true OR " +
+            "     LOWER(u.firstName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "     LOWER(u.lastName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "     LOWER(u.displayName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "     LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+            "AND u.id NOT IN (" +
+            "   SELECT m.userId FROM ClassMember m WHERE m.classId = :classId AND m.removedAt IS NULL" +
+            ")")
+    Page<User> findEligibleLearnersForClass(
+            @Param("classId") UUID classId,
+            @Param("keyword") String keyword,
+            Pageable pageable
+    );
 }

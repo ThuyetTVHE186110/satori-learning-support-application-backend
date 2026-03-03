@@ -1158,4 +1158,46 @@ class ClassServiceImplTest {
             assertThat(result.getTeacherEmail()).isNull();
         }
     }
+
+    // =====================================================
+    // ELIGIBLE LEARNERS TESTS
+    // =====================================================
+
+    @Nested
+    @DisplayName("Get Eligible Learners Tests")
+    class GetEligibleLearnersTests {
+
+        @Test
+        @DisplayName("Should get eligible learners successfully")
+        void shouldGetEligibleLearnersSuccessfully() {
+            // Given
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<User> usersPage = new PageImpl<>(List.of(testStudent), pageable, 1);
+            given(userRepository.findEligibleLearnersForClass(classId, "Test", pageable)).willReturn(usersPage);
+
+            // When
+            Page<com.fu.user.dto.UserResponse> result = clazzService.getEligibleLearners(classId, "Test", pageable);
+
+            // Then
+            assertThat(result).isNotNull();
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            assertThat(result.getContent().get(0).getId()).isEqualTo(studentId);
+            assertThat(result.getContent().get(0).getEmail()).isEqualTo("student@example.com");
+            verify(userRepository).findEligibleLearnersForClass(classId, "Test", pageable);
+        }
+
+        @Test
+        @DisplayName("Should throw exception when class not found")
+        void shouldThrowExceptionWhenClassNotFound() {
+            // Given
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.empty());
+            Pageable pageable = PageRequest.of(0, 10);
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.getEligibleLearners(classId, null, pageable))
+                    .isInstanceOf(ClassNotFoundException.class);
+            verify(userRepository, never()).findEligibleLearnersForClass(any(), any(), any());
+        }
+    }
 }
