@@ -88,12 +88,8 @@ public class ClassServiceImpl implements ClassService {
         }
 
         // Validate Course exists, is PUBLISHED, and not deleted
-        Course course = courseRepository.findById(request.getCourseId())
+        Course course = courseRepository.findByIdAndNotDeleted(request.getCourseId())
                 .orElseThrow(() -> new BusinessException("INVALID_COURSE", "Khóa học không tồn tại."));
-
-        if (course.getDeletedAt() != null) {
-            throw new BusinessException("INVALID_COURSE", "Khóa học đã bị xóa.");
-        }
 
         if (course.getStatus() != Course.CourseStatus.ACTIVE) {
             throw new BusinessException("INVALID_COURSE_STATUS", "Chỉ có thể tạo lớp học cho khóa học đang hoạt động.");
@@ -104,12 +100,11 @@ public class ClassServiceImpl implements ClassService {
         clazz.setCourseId(course.getId());
         clazz.setCreatedBy(managerId);
         clazz.setUpdatedBy(managerId);
-
         // Save class
         Clazz savedClazz = classRepository.save(clazz);
         log.info("Tạo lớp học thành công với ID: {}", savedClazz.getId());
 
-        ClassResponse response = classMapper.toResponse(savedClazz);
+        ClassResponse response = toResponseWithMemberCount(clazz);
         response.setMemberCount(0L);
         return response;
     }
@@ -311,6 +306,33 @@ public class ClassServiceImpl implements ClassService {
         }
 
         return getClassMembers(classId, pageable);
+    }
+
+    @Override
+    public Page<com.fu.user.dto.UserResponse> getEligibleLearners(UUID classId, String keyword, Pageable pageable) {
+        log.debug("Lấy danh sách học viên đủ điều kiện thêm vào lớp: {}", classId);
+
+        // Verify class exists
+        findClassOrThrow(classId);
+
+        Page<User> usersPage = userRepository.findEligibleLearnersForClass(classId, keyword, pageable);
+
+        return usersPage.map(user -> com.fu.user.dto.UserResponse.builder()
+                .id(user.getId())
+                .email(user.getEmail())
+                .firstName(user.getFirstName())
+                .lastName(user.getLastName())
+                .displayName(user.getDisplayName())
+                .fullName(user.getFullName())
+                .avatarUrl(user.getAvatarUrl())
+                .phoneNumber(user.getPhoneNumber())
+                .dateOfBirth(user.getDateOfBirth())
+                .role(user.getRole())
+                .status(user.getStatus())
+                .createdAt(user.getCreatedAt())
+                .updatedAt(user.getUpdatedAt())
+                .lastLoginAt(user.getLastLoginAt())
+                .build());
     }
 
     // =====================================================

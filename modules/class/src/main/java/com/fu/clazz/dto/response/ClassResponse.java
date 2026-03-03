@@ -43,4 +43,5 @@ public class ClassResponse {
     private String teacherName;
     private String teacherEmail;
     private String teacherAvatarUrl;
+    private String teacherPhoneNumber;
 }

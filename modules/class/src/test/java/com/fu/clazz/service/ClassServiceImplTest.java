@@ -140,6 +140,7 @@ class ClassServiceImplTest {
                 .endDate(LocalDate.now().plusMonths(4))
                 .isActive(true)
                 .memberCount(0L)
+                .teacherPhoneNumber("0123456789")
                 .build();
 
         testSummaryResponse = ClassSummaryResponse.builder()
@@ -187,6 +188,7 @@ class ClassServiceImplTest {
                 .email("teacher@example.com")
                 .firstName("Test")
                 .lastName("Teacher")
+                .phoneNumber("0123456789")
                 .role(UserRole.TEACHER)
                 .status(UserStatus.ACTIVE)
                 .build();
@@ -320,28 +322,14 @@ class ClassServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should throw exception when course not found")
+        @DisplayName("Should throw exception when course not found or deleted")
         void shouldThrowWhenCourseNotFound() {
             given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
-            given(courseRepository.findById(courseId)).willReturn(Optional.empty());
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.empty());
 
             assertThatThrownBy(() -> clazzService.createClass(createRequest, managerId))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Khóa học không tồn tại");
-
-            verify(classRepository, never()).save(any());
-        }
-
-        @Test
-        @DisplayName("Should throw exception when course is deleted")
-        void shouldThrowWhenCourseDeleted() {
-            testCourse.setDeletedAt(LocalDateTime.now());
-            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
-            given(courseRepository.findById(courseId)).willReturn(Optional.of(testCourse));
-
-            assertThatThrownBy(() -> clazzService.createClass(createRequest, managerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("Khóa học đã bị xóa");
 
             verify(classRepository, never()).save(any());
         }
@@ -1168,6 +1156,48 @@ class ClassServiceImplTest {
             // Then
             assertThat(result.getTeacherName()).isNull();
             assertThat(result.getTeacherEmail()).isNull();
+        }
+    }
+
+    // =====================================================
+    // ELIGIBLE LEARNERS TESTS
+    // =====================================================
+
+    @Nested
+    @DisplayName("Get Eligible Learners Tests")
+    class GetEligibleLearnersTests {
+
+        @Test
+        @DisplayName("Should get eligible learners successfully")
+        void shouldGetEligibleLearnersSuccessfully() {
+            // Given
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<User> usersPage = new PageImpl<>(List.of(testStudent), pageable, 1);
+            given(userRepository.findEligibleLearnersForClass(classId, "Test", pageable)).willReturn(usersPage);
+
+            // When
+            Page<com.fu.user.dto.UserResponse> result = clazzService.getEligibleLearners(classId, "Test", pageable);
+
+            // Then
+            assertThat(result).isNotNull();
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            assertThat(result.getContent().get(0).getId()).isEqualTo(studentId);
+            assertThat(result.getContent().get(0).getEmail()).isEqualTo("student@example.com");
+            verify(userRepository).findEligibleLearnersForClass(classId, "Test", pageable);
+        }
+
+        @Test
+        @DisplayName("Should throw exception when class not found")
+        void shouldThrowExceptionWhenClassNotFound() {
+            // Given
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.empty());
+            Pageable pageable = PageRequest.of(0, 10);
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.getEligibleLearners(classId, null, pageable))
+                    .isInstanceOf(ClassNotFoundException.class);
+            verify(userRepository, never()).findEligibleLearnersForClass(any(), any(), any());
         }
     }
 }
