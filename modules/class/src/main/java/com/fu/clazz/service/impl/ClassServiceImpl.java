@@ -308,6 +308,33 @@ public class ClassServiceImpl implements ClassService {
         return getClassMembers(classId, pageable);
     }
 
+    @Override
+    public Page<com.fu.user.dto.UserResponse> getEligibleLearners(UUID classId, String keyword, Pageable pageable) {
+        log.debug("Lấy danh sách học viên đủ điều kiện thêm vào lớp: {}", classId);
+
+        // Verify class exists
+        findClassOrThrow(classId);
+
+        Page<User> usersPage = userRepository.findEligibleLearnersForClass(classId, keyword, pageable);
+
+        return usersPage.map(user -> com.fu.user.dto.UserResponse.builder()
+                .id(user.getId())
+                .email(user.getEmail())
+                .firstName(user.getFirstName())
+                .lastName(user.getLastName())
+                .displayName(user.getDisplayName())
+                .fullName(user.getFullName())
+                .avatarUrl(user.getAvatarUrl())
+                .phoneNumber(user.getPhoneNumber())
+                .dateOfBirth(user.getDateOfBirth())
+                .role(user.getRole())
+                .status(user.getStatus())
+                .createdAt(user.getCreatedAt())
+                .updatedAt(user.getUpdatedAt())
+                .lastLoginAt(user.getLastLoginAt())
+                .build());
+    }
+
     // =====================================================
     // HELPER METHODS
     // =====================================================

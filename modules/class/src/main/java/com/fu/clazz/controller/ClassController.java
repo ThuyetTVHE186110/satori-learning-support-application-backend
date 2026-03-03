@@ -140,6 +140,34 @@ public class ClassController {
         return ResponseEntity.ok(ApiResponse.success(pageResponse));
     }
 
+    /**
+     * Get learners eligible to be added to a class.
+     * Eligible learners are those with role LEARNER, status ACTIVE/INACTIVE, and not currently an active member.
+     * - MANAGER: can view eligible learners for any class
+     *
+     * GET /api/v1/classes/{classId}/eligible-learners?page=0&size=10&keyword=...
+     */
+    @GetMapping("/{classId}/eligible-learners")
+    @PreAuthorize("hasRole('MANAGER')")
+    public ResponseEntity<ApiResponse<PageResponse<com.fu.user.dto.UserResponse>>> getEligibleLearners(
+            @PathVariable UUID classId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String keyword) {
+
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("email").ascending());
+
+        Page<com.fu.user.dto.UserResponse> userPage = clazzService.getEligibleLearners(classId, keyword, pageable);
+
+        PageResponse<com.fu.user.dto.UserResponse> pageResponse = PageResponse.of(
+                userPage.getContent(),
+                userPage.getNumber(),
+                userPage.getSize(),
+                userPage.getTotalElements(),
+                userPage.getTotalPages());
+        return ResponseEntity.ok(ApiResponse.success(pageResponse));
+    }
+
     // =====================================================
     // WRITE OPERATIONS (MANAGER ONLY)
     // =====================================================
