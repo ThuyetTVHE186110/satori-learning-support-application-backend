@@ -1,5 +1,6 @@
 package com.fu.course.service.impl;
 
+import com.fu.common.exception.BusinessException;
 import com.fu.course.dto.request.CreateCourseRequest;
 import com.fu.course.dto.request.UpdateCourseRequest;
 import com.fu.course.dto.response.CourseResponse;
@@ -90,6 +91,12 @@ public class CourseServiceImpl implements CourseService {
             !request.getName().equalsIgnoreCase(course.getName()) &&
             courseRepository.existsByNameIgnoreCaseAndIdNot(request.getName(), courseId)) {
             throw new CourseNameAlreadyExistsException(request.getName());
+        }
+
+        // Validate status change: cannot set to DELETED via update (use delete endpoint)
+        if (request.getStatus() != null && request.getStatus() == CourseStatus.DELETED) {
+            throw new BusinessException("INVALID_STATUS",
+                    "Không thể cập nhật trạng thái thành DELETED. Vui lòng sử dụng chức năng xóa để xóa khóa học.");
         }
 
         // Handle thumbnail upload if a new file is provided
