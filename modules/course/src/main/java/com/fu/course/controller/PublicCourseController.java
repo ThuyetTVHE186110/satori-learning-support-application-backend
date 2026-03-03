@@ -37,7 +37,7 @@ public class PublicCourseController {
     public ResponseEntity<ApiResponse<List<CourseSummaryResponse>>> getPublishedCourses() {
         log.debug("Fetching all published courses");
         
-        List<CourseSummaryResponse> courses = courseService.getPublishedCourses();
+        List<CourseSummaryResponse> courses = courseService.getActiveCourses();
         return ResponseEntity.ok(ApiResponse.success(courses));
     }
 
@@ -55,7 +55,7 @@ public class PublicCourseController {
         
         log.debug("Fetching published courses for level: {}", level);
         
-        List<CourseSummaryResponse> courses = courseService.getPublishedCoursesByLevel(level);
+        List<CourseSummaryResponse> courses = courseService.getActiveCoursesByLevel(level);
         return ResponseEntity.ok(ApiResponse.success(courses));
     }
 }

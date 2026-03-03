@@ -63,36 +63,28 @@ public class ClassServiceImpl implements ClassService {
 
         // Validate date range
         if (request.getStartDate() != null && request.getStartDate().isBefore(java.time.LocalDate.now())) {
-            throw new BusinessException("INVALID_START_DATE",
-                    "Ngày bắt đầu phải ở tương lai.");
+            throw new BusinessException("INVALID_START_DATE", "Ngày bắt đầu phải ở tương lai.");
         }
 
-        if (request.getStartDate() != null && request.getEndDate() != null
-                && !request.getEndDate().isAfter(request.getStartDate())) {
-            throw new BusinessException("INVALID_DATE_RANGE",
-                    "Ngày kết thúc phải sau ngày bắt đầu.");
+        if (request.getStartDate() != null && request.getEndDate() != null && !request.getEndDate().isAfter(request.getStartDate())) {
+            throw new BusinessException("INVALID_DATE_RANGE", "Ngày kết thúc phải sau ngày bắt đầu.");
         }
         // Check if class name already exists
         if (classRepository.existsByNameIgnoreCase(request.getName())) {
-            throw new BusinessException("CLASS_NAME_EXISTS",
-                    "Tên lớp học đã tồn tại.");
+            throw new BusinessException("CLASS_NAME_EXISTS", "Tên lớp học đã tồn tại.");
         }
         // Validate teacher exists and has TEACHER role
-        User teacher = userRepository.findById(request.getTeacherId())
-                .orElseThrow(
-                        () -> new BusinessException("INVALID_TEACHER", "Giáo viên không tồn tại hoặc không hợp lệ."));
+        User teacher = userRepository.findById(request.getTeacherId()).orElseThrow(() -> new BusinessException("INVALID_TEACHER", "Giáo viên không tồn tại hoặc không hợp lệ."));
 
         if (teacher.getRole() != UserRole.TEACHER || teacher.getStatus() != com.fu.user.entity.UserStatus.ACTIVE) {
-            throw new BusinessException("INVALID_TEACHER",
-                    "Giáo viên không tồn tại hoặc không hợp lệ.");
+            throw new BusinessException("INVALID_TEACHER", "Giáo viên không tồn tại hoặc không hợp lệ.");
         }
 
-        // Validate Course exists, is PUBLISHED, and not deleted
-        Course course = courseRepository.findByIdAndNotDeleted(request.getCourseId())
-                .orElseThrow(() -> new BusinessException("INVALID_COURSE", "Khóa học không tồn tại."));
+        // Validate Course exists, is ACTIVE, and not deleted
+        Course course = courseRepository.findByIdAndNotDeleted(request.getCourseId()).orElseThrow(() -> new BusinessException("INVALID_COURSE", "Khóa học không tồn tại."));
 
-        if (course.getStatus() != Course.ContentStatus.PUBLISHED) {
-            throw new BusinessException("INVALID_COURSE_STATUS", "Chỉ có thể tạo lớp học cho khóa học đã được xuất bản (PUBLISHED).");
+        if (course.getStatus() != Course.CourseStatus.ACTIVE) {
+            throw new BusinessException("INVALID_COURSE_STATUS", "Chỉ có thể tạo lớp học cho khóa học đang hoạt động.");
         }
 
         // Create class entity
@@ -117,42 +109,32 @@ public class ClassServiceImpl implements ClassService {
         Clazz clazz = findClassOrThrow(classId);
 
         // Check if new name conflicts with existing classes
-        if (request.getName() != null &&
-                !request.getName().equalsIgnoreCase(clazz.getName()) &&
-                classRepository.existsByNameIgnoreCaseAndIdNot(request.getName(), classId)) {
-            throw new BusinessException("CLASS_NAME_EXISTS",
-                    "Tên lớp học đã tồn tại.");
+        if (request.getName() != null && !request.getName().equalsIgnoreCase(clazz.getName()) && classRepository.existsByNameIgnoreCaseAndIdNot(request.getName(), classId)) {
+            throw new BusinessException("CLASS_NAME_EXISTS", "Tên lớp học đã tồn tại.");
         }
 
         // Validate teacher if provided
         if (request.getTeacherId() != null) {
 
-            User newTeacher = userRepository.findById(request.getTeacherId())
-                    .orElseThrow(() -> new BusinessException("INVALID_TEACHER",
-                            "Giáo viên không tồn tại hoặc không hợp lệ."));
+            User newTeacher = userRepository.findById(request.getTeacherId()).orElseThrow(() -> new BusinessException("INVALID_TEACHER", "Giáo viên không tồn tại hoặc không hợp lệ."));
 
-            if (newTeacher.getRole() != UserRole.TEACHER
-                    || newTeacher.getStatus() != com.fu.user.entity.UserStatus.ACTIVE) {
-                throw new BusinessException("INVALID_TEACHER",
-                        "Giáo viên không tồn tại hoặc không hợp lệ.");
+            if (newTeacher.getRole() != UserRole.TEACHER || newTeacher.getStatus() != com.fu.user.entity.UserStatus.ACTIVE) {
+                throw new BusinessException("INVALID_TEACHER", "Giáo viên không tồn tại hoặc không hợp lệ.");
             }
         }
 
         // Validate date range (E3: startDate must be before endDate)
         LocalDate effectiveStartDate = request.getStartDate() != null ? request.getStartDate() : clazz.getStartDate();
         LocalDate effectiveEndDate = request.getEndDate() != null ? request.getEndDate() : clazz.getEndDate();
-        if (effectiveStartDate != null && effectiveEndDate != null
-                && !effectiveEndDate.isAfter(effectiveStartDate)) {
-            throw new BusinessException("INVALID_DATE_RANGE",
-                    "Ngày bắt đầu phải trước ngày kết thúc.");
+        if (effectiveStartDate != null && effectiveEndDate != null && !effectiveEndDate.isAfter(effectiveStartDate)) {
+            throw new BusinessException("INVALID_DATE_RANGE", "Ngày bắt đầu phải trước ngày kết thúc.");
         }
 
         // Validate capacity (E4: newMaxStudents >= currentMembers)
         if (request.getMaxStudents() != null) {
             long currentMembers = classMemberRepository.countActiveByClassId(classId);
             if (request.getMaxStudents() < currentMembers) {
-                throw new BusinessException("CAPACITY_VIOLATION",
-                        "Số lượng học viên tối đa không thể nhỏ hơn số lượng học viên hiện tại đang theo học.");
+                throw new BusinessException("CAPACITY_VIOLATION", "Số lượng học viên tối đa không thể nhỏ hơn số lượng học viên hiện tại đang theo học.");
             }
         }
 
@@ -177,15 +159,9 @@ public class ClassServiceImpl implements ClassService {
     public Page<ClassSummaryResponse> getClasses(String keyword, UUID teacherId, UUID courseId, Boolean isActive, Pageable pageable) {
         log.debug("Lấy danh sách lớp học với bộ lọc động");
 
-        org.springframework.data.jpa.domain.Specification<Clazz> spec = org.springframework.data.jpa.domain.Specification
-                .where(ClassSpecification.isNotDeleted())
-                .and(ClassSpecification.hasKeyword(keyword))
-                .and(ClassSpecification.hasTeacherId(teacherId))
-                .and(ClassSpecification.hasCourseId(courseId))
-                .and(ClassSpecification.hasIsActive(isActive));
+        org.springframework.data.jpa.domain.Specification<Clazz> spec = org.springframework.data.jpa.domain.Specification.where(ClassSpecification.isNotDeleted()).and(ClassSpecification.hasKeyword(keyword)).and(ClassSpecification.hasTeacherId(teacherId)).and(ClassSpecification.hasCourseId(courseId)).and(ClassSpecification.hasIsActive(isActive));
 
-        return classRepository.findAll(spec, pageable)
-                .map(this::toSummaryWithMemberCount);
+        return classRepository.findAll(spec, pageable).map(this::toSummaryWithMemberCount);
     }
 
     // =====================================================
@@ -221,13 +197,10 @@ public class ClassServiceImpl implements ClassService {
         Clazz clazz = findClassOrThrow(classId);
         validateClassAcceptingMembers(clazz);
         // Validate user exists and has LEARNER role
-        User user = userRepository.findById(request.getUserId())
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Không tìm thấy học viên."));
+        User user = userRepository.findById(request.getUserId()).orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy học viên."));
 
         if (user.getRole() != UserRole.LEARNER) {
-            throw new BusinessException("INVALID_MEMBER_ROLE",
-                    "Chỉ người dùng có vai trò HỌC VIÊN mới được thêm vào lớp học.");
+            throw new BusinessException("INVALID_MEMBER_ROLE", "Chỉ người dùng có vai trò HỌC VIÊN mới được thêm vào lớp học.");
         }
 
         return addMemberToClass(clazz, request.getUserId());
@@ -241,13 +214,10 @@ public class ClassServiceImpl implements ClassService {
         // Verify class exists
         findClassOrThrow(classId);
 
-        ClassMember member = classMemberRepository.findByClassIdAndUserId(classId, userId)
-                .orElseThrow(() -> new BusinessException("MEMBER_NOT_FOUND",
-                        "Học viên không phải là thành viên của lớp này."));
+        ClassMember member = classMemberRepository.findByClassIdAndUserId(classId, userId).orElseThrow(() -> new BusinessException("MEMBER_NOT_FOUND", "Học viên không phải là thành viên của lớp này."));
 
         if (member.getRemovedAt() != null) {
-            throw new BusinessException("MEMBER_ALREADY_REMOVED",
-                    "Học viên đã bị xóa khỏi lớp này trước đó.");
+            throw new BusinessException("MEMBER_ALREADY_REMOVED", "Học viên đã bị xóa khỏi lớp này trước đó.");
         }
 
         member.remove();
@@ -265,11 +235,8 @@ public class ClassServiceImpl implements ClassService {
         Page<ClassMember> membersPage = classMemberRepository.findActiveByClassId(classId, pageable);
 
         // Batch fetch user info to avoid N+1 queries
-        List<UUID> userIds = membersPage.getContent().stream()
-                .map(ClassMember::getUserId)
-                .toList();
-        Map<UUID, User> userMap = userRepository.findAllById(userIds).stream()
-                .collect(Collectors.toMap(User::getId, user -> user));
+        List<UUID> userIds = membersPage.getContent().stream().map(ClassMember::getUserId).toList();
+        Map<UUID, User> userMap = userRepository.findAllById(userIds).stream().collect(Collectors.toMap(User::getId, user -> user));
 
         return membersPage.map(member -> {
             ClassMemberResponse response = classMapper.toMemberResponse(member);
@@ -317,22 +284,7 @@ public class ClassServiceImpl implements ClassService {
 
         Page<User> usersPage = userRepository.findEligibleLearnersForClass(classId, keyword, pageable);
 
-        return usersPage.map(user -> com.fu.user.dto.UserResponse.builder()
-                .id(user.getId())
-                .email(user.getEmail())
-                .firstName(user.getFirstName())
-                .lastName(user.getLastName())
-                .displayName(user.getDisplayName())
-                .fullName(user.getFullName())
-                .avatarUrl(user.getAvatarUrl())
-                .phoneNumber(user.getPhoneNumber())
-                .dateOfBirth(user.getDateOfBirth())
-                .role(user.getRole())
-                .status(user.getStatus())
-                .createdAt(user.getCreatedAt())
-                .updatedAt(user.getUpdatedAt())
-                .lastLoginAt(user.getLastLoginAt())
-                .build());
+        return usersPage.map(user -> com.fu.user.dto.UserResponse.builder().id(user.getId()).email(user.getEmail()).firstName(user.getFirstName()).lastName(user.getLastName()).displayName(user.getDisplayName()).fullName(user.getFullName()).avatarUrl(user.getAvatarUrl()).phoneNumber(user.getPhoneNumber()).dateOfBirth(user.getDateOfBirth()).role(user.getRole()).status(user.getStatus()).createdAt(user.getCreatedAt()).updatedAt(user.getUpdatedAt()).lastLoginAt(user.getLastLoginAt()).build());
     }
 
     // =====================================================
@@ -343,8 +295,7 @@ public class ClassServiceImpl implements ClassService {
      * Find non-deleted class or throw exception (BR-73)
      */
     private Clazz findClassOrThrow(UUID classId) {
-        return classRepository.findByIdAndNotDeleted(classId)
-                .orElseThrow(() -> new ClassNotFoundException("Lớp học không tồn tại."));
+        return classRepository.findByIdAndNotDeleted(classId).orElseThrow(() -> new ClassNotFoundException("Lớp học không tồn tại."));
     }
 
 
@@ -377,10 +328,7 @@ public class ClassServiceImpl implements ClassService {
             // Re-join: restore previously removed member
             member.restore();
         } else {
-            member = ClassMember.builder()
-                    .classId(clazz.getId())
-                    .userId(userId)
-                    .build();
+            member = ClassMember.builder().classId(clazz.getId()).userId(userId).build();
         }
 
         ClassMember savedMember = classMemberRepository.save(member);
@@ -412,7 +360,6 @@ public class ClassServiceImpl implements ClassService {
                 response.setTeacherName(teacher.getFullName());
                 response.setTeacherEmail(teacher.getEmail());
                 response.setTeacherAvatarUrl(teacher.getAvatarUrl());
-                response.setTeacherPhoneNumber(teacher.getPhoneNumber());
             });
         }
 

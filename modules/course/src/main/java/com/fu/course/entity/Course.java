@@ -9,14 +9,14 @@ import org.hibernate.annotations.ColumnTransformer;
 /**
  * Course entity - Japanese courses (N5, N4, N3, N2, N1)
  * Maps to learning_content.courses table
- * 
+ * <p>
  * Business: MANAGER creates and manages courses
  */
 @Entity
 @Table(name = "courses", schema = "learning_content", indexes = {
-    @Index(name = "idx_courses_name", columnList = "name"),
-    @Index(name = "idx_courses_jlpt_level", columnList = "jlpt_level"),
-    @Index(name = "idx_courses_status", columnList = "status")
+        @Index(name = "idx_courses_name", columnList = "name"),
+        @Index(name = "idx_courses_jlpt_level", columnList = "jlpt_level"),
+        @Index(name = "idx_courses_status", columnList = "status")
 })
 @Getter
 @Setter
@@ -46,9 +46,9 @@ public class Course extends SoftDeletableEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20)
-    @ColumnTransformer(write = "CAST(? AS content_status)")
+    @ColumnTransformer(write = "CAST(? AS course_status)")
     @Builder.Default
-    private ContentStatus status = ContentStatus.DRAFT;
+    private CourseStatus status = CourseStatus.INACTIVE;
 
     /**
      * JLPT Level enum
@@ -64,5 +64,11 @@ public class Course extends SoftDeletableEntity {
         DRAFT,      // Being prepared
         PUBLISHED,  // Available to students
         ARCHIVED    // Hidden from students
+    }
+
+    public enum CourseStatus {
+        ACTIVE,
+        INACTIVE,
+        DELETED
     }
 }

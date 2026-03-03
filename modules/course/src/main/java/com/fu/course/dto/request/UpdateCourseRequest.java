@@ -22,7 +22,5 @@ public class UpdateCourseRequest {
     @Size(max = 5000, message = "Description must not exceed 5000 characters")
     private String description;
 
-    private String thumbnailUrl;
-
     private Integer orderIndex;
 }

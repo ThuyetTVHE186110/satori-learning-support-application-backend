@@ -1,6 +1,6 @@
 package com.fu.course.dto.response;
 
-import com.fu.course.entity.Course.ContentStatus;
+import com.fu.course.entity.Course.CourseStatus;
 import com.fu.course.entity.Course.JlptLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -22,7 +22,7 @@ public class CourseSummaryResponse {
     private String name;
     private JlptLevel jlptLevel;
     private String thumbnailUrl;
-    private ContentStatus status;
+    private CourseStatus status;
     private Integer orderIndex;
     
     private Long lessonCount;
