@@ -4,7 +4,7 @@ import com.fu.course.dto.request.CreateCourseRequest;
 import com.fu.course.dto.request.UpdateCourseRequest;
 import com.fu.course.dto.response.CourseResponse;
 import com.fu.course.dto.response.CourseSummaryResponse;
-import com.fu.course.entity.Course.ContentStatus;
+import com.fu.course.entity.Course.CourseStatus;
 import com.fu.course.entity.Course.JlptLevel;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -46,7 +46,7 @@ public interface CourseService {
     /**
      * Get courses by status
      */
-    Page<CourseSummaryResponse> getCoursesByStatus(ContentStatus status, Pageable pageable);
+    Page<CourseSummaryResponse> getCoursesByStatus(CourseStatus status, Pageable pageable);
 
     /**
      * Get courses by JLPT level
@@ -54,14 +54,14 @@ public interface CourseService {
     Page<CourseSummaryResponse> getCoursesByJlptLevel(JlptLevel jlptLevel, Pageable pageable);
 
     /**
-     * Get published courses only (for students)
+     * Get active courses only (for students)
      */
-    List<CourseSummaryResponse> getPublishedCourses();
+    List<CourseSummaryResponse> getActiveCourses();
 
     /**
-     * Get published courses by JLPT level (for students)
+     * Get active courses by JLPT level (for students)
      */
-    List<CourseSummaryResponse> getPublishedCoursesByLevel(JlptLevel jlptLevel);
+    List<CourseSummaryResponse> getActiveCoursesByLevel(JlptLevel jlptLevel);
 
     /**
      * Search courses by name
@@ -69,14 +69,14 @@ public interface CourseService {
     Page<CourseSummaryResponse> searchCourses(String keyword, Pageable pageable);
 
     /**
-     * Publish course (change status to PUBLISHED)
+     * Activate course (change status to ACTIVE)
      */
-    CourseResponse publishCourse(UUID courseId, UUID managerId);
+    CourseResponse activateCourse(UUID courseId, UUID managerId);
 
     /**
-     * Archive course (change status to ARCHIVED)
+     * Deactivate course (change status to INACTIVE)
      */
-    CourseResponse archiveCourse(UUID courseId, UUID managerId);
+    CourseResponse deactivateCourse(UUID courseId, UUID managerId);
 
     /**
      * Soft delete course (MANAGER only)
@@ -103,9 +103,9 @@ public interface CourseService {
      */
     record CourseStatistics(
         long totalCourses,
-        long publishedCourses,
-        long draftCourses,
-        long archivedCourses,
+        long activeCourses,
+        long inactiveCourses,
+        long deletedCourses,
         long coursesByN5,
         long coursesByN4,
         long coursesByN3,

@@ -25,7 +25,7 @@ public class CourseResponse {
     private JlptLevel jlptLevel;
     private String thumbnailUrl;
     private Integer orderIndex;
-    private Course.ContentStatus status;
+    private Course.CourseStatus status;
     
     private UUID createdBy;
     private UUID updatedBy;

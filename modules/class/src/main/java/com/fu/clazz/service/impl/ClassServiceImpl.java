@@ -95,8 +95,8 @@ public class ClassServiceImpl implements ClassService {
             throw new BusinessException("INVALID_COURSE", "Khóa học đã bị xóa.");
         }
 
-        if (course.getStatus() != Course.ContentStatus.PUBLISHED) {
-            throw new BusinessException("INVALID_COURSE_STATUS", "Chỉ có thể tạo lớp học cho khóa học đã được xuất bản (PUBLISHED).");
+        if (course.getStatus() != Course.CourseStatus.ACTIVE) {
+            throw new BusinessException("INVALID_COURSE_STATUS", "Chỉ có thể tạo lớp học cho khóa học đang hoạt động.");
         }
 
         // Create class entity

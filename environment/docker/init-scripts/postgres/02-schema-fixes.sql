@@ -384,7 +384,7 @@ WHERE deleted_at IS NULL AND status != 'CLOSED';
 -- Active Courses View
 CREATE OR REPLACE VIEW learning_content.v_active_courses AS
 SELECT * FROM learning_content.courses 
-WHERE deleted_at IS NULL AND status = 'PUBLISHED';
+WHERE deleted_at IS NULL AND status = 'ACTIVE';
 
 -- Active Lessons View
 CREATE OR REPLACE VIEW learning_content.v_active_lessons AS

@@ -6,7 +6,7 @@ import com.fu.course.dto.request.CreateCourseRequest;
 import com.fu.course.dto.request.UpdateCourseRequest;
 import com.fu.course.dto.response.CourseResponse;
 import com.fu.course.dto.response.CourseSummaryResponse;
-import com.fu.course.entity.Course.ContentStatus;
+import com.fu.course.entity.Course.CourseStatus;
 import com.fu.course.entity.Course.JlptLevel;
 import com.fu.course.service.CourseService;
 import com.fu.course.service.CourseService.CourseStatistics;
@@ -94,13 +94,13 @@ public class ManagerCourseController {
 
     /**
      * Get all courses with pagination and optional filters.
-     * GET /api/v1/manager/courses?page=0&size=10&status=DRAFT&level=N5&keyword=xxx
+     * GET /api/v1/manager/courses?page=0&size=10&status=INACTIVE&level=N5&keyword=xxx
      */
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<CourseSummaryResponse>>> getAllCourses(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
-            @RequestParam(required = false) ContentStatus status,
+            @RequestParam(required = false) CourseStatus status,
             @RequestParam(required = false) JlptLevel level,
             @RequestParam(required = false) String keyword) {
 
@@ -128,31 +128,31 @@ public class ManagerCourseController {
     }
 
     /**
-     * Publish a course (DRAFT -> PUBLISHED).
-     * PATCH /api/v1/manager/courses/{courseId}/publish
+     * Activate a course (INACTIVE -> ACTIVE).
+     * PATCH /api/v1/manager/courses/{courseId}/activate
      */
-    @PatchMapping("/{courseId}/publish")
-    public ResponseEntity<ApiResponse<CourseResponse>> publishCourse(
+    @PatchMapping("/{courseId}/activate")
+    public ResponseEntity<ApiResponse<CourseResponse>> activateCourse(
             @PathVariable UUID courseId,
             @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
-        log.info("Manager {} publishing course: {}", managerId, courseId);
-        CourseResponse response = courseService.publishCourse(courseId, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Course published successfully", response));
+        log.info("Manager {} activating course: {}", managerId, courseId);
+        CourseResponse response = courseService.activateCourse(courseId, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Course activated successfully", response));
     }
 
     /**
-     * Archive a course (any status -> ARCHIVED).
-     * PATCH /api/v1/manager/courses/{courseId}/archive
+     * Deactivate a course (ACTIVE -> INACTIVE).
+     * PATCH /api/v1/manager/courses/{courseId}/deactivate
      */
-    @PatchMapping("/{courseId}/archive")
-    public ResponseEntity<ApiResponse<CourseResponse>> archiveCourse(
+    @PatchMapping("/{courseId}/deactivate")
+    public ResponseEntity<ApiResponse<CourseResponse>> deactivateCourse(
             @PathVariable UUID courseId,
             @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
-        log.info("Manager {} archiving course: {}", managerId, courseId);
-        CourseResponse response = courseService.archiveCourse(courseId, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Course archived successfully", response));
+        log.info("Manager {} deactivating course: {}", managerId, courseId);
+        CourseResponse response = courseService.deactivateCourse(courseId, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Course deactivated successfully", response));
     }
 
     /**

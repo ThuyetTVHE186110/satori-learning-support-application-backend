@@ -5,7 +5,7 @@ import com.fu.course.dto.request.UpdateCourseRequest;
 import com.fu.course.dto.response.CourseResponse;
 import com.fu.course.dto.response.CourseSummaryResponse;
 import com.fu.course.entity.Course;
-import com.fu.course.entity.Course.ContentStatus;
+import com.fu.course.entity.Course.CourseStatus;
 import com.fu.course.entity.Course.JlptLevel;
 import com.fu.course.exception.CourseNameAlreadyExistsException;
 import com.fu.course.exception.CourseNotFoundException;
@@ -144,7 +144,7 @@ public class CourseServiceImpl implements CourseService {
     }
 
     @Override
-    public Page<CourseSummaryResponse> getCoursesByStatus(Course.ContentStatus status, Pageable pageable) {
+    public Page<CourseSummaryResponse> getCoursesByStatus(Course.CourseStatus status, Pageable pageable) {
         log.debug("Fetching courses by status: {}", status);
         return courseRepository.findByStatusAndDeletedAtIsNull(status, pageable)
             .map(courseMapper::toSummaryResponse);
@@ -158,18 +158,18 @@ public class CourseServiceImpl implements CourseService {
     }
 
     @Override
-    public List<CourseSummaryResponse> getPublishedCourses() {
-        log.debug("Fetching all published courses");
-        return courseRepository.findPublishedCourses()
+    public List<CourseSummaryResponse> getActiveCourses() {
+        log.debug("Fetching all active courses");
+        return courseRepository.findActiveCourses()
             .stream()
             .map(courseMapper::toSummaryResponse)
             .toList();
     }
 
     @Override
-    public List<CourseSummaryResponse> getPublishedCoursesByLevel(JlptLevel jlptLevel) {
-        log.debug("Fetching published courses by level: {}", jlptLevel);
-        return courseRepository.findPublishedCoursesByLevel(jlptLevel)
+    public List<CourseSummaryResponse> getActiveCoursesByLevel(JlptLevel jlptLevel) {
+        log.debug("Fetching active courses by level: {}", jlptLevel);
+        return courseRepository.findActiveCoursesByLevel(jlptLevel)
             .stream()
             .map(courseMapper::toSummaryResponse)
             .toList();
@@ -184,30 +184,30 @@ public class CourseServiceImpl implements CourseService {
 
     @Override
     @Transactional
-    public CourseResponse publishCourse(UUID courseId, UUID managerId) {
-        log.info("Publishing course: {} by manager: {}", courseId, managerId);
+    public CourseResponse activateCourse(UUID courseId, UUID managerId) {
+        log.info("Activating course: {} by manager: {}", courseId, managerId);
         
         Course course = findCourseOrThrow(courseId);
-        course.setStatus(Course.ContentStatus.PUBLISHED);
+        course.setStatus(Course.CourseStatus.ACTIVE);
         course.setUpdatedBy(managerId);
         
         Course updatedCourse = courseRepository.save(course);
-        log.info("Course published successfully: {}", courseId);
+        log.info("Course activated successfully: {}", courseId);
         
         return courseMapper.toResponse(updatedCourse);
     }
 
     @Override
     @Transactional
-    public CourseResponse archiveCourse(UUID courseId, UUID managerId) {
-        log.info("Archiving course: {} by manager: {}", courseId, managerId);
+    public CourseResponse deactivateCourse(UUID courseId, UUID managerId) {
+        log.info("Deactivating course: {} by manager: {}", courseId, managerId);
         
         Course course = findCourseOrThrow(courseId);
-        course.setStatus(ContentStatus.ARCHIVED);
+        course.setStatus(CourseStatus.INACTIVE);
         course.setUpdatedBy(managerId);
         
         Course updatedCourse = courseRepository.save(course);
-        log.info("Course archived successfully: {}", courseId);
+        log.info("Course deactivated successfully: {}", courseId);
         
         return courseMapper.toResponse(updatedCourse);
     }
@@ -255,9 +255,9 @@ public class CourseServiceImpl implements CourseService {
         log.debug("Fetching course statistics");
         
         long totalCourses = courseRepository.count();
-        long publishedCourses = courseRepository.countByStatusAndDeletedAtIsNull(Course.ContentStatus.PUBLISHED);
-        long draftCourses = courseRepository.countByStatusAndDeletedAtIsNull(Course.ContentStatus.DRAFT);
-        long archivedCourses = courseRepository.countByStatusAndDeletedAtIsNull(ContentStatus.ARCHIVED);
+        long activeCourses = courseRepository.countByStatusAndDeletedAtIsNull(Course.CourseStatus.ACTIVE);
+        long inactiveCourses = courseRepository.countByStatusAndDeletedAtIsNull(Course.CourseStatus.INACTIVE);
+        long deletedCourses = courseRepository.countByStatusAndDeletedAtIsNull(CourseStatus.DELETED);
         
         long n5Courses = courseRepository.countByJlptLevelAndDeletedAtIsNull(JlptLevel.N5);
         long n4Courses = courseRepository.countByJlptLevelAndDeletedAtIsNull(JlptLevel.N4);
@@ -267,9 +267,9 @@ public class CourseServiceImpl implements CourseService {
         
         return new CourseStatistics(
             totalCourses,
-            publishedCourses,
-            draftCourses,
-            archivedCourses,
+            activeCourses,
+            inactiveCourses,
+            deletedCourses,
             n5Courses,
             n4Courses,
             n3Courses,

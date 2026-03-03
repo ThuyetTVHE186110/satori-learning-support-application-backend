@@ -5,7 +5,7 @@ import com.fu.course.dto.request.UpdateCourseRequest;
 import com.fu.course.dto.response.CourseResponse;
 import com.fu.course.dto.response.CourseSummaryResponse;
 import com.fu.course.entity.Course;
-import com.fu.course.entity.Course.ContentStatus;
+import com.fu.course.entity.Course.CourseStatus;
 import com.fu.course.entity.Course.JlptLevel;
 import com.fu.course.exception.CourseNameAlreadyExistsException;
 import com.fu.course.exception.CourseNotFoundException;
@@ -87,7 +87,7 @@ class CourseServiceImplTest {
                 .jlptLevel(JlptLevel.N5)
                 .thumbnailUrl("https://example.com/thumb.jpg")
                 .orderIndex(1)
-                .status(Course.ContentStatus.DRAFT)
+                .status(Course.CourseStatus.INACTIVE)
                 .build();
         ReflectionTestUtils.setField(testCourse, "id", courseId);
 
@@ -98,7 +98,7 @@ class CourseServiceImplTest {
                 .jlptLevel(JlptLevel.N5)
                 .thumbnailUrl("https://example.com/thumb.jpg")
                 .orderIndex(1)
-                .status(ContentStatus.DRAFT)
+                .status(CourseStatus.INACTIVE)
                 .lessonCount(0L)
                 .studentCount(0L)
                 .build();
@@ -107,7 +107,7 @@ class CourseServiceImplTest {
                 .id(courseId)
                 .name("Japanese N5 Course")
                 .jlptLevel(JlptLevel.N5)
-                .status(ContentStatus.DRAFT)
+                .status(CourseStatus.INACTIVE)
                 .orderIndex(1)
                 .build();
 
@@ -445,11 +445,11 @@ class CourseServiceImplTest {
             // Given
             Pageable pageable = PageRequest.of(0, 10);
             Page<Course> coursePage = new PageImpl<>(List.of(testCourse), pageable, 1);
-            given(courseRepository.findByStatusAndDeletedAtIsNull(ContentStatus.DRAFT, pageable)).willReturn(coursePage);
+            given(courseRepository.findByStatusAndDeletedAtIsNull(CourseStatus.INACTIVE, pageable)).willReturn(coursePage);
             given(courseMapper.toSummaryResponse(testCourse)).willReturn(testSummaryResponse);
 
             // When
-            Page<CourseSummaryResponse> result = courseService.getCoursesByStatus(Course.ContentStatus.DRAFT, pageable);
+            Page<CourseSummaryResponse> result = courseService.getCoursesByStatus(Course.CourseStatus.INACTIVE, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
@@ -472,14 +472,14 @@ class CourseServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should get published courses")
-        void shouldGetPublishedCourses() {
+        @DisplayName("Should get active courses")
+        void shouldGetActiveCourses() {
             // Given
-            given(courseRepository.findPublishedCourses()).willReturn(List.of(testCourse));
+            given(courseRepository.findActiveCourses()).willReturn(List.of(testCourse));
             given(courseMapper.toSummaryResponse(testCourse)).willReturn(testSummaryResponse);
 
             // When
-            List<CourseSummaryResponse> result = courseService.getPublishedCourses();
+            List<CourseSummaryResponse> result = courseService.getActiveCourses();
 
             // Then
             assertThat(result).hasSize(1);
@@ -503,7 +503,7 @@ class CourseServiceImplTest {
     }
 
     // =====================================================
-    // PUBLISH / ARCHIVE / DELETE
+    // ACTIVATE / DEACTIVATE / DELETE
     // =====================================================
 
     @Nested
@@ -511,48 +511,48 @@ class CourseServiceImplTest {
     class StatusManagementTests {
 
         @Test
-        @DisplayName("Should publish course successfully")
-        void shouldPublishCourseSuccessfully() {
+        @DisplayName("Should activate course successfully")
+        void shouldActivateCourseSuccessfully() {
             // Given
             given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
             given(courseRepository.save(any(Course.class))).willReturn(testCourse);
 
-            CourseResponse publishedResponse = CourseResponse.builder()
+            CourseResponse activatedResponse = CourseResponse.builder()
                     .id(courseId)
-                    .status(ContentStatus.PUBLISHED)
+                    .status(CourseStatus.ACTIVE)
                     .build();
-            given(courseMapper.toResponse(testCourse)).willReturn(publishedResponse);
+            given(courseMapper.toResponse(testCourse)).willReturn(activatedResponse);
 
             // When
-            CourseResponse result = courseService.publishCourse(courseId, managerId);
+            CourseResponse result = courseService.activateCourse(courseId, managerId);
 
             // Then
-            assertThat(result.getStatus()).isEqualTo(ContentStatus.PUBLISHED);
+            assertThat(result.getStatus()).isEqualTo(CourseStatus.ACTIVE);
             verify(courseRepository).save(courseCaptor.capture());
-            assertThat(courseCaptor.getValue().getStatus()).isEqualTo(ContentStatus.PUBLISHED);
+            assertThat(courseCaptor.getValue().getStatus()).isEqualTo(CourseStatus.ACTIVE);
             assertThat(courseCaptor.getValue().getUpdatedBy()).isEqualTo(managerId);
         }
 
         @Test
-        @DisplayName("Should archive course successfully")
-        void shouldArchiveCourseSuccessfully() {
+        @DisplayName("Should deactivate course successfully")
+        void shouldDeactivateCourseSuccessfully() {
             // Given
             given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
             given(courseRepository.save(any(Course.class))).willReturn(testCourse);
 
-            CourseResponse archivedResponse = CourseResponse.builder()
+            CourseResponse deactivatedResponse = CourseResponse.builder()
                     .id(courseId)
-                    .status(ContentStatus.ARCHIVED)
+                    .status(CourseStatus.INACTIVE)
                     .build();
-            given(courseMapper.toResponse(testCourse)).willReturn(archivedResponse);
+            given(courseMapper.toResponse(testCourse)).willReturn(deactivatedResponse);
 
             // When
-            CourseResponse result = courseService.archiveCourse(courseId, managerId);
+            CourseResponse result = courseService.deactivateCourse(courseId, managerId);
 
             // Then
-            assertThat(result.getStatus()).isEqualTo(ContentStatus.ARCHIVED);
+            assertThat(result.getStatus()).isEqualTo(CourseStatus.INACTIVE);
             verify(courseRepository).save(courseCaptor.capture());
-            assertThat(courseCaptor.getValue().getStatus()).isEqualTo(ContentStatus.ARCHIVED);
+            assertThat(courseCaptor.getValue().getStatus()).isEqualTo(CourseStatus.INACTIVE);
         }
 
         @Test
@@ -659,9 +659,9 @@ class CourseServiceImplTest {
         void shouldGetCourseStatistics() {
             // Given
             given(courseRepository.count()).willReturn(10L);
-            given(courseRepository.countByStatusAndDeletedAtIsNull(ContentStatus.PUBLISHED)).willReturn(5L);
-            given(courseRepository.countByStatusAndDeletedAtIsNull(ContentStatus.DRAFT)).willReturn(3L);
-            given(courseRepository.countByStatusAndDeletedAtIsNull(Course.ContentStatus.ARCHIVED)).willReturn(2L);
+            given(courseRepository.countByStatusAndDeletedAtIsNull(CourseStatus.ACTIVE)).willReturn(5L);
+            given(courseRepository.countByStatusAndDeletedAtIsNull(CourseStatus.INACTIVE)).willReturn(3L);
+            given(courseRepository.countByStatusAndDeletedAtIsNull(Course.CourseStatus.DELETED)).willReturn(2L);
             given(courseRepository.countByJlptLevelAndDeletedAtIsNull(JlptLevel.N5)).willReturn(3L);
             given(courseRepository.countByJlptLevelAndDeletedAtIsNull(JlptLevel.N4)).willReturn(2L);
             given(courseRepository.countByJlptLevelAndDeletedAtIsNull(JlptLevel.N3)).willReturn(2L);
@@ -673,9 +673,9 @@ class CourseServiceImplTest {
 
             // Then
             assertThat(stats.totalCourses()).isEqualTo(10L);
-            assertThat(stats.publishedCourses()).isEqualTo(5L);
-            assertThat(stats.draftCourses()).isEqualTo(3L);
-            assertThat(stats.archivedCourses()).isEqualTo(2L);
+            assertThat(stats.activeCourses()).isEqualTo(5L);
+            assertThat(stats.inactiveCourses()).isEqualTo(3L);
+            assertThat(stats.deletedCourses()).isEqualTo(2L);
             assertThat(stats.coursesByN5()).isEqualTo(3L);
             assertThat(stats.coursesByN4()).isEqualTo(2L);
             assertThat(stats.coursesByN1()).isEqualTo(1L);
