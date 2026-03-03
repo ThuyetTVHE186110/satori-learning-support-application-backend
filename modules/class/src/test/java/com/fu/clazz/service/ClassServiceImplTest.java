@@ -322,28 +322,14 @@ class ClassServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should throw exception when course not found")
+        @DisplayName("Should throw exception when course not found or deleted")
         void shouldThrowWhenCourseNotFound() {
             given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
-            given(courseRepository.findById(courseId)).willReturn(Optional.empty());
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.empty());
 
             assertThatThrownBy(() -> clazzService.createClass(createRequest, managerId))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Khóa học không tồn tại");
-
-            verify(classRepository, never()).save(any());
-        }
-
-        @Test
-        @DisplayName("Should throw exception when course is deleted")
-        void shouldThrowWhenCourseDeleted() {
-            testCourse.setDeletedAt(LocalDateTime.now());
-            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
-            given(courseRepository.findById(courseId)).willReturn(Optional.of(testCourse));
-
-            assertThatThrownBy(() -> clazzService.createClass(createRequest, managerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("Khóa học đã bị xóa");
 
             verify(classRepository, never()).save(any());
         }

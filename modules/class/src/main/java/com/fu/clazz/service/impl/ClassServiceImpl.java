@@ -88,12 +88,8 @@ public class ClassServiceImpl implements ClassService {
         }
 
         // Validate Course exists, is PUBLISHED, and not deleted
-        Course course = courseRepository.findById(request.getCourseId())
+        Course course = courseRepository.findByIdAndNotDeleted(request.getCourseId())
                 .orElseThrow(() -> new BusinessException("INVALID_COURSE", "Khóa học không tồn tại."));
-
-        if (course.getDeletedAt() != null) {
-            throw new BusinessException("INVALID_COURSE", "Khóa học đã bị xóa.");
-        }
 
         if (course.getStatus() != Course.ContentStatus.PUBLISHED) {
             throw new BusinessException("INVALID_COURSE_STATUS", "Chỉ có thể tạo lớp học cho khóa học đã được xuất bản (PUBLISHED).");
