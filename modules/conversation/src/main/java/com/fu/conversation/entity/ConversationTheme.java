@@ -59,6 +59,7 @@ public class ConversationTheme extends SoftDeletableEntity {
      * Format: {"vocabularyHints": [...], "grammarPoints": [...], "scenarioSuggestions": [...]}
      */
     @Column(name = "ai_generated_context", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "CAST(? AS jsonb)")
     @Builder.Default
     private String aiGeneratedContext = "{}";
 

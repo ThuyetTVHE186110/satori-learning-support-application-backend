@@ -114,8 +114,6 @@ class AuthServiceImplTest {
         ReflectionTestUtils.setField(testSession, "id", UUID.randomUUID());
         
         // Set security config to match production defaults
-        ReflectionTestUtils.setField(authService, "maxFailedAttempts", 5);
-        ReflectionTestUtils.setField(authService, "lockDurationMinutes", 30);
         ReflectionTestUtils.setField(authService, "otpExpirationMinutes", 10);
 
         // Inject Optional<FirebaseAuth> for Google auth tests
@@ -204,8 +202,7 @@ class AuthServiceImplTest {
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("Sai email hoặc mật khẩu");
 
-            verify(userRepository).save(userCaptor.capture());
-            assertThat(userCaptor.getValue().getFailedLoginAttempts()).isEqualTo(1);
+            verify(loginAttemptService).handleFailedLogin(any(User.class));
         }
 
         // UTCID10 — successful login with valid credentials
@@ -312,8 +309,7 @@ class AuthServiceImplTest {
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("Sai email hoặc mật khẩu");
 
-            verify(userRepository).save(userCaptor.capture());
-            assertThat(userCaptor.getValue().getFailedLoginAttempts()).isEqualTo(1);
+            verify(loginAttemptService).handleFailedLogin(any(User.class));
         }
 
         // UTCID07 — abnormal: password has no digits or special chars
@@ -334,8 +330,7 @@ class AuthServiceImplTest {
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("Sai email hoặc mật khẩu");
 
-            verify(userRepository).save(userCaptor.capture());
-            assertThat(userCaptor.getValue().getFailedLoginAttempts()).isEqualTo(1);
+            verify(loginAttemptService).handleFailedLogin(any(User.class));
         }
 
         // UTCID08 — password has no special character
@@ -356,8 +351,7 @@ class AuthServiceImplTest {
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("Sai email hoặc mật khẩu");
 
-            verify(userRepository).save(userCaptor.capture());
-            assertThat(userCaptor.getValue().getFailedLoginAttempts()).isEqualTo(1);
+            verify(loginAttemptService).handleFailedLogin(any(User.class));
         }
 
         // UTCID09 — password has no uppercase letter
@@ -378,8 +372,7 @@ class AuthServiceImplTest {
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("Sai email hoặc mật khẩu");
 
-            verify(userRepository).save(userCaptor.capture());
-            assertThat(userCaptor.getValue().getFailedLoginAttempts()).isEqualTo(1);
+            verify(loginAttemptService).handleFailedLogin(any(User.class));
         }
 
         // UTCID12 — lock account after reaching max failed attempts

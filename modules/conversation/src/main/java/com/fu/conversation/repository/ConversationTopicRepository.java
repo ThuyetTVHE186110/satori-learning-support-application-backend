@@ -25,4 +25,6 @@ public interface ConversationTopicRepository extends JpaRepository<ConversationT
     List<ConversationTopic> findByThemeIdAndDeletedAtIsNull(UUID themeId);
 
     Page<ConversationTopic> findByDeletedAtIsNull(Pageable pageable);
+
+    long countByThemeIdAndDeletedAtIsNull(UUID themeId);
 }

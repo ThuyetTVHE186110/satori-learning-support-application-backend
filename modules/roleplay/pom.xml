@@ -11,7 +11,7 @@
     </parent>
 
     <artifactId>roleplay</artifactId>
-    <description>Roleplay module - AI-driven roleplay conversation sessions with missions and evaluation</description>
+    <description>Roleplay module - AI-driven roleplay sessions with missions and pronunciation assessment</description>
 
     <dependencies>
         <dependency>

@@ -1,5 +1,6 @@
 package com.fu.conversation.service.impl;
 
+import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.conversation.ai.ConversationGenerationService;
 import com.fu.conversation.dto.request.CreateThemeRequest;
@@ -57,6 +58,9 @@ public class ConversationThemeServiceImpl implements ConversationThemeService {
     @Override
     @Transactional
     public ConversationThemeResponse updateTheme(UUID id, UpdateThemeRequest request, UUID managerId) {
+        if (request.getTitle() != null && request.getTitle().isBlank()) {
+            throw new BusinessException("VALIDATION_ERROR", "Title must not be blank");
+        }
         ConversationTheme theme = findActiveTheme(id);
         themeMapper.updateEntity(theme, request);
         theme.setUpdatedBy(managerId);
@@ -106,6 +110,12 @@ public class ConversationThemeServiceImpl implements ConversationThemeService {
     }
 
     @Override
+    public Page<ConversationThemeSummaryResponse> searchThemes(String keyword, Pageable pageable) {
+        return themeRepository.searchByKeyword(keyword, pageable)
+                .map(this::buildThemeSummaryResponse);
+    }
+
+    @Override
     public Page<ConversationThemeSummaryResponse> getPublishedThemes(Course.JlptLevel jlptLevel, Pageable pageable) {
         Page<ConversationTheme> page = jlptLevel != null
                 ? themeRepository.findByJlptLevelAndStatusAndDeletedAtIsNull(
@@ -113,6 +123,12 @@ public class ConversationThemeServiceImpl implements ConversationThemeService {
                 : themeRepository.findByStatusAndDeletedAtIsNull(
                         Course.ContentStatus.PUBLISHED, pageable);
         return page.map(this::buildThemeSummaryResponse);
+    }
+
+    @Override
+    public Page<ConversationThemeSummaryResponse> searchPublishedThemes(String keyword, Pageable pageable) {
+        return themeRepository.searchPublishedByKeyword(keyword, pageable)
+                .map(this::buildThemeSummaryResponse);
     }
 
     private ConversationTheme findActiveTheme(UUID id) {
@@ -128,16 +144,14 @@ public class ConversationThemeServiceImpl implements ConversationThemeService {
             courseRepository.findById(theme.getCourseId())
                     .ifPresent(c -> response.setCourseName(c.getName()));
         }
-        long topicCount = topicRepository.findByThemeIdAndDeletedAtIsNull(
-                theme.getId(), Pageable.unpaged()).getTotalElements();
+        long topicCount = topicRepository.countByThemeIdAndDeletedAtIsNull(theme.getId());
         response.setTopicCount(topicCount);
         return response;
     }
 
     private ConversationThemeSummaryResponse buildThemeSummaryResponse(ConversationTheme theme) {
         ConversationThemeSummaryResponse response = themeMapper.toSummaryResponse(theme);
-        long topicCount = topicRepository.findByThemeIdAndDeletedAtIsNull(
-                theme.getId(), Pageable.unpaged()).getTotalElements();
+        long topicCount = topicRepository.countByThemeIdAndDeletedAtIsNull(theme.getId());
         response.setTopicCount(topicCount);
         return response;
     }

@@ -3,6 +3,8 @@ FROM python:3.11-slim
 # System dependencies required by pyopenjtalk (builds from source)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
+    make \
+    gcc \
     g++ \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
@@ -10,9 +12,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY requirements.txt .
+COPY requirements-test.txt .
+ENV CMAKE_POLICY_VERSION_MINIMUM=3.5
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY main.py .
+COPY test_main.py .
 
 EXPOSE 8091
 
