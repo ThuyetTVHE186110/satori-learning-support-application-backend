@@ -325,11 +325,13 @@ class AuthControllerIntegrationTest {
          * TC_AUTH_LG_008 — Expired access token on a protected endpoint → HTTP 401.
          * Generates a token signed with the same secret but expiry in the past.
          *
-         * filter chain (active in @SpringBootTest) returns 401 for expired JWT.
-         * Assertions follow actual code behavior.
+         * JwtAuthenticationFilter catches ExpiredJwtException, sets header
+         * X-Token-Expired: true, then continues the filter chain.
+         * Spring Security finds no authentication → authenticationEntryPoint
+         * returns HTTP 401 with errorCode "UNAUTHORIZED".
          */
         @Test
-        @DisplayName("TC_AUTH_LG_008 — Expired access token → 400 Unauthorized")
+        @DisplayName("TC_AUTH_LG_008 — Expired access token → 401 Unauthorized + errorCode UNAUTHORIZED")
         void tc_lg_008_expiredAccessToken() throws Exception {
             SecretKey key = (SecretKey) ReflectionTestUtils.getField(jwtService, "accessTokenKey");
             User user = userRepository.findByEmail("learner@test.com").orElseThrow();
@@ -355,7 +357,8 @@ class AuthControllerIntegrationTest {
                                     .confirmPassword("NewPass@2")
                                     .build())))
                     .andExpect(status().isUnauthorized())
-                    .andExpect(jsonPath("$.success").value(false));
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
         }
 
         /**

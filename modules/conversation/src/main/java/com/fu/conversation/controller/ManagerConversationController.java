@@ -156,7 +156,7 @@ public class ManagerConversationController {
             @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
         themeService.deleteTheme(themeId, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Theme deleted successfully", null));
+        return ResponseEntity.ok(ApiResponse.success("Nội dung đã được xoá", null));
     }
 
     // ==================== TOPIC (Chủ đề nhỏ) ====================

@@ -806,27 +806,26 @@ class AuthControllerTest {
          * be
          * fully replicated here.
          *
-         * Recommended follow-up:
-         * 1. Write a unit test for JwtAuthenticationFilter: mock
-         * jwtService.validateAccessToken()
-         * to return null, verify SecurityContextHolder stays empty, and verify
-         * response is 401 via the entry point.
-         * 2. OR: Add a @SpringBootTest integration test with the full filter chain.
+         * ACTUAL PRODUCTION BEHAVIOR:
+         * JwtAuthenticationFilter catches ExpiredJwtException → sets header
+         * X-Token-Expired: true → continues filter chain → Spring Security finds no
+         * authentication → authenticationEntryPoint →
+         * HTTP 401, success=false, errorCode="UNAUTHORIZED"
          *
-         * This test is @Disabled to avoid a misleading green result; it is kept here
-         * as a placeholder / reminder.
+         * Covered by integration test tc_lg_008_expiredAccessToken()
+         * in AuthControllerIntegrationTest (full filter chain via @SpringBootTest).
          *
          * CURRENT BEHAVIOR IN TEST CONTEXT: No JWT filter active → anonymous request →
          * AccessDeniedException → HTTP 403 (not 401 as production returns).
          */
         @Test
         @org.junit.jupiter.api.Disabled("TC_AUTH_LG_008: JWT filter not active in @WebMvcTest context — " +
-                "see NOTE FOR DEV; write a JwtAuthenticationFilter unit test or @SpringBootTest instead")
-        @DisplayName("TC_AUTH_LG_008 — @Disabled: expired token → 401 requires JWT filter (see NOTE FOR DEV)")
+                "see NOTE FOR DEV; covered by AuthControllerIntegrationTest#tc_lg_008_expiredAccessToken")
+        @DisplayName("TC_AUTH_LG_008 — @Disabled: expired token → 401 + UNAUTHORIZED (see NOTE FOR DEV)")
         void expiredAccessTokenReturns401_requiresFilterChain() throws Exception {
             // Placeholder — not runnable in @WebMvcTest without JWT filter.
-            // In production: invalid/expired JWT → filter clears SecurityContext → entry
-            // point → 401.
+            // In production: expired JWT → filter sets X-Token-Expired header →
+            // authenticationEntryPoint → HTTP 401, code="UNAUTHORIZED".
             mockMvc.perform(get("/api/v1/auth/me").with(csrf()))
                     .andExpect(status().isUnauthorized()); // would be 401 in production
         }

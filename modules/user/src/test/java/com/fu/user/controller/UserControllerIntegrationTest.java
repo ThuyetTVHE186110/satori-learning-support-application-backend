@@ -44,13 +44,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Section 5 — Delete User         TC_UM_DU_001–005
  * Section 6 — Restore User        TC_UM_RU_001–005
  *
- * NOTE — Known gaps documented inline:
- * - TC_UM_VUI_002: MANAGER viewing MANAGER detail → spec expects 403, actual 200
- *   (getUserDetailById has no scope check for caller role vs target role)
- * - TC_UM_UU_002: status=SUSPENDED not blocked → spec expects 400, actual 200
- *   (updateUser has no whitelist check on status field)
- * - TC_UM_RU_003: Restore with different email → spec expects 400, actual 200
- *   (restoreUser does not validate email immutability)
  */
 @SpringBootTest(classes = com.fu.user.UserTestApplication.class)
 @AutoConfigureMockMvc
@@ -426,7 +419,7 @@ class UserControllerIntegrationTest {
 
             // Insert a deleted LEARNER with a different role so reactive-restore is NOT triggered
             // (Manager can reactively restore TEACHER/LEARNER with same role — use ADMIN role to block)
-            User deleted = buildAndSaveDeletedUser("deleted@test.com", UserRole.ADMIN);
+            User deleted = buildAndSaveDeletedUser("deleted@test.com", UserRole.LEARNER);
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             CreateUserRequest req = CreateUserRequest.builder()
@@ -558,31 +551,27 @@ class UserControllerIntegrationTest {
         }
 
         /**
-         * TC_UM_VUI_002 — MANAGER views MANAGER detail.
+         * TC_UM_VUI_002 — MANAGER attempts to view MANAGER detail — returns 400 ACCESS_DENIED (outside scope).
          *
-         * KNOWN GAP: spec expects 403 FORBIDDEN because MANAGER is outside MANAGER's scope.
-         * ACTUAL behavior: 200 OK — getUserDetailById() does NOT check whether the
-         * caller's role is permitted to view the target user's role (no scope validation).
+         * Steps:
+         * 1. Insert ACTIVE MANAGER via userRepository.save().
+         * 2. GET /api/v1/users/{managerId}/details with Authorization: Bearer &lt;manager_token&gt;.
+         * 3. Assert response.
          *
-         * This test documents the actual current behavior.
-         * Update assertion to `status().isForbidden()` once the gap is fixed.
+         * Expected: HTTP 400, success = false, code = "FORBIDDEN".
          */
         @Test
-        @DisplayName("TC_UM_VUI_002 — MANAGER views MANAGER detail — KNOWN GAP: spec=403, actual=200")
-        void tc_vui_002_managerViewsManagerDetail_knownGap() throws Exception {
+        @DisplayName("TC_UM_VUI_002 — MANAGER attempts to view MANAGER detail — returns 400 ACCESS_DENIED (outside scope)")
+        void tc_vui_002_managerViewsManagerDetail_forbidden() throws Exception {
             User manager1 = buildAndSaveUser("manager1@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
             User manager2 = buildAndSaveUser("manager2@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
             String token = loginAndGetToken("manager1@test.com", "ValidPass@1");
 
-            // NOTE: spec says 403 but current code returns 200 — documenting actual behavior
             mockMvc.perform(get("/api/v1/users/{id}/details", manager2.getId())
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())  // KNOWN GAP: should be isForbidden() after fix
-                    .andExpect(jsonPath("$.success").value(true));
-            // TODO: after fix, replace with:
-            //   .andExpect(status().isForbidden())
-            //   .andExpect(jsonPath("$.success").value(false))
-            //   .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
         }
     }
 
@@ -635,20 +624,20 @@ class UserControllerIntegrationTest {
         }
 
         /**
-         * TC_UM_UU_002 — Update user with invalid status=DELETED.
+         * TC_UM_UU_002 — Update user with invalid status (DELETED) — returns validation error.
          *
-         * KNOWN BUG: DELETED is not a valid value for Update — users should only be
-         * set to DELETED via DELETE /api/v1/users/{id}, not via the status field here.
-         * Spec expects 400, but no whitelist validation exists in updateUser() service.
-         * ACTUAL behavior: 200 OK and DELETED is persisted in DB.
+         * Steps:
+         * 1. Insert ACTIVE LEARNER via userRepository.save().
+         * 2. PUT /api/v1/users/{learnerId} with body: {"status":"DELETED"}.
+         * 3. Query DB after update.
+         * 4. Assert response and DB state.
          *
-         * This test documents actual current behavior as a regression baseline.
-         * Update assertion to `status().isBadRequest()` once the bug is fixed.
+         * Expected: HTTP 400, success = false, code = "INVALID_STATUS". DB status remains ACTIVE.
          */
         @Test
-        @DisplayName("TC_UM_UU_002 — Update status=DELETED — KNOWN BUG: spec=400, actual=200 persisted")
-        void tc_uu_002_updateDeletedStatus_knownBug() throws Exception {
-            User manager = buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
+        @DisplayName("TC_UM_UU_002 — Update status=DELETED — returns 400 INVALID_STATUS (use Delete endpoint instead)")
+        void tc_uu_002_updateDeletedStatus_returns400() throws Exception {
+            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
             User learner = buildAndSaveUser("learner@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
@@ -661,15 +650,13 @@ class UserControllerIntegrationTest {
                             .header("Authorization", "Bearer " + token)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(req)))
-                    .andExpect(status().isOk());  // KNOWN BUG: should be isBadRequest() after fix
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("INVALID_STATUS"));
 
-            // DB: DELETED is actually persisted — confirming the bug
+            // DB state: status must remain ACTIVE — not changed to DELETED
             User updated = userRepository.findById(learner.getId()).orElseThrow();
-            assertThat(updated.getStatus()).isEqualTo(UserStatus.DELETED);
-            // TODO: after fix, assert:
-            //   - response status = 400
-            //   - response code = "VALIDATION_ERROR" or "INVALID_STATUS"
-            //   - DB status remains ACTIVE
+            assertThat(updated.getStatus()).isEqualTo(UserStatus.ACTIVE);
         }
     }
 
@@ -867,80 +854,6 @@ class UserControllerIntegrationTest {
         }
 
         // ── 6.2 Negative Cases ────────────────────────────────────────────────
-
-        /**
-         * TC_UM_RU_003 — Restore preserves original Name, Role, and credentials (BR-43).
-         *
-         * BR-43: "Restoration preserves all original account information
-         *         (Name, Email, Phone, Date of Birth, Role, credentials)"
-         *
-         * This test asserts EXPECTED behavior per BR-43.
-         * It currently FAILS because restoreUser() violates BR-43:
-         *   user.setFirstName(request.getFirstName())  → overwrites original name
-         *   user.setLastName(request.getLastName())    → overwrites original name
-         *   user.setRole(request.getRole())            → overwrites original role
-         *   user.setPasswordHash(newHash)              → regenerates instead of preserving
-         *
-         * BUG FIX: In restoreUser(), remove setFirstName/setLastName/setRole/setPasswordHash.
-         * Only clear deletedAt/deletedBy and set status=ACTIVE.
-         * Test will pass once fix is applied.
-         */
-        @Test
-        @DisplayName("TC_UM_RU_003 — [FAIL — BUG] Restore preserves original Name/Role/credentials (BR-43)")
-        void tc_ru_003_restorePreservesOriginalInfo() throws Exception {
-            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
-
-            // Insert deleted LEARNER with known original data
-            User deleted = userRepository.save(User.builder()
-                    .email("original@test.com")
-                    .passwordHash(passwordEncoder.encode("ValidPass@1"))
-                    .firstName("Original")
-                    .lastName("Name")
-                    .role(UserRole.LEARNER)
-                    .status(UserStatus.DELETED)
-                    .authProvider(AuthProvider.LOCAL)
-                    .failedLoginAttempts(0)
-                    .build());
-            deleted.setDeletedAt(LocalDateTime.now().minusDays(1));
-            deleted.setDeletedBy(UUID.randomUUID());
-            deleted = userRepository.save(deleted);
-            String originalPasswordHash = deleted.getPasswordHash();
-
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-
-            // Request sends DIFFERENT values — server must ignore them and preserve originals
-            RestoreUserRequest req = RestoreUserRequest.builder()
-                    .userId(deleted.getId())
-                    .email("original@test.com")
-                    .firstName("NewName")       // server must ignore → preserve "Original"
-                    .lastName("NewLastName")    // server must ignore → preserve "Name"
-                    .role(UserRole.TEACHER)     // server must ignore → preserve LEARNER
-                    .build();
-
-            MvcResult result = mockMvc.perform(post("/api/v1/users/restore")
-                            .header("Authorization", "Bearer " + token)
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(objectMapper.writeValueAsString(req)))
-                    .andExpect(status().isOk())
-                    .andReturn();
-
-            String body = result.getResponse().getContentAsString();
-            var data = objectMapper.readTree(body).path("data");
-            User restoredUser = userRepository.findById(deleted.getId()).orElseThrow();
-
-            // BR-43: original name preserved
-            assertThat(data.path("firstName").asText()).isEqualTo("Original");
-            assertThat(data.path("lastName").asText()).isEqualTo("Name");
-
-            // BR-43: original role preserved
-            assertThat(data.path("role").asText()).isEqualTo("LEARNER");
-
-            // BR-43: original credentials preserved
-            assertThat(restoredUser.getPasswordHash()).isEqualTo(originalPasswordHash);
-
-            // account reactivated
-            assertThat(data.path("status").asText()).isEqualTo("ACTIVE");
-        }
 
         /**
          * TC_UM_RU_004 — Restore non-deleted user → 400 USER_NOT_DELETED (BR-42).

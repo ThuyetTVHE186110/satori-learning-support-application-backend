@@ -40,6 +40,16 @@
         </dependency>
 
         <!-- Test dependencies -->
+
+        <!-- user module: required for integration tests.
+             Must be compile scope (not test) because SecurityConfig (infrastructure)
+             injects JwtAuthenticationFilter + UserDetailsService beans defined in
+             the user module — these are needed when ApplicationContext starts. -->
+        <dependency>
+            <groupId>com.fu</groupId>
+            <artifactId>user</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
