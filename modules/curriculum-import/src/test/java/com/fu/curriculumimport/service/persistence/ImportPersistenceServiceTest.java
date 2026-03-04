@@ -1,6 +1,5 @@
 package com.fu.curriculumimport.service.persistence;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.course.entity.*;
 import com.fu.course.entity.Course.JlptLevel;
 import com.fu.course.repository.*;
@@ -18,7 +17,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -29,6 +27,9 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.*;
 
 /**
@@ -36,8 +37,8 @@ import static org.mockito.BDDMockito.*;
  *
  * Coverage:
  *  persistChunks():
- *   - Empty document list → nothing saved, empty list returned
- *   - Multiple chunks → each saved, returned in order
+ *   - Empty document list -> nothing saved, empty list returned
+ *   - Multiple chunks -> each saved, returned in order
  *   - Fields mapped correctly to ImportChunk (index, content, pages, tokenCount, chunkType)
  *
  *  saveChunk():
@@ -47,26 +48,19 @@ import static org.mockito.BDDMockito.*;
  *   - Delegates to importRepository.save
  *
  *  persistExtractedContent():
- *   - No courseId (null) → lessons skipped, counts still updated from raw sizes
- *   - CourseId set but course not found → lessons skipped (same as no course)
- *   - Empty results list → nothing saved, all counts = 0
- *   - No lessons in result → lesson not created, vocab/grammar counts still updated
- *   - Lesson created with all required fields (course, importId, status = DRAFT)
- *   - New vocab → findByJapanese returns empty → vocabularyRepository.save called
- *   - Existing vocab (dedup) → findByJapanese returns existing → vocabularyRepository.save NOT called
- *   - Lesson-vocab link already exists → lessonVocabularyRepository.save NOT called
- *   - Lesson-vocab link does not exist → lessonVocabularyRepository.save called
- *   - New grammar → findByPattern returns empty → grammarPointRepository.save called
- *   - Existing grammar (dedup) → findByPattern returns existing → grammarPointRepository.save NOT called
- *   - Lesson-grammar link already exists → lessonGrammarRepository.save NOT called
- *   - Lesson-grammar link does not exist → lessonGrammarRepository.save called
+ *   - No courseId (null) -> lessons skipped, counts still updated from raw sizes
+ *   - CourseId set but course not found -> lessons skipped (same as no course)
+ *   - Empty results list -> nothing saved, all counts = 0
+ *   - No lessons in result -> lesson not created, vocab/grammar counts still updated
+ *   - Lesson created via itemHelper.saveLesson
+ *   - Lesson save fails -> skips vocab/grammar linking for that lesson
+ *   - New vocab -> itemHelper.findOrCreateVocabulary called and linked
+ *   - Vocab returns null -> link skipped, failedItems incremented
+ *   - Grammar linked correctly via itemHelper
  *   - Stats updated on importEntity: lessonsCreated, vocabularyCreated, grammarPointsCreated
  *   - importRepository.save called with updated entity
- *   - Null JLPT level → defaults to N5
- *   - Invalid JLPT level → exception caught gracefully → vocab/grammar returns null → link skipped
- *   - Invalid lessonType string → falls back to LessonType.MIXED
- *   - Invalid grammarCategory string → falls back to GrammarCategory.OTHER
- *   - Multiple ExtractionResults → vocab/grammar counts accumulate
+ *   - Multiple ExtractionResults -> vocab/grammar counts accumulate
+ *   - Invalid lessonType string -> falls back to LessonType.MIXED
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -77,11 +71,9 @@ class ImportPersistenceServiceTest {
     @Mock private ImportChunkRepository chunkRepository;
     @Mock private CourseRepository courseRepository;
     @Mock private LessonRepository lessonRepository;
-    @Mock private VocabularyRepository vocabularyRepository;
-    @Mock private GrammarPointRepository grammarPointRepository;
     @Mock private LessonVocabularyRepository lessonVocabularyRepository;
     @Mock private LessonGrammarRepository lessonGrammarRepository;
-    @Spy  private ObjectMapper objectMapper = new ObjectMapper();
+    @Mock private ImportItemPersistenceHelper itemHelper;
 
     @InjectMocks
     private ImportPersistenceService service;
@@ -128,7 +120,7 @@ class ImportPersistenceServiceTest {
                 .japaneseText(japaneseText)
                 .reading("よみかた")
                 .meaningEn("meaning")
-                .meaningVi("nghĩa")
+                .meaningVi("nghia")
                 .jlptLevel(jlptLevel)
                 .build();
     }
@@ -137,7 +129,7 @@ class ImportPersistenceServiceTest {
         return ExtractionResult.ExtractedGrammar.builder()
                 .pattern(pattern)
                 .meaningEn("ongoing action")
-                .meaningVi("đang làm")
+                .meaningVi("dang lam")
                 .jlptLevel(jlptLevel)
                 .category("TENSE")
                 .build();
@@ -165,7 +157,7 @@ class ImportPersistenceServiceTest {
     class PersistChunksTests {
 
         @Test
-        @DisplayName("Empty document list → returns empty list, nothing saved")
+        @DisplayName("Empty document list -> returns empty list, nothing saved")
         void persistChunks_emptyList_returnsEmpty() {
             CurriculumImport entity = makeImport(COURSE_ID);
 
@@ -176,7 +168,7 @@ class ImportPersistenceServiceTest {
         }
 
         @Test
-        @DisplayName("Two document chunks → each saved, both returned")
+        @DisplayName("Two document chunks -> each saved, both returned")
         void persistChunks_twoChunks_bothSaved() {
             CurriculumImport entity = makeImport(COURSE_ID);
             DocumentChunk doc1 = docChunk(0, "Lesson 1 content");
@@ -277,7 +269,7 @@ class ImportPersistenceServiceTest {
         }
 
         @Test
-        @DisplayName("Empty results list → nothing saved, counts all zero")
+        @DisplayName("Empty results list -> nothing saved, counts all zero")
         void persistExtracted_emptyResults_allCountsZero() {
             CurriculumImport entity = makeImport(COURSE_ID);
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(new Course()));
@@ -287,11 +279,11 @@ class ImportPersistenceServiceTest {
             assertThat(entity.getLessonsCreated()).isZero();
             assertThat(entity.getVocabularyCreated()).isZero();
             assertThat(entity.getGrammarPointsCreated()).isZero();
-            then(lessonRepository).should(never()).save(any());
+            then(itemHelper).should(never()).saveLesson(any());
         }
 
         @Test
-        @DisplayName("Null courseId → lessons skipped, vocab/grammar raw counts still set")
+        @DisplayName("Null courseId -> lessons skipped, vocab/grammar raw counts still set")
         void persistExtracted_noCourseId_lessonsSkipped_countsUpdated() {
             CurriculumImport entity = makeImport(null); // no course
             ExtractionResult result = resultWith(
@@ -301,9 +293,7 @@ class ImportPersistenceServiceTest {
 
             service.persistExtractedContent(entity, List.of(result));
 
-            // Lessons skipped (course = null)
-            then(lessonRepository).should(never()).save(any());
-            // But raw counts from result.getVocabulary().size() and grammar.size() are still set
+            then(itemHelper).should(never()).saveLesson(any());
             assertThat(entity.getLessonsCreated()).isZero();
             assertThat(entity.getVocabularyCreated()).isEqualTo(1);
             assertThat(entity.getGrammarPointsCreated()).isEqualTo(1);
@@ -311,7 +301,7 @@ class ImportPersistenceServiceTest {
         }
 
         @Test
-        @DisplayName("CourseId set but course not found → lessons skipped")
+        @DisplayName("CourseId set but course not found -> lessons skipped")
         void persistExtracted_courseNotFound_lessonsSkipped() {
             CurriculumImport entity = makeImport(COURSE_ID);
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.empty());
@@ -321,12 +311,12 @@ class ImportPersistenceServiceTest {
 
             service.persistExtractedContent(entity, List.of(result));
 
-            then(lessonRepository).should(never()).save(any());
+            then(itemHelper).should(never()).saveLesson(any());
             assertThat(entity.getLessonsCreated()).isZero();
         }
 
         @Test
-        @DisplayName("No lessons in result → lesson not created, vocab/grammar counts still set")
+        @DisplayName("No lessons in result -> lesson not created, vocab/grammar counts still set")
         void persistExtracted_noLessons_countsUpdatedFromRawSize() {
             CurriculumImport entity = makeImport(COURSE_ID);
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(new Course()));
@@ -337,15 +327,15 @@ class ImportPersistenceServiceTest {
 
             service.persistExtractedContent(entity, List.of(result));
 
-            then(lessonRepository).should(never()).save(any());
+            then(itemHelper).should(never()).saveLesson(any());
             assertThat(entity.getLessonsCreated()).isZero();
             assertThat(entity.getVocabularyCreated()).isEqualTo(2);
             assertThat(entity.getGrammarPointsCreated()).isEqualTo(1);
         }
 
         @Test
-        @DisplayName("Lesson created with correct fields (course, importId, status=DRAFT)")
-        void persistExtracted_lessonCreatedWithCorrectFields() {
+        @DisplayName("Lesson created via itemHelper.saveLesson with correct fields")
+        void persistExtracted_lessonCreatedViaHelper() {
             CurriculumImport entity = makeImport(COURSE_ID);
             Course course = new Course();
             course.setId(COURSE_ID);
@@ -353,7 +343,7 @@ class ImportPersistenceServiceTest {
 
             Lesson savedLesson = new Lesson();
             savedLesson.setId(UUID.randomUUID());
-            given(lessonRepository.save(any(Lesson.class))).willReturn(savedLesson);
+            given(itemHelper.saveLesson(any(Lesson.class))).willReturn(savedLesson);
 
             ExtractionResult result = resultWith(
                     List.of(extractedLesson("Grammar Basics")),
@@ -362,7 +352,7 @@ class ImportPersistenceServiceTest {
             service.persistExtractedContent(entity, List.of(result));
 
             ArgumentCaptor<Lesson> captor = ArgumentCaptor.forClass(Lesson.class);
-            then(lessonRepository).should().save(captor.capture());
+            then(itemHelper).should().saveLesson(captor.capture());
             Lesson captured = captor.getValue();
 
             assertThat(captured.getCourse()).isSameAs(course);
@@ -374,249 +364,116 @@ class ImportPersistenceServiceTest {
         }
 
         @Test
-        @DisplayName("New vocab created when not found by dedup key")
-        void persistExtracted_newVocab_createdAndLinked() {
+        @DisplayName("Lesson save fails -> skips vocab/grammar linking for that lesson")
+        void persistExtracted_lessonSaveFails_vocabGrammarSkipped() {
             CurriculumImport entity = makeImport(COURSE_ID);
             Course course = new Course();
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
 
-            Lesson savedLesson = new Lesson();
-            savedLesson.setId(UUID.randomUUID());
-            given(lessonRepository.save(any(Lesson.class))).willReturn(savedLesson);
-
-            Vocabulary newVocab = new Vocabulary();
-            newVocab.setId(UUID.randomUUID());
-            // Not found → save new
-            given(vocabularyRepository.findByJapaneseTextAndJlptLevel(eq("食べる"), eq(JlptLevel.N5)))
-                    .willReturn(Optional.empty());
-            given(vocabularyRepository.save(any(Vocabulary.class))).willReturn(newVocab);
-            given(lessonVocabularyRepository.existsByLessonIdAndVocabularyId(
-                    savedLesson.getId(), newVocab.getId())).willReturn(false);
+            // itemHelper.saveLesson returns null (failure)
+            given(itemHelper.saveLesson(any(Lesson.class))).willReturn(null);
 
             ExtractionResult result = resultWith(
-                    List.of(extractedLesson("Vocab Lesson")),
+                    List.of(extractedLesson("Bad Lesson")),
                     List.of(extractedVocab("食べる", "N5")),
-                    List.of());
-
-            service.persistExtractedContent(entity, List.of(result));
-
-            then(vocabularyRepository).should().save(any(Vocabulary.class));
-            then(lessonVocabularyRepository).should().save(any(LessonVocabulary.class));
-        }
-
-        @Test
-        @DisplayName("Existing vocab (dedup) → vocabularyRepository.save NOT called")
-        void persistExtracted_existingVocab_notCreatedAgain() {
-            CurriculumImport entity = makeImport(COURSE_ID);
-            Course course = new Course();
-            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
-
-            Lesson savedLesson = new Lesson();
-            savedLesson.setId(UUID.randomUUID());
-            given(lessonRepository.save(any(Lesson.class))).willReturn(savedLesson);
-
-            Vocabulary existingVocab = new Vocabulary();
-            existingVocab.setId(UUID.randomUUID());
-            // Already exists → return existing
-            given(vocabularyRepository.findByJapaneseTextAndJlptLevel(eq("食べる"), eq(JlptLevel.N5)))
-                    .willReturn(Optional.of(existingVocab));
-            given(lessonVocabularyRepository.existsByLessonIdAndVocabularyId(
-                    savedLesson.getId(), existingVocab.getId())).willReturn(false);
-
-            ExtractionResult result = resultWith(
-                    List.of(extractedLesson("Vocab Lesson")),
-                    List.of(extractedVocab("食べる", "N5")),
-                    List.of());
-
-            service.persistExtractedContent(entity, List.of(result));
-
-            // Vocabulary was NOT saved (dedup — used existing)
-            then(vocabularyRepository).should(never()).save(any(Vocabulary.class));
-            // But the link WAS saved
-            then(lessonVocabularyRepository).should().save(any(LessonVocabulary.class));
-        }
-
-        @Test
-        @DisplayName("Lesson-vocab link already exists → lessonVocabularyRepository.save NOT called")
-        void persistExtracted_duplicateVocabLink_notSavedAgain() {
-            CurriculumImport entity = makeImport(COURSE_ID);
-            Course course = new Course();
-            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
-
-            Lesson savedLesson = new Lesson();
-            savedLesson.setId(UUID.randomUUID());
-            given(lessonRepository.save(any(Lesson.class))).willReturn(savedLesson);
-
-            Vocabulary existingVocab = new Vocabulary();
-            existingVocab.setId(UUID.randomUUID());
-            given(vocabularyRepository.findByJapaneseTextAndJlptLevel(any(), any()))
-                    .willReturn(Optional.of(existingVocab));
-            // Link already exists
-            given(lessonVocabularyRepository.existsByLessonIdAndVocabularyId(
-                    savedLesson.getId(), existingVocab.getId())).willReturn(true);
-
-            ExtractionResult result = resultWith(
-                    List.of(extractedLesson("Lesson")),
-                    List.of(extractedVocab("食べる", "N5")),
-                    List.of());
-
-            service.persistExtractedContent(entity, List.of(result));
-
-            then(lessonVocabularyRepository).should(never()).save(any(LessonVocabulary.class));
-        }
-
-        @Test
-        @DisplayName("New grammar created when not found by dedup key")
-        void persistExtracted_newGrammar_createdAndLinked() {
-            CurriculumImport entity = makeImport(COURSE_ID);
-            Course course = new Course();
-            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
-
-            Lesson savedLesson = new Lesson();
-            savedLesson.setId(UUID.randomUUID());
-            given(lessonRepository.save(any(Lesson.class))).willReturn(savedLesson);
-
-            GrammarPoint newGp = new GrammarPoint();
-            newGp.setId(UUID.randomUUID());
-            given(grammarPointRepository.findByPatternAndJlptLevel(eq("〜ている"), eq(JlptLevel.N5)))
-                    .willReturn(Optional.empty());
-            given(grammarPointRepository.save(any(GrammarPoint.class))).willReturn(newGp);
-            given(lessonGrammarRepository.existsByLessonIdAndGrammarPointId(
-                    savedLesson.getId(), newGp.getId())).willReturn(false);
-
-            ExtractionResult result = resultWith(
-                    List.of(extractedLesson("Grammar Lesson")),
-                    List.of(),
                     List.of(extractedGrammar("〜ている", "N5")));
 
             service.persistExtractedContent(entity, List.of(result));
 
-            then(grammarPointRepository).should().save(any(GrammarPoint.class));
-            then(lessonGrammarRepository).should().save(any(LessonGrammar.class));
+            assertThat(entity.getLessonsCreated()).isZero();
+            // Vocab/grammar findOrCreate should NOT be called since lesson save failed
+            then(itemHelper).should(never()).findOrCreateVocabulary(any(), any());
+            then(itemHelper).should(never()).findOrCreateGrammarPoint(any(), any());
         }
 
         @Test
-        @DisplayName("Existing grammar (dedup) → grammarPointRepository.save NOT called")
-        void persistExtracted_existingGrammar_notCreatedAgain() {
+        @DisplayName("Vocab found/created and linked via itemHelper")
+        void persistExtracted_vocabCreatedAndLinked() {
             CurriculumImport entity = makeImport(COURSE_ID);
             Course course = new Course();
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
 
+            UUID lessonId = UUID.randomUUID();
             Lesson savedLesson = new Lesson();
-            savedLesson.setId(UUID.randomUUID());
-            given(lessonRepository.save(any(Lesson.class))).willReturn(savedLesson);
-
-            GrammarPoint existingGp = new GrammarPoint();
-            existingGp.setId(UUID.randomUUID());
-            given(grammarPointRepository.findByPatternAndJlptLevel(eq("〜ている"), eq(JlptLevel.N5)))
-                    .willReturn(Optional.of(existingGp));
-            given(lessonGrammarRepository.existsByLessonIdAndGrammarPointId(
-                    savedLesson.getId(), existingGp.getId())).willReturn(false);
-
-            ExtractionResult result = resultWith(
-                    List.of(extractedLesson("Grammar Lesson")),
-                    List.of(),
-                    List.of(extractedGrammar("〜ている", "N5")));
-
-            service.persistExtractedContent(entity, List.of(result));
-
-            then(grammarPointRepository).should(never()).save(any(GrammarPoint.class));
-            then(lessonGrammarRepository).should().save(any(LessonGrammar.class));
-        }
-
-        @Test
-        @DisplayName("Lesson-grammar link already exists → lessonGrammarRepository.save NOT called")
-        void persistExtracted_duplicateGrammarLink_notSavedAgain() {
-            CurriculumImport entity = makeImport(COURSE_ID);
-            Course course = new Course();
-            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
-
-            Lesson savedLesson = new Lesson();
-            savedLesson.setId(UUID.randomUUID());
-            given(lessonRepository.save(any(Lesson.class))).willReturn(savedLesson);
-
-            GrammarPoint existingGp = new GrammarPoint();
-            existingGp.setId(UUID.randomUUID());
-            given(grammarPointRepository.findByPatternAndJlptLevel(any(), any()))
-                    .willReturn(Optional.of(existingGp));
-            given(lessonGrammarRepository.existsByLessonIdAndGrammarPointId(
-                    savedLesson.getId(), existingGp.getId())).willReturn(true);
-
-            ExtractionResult result = resultWith(
-                    List.of(extractedLesson("Lesson")),
-                    List.of(),
-                    List.of(extractedGrammar("〜ている", "N5")));
-
-            service.persistExtractedContent(entity, List.of(result));
-
-            then(lessonGrammarRepository).should(never()).save(any(LessonGrammar.class));
-        }
-
-        @Test
-        @DisplayName("Null JLPT level → defaults to N5 for vocab lookup")
-        void persistExtracted_nullJlptLevel_defaultsToN5() {
-            CurriculumImport entity = makeImport(COURSE_ID);
-            Course course = new Course();
-            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
-
-            Lesson savedLesson = new Lesson();
-            savedLesson.setId(UUID.randomUUID());
-            given(lessonRepository.save(any(Lesson.class))).willReturn(savedLesson);
+            savedLesson.setId(lessonId);
+            given(itemHelper.saveLesson(any(Lesson.class))).willReturn(savedLesson);
 
             Vocabulary vocab = new Vocabulary();
             vocab.setId(UUID.randomUUID());
-            given(vocabularyRepository.findByJapaneseTextAndJlptLevel(eq("食べる"), eq(JlptLevel.N5)))
-                    .willReturn(Optional.of(vocab));
-            given(lessonVocabularyRepository.existsByLessonIdAndVocabularyId(any(), any()))
-                    .willReturn(false);
+            given(itemHelper.findOrCreateVocabulary(any(), eq(MANAGER_ID))).willReturn(vocab);
+            given(itemHelper.linkVocabularyToLesson(eq(lessonId), eq(vocab), anyInt(), anyBoolean()))
+                    .willReturn(true);
 
             ExtractionResult result = resultWith(
-                    List.of(extractedLesson("Lesson")),
-                    List.of(extractedVocab("食べる", null)), // null jlpt
+                    List.of(extractedLesson("Vocab Lesson")),
+                    List.of(extractedVocab("食べる", "N5")),
                     List.of());
 
             service.persistExtractedContent(entity, List.of(result));
 
-            // Should have used N5 as default
-            then(vocabularyRepository).should()
-                    .findByJapaneseTextAndJlptLevel(eq("食べる"), eq(JlptLevel.N5));
+            then(itemHelper).should().findOrCreateVocabulary(any(), eq(MANAGER_ID));
+            then(itemHelper).should().linkVocabularyToLesson(eq(lessonId), eq(vocab), eq(0), anyBoolean());
         }
 
         @Test
-        @DisplayName("Invalid JLPT level → exception caught gracefully, vocab returns null, link skipped")
-        void persistExtracted_invalidJlptLevel_exceptionCaughtGracefully() {
+        @DisplayName("Vocab returns null -> link skipped")
+        void persistExtracted_vocabReturnsNull_linkSkipped() {
             CurriculumImport entity = makeImport(COURSE_ID);
             Course course = new Course();
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
 
             Lesson savedLesson = new Lesson();
             savedLesson.setId(UUID.randomUUID());
-            given(lessonRepository.save(any(Lesson.class))).willReturn(savedLesson);
+            given(itemHelper.saveLesson(any(Lesson.class))).willReturn(savedLesson);
+            given(itemHelper.findOrCreateVocabulary(any(), any())).willReturn(null);
 
-            // N9 is invalid → JlptLevel.valueOf("N9") throws IllegalArgumentException
             ExtractionResult result = resultWith(
                     List.of(extractedLesson("Lesson")),
-                    List.of(extractedVocab("食べる", "N9")),
+                    List.of(extractedVocab("食べる", "N5")),
                     List.of());
 
-            // Should not throw
             service.persistExtractedContent(entity, List.of(result));
 
-            // Vocabulary and link NOT saved because findOrCreate returned null
-            then(vocabularyRepository).should(never()).save(any());
-            then(lessonVocabularyRepository).should(never()).save(any());
+            then(itemHelper).should(never()).linkVocabularyToLesson(any(), any(), anyInt(), anyBoolean());
         }
 
         @Test
-        @DisplayName("Invalid lessonType → falls back to LessonType.MIXED")
+        @DisplayName("Grammar found/created and linked via itemHelper")
+        void persistExtracted_grammarCreatedAndLinked() {
+            CurriculumImport entity = makeImport(COURSE_ID);
+            Course course = new Course();
+            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
+
+            UUID lessonId = UUID.randomUUID();
+            Lesson savedLesson = new Lesson();
+            savedLesson.setId(lessonId);
+            given(itemHelper.saveLesson(any(Lesson.class))).willReturn(savedLesson);
+
+            GrammarPoint grammar = new GrammarPoint();
+            grammar.setId(UUID.randomUUID());
+            given(itemHelper.findOrCreateGrammarPoint(any(), eq(MANAGER_ID))).willReturn(grammar);
+            given(itemHelper.linkGrammarToLesson(eq(lessonId), eq(grammar), anyInt(), anyBoolean()))
+                    .willReturn(true);
+
+            ExtractionResult result = resultWith(
+                    List.of(extractedLesson("Grammar Lesson")),
+                    List.of(),
+                    List.of(extractedGrammar("〜ている", "N5")));
+
+            service.persistExtractedContent(entity, List.of(result));
+
+            then(itemHelper).should().findOrCreateGrammarPoint(any(), eq(MANAGER_ID));
+            then(itemHelper).should().linkGrammarToLesson(eq(lessonId), eq(grammar), eq(0), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("Invalid lessonType -> falls back to LessonType.MIXED")
         void persistExtracted_invalidLessonType_fallsBackToMixed() {
             CurriculumImport entity = makeImport(COURSE_ID);
             Course course = new Course();
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
 
-            Lesson savedLesson = new Lesson();
-            savedLesson.setId(UUID.randomUUID());
-            given(lessonRepository.save(any(Lesson.class))).willAnswer(inv -> inv.getArgument(0));
+            given(itemHelper.saveLesson(any(Lesson.class))).willAnswer(inv -> inv.getArgument(0));
 
             ExtractionResult.ExtractedLesson badTypeLesson = ExtractionResult.ExtractedLesson.builder()
                     .title("Unknown Type Lesson")
@@ -629,51 +486,14 @@ class ImportPersistenceServiceTest {
             service.persistExtractedContent(entity, List.of(result));
 
             ArgumentCaptor<Lesson> captor = ArgumentCaptor.forClass(Lesson.class);
-            then(lessonRepository).should().save(captor.capture());
+            then(itemHelper).should().saveLesson(captor.capture());
             assertThat(captor.getValue().getLessonType()).isEqualTo(Lesson.LessonType.MIXED);
         }
 
         @Test
-        @DisplayName("Invalid grammar category → falls back to GrammarCategory.OTHER")
-        void persistExtracted_invalidGrammarCategory_fallsBackToOther() {
-            CurriculumImport entity = makeImport(COURSE_ID);
-            Course course = new Course();
-            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
-
-            Lesson savedLesson = new Lesson();
-            savedLesson.setId(UUID.randomUUID());
-            given(lessonRepository.save(any(Lesson.class))).willReturn(savedLesson);
-
-            ExtractionResult.ExtractedGrammar badCategory = ExtractionResult.ExtractedGrammar.builder()
-                    .pattern("〜ている")
-                    .jlptLevel("N5")
-                    .category("UNKNOWN_CATEGORY") // invalid
-                    .meaningEn("ongoing").meaningVi("đang")
-                    .build();
-
-            given(grammarPointRepository.findByPatternAndJlptLevel(any(), any()))
-                    .willReturn(Optional.empty());
-            GrammarPoint savedGp = new GrammarPoint();
-            savedGp.setId(UUID.randomUUID());
-            given(grammarPointRepository.save(any(GrammarPoint.class))).willReturn(savedGp);
-            given(lessonGrammarRepository.existsByLessonIdAndGrammarPointId(any(), any()))
-                    .willReturn(false);
-
-            ExtractionResult result = resultWith(
-                    List.of(extractedLesson("Lesson")),
-                    List.of(), List.of(badCategory));
-
-            service.persistExtractedContent(entity, List.of(result));
-
-            ArgumentCaptor<GrammarPoint> captor = ArgumentCaptor.forClass(GrammarPoint.class);
-            then(grammarPointRepository).should().save(captor.capture());
-            assertThat(captor.getValue().getCategory()).isEqualTo(GrammarPoint.GrammarCategory.OTHER);
-        }
-
-        @Test
-        @DisplayName("Multiple ExtractionResults → vocab/grammar counts accumulate from raw sizes")
+        @DisplayName("Multiple ExtractionResults -> vocab/grammar counts accumulate from raw sizes")
         void persistExtracted_multipleResults_countsAccumulate() {
-            CurriculumImport entity = makeImport(null); // no course → no lesson persisted
+            CurriculumImport entity = makeImport(null); // no course -> no lesson persisted
             ExtractionResult result1 = resultWith(List.of(),
                     List.of(extractedVocab("食べる", "N5"), extractedVocab("飲む", "N5")),
                     List.of(extractedGrammar("〜ている", "N5")));
