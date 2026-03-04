@@ -55,14 +55,17 @@ public class ConversationTopic extends SoftDeletableEntity {
     private String scenario;
 
     @Column(name = "vocabulary_hints", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "CAST(? AS jsonb)")
     @Builder.Default
     private String vocabularyHints = "[]";
 
     @Column(name = "grammar_points", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "CAST(? AS jsonb)")
     @Builder.Default
     private String grammarPoints = "[]";
 
     @Column(name = "useful_expressions", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "CAST(? AS jsonb)")
     @Builder.Default
     private String usefulExpressions = "[]";
 
@@ -83,6 +86,7 @@ public class ConversationTopic extends SoftDeletableEntity {
     private Boolean isRoleplay = false;
 
     @Column(name = "roleplay_context", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "CAST(? AS jsonb)")
     private String roleplayContext;
 
     @Column(name = "thumbnail_url", columnDefinition = "TEXT")

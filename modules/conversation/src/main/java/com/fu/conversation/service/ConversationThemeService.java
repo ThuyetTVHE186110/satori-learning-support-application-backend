@@ -29,5 +29,9 @@ public interface ConversationThemeService {
 
     Page<ConversationThemeSummaryResponse> getAllThemes(Pageable pageable);
 
+    Page<ConversationThemeSummaryResponse> searchThemes(String keyword, Pageable pageable);
+
     Page<ConversationThemeSummaryResponse> getPublishedThemes(Course.JlptLevel jlptLevel, Pageable pageable);
+
+    Page<ConversationThemeSummaryResponse> searchPublishedThemes(String keyword, Pageable pageable);
 }

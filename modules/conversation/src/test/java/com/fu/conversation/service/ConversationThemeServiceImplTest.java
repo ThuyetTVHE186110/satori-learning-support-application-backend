@@ -1,5 +1,6 @@
 package com.fu.conversation.service;
 
+import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.conversation.ai.ConversationGenerationService;
 import com.fu.conversation.dto.request.CreateThemeRequest;
@@ -91,12 +92,9 @@ class ConversationThemeServiceImplTest {
     }
 
     // ── helper ──────────────────────────────────────────────────────────────
-    @SuppressWarnings("unchecked")
     private void mockTopicCount(UUID id, long count) {
-        Page<Object> mockPage = mock(Page.class);
-        when(mockPage.getTotalElements()).thenReturn(count);
-        when(topicRepository.findByThemeIdAndDeletedAtIsNull(eq(id), eq(Pageable.unpaged())))
-                .thenReturn((Page) mockPage);
+        when(topicRepository.countByThemeIdAndDeletedAtIsNull(eq(id)))
+                .thenReturn(count);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -269,6 +267,35 @@ class ConversationThemeServiceImplTest {
             assertThatThrownBy(() ->
                     themeService.updateTheme(deletedTheme.getId(), new UpdateThemeRequest(), managerId))
                     .isInstanceOf(ResourceNotFoundException.class);
+        }
+        @Test
+        @DisplayName("Should throw BusinessException when title is blank (non-null)")
+        void shouldThrowWhenTitleIsBlank() {
+            UpdateThemeRequest request = UpdateThemeRequest.builder()
+                    .title("   ").build(); // blank, not null
+
+            assertThatThrownBy(() ->
+                    themeService.updateTheme(themeId, request, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Title must not be blank");
+        }
+
+        @Test
+        @DisplayName("Should allow null title (partial update, no change)")
+        void shouldAllowNullTitle() {
+            UpdateThemeRequest request = UpdateThemeRequest.builder()
+                    .category("travel").build(); // title is null
+            when(themeRepository.findById(themeId)).thenReturn(Optional.of(activeTheme));
+            when(themeRepository.save(activeTheme)).thenReturn(activeTheme);
+            when(themeMapper.toResponse(activeTheme)).thenReturn(themeResponse);
+            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+            mockTopicCount(themeId, 0L);
+
+            ConversationThemeResponse result =
+                    themeService.updateTheme(themeId, request, managerId);
+
+            assertThat(result).isNotNull();
+            verify(themeMapper).updateEntity(activeTheme, request);
         }
     }
 
@@ -576,6 +603,74 @@ class ConversationThemeServiceImplTest {
 
             Page<ConversationThemeSummaryResponse> result =
                     themeService.getPublishedThemes(null, pageable);
+
+            assertThat(result.getContent()).isEmpty();
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    @Nested
+    @DisplayName("searchThemes")
+    class SearchThemesTests {
+
+        @Test
+        @DisplayName("Should return paginated results matching keyword")
+        void shouldReturnSearchResults() {
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<ConversationTheme> page = new PageImpl<>(List.of(activeTheme));
+            when(themeRepository.searchByKeyword("Daily", pageable)).thenReturn(page);
+            when(themeMapper.toSummaryResponse(activeTheme)).thenReturn(summaryResponse);
+            mockTopicCount(themeId, 1L);
+
+            Page<ConversationThemeSummaryResponse> result =
+                    themeService.searchThemes("Daily", pageable);
+
+            assertThat(result.getContent()).hasSize(1);
+            verify(themeRepository).searchByKeyword("Daily", pageable);
+        }
+
+        @Test
+        @DisplayName("Should return empty page when no matches")
+        void shouldReturnEmptyWhenNoMatches() {
+            Pageable pageable = PageRequest.of(0, 10);
+            when(themeRepository.searchByKeyword("xyz", pageable)).thenReturn(Page.empty());
+
+            Page<ConversationThemeSummaryResponse> result =
+                    themeService.searchThemes("xyz", pageable);
+
+            assertThat(result.getContent()).isEmpty();
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    @Nested
+    @DisplayName("searchPublishedThemes")
+    class SearchPublishedThemesTests {
+
+        @Test
+        @DisplayName("Should return published themes matching keyword")
+        void shouldReturnPublishedSearchResults() {
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<ConversationTheme> page = new PageImpl<>(List.of(activeTheme));
+            when(themeRepository.searchPublishedByKeyword("Shopping", pageable)).thenReturn(page);
+            when(themeMapper.toSummaryResponse(activeTheme)).thenReturn(summaryResponse);
+            mockTopicCount(themeId, 0L);
+
+            Page<ConversationThemeSummaryResponse> result =
+                    themeService.searchPublishedThemes("Shopping", pageable);
+
+            assertThat(result.getContent()).hasSize(1);
+            verify(themeRepository).searchPublishedByKeyword("Shopping", pageable);
+        }
+
+        @Test
+        @DisplayName("Should return empty page when no published matches")
+        void shouldReturnEmptyWhenNoPublishedMatches() {
+            Pageable pageable = PageRequest.of(0, 10);
+            when(themeRepository.searchPublishedByKeyword("xyz", pageable)).thenReturn(Page.empty());
+
+            Page<ConversationThemeSummaryResponse> result =
+                    themeService.searchPublishedThemes("xyz", pageable);
 
             assertThat(result.getContent()).isEmpty();
         }

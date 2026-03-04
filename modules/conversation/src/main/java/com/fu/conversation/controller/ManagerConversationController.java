@@ -77,17 +77,25 @@ public class ManagerConversationController {
     }
 
     /**
-     * Get all themes (paginated, includes all statuses).
-     * GET /api/v1/manager/conversation/themes
+     * Get all themes (paginated, includes all statuses). Supports keyword search.
+     * GET /api/v1/manager/conversation/themes?page=0&size=10&keyword=xxx
      */
     @GetMapping("/themes")
     public ResponseEntity<ApiResponse<PageResponse<ConversationThemeSummaryResponse>>> getAllThemes(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String keyword) {
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 100),
                 Sort.by("orderIndex").ascending());
-        Page<ConversationThemeSummaryResponse> result = themeService.getAllThemes(pageable);
+
+        Page<ConversationThemeSummaryResponse> result;
+        if (keyword != null && !keyword.isBlank()) {
+            result = themeService.searchThemes(keyword.trim(), pageable);
+        } else {
+            result = themeService.getAllThemes(pageable);
+        }
+
         return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
                 result.getContent(), result.getNumber(), result.getSize(),
                 result.getTotalElements(), result.getTotalPages())));

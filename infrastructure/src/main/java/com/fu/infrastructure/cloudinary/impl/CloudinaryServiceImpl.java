@@ -28,6 +28,7 @@ public class CloudinaryServiceImpl implements CloudinaryService {
     private boolean cloudinaryEnabled;
 
     private static final long MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+    private static final long MAX_AUDIO_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
     @Override
     public String uploadImage(MultipartFile file, String folder) {
@@ -125,6 +126,49 @@ public class CloudinaryServiceImpl implements CloudinaryService {
         String contentType = file.getContentType();
         if (contentType == null || !contentType.startsWith("image/")) {
             throw new BusinessException("INVALID_FILE_TYPE", "Only image files are allowed (JPEG, PNG, GIF, WebP)");
+        }
+    }
+
+    @Override
+    public String uploadAudio(MultipartFile file, String folder) {
+        if (!cloudinaryEnabled) {
+            log.info("[CLOUDINARY DISABLED] Would upload audio: {} to folder: {}", file.getOriginalFilename(), folder);
+            return "https://placeholder.co/audio?text=Cloudinary+Disabled";
+        }
+
+        validateAudioFile(file);
+
+        try {
+            log.info("Uploading audio to Cloudinary folder: {}", folder);
+
+            Map<?, ?> uploadResult = cloudinary.uploader().upload(file.getBytes(), ObjectUtils.asMap(
+                    "folder", folder,
+                    "resource_type", "video",
+                    "overwrite", true
+            ));
+
+            String secureUrl = (String) uploadResult.get("secure_url");
+            log.info("Audio uploaded successfully: {}", secureUrl);
+
+            return secureUrl;
+        } catch (IOException e) {
+            log.error("Failed to upload audio to Cloudinary", e);
+            throw new BusinessException("UPLOAD_FAILED", "Failed to upload audio: " + e.getMessage());
+        }
+    }
+
+    private void validateAudioFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("INVALID_FILE", "Audio file is required and must not be empty");
+        }
+
+        if (file.getSize() > MAX_AUDIO_FILE_SIZE) {
+            throw new BusinessException("FILE_TOO_LARGE", "Audio file size must not exceed 10MB");
+        }
+
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("audio/")) {
+            throw new BusinessException("INVALID_FILE_TYPE", "Only audio files are allowed (WAV, MP3, OGG, WebM, M4A)");
         }
     }
 }

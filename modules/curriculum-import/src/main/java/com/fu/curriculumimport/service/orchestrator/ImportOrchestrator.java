@@ -14,7 +14,7 @@ import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.service.ingestion.DocumentParseResult;
-import com.fu.curriculumimport.service.ingestion.PdfIngestionService;
+import com.fu.curriculumimport.service.ingestion.FileIngestionRouter;
 import com.fu.curriculumimport.service.persistence.ImportPersistenceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -64,7 +64,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RequiredArgsConstructor
 public class ImportOrchestrator {
 
-    private final PdfIngestionService pdfIngestionService;
+    private final FileIngestionRouter fileIngestionRouter;
     private final ContentExtractionAgent extractionAgent;
     private final ContentClassifierAgent classifierAgent;
     private final VocabularyExtractionAgent vocabularyAgent;
@@ -105,13 +105,14 @@ public class ImportOrchestrator {
             importEntity.markStarted();
             persistenceService.updateImportProgress(importEntity);
 
-            // === STAGE 1: PDF EXTRACTION ===
+            // === STAGE 1: FILE INGESTION (PDF text / PDF scanned OCR / PPTX) ===
             checkCancelled(cancelFlag, importId);
-            log.info("[{}] Stage 1/7: Extracting text from PDF...", importId);
+            log.info("[{}] Stage 1/7: Ingesting file '{}' (auto-routing by type)…",
+                    importId, file.getOriginalFilename());
             importEntity.updateProgress("EXTRACTING", new BigDecimal("5"));
             persistenceService.updateImportProgress(importEntity);
 
-            DocumentParseResult parseResult = pdfIngestionService.parsePdf(file);
+            DocumentParseResult parseResult = fileIngestionRouter.route(file);
             importEntity.setTotalPages(parseResult.getTotalPages());
             persistenceService.updateImportProgress(importEntity);
 
@@ -289,13 +290,13 @@ public class ImportOrchestrator {
 
             persistenceService.persistExtractedContent(importEntity, allResults);
 
-            // === COMPLETE ===
+            // === PENDING APPROVAL ===
             importEntity.setTokensUsed(totalTokens.get());
             importEntity.setActualCostUsd(estimateCost(totalTokens.get()));
-            importEntity.markCompleted();
+            importEntity.markPendingApproval();
             persistenceService.updateImportProgress(importEntity);
 
-            log.info("[{}] ✅ Import completed! Lessons: {}, Vocab: {}, Grammar: {}, " +
+            log.info("[{}] ✅ Import ready for manager approval! Lessons: {}, Vocab: {}, Grammar: {}, " +
                             "Embeddings: {}, Validations: {}/{}, Re-extractions: {}, Hallucinated: {}",
                     importId,
                     importEntity.getLessonsCreated(),

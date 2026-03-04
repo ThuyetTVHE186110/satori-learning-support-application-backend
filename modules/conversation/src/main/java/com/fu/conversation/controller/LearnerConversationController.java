@@ -46,18 +46,26 @@ public class LearnerConversationController {
     // ==================== Browse Published Themes/Topics ====================
 
     /**
-     * Get all published themes (optionally filtered by JLPT level).
-     * GET /api/v1/learner/conversation/themes
+     * Get all published themes (optionally filtered by JLPT level). Supports keyword search.
+     * GET /api/v1/learner/conversation/themes?level=N5&keyword=xxx
      */
     @GetMapping("/themes")
     public ResponseEntity<ApiResponse<PageResponse<ConversationThemeSummaryResponse>>> getPublishedThemes(
             @RequestParam(required = false) Course.JlptLevel level,
+            @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 50),
                 Sort.by("orderIndex").ascending());
-        Page<ConversationThemeSummaryResponse> result = themeService.getPublishedThemes(level, pageable);
+
+        Page<ConversationThemeSummaryResponse> result;
+        if (keyword != null && !keyword.isBlank()) {
+            result = themeService.searchPublishedThemes(keyword.trim(), pageable);
+        } else {
+            result = themeService.getPublishedThemes(level, pageable);
+        }
+
         return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
                 result.getContent(), result.getNumber(), result.getSize(),
                 result.getTotalElements(), result.getTotalPages())));

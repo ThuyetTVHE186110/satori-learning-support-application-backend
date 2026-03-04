@@ -1,0 +1,9 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+paddleocr==2.9.1
+# PaddlePaddle CPU-only — swap for paddlepaddle-gpu for CUDA servers
+paddlepaddle==2.6.2
+Pillow==11.0.0
+pydantic==2.10.3
+numpy==1.26.4
+opencv-python-headless==4.10.0.84

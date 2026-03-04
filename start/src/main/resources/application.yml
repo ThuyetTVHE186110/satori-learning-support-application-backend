@@ -66,8 +66,8 @@ spring:
     servlet:
         multipart:
             enabled: true
-            max-file-size: 50MB
-            max-request-size: 55MB
+            max-file-size: 100MB # Increased: PPTX with images can exceed 50 MB
+            max-request-size: 110MB
 
 # ==================== Japanese Learning Configuration ====================
 learning:
@@ -170,6 +170,21 @@ management:
 
 # ==================== Curriculum Import - Agentic RAG Configuration ====================
 curriculum-import:
+    # ===== OCR Microservice (PaddleOCR sidecar for scanned PDFs) =====
+    ocr:
+        # URL of the PaddleOCR FastAPI container
+        service-url: ${OCR_SERVICE_URL:http://localhost:8090}
+        # HTTP timeout in seconds per page request
+        timeout-seconds: ${OCR_TIMEOUT_SECONDS:60}
+        # Set to false to disable OCR (scanned PDFs will be rejected)
+        enabled: ${OCR_ENABLED:true}
+        # DPI for rendering PDF pages to images (200 = good quality, 300 = higher accuracy)
+        render-dpi: ${OCR_RENDER_DPI:200}
+        # Chars-per-page below this → treated as scanned PDF (route to OCR)
+        scanned-page-threshold: ${OCR_SCANNED_PAGE_THRESHOLD:100.0}
+        # Minimum OCR confidence to accept (below = logged as low quality)
+        min-confidence: ${OCR_MIN_CONFIDENCE:0.5}
+
     agentic-rag:
         # Minimum confidence for extraction (Corrective RAG threshold)
         confidence-threshold: ${RAG_CONFIDENCE_THRESHOLD:0.6}
@@ -212,3 +227,26 @@ curriculum-import:
         grounding-weight: ${RAG_GROUNDING_WEIGHT:0.35}
         # Combined score below this triggers re-extraction
         combined-re-extraction-threshold: ${RAG_COMBINED_RE_EXTRACTION_THRESHOLD:0.5}
+
+# ==================== Pronunciation Assessment (SpeechSuper) ====================
+pronunciation:
+    speechsuper:
+        app-key: ${SPEECHSUPER_APP_KEY:}
+        secret-key: ${SPEECHSUPER_SECRET_KEY:}
+        base-url: ${SPEECHSUPER_BASE_URL:https://api.speechsuper.com}
+        timeout: ${SPEECHSUPER_TIMEOUT:30000}
+    japanese:
+        enabled: ${JP_PRONUNCIATION_ENABLED:true}
+        service-url: ${JP_PRONUNCIATION_SERVICE_URL:http://localhost:8091}
+        timeout: ${JP_PRONUNCIATION_TIMEOUT:30000}
+        speech-super-weight: ${JP_PRONUNCIATION_SPEECH_SUPER_WEIGHT:0.6}
+        japanese-assessment-weight: ${JP_PRONUNCIATION_JAPANESE_WEIGHT:0.4}
+
+# ==================== Roleplay Module Configuration ====================
+roleplay:
+    max-messages: ${ROLEPLAY_MAX_MESSAGES:50}
+    max-active-sessions: ${ROLEPLAY_MAX_ACTIVE_SESSIONS:3}
+    scoring:
+        mission-weight: ${ROLEPLAY_MISSION_WEIGHT:0.35}
+        pronunciation-weight: ${ROLEPLAY_PRONUNCIATION_WEIGHT:0.30}
+        language-weight: ${ROLEPLAY_LANGUAGE_WEIGHT:0.35}

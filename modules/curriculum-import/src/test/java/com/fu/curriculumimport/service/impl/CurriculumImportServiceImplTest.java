@@ -208,23 +208,23 @@ class CurriculumImportServiceImplTest {
         }
 
         @Test
-        @DisplayName("Exception — file exceeds 50 MB throws InvalidImportFileException")
+        @DisplayName("Exception — file exceeds 100 MB throws InvalidImportFileException")
         void initiateImport_oversizedFile_throwsInvalidImportFileException() {
             MultipartFile bigFile = mock(MultipartFile.class);
-            long oversizeBytes = 51L * 1024 * 1024;
+            long oversizeBytes = 101L * 1024 * 1024;
             given(bigFile.isEmpty()).willReturn(false);
             given(bigFile.getContentType()).willReturn("application/pdf");
             given(bigFile.getSize()).willReturn(oversizeBytes);
 
             assertThatThrownBy(() -> service.initiateImport(bigFile, null, MANAGER_ID))
                     .isInstanceOf(InvalidImportFileException.class)
-                    .hasMessageContaining("50 MB");
+                    .hasMessageContaining("100");
         }
 
         @Test
-        @DisplayName("Edge case — exactly 50 MB file is accepted")
-        void initiateImport_exactly50MbFile_accepted() {
-            long exactBytes = 50L * 1024 * 1024;
+        @DisplayName("Edge case — exactly 100 MB file is accepted")
+        void initiateImport_exactly100MbFile_accepted() {
+            long exactBytes = 100L * 1024 * 1024;
             given(validPdf.getSize()).willReturn(exactBytes);
 
             CurriculumImport savedEntity = makeImport(ImportStatus.QUEUED);
@@ -244,6 +244,57 @@ class CurriculumImportServiceImplTest {
                     .isInstanceOf(CourseNotFoundException.class);
 
             then(importRepository).should(never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Happy path — PPTX MIME type is accepted and triggers processing")
+        void initiateImport_validPptxMimeType_accepted() {
+            MultipartFile pptxFile = mock(MultipartFile.class);
+            given(pptxFile.isEmpty()).willReturn(false);
+            given(pptxFile.getContentType()).willReturn(
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+            given(pptxFile.getSize()).willReturn(1024L);
+            given(pptxFile.getOriginalFilename()).willReturn("slides.pptx");
+
+            CurriculumImport savedEntity = makeImport(ImportStatus.QUEUED);
+            given(importRepository.save(any(CurriculumImport.class))).willReturn(savedEntity);
+            given(importMapper.toResponse(savedEntity)).willReturn(new CurriculumImportResponse());
+
+            assertThatNoException().isThrownBy(
+                    () -> service.initiateImport(pptxFile, null, MANAGER_ID));
+
+            then(orchestrator).should().processImportAsync(any(), eq(pptxFile));
+        }
+
+        @Test
+        @DisplayName("Happy path — .pptx filename extension accepted even with generic MIME")
+        void initiateImport_pptxExtension_acceptedWithGenericMime() {
+            MultipartFile pptxFile = mock(MultipartFile.class);
+            given(pptxFile.isEmpty()).willReturn(false);
+            given(pptxFile.getContentType()).willReturn("application/octet-stream");
+            given(pptxFile.getSize()).willReturn(2048L);
+            given(pptxFile.getOriginalFilename()).willReturn("curriculum.pptx");
+
+            CurriculumImport savedEntity = makeImport(ImportStatus.QUEUED);
+            given(importRepository.save(any(CurriculumImport.class))).willReturn(savedEntity);
+            given(importMapper.toResponse(savedEntity)).willReturn(new CurriculumImportResponse());
+
+            assertThatNoException().isThrownBy(
+                    () -> service.initiateImport(pptxFile, null, MANAGER_ID));
+        }
+
+        @Test
+        @DisplayName("Exception — .docx file (wrong extension, wrong MIME) throws InvalidImportFileException")
+        void initiateImport_docxFile_throwsInvalidImportFileException() {
+            MultipartFile docxFile = mock(MultipartFile.class);
+            given(docxFile.isEmpty()).willReturn(false);
+            given(docxFile.getContentType()).willReturn("application/msword");
+            given(docxFile.getSize()).willReturn(1024L);
+            given(docxFile.getOriginalFilename()).willReturn("document.docx");
+
+            assertThatThrownBy(() -> service.initiateImport(docxFile, null, MANAGER_ID))
+                    .isInstanceOf(InvalidImportFileException.class)
+                    .hasMessageContaining("PDF and PPTX");
         }
     }
 

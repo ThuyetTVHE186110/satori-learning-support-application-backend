@@ -181,7 +181,9 @@ public class CurriculumImport extends BaseEntity {
         EMBEDDING,
         VALIDATING,
         PERSISTING,
+        PENDING_APPROVAL,
         COMPLETED,
+        ROLLED_BACK,
         FAILED,
         CANCELLED
     }
@@ -193,6 +195,17 @@ public class CurriculumImport extends BaseEntity {
         this.status = ImportStatus.EXTRACTING;
         this.startedAt = LocalDateTime.now();
         this.currentStep = "EXTRACTING";
+    }
+
+    /**
+     * Mark import as pending manager approval.
+     * Content is already persisted as DRAFT; manager must explicitly approve or reject.
+     */
+    public void markPendingApproval() {
+        this.status = ImportStatus.PENDING_APPROVAL;
+        this.completedAt = null;
+        this.progressPercent = new BigDecimal("100.00");
+        this.currentStep = "PENDING_APPROVAL";
     }
 
     /**
@@ -212,6 +225,15 @@ public class CurriculumImport extends BaseEntity {
         this.status = ImportStatus.FAILED;
         this.completedAt = LocalDateTime.now();
         this.errorMessage = errorMsg;
+        this.currentStep = null;
+    }
+
+    /**
+     * Mark import as rolled back.
+     * Used when a COMPLETED import is reverted by a manager.
+     */
+    public void markRolledBack() {
+        this.status = ImportStatus.ROLLED_BACK;
         this.currentStep = null;
     }
 

@@ -35,6 +35,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.List;
 import java.util.UUID;
 
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -211,6 +212,20 @@ class ManagerConversationControllerTest {
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isForbidden());
         }
+
+        @Test
+        @DisplayName("Should return 400 when jlptLevel has invalid enum value (e.g. N9)")
+        @WithMockConversationUser
+        void shouldReturn400WhenJlptLevelInvalid() throws Exception {
+            String body = "{\"title\":\"Test\",\"jlptLevel\":\"N9\"}";
+
+            mockMvc.perform(post("/api/v1/manager/conversation/themes")
+                            .with(csrf())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -238,6 +253,33 @@ class ManagerConversationControllerTest {
         void shouldReturn403ForLearner() throws Exception {
             mockMvc.perform(get("/api/v1/manager/conversation/themes"))
                     .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("Should use searchThemes when keyword is provided")
+        @WithMockConversationUser
+        void shouldSearchWhenKeywordProvided() throws Exception {
+            given(themeService.searchThemes(eq("Daily"), any(Pageable.class)))
+                    .willReturn(new PageImpl<>(List.of(themeSummary)));
+
+            mockMvc.perform(get("/api/v1/manager/conversation/themes")
+                            .param("keyword", "Daily"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.content[0].title").value("Daily Shopping"));
+        }
+
+        @Test
+        @DisplayName("Should ignore blank keyword and return all themes")
+        @WithMockConversationUser
+        void shouldIgnoreBlankKeyword() throws Exception {
+            given(themeService.getAllThemes(any(Pageable.class)))
+                    .willReturn(new PageImpl<>(List.of(themeSummary)));
+
+            mockMvc.perform(get("/api/v1/manager/conversation/themes")
+                            .param("keyword", "   "))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content[0].title").value("Daily Shopping"));
         }
     }
 
