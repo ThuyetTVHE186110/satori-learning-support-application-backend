@@ -18,6 +18,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 
+import numpy as np
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from PIL import Image
@@ -91,11 +92,12 @@ async def extract_text(request: OcrRequest):
     try:
         raw = base64.b64decode(request.image)
         img = Image.open(io.BytesIO(raw)).convert("RGB")
+        img_array = np.array(img)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid image data: {exc}")
 
     try:
-        result = _ocr.ocr(img, cls=True)
+        result = _ocr.ocr(img_array, cls=True)
     except Exception as exc:
         logger.exception("OCR engine error")
         raise HTTPException(status_code=500, detail=f"OCR engine error: {exc}")

@@ -60,12 +60,15 @@ public class OcrClient {
                 log.warn("OCR service returned null response");
                 return OcrTextResult.empty();
             }
-            log.debug("OCR: {} lines, conf={:.3f}, {}ms",
+            log.debug("OCR: {} lines, conf={}, {}ms",
                     resp.lineCount(), resp.confidence(), resp.processingMs());
             return new OcrTextResult(resp.text(), resp.confidence());
 
         } catch (ResourceAccessException e) {
             log.warn("OCR service unreachable at {}: {}", props.getServiceUrl(), e.getMessage());
+            return OcrTextResult.empty();
+        } catch (org.springframework.web.client.HttpServerErrorException e) {
+            log.error("OCR service returned {}: {}", e.getStatusCode(), e.getResponseBodyAsString());
             return OcrTextResult.empty();
         } catch (Exception e) {
             log.error("Unexpected OCR client error", e);

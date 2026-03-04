@@ -1,5 +1,6 @@
 package com.fu.curriculumimport.config;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -8,6 +9,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadPoolExecutor;
 
 /**
  * Async and scheduling configuration for curriculum import processing.
@@ -18,24 +20,30 @@ import java.util.concurrent.Executor;
 @EnableAsync
 @EnableScheduling
 @Slf4j
+@RequiredArgsConstructor
 public class AsyncImportConfig {
+
+    private final AgenticRagProperties ragProperties;
 
     /**
      * Thread pool executor for import processing tasks.
-     * - Core pool: 2 threads (concurrent imports)
-     * - Max pool: 4 threads (burst capacity)
-     * - Queue: 10 (pending imports)
+     * Values are configurable via application.yml under curriculum-import.agentic-rag.
+     * CallerRunsPolicy ensures tasks are never silently dropped when the queue is full.
      */
     @Bean(name = "importTaskExecutor")
     public Executor importTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(2);
-        executor.setMaxPoolSize(4);
-        executor.setQueueCapacity(10);
+        executor.setCorePoolSize(ragProperties.getThreadPoolCoreSize());
+        executor.setMaxPoolSize(ragProperties.getThreadPoolMaxSize());
+        executor.setQueueCapacity(ragProperties.getThreadPoolQueueCapacity());
         executor.setThreadNamePrefix("import-");
-        executor.setRejectedExecutionHandler((r, e) ->
-                log.warn("Import task rejected - queue full. Consider increasing capacity."));
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         executor.initialize();
+
+        log.info("Import thread pool initialized — core={}, max={}, queue={}",
+                ragProperties.getThreadPoolCoreSize(),
+                ragProperties.getThreadPoolMaxSize(),
+                ragProperties.getThreadPoolQueueCapacity());
         return executor;
     }
 }

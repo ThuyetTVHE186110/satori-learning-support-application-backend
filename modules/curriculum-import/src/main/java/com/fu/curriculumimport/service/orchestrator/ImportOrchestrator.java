@@ -24,9 +24,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -463,8 +461,20 @@ public class ImportOrchestrator {
                 futures.add(future);
             }
 
-            // Wait for batch to complete
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            // Wait for batch to complete (with 5 minute timeout per batch)
+            try {
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                        .get(5, TimeUnit.MINUTES);
+            } catch (TimeoutException e) {
+                log.error("[{}] Batch starting at chunk {} timed out after 5 minutes", importId, batchStart);
+                futures.forEach(f -> f.cancel(true));
+            } catch (ExecutionException e) {
+                log.error("[{}] Batch execution error: {}", importId, e.getMessage());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("[{}] Batch processing interrupted", importId);
+                break;
+            }
 
             // Update progress
             int progressPercent = 25 + (int) ((double) Math.min(batchEnd, docChunks.size())

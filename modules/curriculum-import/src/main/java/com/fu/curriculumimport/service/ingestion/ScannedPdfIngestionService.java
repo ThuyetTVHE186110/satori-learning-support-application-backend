@@ -70,11 +70,11 @@ public class ScannedPdfIngestionService {
                 OcrTextResult ocr = ocrClient.extractText(pageImage);
 
                 if (!ocr.hasText()) {
-                    log.warn("Page {} OCR produced no text (conf={:.2f})", i + 1, ocr.confidence());
+                    log.warn("Page {} OCR produced no text (conf={})", i + 1, ocr.confidence());
                     pageTexts.add("");
                 } else {
                     if (ocr.confidence() < ocrProps.getMinConfidence()) {
-                        log.warn("Page {} low OCR confidence: {:.2f}", i + 1, ocr.confidence());
+                        log.warn("Page {} low OCR confidence: {}", i + 1, ocr.confidence());
                     }
                     pageTexts.add(ocr.text());
                     fullText.append(ocr.text()).append("\n\n");
