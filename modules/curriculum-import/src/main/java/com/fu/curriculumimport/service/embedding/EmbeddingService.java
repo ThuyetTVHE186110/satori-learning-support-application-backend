@@ -1,5 +1,6 @@
 package com.fu.curriculumimport.service.embedding;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.config.AgenticRagProperties;
 import com.fu.curriculumimport.service.agent.ExtractionResult;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +33,7 @@ public class EmbeddingService {
     private final OpenAiEmbeddingModel embeddingModel;
     private final JdbcTemplate jdbcTemplate;
     private final AgenticRagProperties ragProperties;
+    private final ObjectMapper objectMapper;
 
     /**
      * Retrieve RAG context by finding similar existing content.
@@ -314,18 +316,14 @@ public class EmbeddingService {
     }
 
     /**
-     * Convert map to JSON string.
+     * Convert map to JSON string using Jackson ObjectMapper for proper escaping.
      */
     private String mapToJson(Map<String, String> map) {
-        StringBuilder sb = new StringBuilder("{");
-        int i = 0;
-        for (Map.Entry<String, String> entry : map.entrySet()) {
-            if (i > 0) sb.append(",");
-            sb.append("\"").append(entry.getKey()).append("\":\"")
-                    .append(entry.getValue().replace("\"", "\\\"")).append("\"");
-            i++;
+        try {
+            return objectMapper.writeValueAsString(map);
+        } catch (Exception e) {
+            log.warn("Failed to serialize metadata to JSON: {}", e.getMessage());
+            return "{}";
         }
-        sb.append("}");
-        return sb.toString();
     }
 }

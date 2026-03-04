@@ -3,6 +3,7 @@ package com.fu.curriculumimport.service.agent;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
+import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -98,7 +99,7 @@ public class ContentClassifierAgent {
 
     private ClassificationResult parseClassificationResponse(String jsonResponse) {
         try {
-            String cleaned = cleanJson(jsonResponse);
+            String cleaned = LlmResponseUtils.cleanJson(jsonResponse);
             Map<String, Object> parsed = objectMapper.readValue(cleaned, new TypeReference<>() {});
 
             String contentTypeStr = (String) parsed.getOrDefault("contentType", "MIXED");
@@ -133,11 +134,4 @@ public class ContentClassifierAgent {
                 content.substring(content.length() - 400);
     }
 
-    private String cleanJson(String json) {
-        String cleaned = json.strip();
-        if (cleaned.startsWith("```json")) cleaned = cleaned.substring(7);
-        if (cleaned.startsWith("```")) cleaned = cleaned.substring(3);
-        if (cleaned.endsWith("```")) cleaned = cleaned.substring(0, cleaned.length() - 3);
-        return cleaned.strip();
-    }
 }

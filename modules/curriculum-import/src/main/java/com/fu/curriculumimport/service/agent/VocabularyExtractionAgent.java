@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
+import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -245,7 +246,7 @@ public class VocabularyExtractionAgent {
 
     private ExtractionResult parseResponse(String json, int chunkIndex, long ms) {
         try {
-            Map<String, Object> parsed = objectMapper.readValue(cleanJson(json), new TypeReference<>() {});
+            Map<String, Object> parsed = objectMapper.readValue(LlmResponseUtils.cleanJson(json), new TypeReference<>() {});
             double confidence = ((Number) parsed.getOrDefault("confidence", 0.5)).doubleValue();
 
             List<ExtractionResult.ExtractedVocabulary> vocab = parseField(
@@ -263,7 +264,7 @@ public class VocabularyExtractionAgent {
             return ExtractionResult.builder()
                     .chunkIndex(chunkIndex)
                     .confidence(confidence)
-                    .tokensUsed(estimateTokens(json))
+                    .tokensUsed(LlmResponseUtils.estimateTokens(json))
                     .processingTimeMs(ms)
                     .lessons(Collections.emptyList())
                     .vocabulary(vocab != null ? vocab : Collections.emptyList())
@@ -305,15 +306,4 @@ public class VocabularyExtractionAgent {
                 .grammarPoints(Collections.emptyList()).build();
     }
 
-    private String cleanJson(String json) {
-        String s = json.strip();
-        if (s.startsWith("```json")) s = s.substring(7);
-        if (s.startsWith("```"))    s = s.substring(3);
-        if (s.endsWith("```"))      s = s.substring(0, s.length() - 3);
-        return s.strip();
-    }
-
-    private int estimateTokens(String text) {
-        return text.length() / 4;
-    }
 }

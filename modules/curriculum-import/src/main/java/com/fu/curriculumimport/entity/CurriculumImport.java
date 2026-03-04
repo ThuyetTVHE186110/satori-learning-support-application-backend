@@ -132,6 +132,7 @@ public class CurriculumImport extends BaseEntity {
     private String errorMessage;
 
     @Column(name = "error_details", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "?::jsonb")
     private String errorDetails;
 
     @Column(name = "retry_count")

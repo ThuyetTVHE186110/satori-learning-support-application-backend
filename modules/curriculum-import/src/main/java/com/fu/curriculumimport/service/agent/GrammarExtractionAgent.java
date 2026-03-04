@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
+import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -166,7 +167,7 @@ public class GrammarExtractionAgent {
 
     private ExtractionResult parseResponse(String jsonResponse, int chunkIndex, long processingTimeMs) {
         try {
-            String cleaned = cleanJson(jsonResponse);
+            String cleaned = LlmResponseUtils.cleanJson(jsonResponse);
             Map<String, Object> parsed = objectMapper.readValue(cleaned, new TypeReference<>() {});
 
             double confidence = ((Number) parsed.getOrDefault("confidence", 0.5)).doubleValue();
@@ -177,7 +178,7 @@ public class GrammarExtractionAgent {
             return ExtractionResult.builder()
                     .chunkIndex(chunkIndex)
                     .confidence(confidence)
-                    .tokensUsed(estimateTokens(jsonResponse))
+                    .tokensUsed(LlmResponseUtils.estimateTokens(jsonResponse))
                     .processingTimeMs(processingTimeMs)
                     .lessons(Collections.emptyList())
                     .vocabulary(Collections.emptyList())
@@ -225,15 +226,4 @@ public class GrammarExtractionAgent {
                 .build();
     }
 
-    private String cleanJson(String json) {
-        String cleaned = json.strip();
-        if (cleaned.startsWith("```json")) cleaned = cleaned.substring(7);
-        if (cleaned.startsWith("```")) cleaned = cleaned.substring(3);
-        if (cleaned.endsWith("```")) cleaned = cleaned.substring(0, cleaned.length() - 3);
-        return cleaned.strip();
-    }
-
-    private int estimateTokens(String text) {
-        return text.length() / 4;
-    }
 }

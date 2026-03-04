@@ -93,15 +93,15 @@ public class FileIngestionRouter {
             String sample = stripper.getText(doc);
 
             double charsPerPage = (double) sample.length() / Math.min(totalPages, 5);
-            log.debug("PDF sample: {:.1f} chars/page (threshold={})",
-                    charsPerPage, ocrProps.getScannedPageThreshold());
+            log.debug("PDF sample: {} chars/page (threshold={})",
+                    String.format("%.1f", charsPerPage), ocrProps.getScannedPageThreshold());
 
             if (charsPerPage < ocrProps.getScannedPageThreshold()) {
-                log.info("Scanned PDF detected ({:.1f} chars/page). Routing to OCR pipeline.", charsPerPage);
+                log.info("Scanned PDF detected ({} chars/page). Routing to OCR pipeline.", String.format("%.1f", charsPerPage));
                 return scannedPdfIngestionService.parse(file);
             }
 
-            log.info("Text-based PDF detected ({:.1f} chars/page). Using native extraction.", charsPerPage);
+            log.info("Text-based PDF detected ({} chars/page). Using native extraction.", String.format("%.1f", charsPerPage));
             return pdfIngestionService.parsePdf(file);
 
         } catch (InvalidImportFileException e) {

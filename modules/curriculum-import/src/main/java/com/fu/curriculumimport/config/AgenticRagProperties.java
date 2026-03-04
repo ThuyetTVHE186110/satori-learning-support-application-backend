@@ -1,6 +1,8 @@
 package com.fu.curriculumimport.config;
 
+import jakarta.annotation.PostConstruct;
 import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -9,6 +11,7 @@ import org.springframework.stereotype.Component;
  * Maps to `curriculum-import.agentic-rag` in application.yml.
  */
 @Data
+@Slf4j
 @Component
 @ConfigurationProperties(prefix = "curriculum-import.agentic-rag")
 public class AgenticRagProperties {
@@ -69,6 +72,23 @@ public class AgenticRagProperties {
      */
     private long retrySchedulerDelayMs = 30000;
 
+    // ==================== Thread Pool Configuration ====================
+
+    /**
+     * Core pool size for import task executor.
+     */
+    private int threadPoolCoreSize = 2;
+
+    /**
+     * Max pool size for import task executor.
+     */
+    private int threadPoolMaxSize = 4;
+
+    /**
+     * Queue capacity for import task executor.
+     */
+    private int threadPoolQueueCapacity = 10;
+
     // ==================== Self-Reflection (Self-RAG) ====================
 
     /**
@@ -120,4 +140,23 @@ public class AgenticRagProperties {
      * Combined score threshold below which re-extraction is triggered.
      */
     private double combinedReExtractionThreshold = 0.5;
+
+    @PostConstruct
+    public void validate() {
+        double weightSum = ruleBasedWeight + reflectionWeight + groundingWeight;
+        if (Math.abs(weightSum - 1.0) > 0.01) {
+            throw new IllegalStateException(
+                    "Agentic RAG scoring weights must sum to 1.0, got: " + weightSum
+                            + " (rule=" + ruleBasedWeight + ", reflection=" + reflectionWeight
+                            + ", grounding=" + groundingWeight + ")");
+        }
+        if (confidenceThreshold < 0 || confidenceThreshold > 1) {
+            throw new IllegalStateException("confidenceThreshold must be between 0 and 1, got: " + confidenceThreshold);
+        }
+        if (groundingThreshold < 0 || groundingThreshold > 1) {
+            throw new IllegalStateException("groundingThreshold must be between 0 and 1, got: " + groundingThreshold);
+        }
+        log.info("Agentic RAG config validated — weights sum={}, confidence={}, grounding={}, parallel={}",
+                String.format("%.2f", weightSum), confidenceThreshold, groundingThreshold, parallelProcessing);
+    }
 }

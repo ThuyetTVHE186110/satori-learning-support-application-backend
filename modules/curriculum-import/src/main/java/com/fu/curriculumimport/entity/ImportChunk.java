@@ -4,6 +4,7 @@ import com.fu.infrastructure.persistence.BaseEntity;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
+import org.hibernate.annotations.ColumnTransformer;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -54,6 +55,7 @@ public class ImportChunk extends BaseEntity {
     private ChunkStatus status = ChunkStatus.PENDING;
 
     @Column(name = "extracted_data", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "?::jsonb")
     private String extractedData;
 
     @Column(name = "extraction_confidence", precision = 3, scale = 2)
@@ -94,6 +96,7 @@ public class ImportChunk extends BaseEntity {
      * Detailed validation results (JSON).
      */
     @Column(name = "validation_details", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "?::jsonb")
     private String validationDetails;
 
     /**
