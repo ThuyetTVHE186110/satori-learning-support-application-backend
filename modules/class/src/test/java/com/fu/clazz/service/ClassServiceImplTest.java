@@ -8,7 +8,6 @@ import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
 import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.entity.Clazz;
-import com.fu.clazz.entity.Clazz.JlptLevel;
 import com.fu.clazz.exception.ClassFullException;
 import com.fu.clazz.exception.ClassNotFoundException;
 import com.fu.clazz.exception.MemberAlreadyExistsException;
@@ -22,6 +21,8 @@ import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
 import com.fu.user.repository.UserRepository;
+import com.fu.course.entity.Course;
+import com.fu.course.repository.CourseRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -70,6 +71,9 @@ class ClassServiceImplTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private CourseRepository courseRepository;
+
     @InjectMocks
     private ClassServiceImpl clazzService;
 
@@ -91,8 +95,10 @@ class ClassServiceImplTest {
     private UUID classId;
     private UUID teacherId;
     private UUID studentId;
+    private UUID courseId;
     private User testTeacher;
     private User testStudent;
+    private Course testCourse;
 
     @BeforeEach
     void setUp() {
@@ -100,16 +106,22 @@ class ClassServiceImplTest {
         classId = UUID.randomUUID();
         teacherId = UUID.randomUUID();
         studentId = UUID.randomUUID();
+        courseId = UUID.randomUUID();
+
+        testCourse = Course.builder()
+                .name("N5 Beginners")
+                .status(Course.CourseStatus.ACTIVE)
+                .build();
+        ReflectionTestUtils.setField(testCourse, "id", courseId);
 
         testClazz = Clazz.builder()
                 .name("N5 Morning Class")
                 .description("Beginner Japanese class")
-                .code("ABC12345")
                 .teacherId(teacherId)
-                .jlptLevel(JlptLevel.N5)
+                .courseId(courseId)
                 .maxStudents(30)
-                .startDate(LocalDate.of(2026, 3, 1))
-                .endDate(LocalDate.of(2026, 6, 30))
+                .startDate(LocalDate.now().plusMonths(1))
+                .endDate(LocalDate.now().plusMonths(4))
                 .isActive(true)
                 .build();
         ReflectionTestUtils.setField(testClazz, "id", classId);
@@ -118,22 +130,27 @@ class ClassServiceImplTest {
                 .id(classId)
                 .name("N5 Morning Class")
                 .description("Beginner Japanese class")
-                .code("ABC12345")
                 .teacherId(teacherId)
-                .jlptLevel(JlptLevel.N5)
+                .courseId(courseId)
+                .courseName("N5 Beginners")
+                .courseLevel("N5")
+                .courseStatus("PUBLISHED")
                 .maxStudents(30)
-                .startDate(LocalDate.of(2026, 3, 1))
-                .endDate(LocalDate.of(2026, 6, 30))
+                .startDate(LocalDate.now().plusMonths(1))
+                .endDate(LocalDate.now().plusMonths(4))
                 .isActive(true)
                 .memberCount(0L)
+                .teacherPhoneNumber("0123456789")
                 .build();
 
         testSummaryResponse = ClassSummaryResponse.builder()
                 .id(classId)
                 .name("N5 Morning Class")
-                .code("ABC12345")
                 .teacherId(teacherId)
-                .jlptLevel(JlptLevel.N5)
+                .courseId(courseId)
+                .courseName("N5 Beginners")
+                .courseLevel("N5")
+                .courseStatus("PUBLISHED")
                 .isActive(true)
                 .memberCount(0L)
                 .build();
@@ -156,10 +173,10 @@ class ClassServiceImplTest {
                 .name("N5 Morning Class")
                 .description("Beginner Japanese class")
                 .teacherId(teacherId)
-                .jlptLevel(JlptLevel.N5)
+                .courseId(courseId)
                 .maxStudents(30)
-                .startDate(LocalDate.of(2026, 3, 1))
-                .endDate(LocalDate.of(2026, 6, 30))
+                .startDate(LocalDate.now().plusMonths(1))
+                .endDate(LocalDate.now().plusMonths(4))
                 .build();
 
         updateRequest = UpdateClassRequest.builder()
@@ -171,6 +188,7 @@ class ClassServiceImplTest {
                 .email("teacher@example.com")
                 .firstName("Test")
                 .lastName("Teacher")
+                .phoneNumber("0123456789")
                 .role(UserRole.TEACHER)
                 .status(UserStatus.ACTIVE)
                 .build();
@@ -187,7 +205,7 @@ class ClassServiceImplTest {
     }
 
     // =====================================================
-    // CREATE CLASS
+    // CLASS MANAGEMENT USE CASES (Create, Update, Status)
     // =====================================================
 
     @Nested
@@ -198,10 +216,13 @@ class ClassServiceImplTest {
         @DisplayName("Should create class successfully")
         void shouldCreateClassSuccessfully() {
             // Given
+            given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
             given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
             given(classMapper.toEntity(createRequest)).willReturn(testClazz);
             given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
-            given(classMapper.toResponse(testClazz)).willReturn(testClassResponse);
+            given(classMapper.toResponse(any(Clazz.class))).willReturn(testClassResponse);
+            given(classMemberRepository.countActiveByClassId(any())).willReturn(0L);
 
             // When
             ClassResponse result = clazzService.createClass(createRequest, managerId);
@@ -209,26 +230,51 @@ class ClassServiceImplTest {
             // Then
             assertThat(result).isNotNull();
             assertThat(result.getName()).isEqualTo("N5 Morning Class");
-            assertThat(result.getJlptLevel()).isEqualTo(JlptLevel.N5);
             assertThat(result.getMemberCount()).isEqualTo(0L);
 
             verify(classRepository).save(clazzCaptor.capture());
             Clazz savedClazz = clazzCaptor.getValue();
-            assertThat(savedClazz.getCode()).isNotBlank();
             assertThat(savedClazz.getCreatedBy()).isEqualTo(managerId);
             assertThat(savedClazz.getUpdatedBy()).isEqualTo(managerId);
+        }
+
+        @Test
+        @DisplayName("Should set courseId when creating class")
+        void shouldPersistCourseId() {
+            given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(classMapper.toEntity(createRequest)).willReturn(testClazz);
+            given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
+            given(classMapper.toResponse(any(Clazz.class))).willReturn(testClassResponse);
+            given(classMemberRepository.countActiveByClassId(any())).willReturn(0L);
+
+            clazzService.createClass(createRequest, managerId);
+
+            verify(classRepository).save(clazzCaptor.capture());
+            assertThat(clazzCaptor.getValue().getCourseId()).isEqualTo(courseId);
         }
 
         @Test
         @DisplayName("Should throw exception when teacher is inactive or not found")
         void shouldThrowExceptionWhenTeacherInactive() {
             // Given
+            CreateClassRequest request = CreateClassRequest.builder()
+                    .name("N5 Morning Class")
+                    .description("Beginner Japanese class")
+                    .teacherId(teacherId)
+                    .courseId(courseId)
+                    .maxStudents(30)
+                    .startDate(LocalDate.now().plusMonths(1))
+                    .endDate(LocalDate.now().plusMonths(4))
+                    .build();
+
             testTeacher.setStatus(UserStatus.INACTIVE);
             given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
             given(classRepository.existsByNameIgnoreCase(anyString())).willReturn(false);
 
             // When/Then
-            assertThatThrownBy(() -> clazzService.createClass(createRequest, managerId))
+            assertThatThrownBy(() -> clazzService.createClass(request, managerId))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Giáo viên không tồn tại hoặc không hợp lệ");
 
@@ -243,7 +289,7 @@ class ClassServiceImplTest {
                     .name("N5 Morning Class")
                     .description("Beginner Japanese class")
                     .teacherId(teacherId)
-                    .jlptLevel(JlptLevel.N5)
+                    .courseId(courseId)
                     .maxStudents(30)
                     .startDate(LocalDate.now().minusDays(1)) // Past date
                     .endDate(LocalDate.now().plusMonths(3))
@@ -265,7 +311,7 @@ class ClassServiceImplTest {
                     .name("N5 Morning Class")
                     .description("Beginner Japanese class")
                     .teacherId(teacherId)
-                    .jlptLevel(JlptLevel.N5)
+                    .courseId(courseId)
                     .maxStudents(30)
                     .startDate(LocalDate.now().plusDays(10))
                     .endDate(LocalDate.now().plusDays(5)) // Before start date
@@ -275,6 +321,35 @@ class ClassServiceImplTest {
             assertThatThrownBy(() -> clazzService.createClass(badDateRequest, managerId))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Ngày kết thúc phải sau ngày bắt đầu.");
+
+            verify(classRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Should throw exception when course not found or deleted")
+        void shouldThrowWhenCourseNotFound() {
+            given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.empty());
+
+            assertThatThrownBy(() -> clazzService.createClass(createRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Khóa học không tồn tại");
+
+            verify(classRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Should throw exception when course is not active")
+        void shouldThrowWhenCourseNotPublished() {
+            testCourse.setStatus(Course.CourseStatus.INACTIVE);
+            given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+
+            assertThatThrownBy(() -> clazzService.createClass(createRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("đang hoạt động");
 
             verify(classRepository, never()).save(any());
         }
@@ -422,7 +497,7 @@ class ClassServiceImplTest {
     }
 
     // =====================================================
-    // GET CLASS
+    // CLASS QUERYING USE CASES (Get, Search, View Members)
     // =====================================================
 
     @Nested
@@ -478,7 +553,7 @@ class ClassServiceImplTest {
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
 
             // When
-            Page<ClassSummaryResponse> result = clazzService.getClasses("N5", teacherId, true, JlptLevel.N5, pageable);
+            Page<ClassSummaryResponse> result = clazzService.getClasses("N5", teacherId, courseId, true, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
@@ -564,13 +639,14 @@ class ClassServiceImplTest {
             verify(classRepository).save(clazzCaptor.capture());
             assertThat(clazzCaptor.getValue().getUpdatedBy()).isEqualTo(managerId);
         }
+    }
 
-        // =====================================================
-        // MEMBERSHIP MANAGEMENT
-        // =====================================================
+    // =====================================================
+    // MEMBERSHIP MANAGEMENT USE CASES (Add, Remove)
+    // =====================================================
 
-        @Nested
-        @DisplayName("Add Member Tests")
+    @Nested
+    @DisplayName("Add Member Tests")
         class AddMemberTests {
 
             @Test
@@ -604,7 +680,6 @@ class ClassServiceImplTest {
                 // Given
                 AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
                 given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-                given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
                 given(classMemberRepository.countActiveByClassId(classId)).willReturn(30L); // maxStudents = 30
 
                 // When/Then
@@ -666,7 +741,6 @@ class ClassServiceImplTest {
                 testClazz.setIsActive(false);
                 AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
                 given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-                given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
 
                 // When/Then
                 assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
@@ -713,8 +787,8 @@ class ClassServiceImplTest {
         // REMOVE MEMBER
         // =====================================================
 
-        @Nested
-        @DisplayName("Remove Member Tests")
+    @Nested
+    @DisplayName("Remove Member Tests")
         class RemoveMemberTests {
 
             @Test
@@ -769,8 +843,8 @@ class ClassServiceImplTest {
         // GET CLASS MEMBERS
         // =====================================================
 
-        @Nested
-        @DisplayName("Get Class Members Tests")
+    @Nested
+    @DisplayName("Get Class Members Tests")
         class GetMembersTests {
 
             @Test
@@ -817,7 +891,7 @@ class ClassServiceImplTest {
                 CreateClassRequest req = CreateClassRequest.builder()
                         .name("Lớp kiểm thử")
                         .teacherId(teacherId)
-                        .jlptLevel(JlptLevel.N5)
+                        .courseId(courseId)
                         .maxStudents(30)
                         .startDate(java.time.LocalDate.now().minusDays(1))
                         .endDate(java.time.LocalDate.now().plusDays(10))
@@ -834,7 +908,7 @@ class ClassServiceImplTest {
                 CreateClassRequest req = CreateClassRequest.builder()
                         .name("Lớp kiểm thử")
                         .teacherId(teacherId)
-                        .jlptLevel(JlptLevel.N5)
+                        .courseId(courseId)
                         .maxStudents(30)
                         .startDate(java.time.LocalDate.now().plusDays(5))
                         .endDate(java.time.LocalDate.now().plusDays(2))
@@ -851,19 +925,21 @@ class ClassServiceImplTest {
                 CreateClassRequest req = CreateClassRequest.builder()
                         .name("Lớp kiểm thử")
                         .teacherId(teacherId)
-                        .jlptLevel(JlptLevel.N5)
+                        .courseId(courseId)
                         .maxStudents(30)
                         .startDate(java.time.LocalDate.now().plusDays(1))
                         .endDate(java.time.LocalDate.now().plusDays(10))
                         .build();
+                given(classRepository.existsByNameIgnoreCase(req.getName())).willReturn(false);
                 given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+                given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
                 given(classMapper.toEntity(any())).willReturn(testClazz);
                 given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
-                given(classMapper.toResponse(any())).willReturn(testClassResponse);
+                given(classMapper.toResponse(any(Clazz.class))).willReturn(testClassResponse);
+                given(classMemberRepository.countActiveByClassId(any())).willReturn(0L);
                 assertThatNoException().isThrownBy(() -> clazzService.createClass(req, managerId));
             }
         }
-    }
 
     // =====================================================
     // GET CLASS MEMBERS (with user info enrichment)
@@ -918,7 +994,7 @@ class ClassServiceImplTest {
     }
 
     // =====================================================
-    // TEACHER-SPECIFIC CLASS QUERIES
+    // TEACHER SPECIFIC USE CASES 
     // =====================================================
 
     @Nested
@@ -937,7 +1013,7 @@ class ClassServiceImplTest {
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
 
             // When
-            Page<ClassSummaryResponse> result = clazzService.getClasses(null, teacherId, true, null, pageable);
+            Page<ClassSummaryResponse> result = clazzService.getClasses(null, teacherId, null, true, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
@@ -955,7 +1031,7 @@ class ClassServiceImplTest {
                     .willReturn(emptyPage);
 
             // When
-            Page<ClassSummaryResponse> result = clazzService.getClasses(null, teacherId, true, null, pageable);
+            Page<ClassSummaryResponse> result = clazzService.getClasses(null, teacherId, null, true, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(0);
@@ -1088,6 +1164,48 @@ class ClassServiceImplTest {
             // Then
             assertThat(result.getTeacherName()).isNull();
             assertThat(result.getTeacherEmail()).isNull();
+        }
+    }
+
+    // =====================================================
+    // ELIGIBLE LEARNERS TESTS
+    // =====================================================
+
+    @Nested
+    @DisplayName("Get Eligible Learners Tests")
+    class GetEligibleLearnersTests {
+
+        @Test
+        @DisplayName("Should get eligible learners successfully")
+        void shouldGetEligibleLearnersSuccessfully() {
+            // Given
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<User> usersPage = new PageImpl<>(List.of(testStudent), pageable, 1);
+            given(userRepository.findEligibleLearnersForClass(classId, "Test", pageable)).willReturn(usersPage);
+
+            // When
+            Page<com.fu.user.dto.UserResponse> result = clazzService.getEligibleLearners(classId, "Test", pageable);
+
+            // Then
+            assertThat(result).isNotNull();
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            assertThat(result.getContent().get(0).getId()).isEqualTo(studentId);
+            assertThat(result.getContent().get(0).getEmail()).isEqualTo("student@example.com");
+            verify(userRepository).findEligibleLearnersForClass(classId, "Test", pageable);
+        }
+
+        @Test
+        @DisplayName("Should throw exception when class not found")
+        void shouldThrowExceptionWhenClassNotFound() {
+            // Given
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.empty());
+            Pageable pageable = PageRequest.of(0, 10);
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.getEligibleLearners(classId, null, pageable))
+                    .isInstanceOf(ClassNotFoundException.class);
+            verify(userRepository, never()).findEligibleLearnersForClass(any(), any(), any());
         }
     }
 }

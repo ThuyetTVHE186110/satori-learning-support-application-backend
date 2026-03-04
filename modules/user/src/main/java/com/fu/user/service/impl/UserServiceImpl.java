@@ -172,6 +172,9 @@ public class UserServiceImpl implements UserService {
                 user = findUserById(id);
                 break;
         }
+        if (userRole == UserRole.MANAGER && user.getRole() == UserRole.MANAGER) {
+            throw new BusinessException("FORBIDDEN", "Bạn không có quyền xem chi tiết tài khoản Manager/Admin");
+        }
         UserResponse userResponse = userMapper.toResponse(user);
 
         UserDetailResponse detailResponse = UserDetailResponse.builder()
@@ -221,8 +224,8 @@ public class UserServiceImpl implements UserService {
             return userRepository.findAll(pageable)
                     .map(userMapper::toResponse);
         } else {
-            // Manager sees only active users
-            return userRepository.findAllActive(pageable)
+            // Manager sees only active users with role LEARNER or TEACHER
+            return userRepository.findAllActive(pageable, Arrays.asList(UserRole.LEARNER, UserRole.TEACHER))
                     .map(userMapper::toResponse);
         }
     }
@@ -322,7 +325,9 @@ public class UserServiceImpl implements UserService {
         if (request.getAvatarUrl() != null) {
             user.setAvatarUrl(request.getAvatarUrl());
         }
-
+        if (request.getStatus() != null && request.getStatus() == UserStatus.DELETED) {
+            throw new BusinessException("INVALID_STATUS", "Không thể cập nhật trạng thái thành DELETED. Vui lòng sử dụng chức năng xóa để xóa tài khoản");
+        }
         // Update role if provided (with permission check)
         if (request.getRole() != null) {
             validateRoleUpdate(request.getRole(), updaterRole);

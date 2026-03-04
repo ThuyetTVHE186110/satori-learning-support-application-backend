@@ -5,18 +5,20 @@ import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.hibernate.annotations.ColumnTransformer;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * Course entity - Japanese courses (N5, N4, N3, N2, N1)
  * Maps to learning_content.courses table
- * 
+ * <p>
  * Business: MANAGER creates and manages courses
  */
 @Entity
 @Table(name = "courses", schema = "learning_content", indexes = {
-    @Index(name = "idx_courses_name", columnList = "name"),
-    @Index(name = "idx_courses_jlpt_level", columnList = "jlpt_level"),
-    @Index(name = "idx_courses_status", columnList = "status")
+        @Index(name = "idx_courses_name", columnList = "name"),
+        @Index(name = "idx_courses_jlpt_level", columnList = "jlpt_level"),
+        @Index(name = "idx_courses_status", columnList = "status")
 })
 @Getter
 @Setter
@@ -33,8 +35,8 @@ public class Course extends SoftDeletableEntity {
     private String description;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "jlpt_level", nullable = false, length = 5)
-    @ColumnTransformer(write = "CAST(? AS jlpt_level)")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "jlpt_level", columnDefinition = "jlpt_level", nullable = false)
     private JlptLevel jlptLevel;
 
     @Column(name = "thumbnail_url", columnDefinition = "TEXT")
@@ -45,10 +47,10 @@ public class Course extends SoftDeletableEntity {
     private Integer orderIndex = 0;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", length = 20)
-    @ColumnTransformer(write = "CAST(? AS content_status)")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "status", columnDefinition = "course_status")
     @Builder.Default
-    private ContentStatus status = ContentStatus.DRAFT;
+    private CourseStatus status = CourseStatus.INACTIVE;
 
     /**
      * JLPT Level enum
@@ -64,5 +66,11 @@ public class Course extends SoftDeletableEntity {
         DRAFT,      // Being prepared
         PUBLISHED,  // Available to students
         ARCHIVED    // Hidden from students
+    }
+
+    public enum CourseStatus {
+        ACTIVE,
+        INACTIVE,
+        DELETED
     }
 }

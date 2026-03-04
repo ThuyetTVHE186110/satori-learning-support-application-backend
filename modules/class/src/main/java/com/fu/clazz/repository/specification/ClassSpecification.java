@@ -34,12 +34,12 @@ public class ClassSpecification {
         };
     }
 
-    public static Specification<Clazz> hasJlptLevel(Clazz.JlptLevel level) {
+    public static Specification<Clazz> hasCourseId(UUID courseId) {
         return (root, query, cb) -> {
-            if (level == null) {
-                return null;
+            if (courseId == null) {
+                return cb.conjunction();
             }
-            return cb.equal(root.get("jlptLevel"), level);
+            return cb.equal(root.get("courseId"), courseId);
         };
     }
 

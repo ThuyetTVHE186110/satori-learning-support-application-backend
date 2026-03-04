@@ -1,6 +1,5 @@
 package com.fu.clazz.dto.response;
 
-import com.fu.clazz.entity.Clazz.JlptLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -22,9 +21,11 @@ public class ClassResponse {
     private UUID id;
     private String name;
     private String description;
-    private String code;
     private UUID teacherId;
-    private JlptLevel jlptLevel;
+    private UUID courseId;
+    private String courseName;
+    private String courseLevel; // e.g. "N5", "N4"
+    private String courseStatus; // e.g. "PUBLISHED"
     private Integer maxStudents;
     private LocalDate startDate;
     private LocalDate endDate;
@@ -42,4 +43,5 @@ public class ClassResponse {
     private String teacherName;
     private String teacherEmail;
     private String teacherAvatarUrl;
+    private String teacherPhoneNumber;
 }

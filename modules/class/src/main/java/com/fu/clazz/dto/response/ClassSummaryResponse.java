@@ -1,6 +1,5 @@
 package com.fu.clazz.dto.response;
 
-import com.fu.clazz.entity.Clazz.JlptLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -19,11 +18,12 @@ public class ClassSummaryResponse {
 
     private UUID id;
     private String name;
-    private String code;
     private UUID teacherId;
-    private JlptLevel jlptLevel;
+    private String teacherName;
+    private UUID courseId;
+    private String courseName;
+    private String courseLevel;
+    private String courseStatus;
     private Boolean isActive;
-
     private Long memberCount;
 }
-

@@ -6,7 +6,6 @@ import com.fu.clazz.dto.request.UpdateClassRequest;
 import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
-import com.fu.clazz.entity.Clazz.JlptLevel;
 import com.fu.clazz.service.ClassService;
 import com.fu.common.response.ApiResponse;
 import com.fu.common.response.PageResponse;
@@ -56,7 +55,7 @@ public class ClassController {
      * - TEACHER: sees only their own active classes (filtered by teacher ID auto)
      *
      * GET
-     * /api/v1/classes?page=0&size=10&isActive=true&level=N5&teacherId=xxx&keyword=xxx
+     * /api/v1/classes?page=0&size=10&isActive=true&courseId=xxx&teacherId=xxx&keyword=xxx
      */
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<ClassSummaryResponse>>> getAllClasses(
@@ -64,7 +63,7 @@ public class ClassController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) Boolean isActive,
-            @RequestParam(required = false) JlptLevel level,
+            @RequestParam(required = false) UUID courseId,
             @RequestParam(required = false) UUID teacherId,
             @RequestParam(required = false) String keyword) {
 
@@ -73,10 +72,10 @@ public class ClassController {
 
         if (isManager()) {
             // MANAGER: full access with dynamic filters combined by AND
-            classPage = clazzService.getClasses(keyword, teacherId, isActive, level, pageable);
+            classPage = clazzService.getClasses(keyword, teacherId, courseId, isActive, pageable);
         } else {
             // TEACHER: only their own active classes (force filter)
-            classPage = clazzService.getClasses(keyword, userId, true, level, pageable);
+            classPage = clazzService.getClasses(keyword, userId, courseId, true, pageable);
         }
 
         PageResponse<ClassSummaryResponse> pageResponse = PageResponse.of(
@@ -138,6 +137,34 @@ public class ClassController {
                 memberPage.getSize(),
                 memberPage.getTotalElements(),
                 memberPage.getTotalPages());
+        return ResponseEntity.ok(ApiResponse.success(pageResponse));
+    }
+
+    /**
+     * Get learners eligible to be added to a class.
+     * Eligible learners are those with role LEARNER, status ACTIVE/INACTIVE, and not currently an active member.
+     * - MANAGER: can view eligible learners for any class
+     *
+     * GET /api/v1/classes/{classId}/eligible-learners?page=0&size=10&keyword=...
+     */
+    @GetMapping("/{classId}/eligible-learners")
+    @PreAuthorize("hasRole('MANAGER')")
+    public ResponseEntity<ApiResponse<PageResponse<com.fu.user.dto.UserResponse>>> getEligibleLearners(
+            @PathVariable UUID classId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String keyword) {
+
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("email").ascending());
+
+        Page<com.fu.user.dto.UserResponse> userPage = clazzService.getEligibleLearners(classId, keyword, pageable);
+
+        PageResponse<com.fu.user.dto.UserResponse> pageResponse = PageResponse.of(
+                userPage.getContent(),
+                userPage.getNumber(),
+                userPage.getSize(),
+                userPage.getTotalElements(),
+                userPage.getTotalPages());
         return ResponseEntity.ok(ApiResponse.success(pageResponse));
     }
 
