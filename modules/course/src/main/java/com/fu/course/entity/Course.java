@@ -5,6 +5,8 @@ import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.hibernate.annotations.ColumnTransformer;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * Course entity - Japanese courses (N5, N4, N3, N2, N1)
@@ -33,8 +35,8 @@ public class Course extends SoftDeletableEntity {
     private String description;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "jlpt_level", nullable = false, length = 5)
-    @ColumnTransformer(write = "CAST(? AS jlpt_level)")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "jlpt_level", columnDefinition = "jlpt_level", nullable = false)
     private JlptLevel jlptLevel;
 
     @Column(name = "thumbnail_url", columnDefinition = "TEXT")
@@ -45,8 +47,8 @@ public class Course extends SoftDeletableEntity {
     private Integer orderIndex = 0;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", length = 20)
-    @ColumnTransformer(write = "CAST(? AS course_status)")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "status", columnDefinition = "course_status")
     @Builder.Default
     private CourseStatus status = CourseStatus.INACTIVE;
 
