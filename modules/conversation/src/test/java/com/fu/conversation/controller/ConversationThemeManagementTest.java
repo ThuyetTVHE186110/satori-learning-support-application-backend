@@ -46,23 +46,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   3. UPDATE THEME       — PUT    /api/v1/manager/conversation/themes/{id}  [P2 Standard]
  *   4. DELETE THEME       — DELETE /api/v1/manager/conversation/themes/{id}  [P2 Standard]
  *   5. VIEW THEME DETAIL  — GET    /api/v1/manager/conversation/themes/{id}  [P3 Sanity]
- *
- * ┌──────────────────────────────────────────────────────────────────────────┐
- * │  DISCREPANCY NOTES — update test script accordingly                     │
- * │                                                                          │
- * │  [NOTE-1] TC_CT_VTL_002 / TC_CT_VTL_003 — keyword search:              │
- * │    GET /themes has NO ?keyword= param in controller → @Disabled.        │
- * │    Raise feature request to dev.                                         │
- * │                                                                          │
- * │  [NOTE-4] TC_CT_DTH_001 / TC_CT_DTH_002 — delete response message:     │
- * │    Script expects: "Nội dung đã được xoá"                               │
- * │    Actual code:    "Theme deleted successfully"                          │
- * │    Tests assert actual. Update test script.                              │
- * │                                                                          │
- * │  [NOTE-5] 404 errorCode: script expects "THEME_NOT_FOUND",             │
- * │    actual ResourceNotFoundException uses "NOT_FOUND".                   │
- * │    Tests assert "NOT_FOUND". Update test script.                        │
- * └──────────────────────────────────────────────────────────────────────────┘
  */
 @SpringBootTest(classes = com.fu.conversation.ConversationTestApplication.class)
 @AutoConfigureMockMvc
@@ -214,7 +197,7 @@ class ConversationThemeManagementTest {
                     .andExpect(jsonPath("$.data.content.length()").value(3))
                     .andReturn();
 
-            String body = result.getResponse().getContentAsString();
+            String body = result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
             var content = objectMapper.readTree(body).path("data").path("content");
 
             // All 3 statuses represented
@@ -229,25 +212,58 @@ class ConversationThemeManagementTest {
         }
 
         /**
-         * TC_CT_VTL_002 — DISABLED
-         * [NOTE-1] GET /themes has no ?keyword= param in controller.
-         * Raise feature request to dev, or remove from test plan.
+         * TC_CT_VTL_002
+         * MANAGER searches by keyword — returns only themes matching title.
+         * Expected: HTTP 200, totalElements=1, only "Mua sắm" in content, "Du lịch" absent.
          */
         @Test
-        @DisplayName("TC_CT_VTL_002 — [DISABLED — NOTE-1] keyword search not implemented")
-        @org.junit.jupiter.api.Disabled(
-                "[NOTE-1] GET /api/v1/manager/conversation/themes does not support ?keyword= param. " +
-                "Raise feature request to dev or remove TC from plan.")
-        void tc_ct_vtl_002_keywordSearch_disabled() {}
+        @DisplayName("TC_CT_VTL_002 — keyword='mua' → only 'Mua sắm' returned, 'Du lịch' absent")
+        void tc_ct_vtl_002_keywordSearch_returnsMatchingThemeOnly() throws Exception {
+            // Arrange
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            saveTheme("Mua sắm", Course.ContentStatus.PUBLISHED);
+            saveTheme("Du lịch", Course.ContentStatus.PUBLISHED);
+
+            // Act + Assert
+            MvcResult result = mockMvc.perform(get("/api/v1/manager/conversation/themes")
+                            .param("page", "0").param("size", "10")
+                            .param("keyword", "mua")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.totalElements").value(1))
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andReturn();
+
+            String body = result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+            var content = objectMapper.readTree(body).path("data").path("content");
+            assertThat(content.get(0).path("title").asText()).isEqualTo("Mua sắm");
+        }
 
         /**
-         * TC_CT_VTL_003 — DISABLED
-         * [NOTE-1] Same reason as TC_CT_VTL_002.
+         * TC_CT_VTL_003
+         * MANAGER searches by keyword with no matching theme — returns empty content list.
+         * Expected: HTTP 200, totalElements=0, content=[].
          */
         @Test
-        @DisplayName("TC_CT_VTL_003 — [DISABLED — NOTE-1] keyword search not implemented")
-        @org.junit.jupiter.api.Disabled("[NOTE-1] See TC_CT_VTL_002.")
-        void tc_ct_vtl_003_keywordNoResult_disabled() {}
+        @DisplayName("TC_CT_VTL_003 — keyword='Bệnh viện' → empty content list")
+        void tc_ct_vtl_003_keywordNoResult_returnsEmptyList() throws Exception {
+            // Arrange
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            saveTheme("Mua sắm", Course.ContentStatus.PUBLISHED);
+
+            // Act + Assert
+            mockMvc.perform(get("/api/v1/manager/conversation/themes")
+                            .param("page", "0").param("size", "10")
+                            .param("keyword", "Bệnh viện")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.totalElements").value(0))
+                    .andExpect(jsonPath("$.data.content").isEmpty());
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -419,10 +435,17 @@ class ConversationThemeManagementTest {
         /**
          * TC_CT_CTH_005
          * Create theme with invalid jlptLevel enum value ("N9").
-         * Expected: HTTP 400, code = "VALIDATION_ERROR", data.jlptLevel error present.
+         *
+         * Jackson fails to deserialize "N9" → HttpMessageNotReadableException
+         * (fired BEFORE Bean Validation) → GlobalExceptionHandler returns:
+         *   HTTP 400, code="VALIDATION_ERROR", message contains "N9", data=null.
+         *
+         * NOTE: data.jlptLevel is NOT present (unlike MethodArgumentNotValidException).
+         * The error message format is: "Invalid value 'N9'. Accepted values: [N5, N4, N3, N2, N1]"
+         * (order follows enum declaration order in Course.JlptLevel: N5, N4, N3, N2, N1)
          */
         @Test
-        @DisplayName("TC_CT_CTH_005 — invalid enum 'N9' → HTTP 400 VALIDATION_ERROR, data.jlptLevel error present")
+        @DisplayName("TC_CT_CTH_005 — invalid enum 'N9' → HTTP 400 VALIDATION_ERROR, message contains 'N9'")
         void tc_ct_cth_005_invalidJlptEnum_returns400ValidationError() throws Exception {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
@@ -434,7 +457,8 @@ class ConversationThemeManagementTest {
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
-                    .andExpect(jsonPath("$.data.jlptLevel").isNotEmpty());
+                    // data=null because HttpMessageNotReadableException fires before Bean Validation
+                    .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("N9")));
         }
 
         // ── 2.3 Permission Cases ──────────────────────────────────────────────
@@ -520,6 +544,13 @@ class ConversationThemeManagementTest {
          * TC_CT_UTH_002
          * MANAGER updates only optional fields (titleJapanese, jlptLevel).
          * Expected: HTTP 200, original title unchanged, updated optional fields persisted.
+         *
+         * ❌ KNOWN FAILING — bug in dev code:
+         *   UpdateThemeRequest is missing the jlptLevel field entirely.
+         *   Jackson ignores unknown fields → jlptLevel is never written to the entity
+         *   → response returns jlptLevel = null → $.data.jlptLevel assertion fails.
+         *
+         *   Fix (dev): add "private Course.JlptLevel jlptLevel;" to UpdateThemeRequest.
          */
         @Test
         @DisplayName("TC_CT_UTH_002 — optional fields only → HTTP 200, title unchanged in DB")
@@ -553,15 +584,11 @@ class ConversationThemeManagementTest {
 
         /**
          * TC_CT_UTH_003
-         * Update theme with blank title — returns VALIDATION_ERROR (BR-115).
-         *
-         * ❌ KNOWN FAILING — bug in dev code:
-         *   UpdateThemeRequest.title has @Size only, NO @NotBlank.
-         *   Blank string passes validation → actual HTTP 200 instead of 400.
-         *   Bug: add @NotBlank to UpdateThemeRequest.title to enforce BR-115.
+         * Update theme with blank title — returns VALIDATION_ERROR.
+         * Dev handles blank title in service via BusinessException → data=null, message="Title must not be blank".
          */
         @Test
-        @DisplayName("TC_CT_UTH_003 — blank title → HTTP 400 VALIDATION_ERROR, data.title error present [BR-115]")
+        @DisplayName("TC_CT_UTH_003 — blank title → HTTP 400 VALIDATION_ERROR, message='Title must not be blank'")
         void tc_ct_uth_003_blankTitle_returns400ValidationError() throws Exception {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
@@ -574,17 +601,16 @@ class ConversationThemeManagementTest {
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
-                    .andExpect(jsonPath("$.data.title").isNotEmpty());
+                    .andExpect(jsonPath("$.data").doesNotExist())
+                    .andExpect(jsonPath("$.message").value("Title must not be blank"));
         }
 
         /**
          * TC_CT_UTH_004
          * Update non-existent theme (all-zeros UUID) → HTTP 404.
-         *
-         * [NOTE-5] errorCode: actual = "NOT_FOUND", script says "NOT_FOUND".
          */
         @Test
-        @DisplayName("TC_CT_UTH_004 — non-existent themeId → HTTP 404, code='NOT_FOUND' [NOTE-5]")
+        @DisplayName("TC_CT_UTH_004 — non-existent themeId → HTTP 404, code='NOT_FOUND'")
         void tc_ct_uth_004_nonExistentThemeId_returns404() throws Exception {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
@@ -596,18 +622,15 @@ class ConversationThemeManagementTest {
                             .content("{\"title\":\"Test\"}"))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.success").value(false))
-                    // NOTE-5: actual "NOT_FOUND", update test script from "THEME_NOT_FOUND"
                     .andExpect(jsonPath("$.code").value("NOT_FOUND"));
         }
 
         /**
          * TC_CT_UTH_005
          * Update soft-deleted theme → HTTP 404 (service filters deleted_at IS NULL).
-         *
-         * [NOTE-5] Same errorCode note.
          */
         @Test
-        @DisplayName("TC_CT_UTH_005 — soft-deleted theme → HTTP 404, code='NOT_FOUND' [NOTE-5]")
+        @DisplayName("TC_CT_UTH_005 — soft-deleted theme → HTTP 404, code='NOT_FOUND'")
         void tc_ct_uth_005_softDeletedTheme_returns404() throws Exception {
             User manager = saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
@@ -675,12 +698,9 @@ class ConversationThemeManagementTest {
          * MANAGER soft-deletes theme with no child topics.
          * Expected: HTTP 200, deleted_at set in DB, deleted_by = manager UUID,
          * all other fields unchanged, theme absent from list response.
-         *
-         * [NOTE-4] Response message: actual = "Theme deleted successfully",
-         *          script says "Nội dung đã được xoá".
          */
         @Test
-        @DisplayName("TC_CT_DTH_001 — delete theme (no topics) → HTTP 200, deleted_at set, absent from list [NOTE-4]")
+        @DisplayName("TC_CT_DTH_001 — delete theme (no topics) → HTTP 200, deleted_at set, absent from list")
         void tc_ct_dth_001_deleteThemeNoTopics_softDeletedInDB_absentFromList() throws Exception {
             // Arrange
             User manager = saveManager("manager@test.com");
@@ -761,11 +781,9 @@ class ConversationThemeManagementTest {
         /**
          * TC_CT_DTH_003
          * Delete non-existent theme (all-zeros UUID) → HTTP 404.
-         *
-         * [NOTE-5] errorCode: actual = "NOT_FOUND".
          */
         @Test
-        @DisplayName("TC_CT_DTH_003 — non-existent themeId → HTTP 404, code='NOT_FOUND' [NOTE-5]")
+        @DisplayName("TC_CT_DTH_003 — non-existent themeId → HTTP 404, code='NOT_FOUND'")
         void tc_ct_dth_003_nonExistentThemeId_returns404() throws Exception {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
@@ -781,11 +799,9 @@ class ConversationThemeManagementTest {
         /**
          * TC_CT_DTH_004
          * Delete already-soft-deleted theme → HTTP 404.
-         *
-         * [NOTE-5] Same errorCode note.
          */
         @Test
-        @DisplayName("TC_CT_DTH_004 — already-deleted theme → HTTP 404, code='NOT_FOUND' [NOTE-5]")
+        @DisplayName("TC_CT_DTH_004 — already-deleted theme → HTTP 404, code='NOT_FOUND'")
         void tc_ct_dth_004_alreadyDeletedTheme_returns404() throws Exception {
             User manager = saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
