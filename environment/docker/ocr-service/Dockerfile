@@ -27,7 +27,7 @@ COPY main.py .
 # (no full process environment). The FastAPI lifespan handler does the warm-up
 # instead, and the model cache is persisted via a named Docker volume so it
 # is only downloaded once.
-ENV MODEL_LANG=japan
+# v2.0: Both Japanese and Vietnamese models are loaded automatically.
 
 EXPOSE 8090
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8090", "--workers", "1"]
