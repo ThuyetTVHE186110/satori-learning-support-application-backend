@@ -22,6 +22,7 @@ import com.fu.course.entity.Course;
 import com.fu.course.repository.CourseRepository;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
+import com.fu.user.entity.UserStatus;
 import com.fu.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -343,7 +344,12 @@ public class ClassServiceImpl implements ClassService {
             response.setAvatarUrl(user.getAvatarUrl());
             response.setRole(user.getRole().name());
         });
-
+        User learner = userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy học viên."));
+        // If learner was previously INACTIVE, set to ACTIVE upon joining a class
+        if (learner.getStatus() == UserStatus.INACTIVE) {
+            learner.setStatus(UserStatus.ACTIVE);
+        }
+        userRepository.save(learner);
         return response;
     }
 
