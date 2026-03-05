@@ -1,0 +1,25 @@
+package com.fu.roleplay.dto.response;
+
+import com.fu.roleplay.entity.ConversationMission;
+import com.fu.roleplay.entity.SessionMission;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.UUID;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class SessionMissionResponse {
+
+    private UUID id;
+    private String title;
+    private String titleJapanese;
+    private String description;
+    private ConversationMission.MissionType missionType;
+    private SessionMission.MissionStatus status;
+    private Integer progressPct;
+}

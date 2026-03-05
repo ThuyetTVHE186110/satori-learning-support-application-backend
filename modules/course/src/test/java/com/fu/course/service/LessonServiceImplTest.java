@@ -86,7 +86,7 @@ class LessonServiceImplTest {
         testCourse = Course.builder()
                 .name("Japanese N5 Course")
                 .jlptLevel(JlptLevel.N5)
-                .status(Course.ContentStatus.PUBLISHED)
+                .status(Course.CourseStatus.ACTIVE)
                 .build();
         ReflectionTestUtils.setField(testCourse, "id", courseId);
 

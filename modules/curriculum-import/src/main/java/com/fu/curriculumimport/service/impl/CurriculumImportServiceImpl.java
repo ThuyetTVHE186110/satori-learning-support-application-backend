@@ -17,7 +17,9 @@ import com.fu.curriculumimport.mapper.CurriculumImportMapper;
 import com.fu.curriculumimport.repository.CurriculumImportRepository;
 import com.fu.curriculumimport.repository.ImportChunkRepository;
 import com.fu.curriculumimport.service.CurriculumImportService;
+import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import com.fu.curriculumimport.service.orchestrator.ImportOrchestrator;
+import com.fu.curriculumimport.service.persistence.ImportPersistenceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -29,6 +31,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -48,6 +51,8 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
     private final GrammarPointRepository grammarPointRepository;
     private final CurriculumImportMapper importMapper;
     private final ImportOrchestrator orchestrator;
+    private final ImportPersistenceService persistenceService;
+    private final EmbeddingService embeddingService;
 
     @Override
     @Transactional
@@ -185,9 +190,14 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
         CurriculumImport importEntity = findImportOrThrow(importId);
 
         if (importEntity.getStatus() == ImportStatus.COMPLETED ||
-                importEntity.getStatus() == ImportStatus.CANCELLED) {
+                importEntity.getStatus() == ImportStatus.CANCELLED ||
+                importEntity.getStatus() == ImportStatus.ROLLED_BACK) {
             throw new ImportStateException(
                     "Cannot cancel an already " + importEntity.getStatus().name().toLowerCase() + " import");
+        }
+        if (importEntity.getStatus() == ImportStatus.PENDING_APPROVAL) {
+            throw new ImportStateException(
+                    "Import is awaiting approval. Use the reject endpoint to cancel it.");
         }
 
         // Request async cancellation of the running import
@@ -332,22 +342,113 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
         return response;
     }
 
+    @Override
+    @Transactional
+    public CurriculumImportResponse approveImport(UUID importId, UUID managerId) {
+        log.info("Manager {} approving import: {}", managerId, importId);
+        CurriculumImport importEntity = findImportOrThrow(importId);
+
+        if (importEntity.getStatus() != ImportStatus.PENDING_APPROVAL) {
+            throw new ImportStateException(
+                    "Can only approve imports in PENDING_APPROVAL status. Current status: "
+                            + importEntity.getStatus());
+        }
+
+        importEntity.markCompleted();
+        importRepository.save(importEntity);
+        log.info("Import {} approved and marked COMPLETED", importId);
+
+        CurriculumImportResponse response = importMapper.toResponse(importEntity);
+        enrichWithCourseName(response, importEntity.getCourseId());
+        return response;
+    }
+
+    @Override
+    @Transactional
+    public CurriculumImportResponse rejectImport(UUID importId, UUID managerId) {
+        log.info("Manager {} rejecting import: {}", managerId, importId);
+        CurriculumImport importEntity = findImportOrThrow(importId);
+
+        if (importEntity.getStatus() != ImportStatus.PENDING_APPROVAL) {
+            throw new ImportStateException(
+                    "Can only reject imports in PENDING_APPROVAL status. Current status: "
+                            + importEntity.getStatus());
+        }
+
+        persistenceService.softDeleteLessonsByImportId(importId, managerId);
+        embeddingService.purgeEmbeddingsByImportId(importId);
+        importEntity.markCancelled();
+        importRepository.save(importEntity);
+        log.info("Import {} rejected and marked CANCELLED; lessons soft-deleted, embeddings purged", importId);
+
+        CurriculumImportResponse response = importMapper.toResponse(importEntity);
+        enrichWithCourseName(response, importEntity.getCourseId());
+        return response;
+    }
+
+    @Override
+    @Transactional
+    public CurriculumImportResponse rollbackImport(UUID importId, UUID managerId) {
+        log.info("Manager {} rolling back import: {}", managerId, importId);
+        CurriculumImport importEntity = findImportOrThrow(importId);
+
+        if (importEntity.getStatus() != ImportStatus.COMPLETED) {
+            throw new ImportStateException(
+                    "Can only rollback imports in COMPLETED status. Current status: "
+                            + importEntity.getStatus());
+        }
+
+        // 1. Soft-delete lessons + clean up join tables
+        persistenceService.softDeleteLessonsByImportId(importId, managerId);
+
+        // 2. Purge embeddings created by this import
+        embeddingService.purgeEmbeddingsByImportId(importId);
+
+        // 3. Mark as rolled back
+        importEntity.markRolledBack();
+        importRepository.save(importEntity);
+        log.info("Import {} rolled back: lessons soft-deleted, embeddings purged", importId);
+
+        CurriculumImportResponse response = importMapper.toResponse(importEntity);
+        enrichWithCourseName(response, importEntity.getCourseId());
+        return response;
+    }
+
     // --- Helper methods ---
 
-    private static final long MAX_FILE_SIZE_BYTES = 50L * 1024 * 1024; // 50 MB
+    /** 100 MB — PPTX with embedded images can be larger than plain PDFs. */
+    private static final long MAX_FILE_SIZE_BYTES = 100L * 1024 * 1024;
+
+    private static final Set<String> ACCEPTED_MIME_TYPES = Set.of(
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+            "application/zip"   // some browsers report PPTX as generic zip
+    );
+
+    private static final Set<String> ACCEPTED_EXTENSIONS = Set.of(".pdf", ".pptx");
 
     private void validateImportFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new InvalidImportFileException("File is required and must not be empty");
         }
-        String contentType = file.getContentType();
-        if (contentType == null || !contentType.equalsIgnoreCase("application/pdf")) {
+
+        String contentType = file.getContentType() == null ? "" : file.getContentType().toLowerCase();
+        String filename    = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
+        boolean mimeOk     = ACCEPTED_MIME_TYPES.contains(contentType);
+        boolean extOk      = ACCEPTED_EXTENSIONS.stream().anyMatch(filename::endsWith);
+
+        if (!mimeOk && !extOk) {
             throw new InvalidImportFileException(
-                    "Only PDF files are accepted. Received: " + contentType);
+                    "Only PDF and PPTX files are accepted. Received MIME type: " + contentType
+                            + ", filename: " + file.getOriginalFilename());
         }
+
         if (file.getSize() > MAX_FILE_SIZE_BYTES) {
-            throw new InvalidImportFileException(
-                    "File size exceeds the 50 MB limit. Received: " + file.getSize() + " bytes");
+            throw new InvalidImportFileException(String.format(
+                    "File size %.1f MB exceeds the maximum limit of %d MB.",
+                    file.getSize() / (1024.0 * 1024.0),
+                    MAX_FILE_SIZE_BYTES / (1024 * 1024)));
         }
     }
 

@@ -20,7 +20,7 @@ import lombok.NoArgsConstructor;
 public class CreateCourseRequest {
 
     @NotBlank(message = "Course name is required")
-    @Size(min = 3, max = 255, message = "Course name must be between 3 and 255 characters")
+    @Size(min = 1, max = 100, message = "Course name must be between 1 and 100 characters")
     private String name;
 
     @Size(max = 5000, message = "Description must not exceed 5000 characters")

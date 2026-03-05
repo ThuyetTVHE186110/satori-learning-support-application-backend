@@ -18,7 +18,6 @@ public class ClassSummaryResponse {
 
     private UUID id;
     private String name;
-    private String code;
     private UUID teacherId;
     private String teacherName;
     private UUID courseId;

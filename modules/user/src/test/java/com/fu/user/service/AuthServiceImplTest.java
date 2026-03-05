@@ -112,8 +112,8 @@ class AuthServiceImplTest {
                 .expiresAt(LocalDateTime.now().plusDays(7))
                 .build();
         ReflectionTestUtils.setField(testSession, "id", UUID.randomUUID());
-
-        // Set default security values that normally come from @Value
+        
+        // Set security config to match production defaults
         ReflectionTestUtils.setField(authService, "otpExpirationMinutes", 10);
 
         // Inject Optional<FirebaseAuth> for Google auth tests
@@ -124,8 +124,90 @@ class AuthServiceImplTest {
     @DisplayName("UC-06: Login Tests")
     class LoginTests {
 
+        // UTCID01 — email is null
         @Test
-        @DisplayName("Should login successfully with valid credentials")
+        @DisplayName("UTCID01 [A] - Should throw INVALID_CREDENTIALS when email is null")
+        void shouldThrowInvalidCredentialsWhenEmailIsNull() {
+            LoginRequest request = new LoginRequest();
+            request.setEmail(null);
+            request.setPassword("Password123!");
+            request.setDeviceInfo(deviceInfo);
+
+            given(userRepository.findByEmail(null)).willReturn(Optional.empty());
+
+            assertThatThrownBy(() ->
+                authService.login(request, "127.0.0.1", "Chrome")
+            )
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Sai email hoặc mật khẩu");
+
+            verify(userRepository, never()).save(any(User.class));
+        }
+
+        // UTCID02 — email is blank (whitespace only)
+        @Test
+        @DisplayName("UTCID02 [N] - Should throw INVALID_CREDENTIALS when email is blank")
+        void shouldThrowInvalidCredentialsWhenEmailIsBlank() {
+            LoginRequest request = new LoginRequest();
+            request.setEmail("   ");
+            request.setPassword("Password123!");
+            request.setDeviceInfo(deviceInfo);
+
+            given(userRepository.findByEmail("   ")).willReturn(Optional.empty());
+
+            assertThatThrownBy(() ->
+                authService.login(request, "127.0.0.1", "Chrome")
+            )
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Sai email hoặc mật khẩu");
+
+            verify(userRepository, never()).save(any(User.class));
+        }
+
+        // UTCID03 — email has invalid format (missing @)
+        @Test
+        @DisplayName("UTCID03 [N] - Should throw INVALID_CREDENTIALS when email format is invalid")
+        void shouldThrowInvalidCredentialsWhenEmailFormatInvalid() {
+            LoginRequest request = new LoginRequest();
+            request.setEmail("learner1test.satori.com");
+            request.setPassword("Password123!");
+            request.setDeviceInfo(deviceInfo);
+
+            given(userRepository.findByEmail("learner1test.satori.com")).willReturn(Optional.empty());
+
+            assertThatThrownBy(() ->
+                authService.login(request, "127.0.0.1", "Chrome")
+            )
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Sai email hoặc mật khẩu");
+
+            verify(userRepository, never()).save(any(User.class));
+        }
+
+        // UTCID05 — password is null
+        @Test
+        @DisplayName("UTCID05 [N] - Should throw INVALID_CREDENTIALS when password is null")
+        void shouldThrowInvalidCredentialsWhenPasswordIsNull() {
+            LoginRequest request = new LoginRequest();
+            request.setEmail("active@test.satori.com");
+            request.setPassword(null);
+            request.setDeviceInfo(deviceInfo);
+
+            given(userRepository.findByEmail("active@test.satori.com")).willReturn(Optional.of(testUser));
+            given(passwordEncoder.matches(null, testUser.getPasswordHash())).willReturn(false);
+
+            assertThatThrownBy(() ->
+                authService.login(request, "127.0.0.1", "Chrome")
+            )
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Sai email hoặc mật khẩu");
+
+            verify(loginAttemptService).handleFailedLogin(any(User.class));
+        }
+
+        // UTCID10 — successful login with valid credentials
+        @Test
+        @DisplayName("UTCID10 [N] - Should login successfully with valid credentials")
         void shouldLoginSuccessfully() {
             // Given
             LoginRequest request = new LoginRequest();
@@ -188,8 +270,114 @@ class AuthServiceImplTest {
             assertThat(savedUser.getFailedLoginAttempts()).isEqualTo(1);
         }
 
+        // UTCID04 — email not found in DB
         @Test
-        @DisplayName("Should lock account after 5 failed attempts")
+        @DisplayName("UTCID04 [N] - Should throw INVALID_CREDENTIALS when email not registered")
+        void shouldThrowInvalidCredentialsWhenEmailNotFound() {
+            LoginRequest request = new LoginRequest();
+            request.setEmail("learner2@test.satori.com");
+            request.setPassword("Password123!");
+            request.setDeviceInfo(deviceInfo);
+
+            given(userRepository.findByEmail("learner2@test.satori.com")).willReturn(Optional.empty());
+
+            assertThatThrownBy(() ->
+                authService.login(request, "127.0.0.1", "Chrome")
+            )
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Sai email hoặc mật khẩu");
+
+            // Save must NOT be called — there is no user to update
+            verify(userRepository, never()).save(any(User.class));
+        }
+
+        // UTCID06 — boundary: very short password "Pass" (4 chars)
+        @Test
+        @DisplayName("UTCID06 [B] - Should throw INVALID_CREDENTIALS and increment attempts for short password 'Pass'")
+        void shouldIncrementFailedAttemptsOnBoundaryShortPassword() {
+            LoginRequest request = new LoginRequest();
+            request.setEmail("active@test.satori.com");
+            request.setPassword("Pass");
+            request.setDeviceInfo(deviceInfo);
+
+            given(userRepository.findByEmail("active@test.satori.com")).willReturn(Optional.of(testUser));
+            given(passwordEncoder.matches("Pass", testUser.getPasswordHash())).willReturn(false);
+
+            assertThatThrownBy(() ->
+                authService.login(request, "127.0.0.1", "Chrome")
+            )
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Sai email hoặc mật khẩu");
+
+            verify(loginAttemptService).handleFailedLogin(any(User.class));
+        }
+
+        // UTCID07 — abnormal: password has no digits or special chars
+        @Test
+        @DisplayName("UTCID07 [A] - Should throw INVALID_CREDENTIALS and increment attempts for password 'Password'")
+        void shouldIncrementFailedAttemptsOnWeakPasswordWithoutNumbersOrSpecialChars() {
+            LoginRequest request = new LoginRequest();
+            request.setEmail("active@test.satori.com");
+            request.setPassword("Password");
+            request.setDeviceInfo(deviceInfo);
+
+            given(userRepository.findByEmail("active@test.satori.com")).willReturn(Optional.of(testUser));
+            given(passwordEncoder.matches("Password", testUser.getPasswordHash())).willReturn(false);
+
+            assertThatThrownBy(() ->
+                authService.login(request, "127.0.0.1", "Chrome")
+            )
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Sai email hoặc mật khẩu");
+
+            verify(loginAttemptService).handleFailedLogin(any(User.class));
+        }
+
+        // UTCID08 — password has no special character
+        @Test
+        @DisplayName("UTCID08 [N] - Should throw INVALID_CREDENTIALS and increment attempts for password 'Password123'")
+        void shouldIncrementFailedAttemptsOnPasswordWithoutSpecialChar() {
+            LoginRequest request = new LoginRequest();
+            request.setEmail("active@test.satori.com");
+            request.setPassword("Password123");
+            request.setDeviceInfo(deviceInfo);
+
+            given(userRepository.findByEmail("active@test.satori.com")).willReturn(Optional.of(testUser));
+            given(passwordEncoder.matches("Password123", testUser.getPasswordHash())).willReturn(false);
+
+            assertThatThrownBy(() ->
+                authService.login(request, "127.0.0.1", "Chrome")
+            )
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Sai email hoặc mật khẩu");
+
+            verify(loginAttemptService).handleFailedLogin(any(User.class));
+        }
+
+        // UTCID09 — password has no uppercase letter
+        @Test
+        @DisplayName("UTCID09 [N] - Should throw INVALID_CREDENTIALS and increment attempts for password 'password123!'")
+        void shouldIncrementFailedAttemptsOnPasswordWithoutUppercase() {
+            LoginRequest request = new LoginRequest();
+            request.setEmail("active@test.satori.com");
+            request.setPassword("password123!");
+            request.setDeviceInfo(deviceInfo);
+
+            given(userRepository.findByEmail("active@test.satori.com")).willReturn(Optional.of(testUser));
+            given(passwordEncoder.matches("password123!", testUser.getPasswordHash())).willReturn(false);
+
+            assertThatThrownBy(() ->
+                authService.login(request, "127.0.0.1", "Chrome")
+            )
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Sai email hoặc mật khẩu");
+
+            verify(loginAttemptService).handleFailedLogin(any(User.class));
+        }
+
+        // UTCID12 — lock account after reaching max failed attempts
+        @Test
+        @DisplayName("UTCID12 [N] - Should lock account after 5 failed attempts")
         void shouldLockAccountAfterFailedAttempts() {
             // Given
             testUser.setFailedLoginAttempts(4); // One more will reach 5
@@ -249,10 +437,109 @@ class AuthServiceImplTest {
 
             given(userRepository.findByEmail(request.getEmail())).willReturn(Optional.of(testUser));
 
+
             // When/Then
-            assertThatThrownBy(() -> authService.login(request, "127.0.0.1", "Chrome"))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("khóa");
+            assertThatThrownBy(() ->
+                authService.login(request, "127.0.0.1", "Chrome")
+            )
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("khóa");
+        }
+
+        // UTCID11 — correct password after previous failed attempts → counter resets to 0
+        @Test
+        @DisplayName("UTCID11 [N] - Should reset failed attempts counter on successful login")
+        void shouldResetFailedAttemptsOnSuccessfulLoginAfterPreviousFailures() {
+            testUser.setFailedLoginAttempts(3); // Simulates 3 prior failures
+
+            LoginRequest request = new LoginRequest();
+            request.setEmail("active@test.satori.com");
+            request.setPassword("Password123!");
+            request.setDeviceInfo(deviceInfo);
+
+            given(userRepository.findByEmail("active@test.satori.com")).willReturn(Optional.of(testUser));
+            given(passwordEncoder.matches("Password123!", testUser.getPasswordHash())).willReturn(true);
+            given(jwtService.generateAccessToken(eq(testUser), any(UUID.class))).willReturn("access-token");
+            given(jwtService.generateRefreshToken(any(UUID.class))).willReturn("refresh-token");
+            given(sessionRepository.save(any(UserSession.class))).willReturn(testSession);
+
+            LoginResponse result = authService.login(request, "127.0.0.1", "Chrome");
+
+            assertThat(result).isNotNull();
+            verify(userRepository).save(userCaptor.capture());
+            assertThat(userCaptor.getValue().getFailedLoginAttempts()).isEqualTo(0);
+            assertThat(userCaptor.getValue().getLockedUntil()).isNull();
+        }
+
+        // UTCID13 [A] — THE UNTESTED CASE: soft-deleted user → ACCOUNT_DELETED
+        @Test
+        @DisplayName("UTCID13 [A] - Should throw ACCOUNT_DELETED for soft-deleted user (skips password check)")
+        void shouldThrowAccountDeletedWhenUserIsSoftDeleted() {
+            testUser.softDelete(userId); // sets deletedAt = now
+
+            LoginRequest request = new LoginRequest();
+            request.setEmail("deleted@test.satori.com");
+            request.setPassword("Password123!");
+            request.setDeviceInfo(deviceInfo);
+
+            given(userRepository.findByEmail("deleted@test.satori.com")).willReturn(Optional.of(testUser));
+
+            assertThatThrownBy(() ->
+                authService.login(request, "127.0.0.1", "Chrome")
+            )
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Tài khoản không tồn tại");
+
+            // Password check must be skipped entirely
+            verify(passwordEncoder, never()).matches(anyString(), anyString());
+            verify(userRepository, never()).save(any(User.class));
+        }
+
+        // UTCID14 [N] — suspended user → ACCOUNT_SUSPENDED (password check skipped)
+        @Test
+        @DisplayName("UTCID14 [N] - Should throw ACCOUNT_SUSPENDED for suspended user (skips password check)")
+        void shouldThrowAccountSuspendedForSuspendedUser() {
+            testUser.setStatus(UserStatus.SUSPENDED);
+
+            LoginRequest request = new LoginRequest();
+            request.setEmail("suspended@test.satori.com");
+            request.setPassword("Password123!");
+            request.setDeviceInfo(deviceInfo);
+
+            given(userRepository.findByEmail("suspended@test.satori.com")).willReturn(Optional.of(testUser));
+
+            assertThatThrownBy(() ->
+                authService.login(request, "127.0.0.1", "Chrome")
+            )
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("bị chặn");
+
+            verify(passwordEncoder, never()).matches(anyString(), anyString());
+            verify(userRepository, never()).save(any(User.class));
+        }
+
+        // UTCID15 [N] — account not yet activated → ACCOUNT_NOT_ACTIVATED (password check skipped)
+        // Note: "inactive" in business terms = PENDING_ACTIVATION status, not UserStatus.INACTIVE
+        @Test
+        @DisplayName("UTCID15 [N] - Should throw ACCOUNT_NOT_ACTIVATED for PENDING_ACTIVATION user (skips password check)")
+        void shouldThrowAccountNotActivatedForPendingActivationUser() {
+            testUser.setStatus(UserStatus.PENDING_ACTIVATION);
+
+            LoginRequest request = new LoginRequest();
+            request.setEmail("inactive@test.satori.com");
+            request.setPassword("Password123!");
+            request.setDeviceInfo(deviceInfo);
+
+            given(userRepository.findByEmail("inactive@test.satori.com")).willReturn(Optional.of(testUser));
+
+            assertThatThrownBy(() ->
+                authService.login(request, "127.0.0.1", "Chrome")
+            )
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("chưa được kích hoạt");
+
+            verify(passwordEncoder, never()).matches(anyString(), anyString());
+            verify(userRepository, never()).save(any(User.class));
         }
     }
 

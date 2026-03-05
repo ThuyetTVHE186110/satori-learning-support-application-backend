@@ -1,5 +1,6 @@
 package com.fu.course.service.impl;
 
+import com.fu.common.event.ContentEmbeddingEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.course.dto.request.CreateVocabularyRequest;
@@ -11,6 +12,7 @@ import com.fu.course.repository.VocabularyRepository;
 import com.fu.course.service.VocabularyService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -30,6 +32,7 @@ import java.util.UUID;
 public class VocabularyServiceImpl implements VocabularyService {
 
     private final VocabularyRepository vocabularyRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     @Transactional
@@ -91,6 +94,14 @@ public class VocabularyServiceImpl implements VocabularyService {
         vocab.setUpdatedBy(managerId);
 
         Vocabulary saved = vocabularyRepository.save(vocab);
+
+        eventPublisher.publishEvent(ContentEmbeddingEvent.forVocabularyUpdate(
+                this, saved.getId(),
+                saved.getJapaneseText(), saved.getReading(),
+                saved.getMeaningEn(), saved.getMeaningVi(),
+                saved.getPartOfSpeech(),
+                saved.getJlptLevel() != null ? saved.getJlptLevel().name() : "N5"));
+
         return toResponse(saved);
     }
 
@@ -104,6 +115,7 @@ public class VocabularyServiceImpl implements VocabularyService {
     public void deleteVocabulary(UUID vocabularyId, UUID managerId) {
         log.info("Manager {} soft-deleting vocabulary: {}", managerId, vocabularyId);
         Vocabulary vocab = findOrThrow(vocabularyId);
+        eventPublisher.publishEvent(ContentEmbeddingEvent.forDelete(this, vocabularyId, "VOCABULARY"));
         vocab.softDelete(managerId);
         vocabularyRepository.save(vocab);
     }

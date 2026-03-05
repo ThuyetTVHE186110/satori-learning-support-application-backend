@@ -15,7 +15,7 @@ import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.service.ingestion.DocumentParseResult;
-import com.fu.curriculumimport.service.ingestion.PdfIngestionService;
+import com.fu.curriculumimport.service.ingestion.FileIngestionRouter;
 import com.fu.curriculumimport.service.persistence.ImportPersistenceService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -73,7 +73,7 @@ import static org.mockito.BDDMockito.*;
 @DisplayName("ImportOrchestrator")
 class ImportOrchestratorTest {
 
-    @Mock private PdfIngestionService pdfIngestionService;
+    @Mock private FileIngestionRouter fileIngestionRouter;
     @Mock private ContentExtractionAgent extractionAgent;
     @Mock private ContentClassifierAgent classifierAgent;
     @Mock private VocabularyExtractionAgent vocabularyAgent;
@@ -176,7 +176,7 @@ class ImportOrchestratorTest {
             // Arrange: set up a full pipeline to register the import ID in cancelFlags
             CurriculumImport entity = makeImport(null);
             given(importRepository.findById(IMPORT_ID)).willReturn(Optional.of(entity));
-            given(pdfIngestionService.parsePdf(any())).willAnswer(inv -> {
+            given(fileIngestionRouter.route(any())).willAnswer(inv -> {
                 // While parsePdf is "running", cancel the import
                 orchestrator.requestCancel(IMPORT_ID);
                 return parsedDoc(List.of(docChunk(0)));
@@ -215,7 +215,7 @@ class ImportOrchestratorTest {
 
             DocumentChunk chunk0 = docChunk(0);
             ImportChunk dbChunk0 = dbChunk(0);
-            given(pdfIngestionService.parsePdf(any())).willReturn(parsedDoc(List.of(chunk0)));
+            given(fileIngestionRouter.route(any())).willReturn(parsedDoc(List.of(chunk0)));
             given(persistenceService.persistChunks(any(), any())).willReturn(List.of(dbChunk0));
 
             ClassificationResult classification = ClassificationResult.fallback(); // MIXED
@@ -247,7 +247,7 @@ class ImportOrchestratorTest {
                 setJlptLevel(JlptLevel.N5);
             }}));
 
-            given(pdfIngestionService.parsePdf(any()))
+            given(fileIngestionRouter.route(any()))
                     .willThrow(new RuntimeException("PDF corrupted"));
 
             MultipartFile file = mock(MultipartFile.class);
@@ -277,7 +277,7 @@ class ImportOrchestratorTest {
 
             DocumentChunk chunk0 = docChunk(0);
             ImportChunk dbChunk0 = dbChunk(0);
-            given(pdfIngestionService.parsePdf(any())).willReturn(parsedDoc(List.of(chunk0)));
+            given(fileIngestionRouter.route(any())).willReturn(parsedDoc(List.of(chunk0)));
             given(persistenceService.persistChunks(any(), any())).willReturn(List.of(dbChunk0));
 
             ClassificationResult classification = ClassificationResult.fallback(); // MIXED
@@ -303,7 +303,7 @@ class ImportOrchestratorTest {
 
             DocumentChunk chunk0 = docChunk(0);
             ImportChunk dbChunk0 = dbChunk(0);
-            given(pdfIngestionService.parsePdf(any())).willReturn(parsedDoc(List.of(chunk0)));
+            given(fileIngestionRouter.route(any())).willReturn(parsedDoc(List.of(chunk0)));
             given(persistenceService.persistChunks(any(), any())).willReturn(List.of(dbChunk0));
 
             ClassificationResult vocabClassification = new ClassificationResult();
@@ -329,7 +329,7 @@ class ImportOrchestratorTest {
 
             DocumentChunk chunk0 = docChunk(0);
             ImportChunk dbChunk0 = dbChunk(0);
-            given(pdfIngestionService.parsePdf(any())).willReturn(parsedDoc(List.of(chunk0)));
+            given(fileIngestionRouter.route(any())).willReturn(parsedDoc(List.of(chunk0)));
             given(persistenceService.persistChunks(any(), any())).willReturn(List.of(dbChunk0));
 
             ClassificationResult grammarClassification = new ClassificationResult();
@@ -354,7 +354,7 @@ class ImportOrchestratorTest {
 
             DocumentChunk chunk0 = docChunk(0);
             ImportChunk dbChunk0 = dbChunk(0);
-            given(pdfIngestionService.parsePdf(any())).willReturn(parsedDoc(List.of(chunk0)));
+            given(fileIngestionRouter.route(any())).willReturn(parsedDoc(List.of(chunk0)));
             given(persistenceService.persistChunks(any(), any())).willReturn(List.of(dbChunk0));
 
             ClassificationResult exerciseClassification = new ClassificationResult();
@@ -376,7 +376,7 @@ class ImportOrchestratorTest {
         void processImportAsync_emptyChunks_completesWithZeroCounts() {
             CurriculumImport entity = makeImport(null);
             given(importRepository.findById(IMPORT_ID)).willReturn(Optional.of(entity));
-            given(pdfIngestionService.parsePdf(any())).willReturn(parsedDoc(List.of()));
+            given(fileIngestionRouter.route(any())).willReturn(parsedDoc(List.of()));
             given(persistenceService.persistChunks(any(), any())).willReturn(List.of());
 
             disableAllRagFeatures();

@@ -149,6 +149,79 @@ public class EmbeddingService {
     }
 
     /**
+     * Upsert embedding for an existing entity (vocabulary or grammar point) by its entity ID.
+     * Uses the entity UUID as content_id with chunk_index = 0.
+     * Called when a vocabulary/grammar item is updated (UC 2.4.4).
+     *
+     * @param entityId    the entity's UUID (used as content_id)
+     * @param contentType "VOCABULARY" or "GRAMMAR"
+     * @param richText    pre-built rich text combining all relevant fields
+     */
+    public void upsertEntityEmbedding(UUID entityId, String contentType, String richText) {
+        try {
+            float[] embedding = generateEmbedding(richText);
+            if (embedding == null) return;
+
+            String vectorStr = arrayToVectorString(embedding);
+
+            jdbcTemplate.update(
+                    """
+                    INSERT INTO progress.content_embeddings
+                        (id, content_type, content_id, embedding, text_content, metadata, chunk_index, import_id, token_count)
+                    VALUES (uuid_generate_v4(), ?, ?, ?::vector, ?, '{}'::jsonb, 0, NULL, ?)
+                    ON CONFLICT (content_type, content_id, chunk_index) DO UPDATE
+                    SET embedding = EXCLUDED.embedding,
+                        text_content = EXCLUDED.text_content,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    contentType, entityId, vectorStr, richText, richText.length() / 4
+            );
+            log.debug("Upserted embedding for {} entity {}", contentType, entityId);
+        } catch (Exception e) {
+            log.warn("Failed to upsert embedding for {} {}: {}", contentType, entityId, e.getMessage());
+        }
+    }
+
+    /**
+     * Delete embeddings for an entity that has been soft-deleted (UC 2.4.5).
+     *
+     * @param entityId    the entity's UUID (content_id)
+     * @param contentType "VOCABULARY" or "GRAMMAR"
+     */
+    public void deleteEntityEmbedding(UUID entityId, String contentType) {
+        try {
+            int deleted = jdbcTemplate.update(
+                    "DELETE FROM progress.content_embeddings WHERE content_id = ? AND content_type = ?",
+                    entityId, contentType
+            );
+            log.debug("Deleted {} embedding row(s) for {} entity {}", deleted, contentType, entityId);
+        } catch (Exception e) {
+            log.warn("Failed to delete embedding for {} {}: {}", contentType, entityId, e.getMessage());
+        }
+    }
+
+    /**
+     * Purge all embeddings created by a specific import.
+     * Used during rollback to clean up RAG context from a reverted import.
+     *
+     * @param importId the import whose embeddings should be deleted
+     * @return number of embeddings deleted
+     */
+    public int purgeEmbeddingsByImportId(UUID importId) {
+        try {
+            int deleted = jdbcTemplate.update(
+                    "DELETE FROM progress.content_embeddings WHERE import_id = ?",
+                    importId
+            );
+            log.info("Purged {} embeddings for rolled-back import {}", deleted, importId);
+            return deleted;
+        } catch (Exception e) {
+            log.warn("Failed to purge embeddings for import {}: {}", importId, e.getMessage());
+            return 0;
+        }
+    }
+
+    /**
      * Store a single embedding in the content_embeddings table.
      */
     private void storeEmbedding(UUID contentId, String contentType, String textContent,

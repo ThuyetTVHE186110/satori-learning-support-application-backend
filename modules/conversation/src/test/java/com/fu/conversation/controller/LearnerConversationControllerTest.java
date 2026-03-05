@@ -141,6 +141,33 @@ class LearnerConversationControllerTest {
                             .param("level", "N5"))
                     .andExpect(status().isOk());
         }
+
+        @Test
+        @DisplayName("Should use searchPublishedThemes when keyword is provided")
+        @WithMockConversationUser(roles = "LEARNER")
+        void shouldSearchWhenKeywordProvided() throws Exception {
+            given(themeService.searchPublishedThemes(eq("Shopping"), any(Pageable.class)))
+                    .willReturn(new PageImpl<>(List.of(themeSummary)));
+
+            mockMvc.perform(get("/api/v1/learner/conversation/themes")
+                            .param("keyword", "Shopping"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.content[0].title").value("Daily Shopping"));
+        }
+
+        @Test
+        @DisplayName("Should ignore blank keyword and return published themes")
+        @WithMockConversationUser(roles = "LEARNER")
+        void shouldIgnoreBlankKeyword() throws Exception {
+            given(themeService.getPublishedThemes(any(), any(Pageable.class)))
+                    .willReturn(new PageImpl<>(List.of(themeSummary)));
+
+            mockMvc.perform(get("/api/v1/learner/conversation/themes")
+                            .param("keyword", "  "))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content[0].title").value("Daily Shopping"));
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════════

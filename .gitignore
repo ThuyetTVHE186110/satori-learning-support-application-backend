@@ -65,5 +65,5 @@ release.properties
 **/generated-sources/**
 **/generated-test-sources/**
 /docs
-CLAUDE.md
+.claude/**
 .github/**

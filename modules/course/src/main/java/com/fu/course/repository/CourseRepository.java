@@ -1,7 +1,7 @@
 package com.fu.course.repository;
 
 import com.fu.course.entity.Course;
-import com.fu.course.entity.Course.ContentStatus;
+import com.fu.course.entity.Course.CourseStatus;
 import com.fu.course.entity.Course.JlptLevel;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -34,7 +34,7 @@ public interface CourseRepository extends JpaRepository<Course, UUID> {
     /**
      * Find all courses by status
      */
-    Page<Course> findByStatusAndDeletedAtIsNull(ContentStatus status, Pageable pageable);
+    Page<Course> findByStatusAndDeletedAtIsNull(CourseStatus status, Pageable pageable);
 
     /**
      * Find all courses by JLPT level
@@ -46,7 +46,7 @@ public interface CourseRepository extends JpaRepository<Course, UUID> {
      */
     Page<Course> findByJlptLevelAndStatusAndDeletedAtIsNull(
         JlptLevel jlptLevel, 
-        ContentStatus status, 
+        CourseStatus status, 
         Pageable pageable
     );
 
@@ -60,16 +60,16 @@ public interface CourseRepository extends JpaRepository<Course, UUID> {
     /**
      * Find published courses only
      */
-    @Query("SELECT c FROM Course c WHERE c.status = 'PUBLISHED' AND c.deletedAt IS NULL " +
+    @Query("SELECT c FROM Course c WHERE c.status = 'ACTIVE' AND c.deletedAt IS NULL " +
            "ORDER BY c.orderIndex ASC, c.createdAt DESC")
-    List<Course> findPublishedCourses();
+    List<Course> findActiveCourses();
 
     /**
      * Find published courses by JLPT level
      */
-    @Query("SELECT c FROM Course c WHERE c.jlptLevel = :level AND c.status = 'PUBLISHED' " +
+    @Query("SELECT c FROM Course c WHERE c.jlptLevel = :level AND c.status = 'ACTIVE' " +
            "AND c.deletedAt IS NULL ORDER BY c.orderIndex ASC")
-    List<Course> findPublishedCoursesByLevel(@Param("level") JlptLevel level);
+    List<Course> findActiveCoursesByLevel(@Param("level") JlptLevel level);
 
     /**
      * Check if course name already exists (case-insensitive, excluding deleted)
@@ -88,7 +88,7 @@ public interface CourseRepository extends JpaRepository<Course, UUID> {
     /**
      * Count courses by status
      */
-    long countByStatusAndDeletedAtIsNull(ContentStatus status);
+    long countByStatusAndDeletedAtIsNull(CourseStatus status);
 
     /**
      * Count courses by JLPT level

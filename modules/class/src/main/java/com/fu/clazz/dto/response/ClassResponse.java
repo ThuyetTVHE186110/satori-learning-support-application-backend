@@ -21,7 +21,6 @@ public class ClassResponse {
     private UUID id;
     private String name;
     private String description;
-    private String code;
     private UUID teacherId;
     private UUID courseId;
     private String courseName;
@@ -44,4 +43,5 @@ public class ClassResponse {
     private String teacherName;
     private String teacherEmail;
     private String teacherAvatarUrl;
+    private String teacherPhoneNumber;
 }

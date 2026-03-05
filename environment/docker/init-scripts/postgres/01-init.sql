@@ -33,6 +33,7 @@ CREATE TYPE gender AS ENUM ('MALE', 'FEMALE', 'OTHER', 'PREFER_NOT_TO_SAY');
 CREATE TYPE jlpt_level AS ENUM ('N5', 'N4', 'N3', 'N2', 'N1');
 CREATE TYPE lesson_type AS ENUM ('VOCABULARY', 'GRAMMAR', 'KANJI', 'LISTENING', 'READING', 'MIXED');
 CREATE TYPE content_status AS ENUM ('DRAFT', 'PUBLISHED', 'ARCHIVED');
+CREATE TYPE course_status AS ENUM ('ACTIVE', 'INACTIVE', 'DELETED');
 CREATE TYPE processing_status AS ENUM ('QUEUED', 'EXTRACTING', 'CHUNKING', 'AI_PROCESSING', 'EMBEDDING', 'COMPLETED', 'FAILED');
 CREATE TYPE grammar_category AS ENUM ('VERB_FORM', 'PARTICLE', 'ADJECTIVE', 'CONJUGATION', 'SENTENCE_PATTERN', 'HONORIFIC', 'CONDITIONAL', 'PASSIVE', 'CAUSATIVE', 'OTHER');
 
@@ -222,7 +223,7 @@ CREATE TABLE learning_content.courses (
     thumbnail_url TEXT,
 
     order_index INT DEFAULT 0,
-    status content_status DEFAULT 'DRAFT',
+    status course_status DEFAULT 'INACTIVE',
 
     created_by UUID REFERENCES user_management.users(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -722,8 +723,9 @@ CREATE TABLE ai_conversation.conversation_messages (
     is_hint_request BOOLEAN DEFAULT FALSE,
     sequence_number INT NOT NULL,
     processing_time_ms INT,
-
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_conversation_sessions_user ON ai_conversation.conversation_sessions(user_id, created_at DESC);

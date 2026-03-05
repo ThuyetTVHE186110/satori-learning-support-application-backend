@@ -81,6 +81,38 @@ public interface CurriculumImportService {
     CurriculumImportResponse linkToCourse(UUID importId, UUID courseId, UUID managerId);
 
     /**
+     * Approve a PENDING_APPROVAL import.
+     * Sets status to COMPLETED; draft content remains in the DB.
+     *
+     * @param importId  the import to approve
+     * @param managerId the manager performing the approval
+     * @return updated import response
+     */
+    CurriculumImportResponse approveImport(UUID importId, UUID managerId);
+
+    /**
+     * Reject a PENDING_APPROVAL import.
+     * Soft-deletes all lessons created by this import and sets status to CANCELLED.
+     * Vocabulary and GrammarPoint entries are retained as shared resources.
+     *
+     * @param importId  the import to reject
+     * @param managerId the manager performing the rejection
+     * @return updated import response
+     */
+    CurriculumImportResponse rejectImport(UUID importId, UUID managerId);
+
+    /**
+     * Rollback a COMPLETED import.
+     * Soft-deletes lessons, purges embeddings, and sets status to ROLLED_BACK.
+     * Vocabulary and GrammarPoint entries are retained as shared resources.
+     *
+     * @param importId  the import to rollback
+     * @param managerId the manager performing the rollback
+     * @return updated import response
+     */
+    CurriculumImportResponse rollbackImport(UUID importId, UUID managerId);
+
+    /**
      * Lightweight DTO for lesson summary in import context
      */
     record LessonSummaryDto(
