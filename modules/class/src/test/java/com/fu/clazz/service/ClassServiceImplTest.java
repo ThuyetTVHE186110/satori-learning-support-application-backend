@@ -83,6 +83,9 @@ class ClassServiceImplTest {
     @Captor
     private ArgumentCaptor<ClassMember> memberCaptor;
 
+    @Captor
+    private ArgumentCaptor<User> userCaptor;
+
     // Test fixtures
     private Clazz testClazz;
     private ClassResponse testClassResponse;
@@ -660,6 +663,7 @@ class ClassServiceImplTest {
                 given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.empty());
                 given(classMemberRepository.save(any(ClassMember.class))).willReturn(testMember);
                 given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
+                given(userRepository.save(any(User.class))).willReturn(testStudent);
 
                 // When
                 ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
@@ -724,6 +728,7 @@ class ClassServiceImplTest {
                         .willReturn(Optional.of(removedMember));
                 given(classMemberRepository.save(any(ClassMember.class))).willReturn(removedMember);
                 given(classMapper.toMemberResponse(removedMember)).willReturn(testMemberResponse);
+                given(userRepository.save(any(User.class))).willReturn(testStudent);
 
                 // When
                 ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
@@ -780,6 +785,101 @@ class ClassServiceImplTest {
                         .isInstanceOf(ResourceNotFoundException.class);
 
                 verify(classMemberRepository, never()).save(any());
+            }
+
+            @Test
+            @DisplayName("Should activate INACTIVE learner when added to class")
+            void shouldActivateInactiveLearnerWhenAdded() {
+                // Given
+                User inactiveStudent = User.builder()
+                        .email("inactive@example.com")
+                        .firstName("Inactive")
+                        .lastName("Student")
+                        .role(UserRole.LEARNER)
+                        .status(UserStatus.INACTIVE)
+                        .build();
+                ReflectionTestUtils.setField(inactiveStudent, "id", studentId);
+
+                AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
+                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(userRepository.findById(studentId)).willReturn(Optional.of(inactiveStudent));
+                given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
+                given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.empty());
+                given(classMemberRepository.save(any(ClassMember.class))).willReturn(testMember);
+                given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
+                given(userRepository.save(any(User.class))).willReturn(inactiveStudent);
+
+                // When
+                ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
+
+                // Then
+                assertThat(result).isNotNull();
+                verify(userRepository).save(userCaptor.capture());
+                User savedUser = userCaptor.getValue();
+                assertThat(savedUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
+            }
+
+            @Test
+            @DisplayName("Should NOT change status of ACTIVE learner when added to class")
+            void shouldNotChangeStatusOfActiveLearner() {
+                // Given
+                AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
+                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent)); // ACTIVE
+                given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
+                given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.empty());
+                given(classMemberRepository.save(any(ClassMember.class))).willReturn(testMember);
+                given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
+                given(userRepository.save(any(User.class))).willReturn(testStudent);
+
+                // When
+                ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
+
+                // Then
+                assertThat(result).isNotNull();
+                verify(userRepository).save(userCaptor.capture());
+                User savedUser = userCaptor.getValue();
+                assertThat(savedUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
+            }
+
+            @Test
+            @DisplayName("Should activate INACTIVE learner when re-joining class after removal")
+            void shouldActivateInactiveLearnerOnReJoin() {
+                // Given
+                User inactiveStudent = User.builder()
+                        .email("inactive@example.com")
+                        .firstName("Inactive")
+                        .lastName("Student")
+                        .role(UserRole.LEARNER)
+                        .status(UserStatus.INACTIVE)
+                        .build();
+                ReflectionTestUtils.setField(inactiveStudent, "id", studentId);
+
+                ClassMember removedMember = ClassMember.builder()
+                        .classId(classId).userId(studentId)
+                        .joinedAt(LocalDateTime.now().minusDays(10))
+                        .removedAt(LocalDateTime.now().minusDays(1))
+                        .build();
+                ReflectionTestUtils.setField(removedMember, "id", UUID.randomUUID());
+
+                AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
+                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(userRepository.findById(studentId)).willReturn(Optional.of(inactiveStudent));
+                given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
+                given(classMemberRepository.findByClassIdAndUserId(classId, studentId))
+                        .willReturn(Optional.of(removedMember));
+                given(classMemberRepository.save(any(ClassMember.class))).willReturn(removedMember);
+                given(classMapper.toMemberResponse(removedMember)).willReturn(testMemberResponse);
+                given(userRepository.save(any(User.class))).willReturn(inactiveStudent);
+
+                // When
+                ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
+
+                // Then
+                assertThat(result).isNotNull();
+                verify(userRepository).save(userCaptor.capture());
+                User savedUser = userCaptor.getValue();
+                assertThat(savedUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
             }
         }
 
