@@ -30,6 +30,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -624,6 +625,170 @@ class CourseServiceImplTest {
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("Should filter courses with no filters (returns all non-deleted, non-DELETED-status)")
+        @SuppressWarnings("unchecked")
+        void shouldFilterCoursesWithNoFilters() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Course> coursePage = new PageImpl<>(List.of(testCourse), pageable, 1);
+            given(courseRepository.findAll(any(Specification.class), eq(pageable))).willReturn(coursePage);
+            given(courseMapper.toSummaryResponse(testCourse)).willReturn(testSummaryResponse);
+
+            // When
+            Page<CourseSummaryResponse> result = courseService.filterCourses(null, null, null, pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            assertThat(result.getContent().getFirst().getName()).isEqualTo("Japanese N5 Course");
+            verify(courseRepository).findAll(any(Specification.class), eq(pageable));
+        }
+
+        @Test
+        @DisplayName("Should filter courses by status only")
+        @SuppressWarnings("unchecked")
+        void shouldFilterCoursesByStatusOnly() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Course> coursePage = new PageImpl<>(List.of(testCourse), pageable, 1);
+            given(courseRepository.findAll(any(Specification.class), eq(pageable))).willReturn(coursePage);
+            given(courseMapper.toSummaryResponse(testCourse)).willReturn(testSummaryResponse);
+
+            // When
+            Page<CourseSummaryResponse> result = courseService.filterCourses(CourseStatus.INACTIVE, null, null, pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            verify(courseRepository).findAll(any(Specification.class), eq(pageable));
+        }
+
+        @Test
+        @DisplayName("Should filter courses by JLPT level only")
+        @SuppressWarnings("unchecked")
+        void shouldFilterCoursesByLevelOnly() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Course> coursePage = new PageImpl<>(List.of(testCourse), pageable, 1);
+            given(courseRepository.findAll(any(Specification.class), eq(pageable))).willReturn(coursePage);
+            given(courseMapper.toSummaryResponse(testCourse)).willReturn(testSummaryResponse);
+
+            // When
+            Page<CourseSummaryResponse> result = courseService.filterCourses(null, JlptLevel.N5, null, pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            verify(courseRepository).findAll(any(Specification.class), eq(pageable));
+        }
+
+        @Test
+        @DisplayName("Should filter courses by keyword only")
+        @SuppressWarnings("unchecked")
+        void shouldFilterCoursesByKeywordOnly() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Course> coursePage = new PageImpl<>(List.of(testCourse), pageable, 1);
+            given(courseRepository.findAll(any(Specification.class), eq(pageable))).willReturn(coursePage);
+            given(courseMapper.toSummaryResponse(testCourse)).willReturn(testSummaryResponse);
+
+            // When
+            Page<CourseSummaryResponse> result = courseService.filterCourses(null, null, "N5", pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            verify(courseRepository).findAll(any(Specification.class), eq(pageable));
+        }
+
+        @Test
+        @DisplayName("Should filter courses by status and level combined")
+        @SuppressWarnings("unchecked")
+        void shouldFilterCoursesByStatusAndLevel() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Course> coursePage = new PageImpl<>(List.of(testCourse), pageable, 1);
+            given(courseRepository.findAll(any(Specification.class), eq(pageable))).willReturn(coursePage);
+            given(courseMapper.toSummaryResponse(testCourse)).willReturn(testSummaryResponse);
+
+            // When
+            Page<CourseSummaryResponse> result = courseService.filterCourses(CourseStatus.INACTIVE, JlptLevel.N5, null, pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            verify(courseRepository).findAll(any(Specification.class), eq(pageable));
+        }
+
+        @Test
+        @DisplayName("Should filter courses by all criteria combined")
+        @SuppressWarnings("unchecked")
+        void shouldFilterCoursesByAllCriteria() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Course> coursePage = new PageImpl<>(List.of(testCourse), pageable, 1);
+            given(courseRepository.findAll(any(Specification.class), eq(pageable))).willReturn(coursePage);
+            given(courseMapper.toSummaryResponse(testCourse)).willReturn(testSummaryResponse);
+
+            // When
+            Page<CourseSummaryResponse> result = courseService.filterCourses(CourseStatus.INACTIVE, JlptLevel.N5, "Japanese", pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            assertThat(result.getContent().getFirst().getName()).isEqualTo("Japanese N5 Course");
+            verify(courseRepository).findAll(any(Specification.class), eq(pageable));
+        }
+
+        @Test
+        @DisplayName("Should return empty page when no courses match filters")
+        @SuppressWarnings("unchecked")
+        void shouldReturnEmptyPageWhenNoMatch() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Course> emptyPage = new PageImpl<>(List.of(), pageable, 0);
+            given(courseRepository.findAll(any(Specification.class), eq(pageable))).willReturn(emptyPage);
+
+            // When
+            Page<CourseSummaryResponse> result = courseService.filterCourses(CourseStatus.ACTIVE, JlptLevel.N1, "nonexistent", pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(0);
+            assertThat(result.getContent()).isEmpty();
+            verify(courseRepository).findAll(any(Specification.class), eq(pageable));
+        }
+
+        @Test
+        @DisplayName("Should filter courses by status and keyword combined")
+        @SuppressWarnings("unchecked")
+        void shouldFilterCoursesByStatusAndKeyword() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Course> coursePage = new PageImpl<>(List.of(testCourse), pageable, 1);
+            given(courseRepository.findAll(any(Specification.class), eq(pageable))).willReturn(coursePage);
+            given(courseMapper.toSummaryResponse(testCourse)).willReturn(testSummaryResponse);
+
+            // When
+            Page<CourseSummaryResponse> result = courseService.filterCourses(CourseStatus.INACTIVE, null, "Japanese", pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            verify(courseRepository).findAll(any(Specification.class), eq(pageable));
+        }
+
+        @Test
+        @DisplayName("Should filter courses by level and keyword combined")
+        @SuppressWarnings("unchecked")
+        void shouldFilterCoursesByLevelAndKeyword() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Course> coursePage = new PageImpl<>(List.of(testCourse), pageable, 1);
+            given(courseRepository.findAll(any(Specification.class), eq(pageable))).willReturn(coursePage);
+            given(courseMapper.toSummaryResponse(testCourse)).willReturn(testSummaryResponse);
+
+            // When
+            Page<CourseSummaryResponse> result = courseService.filterCourses(null, JlptLevel.N5, "Japanese", pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            verify(courseRepository).findAll(any(Specification.class), eq(pageable));
         }
     }
 
