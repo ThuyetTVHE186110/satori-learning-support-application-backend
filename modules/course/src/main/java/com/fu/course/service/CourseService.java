@@ -69,6 +69,18 @@ public interface CourseService {
     Page<CourseSummaryResponse> searchCourses(String keyword, Pageable pageable);
 
     /**
+     * Filter courses by multiple criteria (status, JLPT level, keyword).
+     * Always excludes soft-deleted courses and courses with DELETED status.
+     *
+     * @param status  optional status filter
+     * @param level   optional JLPT level filter
+     * @param keyword optional keyword for name search (case-insensitive)
+     * @param pageable pagination info
+     * @return page of matching courses
+     */
+    Page<CourseSummaryResponse> filterCourses(CourseStatus status, JlptLevel level, String keyword, Pageable pageable);
+
+    /**
      * Activate course (change status to ACTIVE)
      */
     CourseResponse activateCourse(UUID courseId, UUID managerId);

@@ -94,6 +94,8 @@ public class ManagerCourseController {
 
     /**
      * Get all courses with pagination and optional filters.
+     * Supports combining multiple filter criteria simultaneously.
+     * Always excludes courses with DELETED status.
      * GET /api/v1/manager/courses?page=0&size=10&status=INACTIVE&level=N5&keyword=xxx
      */
     @GetMapping
@@ -106,16 +108,7 @@ public class ManagerCourseController {
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("orderIndex").ascending());
 
-        Page<CourseSummaryResponse> coursePage;
-        if (keyword != null && !keyword.isBlank()) {
-            coursePage = courseService.searchCourses(keyword.trim(), pageable);
-        } else if (status != null) {
-            coursePage = courseService.getCoursesByStatus(status, pageable);
-        } else if (level != null) {
-            coursePage = courseService.getCoursesByJlptLevel(level, pageable);
-        } else {
-            coursePage = courseService.getAllCourses(pageable);
-        }
+        Page<CourseSummaryResponse> coursePage = courseService.filterCourses(status, level, keyword, pageable);
 
         PageResponse<CourseSummaryResponse> pageResponse = PageResponse.of(
                 coursePage.getContent(),

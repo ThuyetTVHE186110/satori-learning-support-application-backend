@@ -13,6 +13,7 @@ import com.fu.course.exception.CourseNotFoundException;
 import com.fu.course.mapper.CourseMapper;
 import com.fu.course.repository.CourseRepository;
 import com.fu.course.repository.LessonRepository;
+import com.fu.course.repository.specification.CourseSpecification;
 import com.fu.course.service.CourseService;
 import com.fu.infrastructure.cloudinary.CloudinaryService;
 import lombok.RequiredArgsConstructor;
@@ -186,6 +187,13 @@ public class CourseServiceImpl implements CourseService {
     public Page<CourseSummaryResponse> searchCourses(String keyword, Pageable pageable) {
         log.debug("Searching courses by keyword: {}", keyword);
         return courseRepository.searchByName(keyword, pageable)
+            .map(courseMapper::toSummaryResponse);
+    }
+
+    @Override
+    public Page<CourseSummaryResponse> filterCourses(CourseStatus status, JlptLevel level, String keyword, Pageable pageable) {
+        log.debug("Filtering courses - status: {}, level: {}, keyword: {}", status, level, keyword);
+        return courseRepository.findAll(CourseSpecification.withFilters(status, level, keyword), pageable)
             .map(courseMapper::toSummaryResponse);
     }
 
