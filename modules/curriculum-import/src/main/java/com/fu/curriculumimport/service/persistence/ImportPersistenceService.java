@@ -113,7 +113,30 @@ public class ImportPersistenceService {
         }
 
         for (ExtractionResult result : results) {
-            // Persist lessons
+
+            // 1. Persist vocabulary independently (not tied to lesson existence)
+            List<Vocabulary> persistedVocab = new ArrayList<>();
+            for (ExtractionResult.ExtractedVocabulary ev : result.getVocabulary()) {
+                Vocabulary vocab = itemHelper.findOrCreateVocabulary(ev, importEntity.getCreatedBy());
+                if (vocab != null) {
+                    persistedVocab.add(vocab);
+                } else {
+                    failedItems++;
+                }
+            }
+
+            // 2. Persist grammar independently (not tied to lesson existence)
+            List<GrammarPoint> persistedGrammar = new ArrayList<>();
+            for (ExtractionResult.ExtractedGrammar eg : result.getGrammarPoints()) {
+                GrammarPoint grammar = itemHelper.findOrCreateGrammarPoint(eg, importEntity.getCreatedBy());
+                if (grammar != null) {
+                    persistedGrammar.add(grammar);
+                } else {
+                    failedItems++;
+                }
+            }
+
+            // 3. Persist lessons and link vocab/grammar to them
             for (ExtractionResult.ExtractedLesson el : result.getLessons()) {
                 if (course == null) continue;
 
@@ -142,35 +165,31 @@ public class ImportPersistenceService {
                 }
                 lessonsCount++;
 
-                // Link vocabulary — each in its own transaction
+                // Link already-persisted vocabulary to lesson
                 int vocabOrder = 0;
-                for (ExtractionResult.ExtractedVocabulary ev : result.getVocabulary()) {
-                    Vocabulary vocab = itemHelper.findOrCreateVocabulary(ev, importEntity.getCreatedBy());
-                    if (vocab != null) {
-                        boolean linked = itemHelper.linkVocabularyToLesson(
-                                savedLesson.getId(), vocab, vocabOrder++, ev.isKeyWord());
-                        if (!linked) failedItems++;
-                    } else {
-                        failedItems++;
-                    }
+                for (int i = 0; i < persistedVocab.size(); i++) {
+                    Vocabulary vocab = persistedVocab.get(i);
+                    boolean isKeyWord = i < result.getVocabulary().size()
+                            && result.getVocabulary().get(i).isKeyWord();
+                    boolean linked = itemHelper.linkVocabularyToLesson(
+                            savedLesson.getId(), vocab, vocabOrder++, isKeyWord);
+                    if (!linked) failedItems++;
                 }
 
-                // Link grammar — each in its own transaction
+                // Link already-persisted grammar to lesson
                 int grammarOrder = 0;
-                for (ExtractionResult.ExtractedGrammar eg : result.getGrammarPoints()) {
-                    GrammarPoint grammar = itemHelper.findOrCreateGrammarPoint(eg, importEntity.getCreatedBy());
-                    if (grammar != null) {
-                        boolean linked = itemHelper.linkGrammarToLesson(
-                                savedLesson.getId(), grammar, grammarOrder++, eg.isKeyPoint());
-                        if (!linked) failedItems++;
-                    } else {
-                        failedItems++;
-                    }
+                for (int i = 0; i < persistedGrammar.size(); i++) {
+                    GrammarPoint grammar = persistedGrammar.get(i);
+                    boolean isKeyPoint = i < result.getGrammarPoints().size()
+                            && result.getGrammarPoints().get(i).isKeyPoint();
+                    boolean linked = itemHelper.linkGrammarToLesson(
+                            savedLesson.getId(), grammar, grammarOrder++, isKeyPoint);
+                    if (!linked) failedItems++;
                 }
             }
 
-            vocabCount += result.getVocabulary().size();
-            grammarCount += result.getGrammarPoints().size();
+            vocabCount += persistedVocab.size();
+            grammarCount += persistedGrammar.size();
         }
 
         if (failedItems > 0) {

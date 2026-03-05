@@ -283,9 +283,18 @@ class ImportPersistenceServiceTest {
         }
 
         @Test
-        @DisplayName("Null courseId -> lessons skipped, vocab/grammar raw counts still set")
+        @DisplayName("Null courseId -> lessons skipped, vocab/grammar still persisted independently")
         void persistExtracted_noCourseId_lessonsSkipped_countsUpdated() {
             CurriculumImport entity = makeImport(null); // no course
+
+            Vocabulary vocab = new Vocabulary();
+            vocab.setId(UUID.randomUUID());
+            given(itemHelper.findOrCreateVocabulary(any(), eq(MANAGER_ID))).willReturn(vocab);
+
+            GrammarPoint grammar = new GrammarPoint();
+            grammar.setId(UUID.randomUUID());
+            given(itemHelper.findOrCreateGrammarPoint(any(), eq(MANAGER_ID))).willReturn(grammar);
+
             ExtractionResult result = resultWith(
                     List.of(extractedLesson("Lesson 1")),
                     List.of(extractedVocab("食べる", "N5")),
@@ -293,7 +302,10 @@ class ImportPersistenceServiceTest {
 
             service.persistExtractedContent(entity, List.of(result));
 
+            // Lessons skipped (no course), but vocab/grammar persisted independently
             then(itemHelper).should(never()).saveLesson(any());
+            then(itemHelper).should().findOrCreateVocabulary(any(), eq(MANAGER_ID));
+            then(itemHelper).should().findOrCreateGrammarPoint(any(), eq(MANAGER_ID));
             assertThat(entity.getLessonsCreated()).isZero();
             assertThat(entity.getVocabularyCreated()).isEqualTo(1);
             assertThat(entity.getGrammarPointsCreated()).isEqualTo(1);
@@ -316,10 +328,19 @@ class ImportPersistenceServiceTest {
         }
 
         @Test
-        @DisplayName("No lessons in result -> lesson not created, vocab/grammar counts still set")
+        @DisplayName("No lessons in result -> vocab/grammar still persisted, counts reflect persisted items")
         void persistExtracted_noLessons_countsUpdatedFromRawSize() {
             CurriculumImport entity = makeImport(COURSE_ID);
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(new Course()));
+
+            Vocabulary vocab1 = new Vocabulary(); vocab1.setId(UUID.randomUUID());
+            Vocabulary vocab2 = new Vocabulary(); vocab2.setId(UUID.randomUUID());
+            given(itemHelper.findOrCreateVocabulary(any(), eq(MANAGER_ID)))
+                    .willReturn(vocab1, vocab2);
+
+            GrammarPoint grammar = new GrammarPoint(); grammar.setId(UUID.randomUUID());
+            given(itemHelper.findOrCreateGrammarPoint(any(), eq(MANAGER_ID))).willReturn(grammar);
+
             ExtractionResult result = resultWith(
                     List.of(), // no lessons
                     List.of(extractedVocab("食べる", "N5"), extractedVocab("飲む", "N4")),
@@ -328,6 +349,8 @@ class ImportPersistenceServiceTest {
             service.persistExtractedContent(entity, List.of(result));
 
             then(itemHelper).should(never()).saveLesson(any());
+            then(itemHelper).should(times(2)).findOrCreateVocabulary(any(), eq(MANAGER_ID));
+            then(itemHelper).should().findOrCreateGrammarPoint(any(), eq(MANAGER_ID));
             assertThat(entity.getLessonsCreated()).isZero();
             assertThat(entity.getVocabularyCreated()).isEqualTo(2);
             assertThat(entity.getGrammarPointsCreated()).isEqualTo(1);
@@ -364,7 +387,7 @@ class ImportPersistenceServiceTest {
         }
 
         @Test
-        @DisplayName("Lesson save fails -> skips vocab/grammar linking for that lesson")
+        @DisplayName("Lesson save fails -> vocab/grammar still persisted but linking skipped")
         void persistExtracted_lessonSaveFails_vocabGrammarSkipped() {
             CurriculumImport entity = makeImport(COURSE_ID);
             Course course = new Course();
@@ -372,6 +395,12 @@ class ImportPersistenceServiceTest {
 
             // itemHelper.saveLesson returns null (failure)
             given(itemHelper.saveLesson(any(Lesson.class))).willReturn(null);
+
+            Vocabulary vocab = new Vocabulary(); vocab.setId(UUID.randomUUID());
+            given(itemHelper.findOrCreateVocabulary(any(), eq(MANAGER_ID))).willReturn(vocab);
+
+            GrammarPoint grammar = new GrammarPoint(); grammar.setId(UUID.randomUUID());
+            given(itemHelper.findOrCreateGrammarPoint(any(), eq(MANAGER_ID))).willReturn(grammar);
 
             ExtractionResult result = resultWith(
                     List.of(extractedLesson("Bad Lesson")),
@@ -381,9 +410,12 @@ class ImportPersistenceServiceTest {
             service.persistExtractedContent(entity, List.of(result));
 
             assertThat(entity.getLessonsCreated()).isZero();
-            // Vocab/grammar findOrCreate should NOT be called since lesson save failed
-            then(itemHelper).should(never()).findOrCreateVocabulary(any(), any());
-            then(itemHelper).should(never()).findOrCreateGrammarPoint(any(), any());
+            // Vocab/grammar ARE persisted independently
+            then(itemHelper).should().findOrCreateVocabulary(any(), eq(MANAGER_ID));
+            then(itemHelper).should().findOrCreateGrammarPoint(any(), eq(MANAGER_ID));
+            // But linking is skipped since lesson save failed
+            then(itemHelper).should(never()).linkVocabularyToLesson(any(), any(), anyInt(), anyBoolean());
+            then(itemHelper).should(never()).linkGrammarToLesson(any(), any(), anyInt(), anyBoolean());
         }
 
         @Test
@@ -491,9 +523,24 @@ class ImportPersistenceServiceTest {
         }
 
         @Test
-        @DisplayName("Multiple ExtractionResults -> vocab/grammar counts accumulate from raw sizes")
+        @DisplayName("Multiple ExtractionResults -> vocab/grammar counts accumulate from persisted items")
         void persistExtracted_multipleResults_countsAccumulate() {
             CurriculumImport entity = makeImport(null); // no course -> no lesson persisted
+
+            // Stub vocab: 3 total across 2 results
+            Vocabulary v1 = new Vocabulary(); v1.setId(UUID.randomUUID());
+            Vocabulary v2 = new Vocabulary(); v2.setId(UUID.randomUUID());
+            Vocabulary v3 = new Vocabulary(); v3.setId(UUID.randomUUID());
+            given(itemHelper.findOrCreateVocabulary(any(), eq(MANAGER_ID)))
+                    .willReturn(v1, v2, v3);
+
+            // Stub grammar: 3 total across 2 results
+            GrammarPoint g1 = new GrammarPoint(); g1.setId(UUID.randomUUID());
+            GrammarPoint g2 = new GrammarPoint(); g2.setId(UUID.randomUUID());
+            GrammarPoint g3 = new GrammarPoint(); g3.setId(UUID.randomUUID());
+            given(itemHelper.findOrCreateGrammarPoint(any(), eq(MANAGER_ID)))
+                    .willReturn(g1, g2, g3);
+
             ExtractionResult result1 = resultWith(List.of(),
                     List.of(extractedVocab("食べる", "N5"), extractedVocab("飲む", "N5")),
                     List.of(extractedGrammar("〜ている", "N5")));
@@ -514,6 +561,9 @@ class ImportPersistenceServiceTest {
             CurriculumImport entity = makeImport(COURSE_ID);
             Course course = new Course();
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
+
+            Vocabulary vocab = new Vocabulary(); vocab.setId(UUID.randomUUID());
+            given(itemHelper.findOrCreateVocabulary(any(), eq(MANAGER_ID))).willReturn(vocab);
 
             ExtractionResult result = resultWith(
                     List.of(),
