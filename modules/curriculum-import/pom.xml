@@ -41,6 +41,20 @@
             <version>3.0.3</version>
         </dependency>
 
+        <!-- JBIG2 image support for scanned PDFs (required by PDFBox renderer) -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>jbig2-imageio</artifactId>
+            <version>3.0.4</version>
+        </dependency>
+
+        <!-- JPEG2000 image support for scanned PDFs (required by PDFBox renderer) -->
+        <dependency>
+            <groupId>com.github.jai-imageio</groupId>
+            <artifactId>jai-imageio-jpeg2000</artifactId>
+            <version>1.4.0</version>
+        </dependency>
+
         <!-- PPTX Processing (Apache POI) -->
         <dependency>
             <groupId>org.apache.poi</groupId>

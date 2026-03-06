@@ -63,9 +63,20 @@ public class ScannedPdfIngestionService {
             StringBuilder fullText = new StringBuilder();
             int totalLinesOcrd = 0;
 
+            int renderFailures = 0;
+
             for (int i = 0; i < totalPages; i++) {
-                BufferedImage pageImage = renderer.renderImageWithDPI(
-                        i, ocrProps.getRenderDpi(), ImageType.RGB);
+                BufferedImage pageImage;
+                try {
+                    pageImage = renderer.renderImageWithDPI(
+                            i, ocrProps.getRenderDpi(), ImageType.RGB);
+                } catch (Exception e) {
+                    log.warn("Page {} render failed ({}), skipping OCR for this page",
+                            i + 1, e.getMessage());
+                    pageTexts.add("");
+                    renderFailures++;
+                    continue;
+                }
 
                 OcrTextResult ocr = ocrClient.extractText(pageImage);
 
@@ -80,6 +91,11 @@ public class ScannedPdfIngestionService {
                     fullText.append(ocr.text()).append("\n\n");
                     totalLinesOcrd += ocr.text().split("\n").length;
                 }
+            }
+
+            if (renderFailures > 0) {
+                log.warn("{} of {} pages failed to render (missing image codecs?)",
+                        renderFailures, totalPages);
             }
 
             if (fullText.isEmpty()) {
