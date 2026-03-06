@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.util.LlmResponseUtils;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
@@ -32,11 +31,15 @@ import java.util.Map;
  */
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class ContentExtractionAgent {
 
-    private final OpenAiChatModel chatModel;
+    private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
+
+    public ContentExtractionAgent(OpenAiChatModel chatModel, ObjectMapper objectMapper) {
+        this.chatClient = ChatClient.builder(chatModel).build();
+        this.objectMapper = objectMapper;
+    }
 
     private static final String SYSTEM_PROMPT = """
             You are an expert Japanese language curriculum analyzer. Your task is to extract
@@ -131,7 +134,6 @@ public class ContentExtractionAgent {
                     chunk.getPageStart(), chunk.getPageEnd())
                     + ragSection;
 
-            ChatClient chatClient = ChatClient.builder(chatModel).build();
             String response = chatClient.prompt()
                     .system(SYSTEM_PROMPT + "\nTarget JLPT Level: " + jlptLevel)
                     .user(userPrompt)

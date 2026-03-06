@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.roleplay.entity.ConversationMessage;
 import com.fu.roleplay.entity.ConversationSession;
 import com.fu.roleplay.entity.SessionMission;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
@@ -20,16 +19,22 @@ import java.util.regex.Pattern;
 
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class RoleplayAIService {
 
     private static final String REDIS_KEY_PREFIX = "roleplay:history:";
     private static final Duration HISTORY_TTL = Duration.ofHours(2);
     private static final int MAX_CONTEXT_MESSAGES = 20; // sliding window: last 20 messages
 
-    private final OpenAiChatModel chatModel;
+    private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
     private final RedisTemplate<String, Object> redisTemplate;
+
+    public RoleplayAIService(OpenAiChatModel chatModel, ObjectMapper objectMapper,
+                              RedisTemplate<String, Object> redisTemplate) {
+        this.chatClient = ChatClient.builder(chatModel).build();
+        this.objectMapper = objectMapper;
+        this.redisTemplate = redisTemplate;
+    }
 
     public String buildSystemPrompt(ConversationSession session, String topicContext,
                                      String jlptLevel, List<SessionMission> missions) {
@@ -97,8 +102,6 @@ public class RoleplayAIService {
     public String generateResponse(UUID sessionId, String systemPrompt, List<ConversationMessage> history,
                                     String userMessage) {
         try {
-            ChatClient chatClient = ChatClient.builder(chatModel).build();
-
             // Apply sliding window: keep only last N messages to stay within token limits
             List<ConversationMessage> recentHistory = history;
             if (history.size() > MAX_CONTEXT_MESSAGES) {
@@ -129,8 +132,6 @@ public class RoleplayAIService {
 
     public String generateOpeningMessage(String systemPrompt) {
         try {
-            ChatClient chatClient = ChatClient.builder(chatModel).build();
-
             String rawResponse = chatClient.prompt()
                     .system(systemPrompt)
                     .user("Start the roleplay conversation. Greet the learner and set the scene according to the scenario. Keep it brief and welcoming.")

@@ -8,7 +8,6 @@ import com.fu.course.entity.Vocabulary;
 import com.fu.course.repository.CourseRepository;
 import com.fu.course.repository.GrammarPointRepository;
 import com.fu.course.repository.VocabularyRepository;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
@@ -26,7 +25,6 @@ import java.util.stream.Collectors;
  */
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class ConversationGenerationService {
 
     private static final String GENERATE_THEMES_SYSTEM_PROMPT = """
@@ -59,11 +57,23 @@ public class ConversationGenerationService {
             - practiceQuestions (Array<String>): 3-4 example questions to practice in this scenario
             """;
 
-    private final OpenAiChatModel chatModel;
+    private final ChatClient chatClient;
     private final VocabularyRepository vocabularyRepository;
     private final GrammarPointRepository grammarPointRepository;
     private final CourseRepository courseRepository;
     private final ObjectMapper objectMapper;
+
+    public ConversationGenerationService(OpenAiChatModel chatModel,
+                                          VocabularyRepository vocabularyRepository,
+                                          GrammarPointRepository grammarPointRepository,
+                                          CourseRepository courseRepository,
+                                          ObjectMapper objectMapper) {
+        this.chatClient = ChatClient.builder(chatModel).build();
+        this.vocabularyRepository = vocabularyRepository;
+        this.grammarPointRepository = grammarPointRepository;
+        this.courseRepository = courseRepository;
+        this.objectMapper = objectMapper;
+    }
 
     /**
      * Generate conversation theme suggestions for a manager.
@@ -96,7 +106,6 @@ public class ConversationGenerationService {
         String userPrompt = buildThemeGenerationPrompt(courseName, vocabulary, grammar, count);
 
         try {
-            ChatClient chatClient = ChatClient.builder(chatModel).build();
             String rawResponse = chatClient.prompt()
                     .system(GENERATE_THEMES_SYSTEM_PROMPT)
                     .user(userPrompt)
@@ -150,7 +159,6 @@ public class ConversationGenerationService {
         }
 
         try {
-            ChatClient chatClient = ChatClient.builder(chatModel).build();
             String rawResponse = chatClient.prompt()
                     .system(GENERATE_USER_CONTEXT_SYSTEM_PROMPT)
                     .user(contextInfo.toString())
