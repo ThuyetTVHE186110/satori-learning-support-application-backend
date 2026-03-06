@@ -1,19 +1,15 @@
 package com.fu.pronunciation.provider;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.pronunciation.config.AzureSpeechProperties;
 import com.fu.pronunciation.dto.AssessmentRequest;
 import com.fu.pronunciation.dto.AssessmentResult;
-import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import com.microsoft.cognitiveservices.speech.*;
 import com.microsoft.cognitiveservices.speech.audio.*;
-import com.microsoft.cognitiveservices.speech.PronunciationAssessmentConfig;
-import com.microsoft.cognitiveservices.speech.PronunciationAssessmentGradingSystem;
-import com.microsoft.cognitiveservices.speech.PronunciationAssessmentGranularity;
-import com.microsoft.cognitiveservices.speech.PronunciationAssessmentResult;
 
 import java.io.*;
 import java.util.ArrayList;
@@ -116,6 +112,7 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
 
     private AssessmentResult parseRecognitionResult(SpeechRecognitionResult result) {
         try {
+            // Get overall scores from PronunciationAssessmentResult
             PronunciationAssessmentResult pronResult =
                     PronunciationAssessmentResult.fromResult(result);
 
@@ -128,32 +125,10 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
             double overallScore = (accuracyScore * 0.4 + fluencyScore * 0.2
                     + completenessScore * 0.2 + prosodyScore * 0.2);
 
-            // Parse word-level details
-            List<AssessmentResult.WordAssessment> wordDetails = new ArrayList<>();
-            var words = pronResult.getWords();
-            if (words != null) {
-                for (var word : words) {
-                    List<AssessmentResult.PhonemeAssessment> phonemes = new ArrayList<>();
-                    var wordPhonemes = word.getPhonemes();
-                    if (wordPhonemes != null) {
-                        for (var phoneme : wordPhonemes) {
-                            phonemes.add(AssessmentResult.PhonemeAssessment.builder()
-                                    .phoneme(phoneme.getPhoneme())
-                                    .accuracyScore(phoneme.getAccuracyScore())
-                                    .build());
-                        }
-                    }
-                    wordDetails.add(AssessmentResult.WordAssessment.builder()
-                            .word(word.getWord())
-                            .accuracyScore(word.getAccuracyScore())
-                            .errorType(word.getErrorType())
-                            .phonemes(phonemes)
-                            .build());
-                }
-            }
-
-            // Raw response as JSON for storage
-            String rawJson = serializeRawResult(pronResult, result.getText());
+            // Parse word-level and phoneme-level details from the JSON response
+            String jsonResponse = result.getProperties().getProperty(
+                    PropertyId.SpeechServiceResponse_JsonResult);
+            List<AssessmentResult.WordAssessment> wordDetails = parseWordDetails(jsonResponse);
 
             return AssessmentResult.builder()
                     .success(true)
@@ -163,7 +138,7 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
                     .prosodyScore(prosodyScore)
                     .completenessScore(completenessScore)
                     .transcribedText(result.getText())
-                    .rawResponse(rawJson)
+                    .rawResponse(jsonResponse != null ? jsonResponse : "{}")
                     .providerName("AZURE")
                     .wordDetails(wordDetails)
                     .build();
@@ -179,19 +154,58 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
         }
     }
 
-    private String serializeRawResult(PronunciationAssessmentResult pronResult, String text) {
-        try {
-            var raw = new java.util.LinkedHashMap<String, Object>();
-            raw.put("provider", "AZURE");
-            raw.put("text", text);
-            raw.put("accuracyScore", pronResult.getAccuracyScore());
-            raw.put("fluencyScore", pronResult.getFluencyScore());
-            raw.put("prosodyScore", pronResult.getProsodyScore());
-            raw.put("completenessScore", pronResult.getCompletenessScore());
-            return objectMapper.writeValueAsString(raw);
-        } catch (Exception e) {
-            return "{}";
+    /**
+     * Parses word-level and phoneme-level assessment details from the Azure JSON response.
+     * Azure response structure:
+     * NBest[0].Words[].PronunciationAssessment.{AccuracyScore, ErrorType}
+     * NBest[0].Words[].Phonemes[].PronunciationAssessment.AccuracyScore
+     */
+    private List<AssessmentResult.WordAssessment> parseWordDetails(String jsonResponse) {
+        List<AssessmentResult.WordAssessment> wordDetails = new ArrayList<>();
+        if (jsonResponse == null || jsonResponse.isBlank()) {
+            return wordDetails;
         }
+
+        try {
+            JsonNode root = objectMapper.readTree(jsonResponse);
+            JsonNode nBest = root.path("NBest");
+            if (!nBest.isArray() || nBest.isEmpty()) {
+                return wordDetails;
+            }
+
+            JsonNode words = nBest.get(0).path("Words");
+            if (!words.isArray()) {
+                return wordDetails;
+            }
+
+            for (JsonNode wordNode : words) {
+                JsonNode wordAssessment = wordNode.path("PronunciationAssessment");
+
+                // Parse phonemes for this word
+                List<AssessmentResult.PhonemeAssessment> phonemes = new ArrayList<>();
+                JsonNode phonemeNodes = wordNode.path("Phonemes");
+                if (phonemeNodes.isArray()) {
+                    for (JsonNode phonemeNode : phonemeNodes) {
+                        JsonNode phonemeAssessment = phonemeNode.path("PronunciationAssessment");
+                        phonemes.add(AssessmentResult.PhonemeAssessment.builder()
+                                .phoneme(phonemeNode.path("Phoneme").asText(""))
+                                .accuracyScore(phonemeAssessment.path("AccuracyScore").asDouble(0))
+                                .build());
+                    }
+                }
+
+                wordDetails.add(AssessmentResult.WordAssessment.builder()
+                        .word(wordNode.path("Word").asText(""))
+                        .accuracyScore(wordAssessment.path("AccuracyScore").asDouble(0))
+                        .errorType(wordAssessment.path("ErrorType").asText("None"))
+                        .phonemes(phonemes)
+                        .build());
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse word-level details from Azure response: {}", e.getMessage());
+        }
+
+        return wordDetails;
     }
 
     /**
