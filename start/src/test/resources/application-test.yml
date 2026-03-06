@@ -1,0 +1,61 @@
+# =============================================================================
+# Test Configuration — PostgreSQL satori_test database
+# =============================================================================
+# Used for integration tests (@SpringBootTest) in the start module.
+# All modules are on the classpath — no cross-module entity issues.
+#
+# Setup (one-time):
+#   docker exec satori-postgres psql -U satori_user -d satori_learning \
+#     -c "CREATE DATABASE satori_test OWNER satori_user;"
+# =============================================================================
+
+spring:
+    datasource:
+        url: jdbc:postgresql://localhost:5432/satori_test
+        driver-class-name: org.postgresql.Driver
+        username: satori_user
+        password: SatoriSecure2026!
+
+    jpa:
+        hibernate:
+            ddl-auto: create-drop
+        show-sql: false
+        properties:
+            hibernate:
+                dialect: org.hibernate.dialect.PostgreSQLDialect
+                format_sql: false
+        open-in-view: false
+
+    data:
+        redis:
+            host: localhost
+            port: 6379
+            password: SatoriRedis2026!
+            timeout: 5000
+            repositories:
+                enabled: false
+
+    cache:
+        type: none
+
+    ai:
+        openai:
+            api-key: test-dummy-key-not-used
+            chat:
+                options:
+                    model: gpt-4o-mini
+            embedding:
+                options:
+                    model: text-embedding-3-small
+
+app:
+    security:
+        jwt:
+            access-token-secret: SatoriAccessTokenSecret2026!VeryLongSecretKeyForJWT256Bits
+            refresh-token-secret: SatoriRefreshTokenSecret2026!AnotherLongSecretKeyForJWT256
+            access-token-expiration-ms: 1800000
+            refresh-token-expiration-ms: 604800000
+        max-failed-attempts: 5
+        lock-duration-minutes: 30
+        otp-expiration-minutes: 10
+

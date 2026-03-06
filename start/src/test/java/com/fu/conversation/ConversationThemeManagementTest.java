@@ -1,4 +1,4 @@
-package com.fu.conversation.controller;
+package com.fu.conversation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.conversation.entity.ConversationTheme;
@@ -35,10 +35,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Integration tests — Conversation Theme Management.
  *
- * Runs against a real PostgreSQL database (satori_test).
- * Setup (one-time):
- *   docker exec satori-postgres psql -U satori_user -d satori_learning \
- *     -c "CREATE DATABASE satori_test OWNER satori_user;"
+ * Runs from the start module so all modules are on the classpath —
+ * no cross-module entity issues (e.g. ClassMember in UserRepository JPQL).
+ *
+ * Requires: docker exec satori-postgres psql -U satori_user -d satori_learning \
+ *   -c "CREATE DATABASE satori_test OWNER satori_user;"
  *
  * Covers (test plan):
  *   1. VIEW THEME LIST    — GET    /api/v1/manager/conversation/themes       [P3 Sanity]
@@ -47,7 +48,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   4. DELETE THEME       — DELETE /api/v1/manager/conversation/themes/{id}  [P2 Standard]
  *   5. VIEW THEME DETAIL  — GET    /api/v1/manager/conversation/themes/{id}  [P3 Sanity]
  */
-@SpringBootTest(classes = com.fu.conversation.ConversationTestApplication.class)
+@SpringBootTest(classes = com.fu.StartApplication.class)
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DisplayName("Conversation Theme Management — Integration Tests (PostgreSQL satori_test)")
@@ -65,8 +66,8 @@ class ConversationThemeManagementTest {
     // Email service is mocked — we don't want real SMTP calls during tests
     @MockBean
     private EmailService emailService;
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
     /** Insert a MANAGER user and return the saved entity. */
     private User saveManager(String email) {
@@ -173,6 +174,14 @@ class ConversationThemeManagementTest {
          * MANAGER views theme list — returns paginated list of all non-deleted themes
          * regardless of status (DRAFT / PUBLISHED / ARCHIVED).
          * Soft-deleted theme must NOT appear.
+         *
+         * Procedure:
+         * 1. Client → GET `/api/v1/manager/conversation/themes` with a valid MANAGER Bearer token.
+         * 2. AuthFilter → parse the token and resolve the user identity.
+         * 3. ConversationThemeController → call `ConversationThemeService.getThemes()`.
+         * 4. ConversationThemeService → retrieve all non-deleted themes (deleted_at IS NULL).
+         * 5. ConversationThemeService → return paginated list containing DRAFT, PUBLISHED, and ARCHIVED themes.
+         * 6. System → return the paginated theme list response (totalElements=3, soft-deleted excluded).
          */
         @Test
         @DisplayName("TC_CT_VTL_001 — 3 active themes (DRAFT/PUBLISHED/ARCHIVED) returned, soft-deleted excluded")
@@ -215,6 +224,14 @@ class ConversationThemeManagementTest {
          * TC_CT_VTL_002
          * MANAGER searches by keyword — returns only themes matching title.
          * Expected: HTTP 200, totalElements=1, only "Mua sắm" in content, "Du lịch" absent.
+         *
+         * Procedure:
+         * 1. Client → GET `/api/v1/manager/conversation/themes?keyword=mua` with a valid MANAGER Bearer token.
+         * 2. AuthFilter → parse the token and resolve the user identity.
+         * 3. ConversationThemeController → call `ConversationThemeService.getThemes()` with keyword filter.
+         * 4. ConversationThemeService → retrieve themes whose title matches the keyword (case-insensitive).
+         * 5. ConversationThemeService → return the matching theme only.
+         * 6. System → return the paginated theme list response (totalElements=1, only 'Mua sắm' present).
          */
         @Test
         @DisplayName("TC_CT_VTL_002 — keyword='mua' → only 'Mua sắm' returned, 'Du lịch' absent")
@@ -245,6 +262,13 @@ class ConversationThemeManagementTest {
          * TC_CT_VTL_003
          * MANAGER searches by keyword with no matching theme — returns empty content list.
          * Expected: HTTP 200, totalElements=0, content=[].
+         *
+         * Procedure:
+         * 1. Client → GET `/api/v1/manager/conversation/themes?keyword=Bệnh viện` with a valid MANAGER Bearer token.
+         * 2. AuthFilter → parse the token and resolve the user identity.
+         * 3. ConversationThemeController → call `ConversationThemeService.getThemes()` with keyword filter.
+         * 4. ConversationThemeService → retrieve themes matching the keyword — none found.
+         * 5. System → return the paginated theme list response (totalElements=0, content=[]).
          */
         @Test
         @DisplayName("TC_CT_VTL_003 — keyword='Bệnh viện' → empty content list")
@@ -281,6 +305,14 @@ class ConversationThemeManagementTest {
          * MANAGER creates theme with title only.
          * Expected: HTTP 201, default status=DRAFT, orderIndex=0,
          * all optional fields null, deleted_at=null in DB.
+         *
+         * Procedure:
+         * 1. Client → POST `/api/v1/manager/conversation/themes` with a valid MANAGER Bearer token and `{"title":"Mua sắm"}`.
+         * 2. AuthFilter → parse the token and resolve the user identity.
+         * 3. ConversationThemeController → validate the request body and call `ConversationThemeService.createTheme()`.
+         * 4. ConversationThemeService → create a new theme with default status=DRAFT and orderIndex=0.
+         * 5. ConversationThemeService → persist the theme to the database (optional fields null, deleted_at null).
+         * 6. System → return HTTP 201 with the created theme response.
          */
         @Test
         @DisplayName("TC_CT_CTH_001 — title only → HTTP 201, DB: DRAFT, orderIndex=0, optional fields null")
@@ -320,6 +352,14 @@ class ConversationThemeManagementTest {
          * TC_CT_CTH_002
          * MANAGER creates theme with all optional fields.
          * Expected: HTTP 201, all fields persisted to DB.
+         *
+         * Procedure:
+         * 1. Client → POST `/api/v1/manager/conversation/themes` with a valid MANAGER Bearer token and all fields (title, description, titleJapanese, category, jlptLevel, orderIndex).
+         * 2. AuthFilter → parse the token and resolve the user identity.
+         * 3. ConversationThemeController → validate the request body and call `ConversationThemeService.createTheme()`.
+         * 4. ConversationThemeService → create a new theme with all provided fields.
+         * 5. ConversationThemeService → persist the theme to the database.
+         * 6. System → return HTTP 201 with the created theme response (all fields reflected).
          */
         @Test
         @DisplayName("TC_CT_CTH_002 — all optional fields → HTTP 201, all fields persisted to DB")
@@ -370,6 +410,16 @@ class ConversationThemeManagementTest {
          * TC_CT_CTH_003
          * MANAGER creates two themes with identical title.
          * Expected: both HTTP 201, two distinct UUIDs in DB (no unique constraint on title).
+         *
+         * Procedure:
+         * 1. Client → POST `/api/v1/manager/conversation/themes` with title "Gia đình" (first request).
+         * 2. ConversationThemeController → call `ConversationThemeService.createTheme()`.
+         * 3. ConversationThemeService → create and persist the first theme (no unique constraint on title).
+         * 4. System → return HTTP 201 with the first created theme response.
+         * 5. Client → POST `/api/v1/manager/conversation/themes` with the same title "Gia đình" (second request).
+         * 6. ConversationThemeController → call `ConversationThemeService.createTheme()`.
+         * 7. ConversationThemeService → create and persist the second theme with a distinct UUID.
+         * 8. System → return HTTP 201 with the second created theme response (two distinct records in DB).
          */
         @Test
         @DisplayName("TC_CT_CTH_003 — duplicate title → both HTTP 201, 2 distinct records in DB")
@@ -415,6 +465,13 @@ class ConversationThemeManagementTest {
          * TC_CT_CTH_004
          * Create theme with blank title → @NotBlank violation →
          * HTTP 400, code = "VALIDATION_ERROR", data.title error present.
+         *
+         * Procedure:
+         * 1. Client → POST `/api/v1/manager/conversation/themes` with a valid MANAGER Bearer token and `{"title":""}`.
+         * 2. AuthFilter → parse the token and resolve the user identity.
+         * 3. ConversationThemeController → validate the request body.
+         * 4. ConversationThemeController → detect that the title field violates @NotBlank constraint.
+         * 5. System → return HTTP 400 VALIDATION_ERROR response before reaching ConversationThemeService (data.title error present).
          */
         @Test
         @DisplayName("TC_CT_CTH_004 — blank title → HTTP 400 VALIDATION_ERROR, data.title error present")
@@ -443,6 +500,13 @@ class ConversationThemeManagementTest {
          * NOTE: data.jlptLevel is NOT present (unlike MethodArgumentNotValidException).
          * The error message format is: "Invalid value 'N9'. Accepted values: [N5, N4, N3, N2, N1]"
          * (order follows enum declaration order in Course.JlptLevel: N5, N4, N3, N2, N1)
+         *
+         * Procedure:
+         * 1. Client → POST `/api/v1/manager/conversation/themes` with a valid MANAGER Bearer token and `{"title":"Test Theme","jlptLevel":"N9"}`.
+         * 2. AuthFilter → parse the token and resolve the user identity.
+         * 3. ConversationThemeController → attempt to deserialize the request body.
+         * 4. Jackson → fail to deserialize "N9" into Course.JlptLevel (HttpMessageNotReadableException, fires before Bean Validation).
+         * 5. System → return HTTP 400 VALIDATION_ERROR response (message contains "N9", data=null).
          */
         @Test
         @DisplayName("TC_CT_CTH_005 — invalid enum 'N9' → HTTP 400 VALIDATION_ERROR, message contains 'N9'")
@@ -466,6 +530,12 @@ class ConversationThemeManagementTest {
         /**
          * TC_CT_CTH_006
          * Unauthenticated request → HTTP 401 Unauthorized.
+         *
+         * Procedure:
+         * 1. Client → POST `/api/v1/manager/conversation/themes` with no Authorization header.
+         * 2. AuthFilter → detect that no token is present.
+         * 3. AuthFilter → reject the request as unauthenticated.
+         * 4. System → return HTTP 401 Unauthorized response.
          */
         @Test
         @DisplayName("TC_CT_CTH_006 — no token → HTTP 401 Unauthorized")
@@ -480,6 +550,12 @@ class ConversationThemeManagementTest {
         /**
          * TC_CT_CTH_007
          * LEARNER attempts to create theme → HTTP 403 Forbidden.
+         *
+         * Procedure:
+         * 1. Client → POST `/api/v1/manager/conversation/themes` with a valid LEARNER Bearer token.
+         * 2. AuthFilter → parse the token and resolve the user identity (role=LEARNER).
+         * 3. AuthFilter → detect that the LEARNER role is not authorized for this endpoint.
+         * 4. System → return HTTP 403 Forbidden response.
          */
         @Test
         @DisplayName("TC_CT_CTH_007 — LEARNER creates theme → HTTP 403 Forbidden")
@@ -510,6 +586,15 @@ class ConversationThemeManagementTest {
          * TC_CT_UTH_001
          * MANAGER updates title and description.
          * Expected: HTTP 200, changes persisted, updatedAt refreshed.
+         *
+         * Procedure:
+         * 1. Client → PUT `/api/v1/manager/conversation/themes/{id}` with a valid MANAGER Bearer token and `{"title":"New Title","description":"New Desc"}`.
+         * 2. AuthFilter → parse the token and resolve the user identity.
+         * 3. ConversationThemeController → validate the request body and call `ConversationThemeService.updateTheme()`.
+         * 4. ConversationThemeService → retrieve the theme by ID (deleted_at IS NULL).
+         * 5. ConversationThemeService → apply the title and description changes.
+         * 6. ConversationThemeService → persist the updated theme (updatedAt refreshed).
+         * 7. System → return HTTP 200 with the updated theme response.
          */
         @Test
         @DisplayName("TC_CT_UTH_001 — update title+description → HTTP 200, DB updated, updatedAt refreshed")
@@ -536,7 +621,6 @@ class ConversationThemeManagementTest {
             ConversationTheme updated = themeRepository.findById(theme.getId()).orElseThrow();
             assertThat(updated.getTitle()).isEqualTo("New Title");
             assertThat(updated.getDescription()).isEqualTo("New Desc");
-            // updatedAt must have changed (or be at least equal — JPA may batch within same ms)
             assertThat(updated.getUpdatedAt()).isNotNull();
         }
 
@@ -551,6 +635,15 @@ class ConversationThemeManagementTest {
          *   → response returns jlptLevel = null → $.data.jlptLevel assertion fails.
          *
          *   Fix (dev): add "private Course.JlptLevel jlptLevel;" to UpdateThemeRequest.
+         *
+         * Procedure:
+         * 1. Client → PUT `/api/v1/manager/conversation/themes/{id}` with a valid MANAGER Bearer token and `{"titleJapanese":"家族","jlptLevel":"N4"}`.
+         * 2. AuthFilter → parse the token and resolve the user identity.
+         * 3. ConversationThemeController → validate the request body and call `ConversationThemeService.updateTheme()`.
+         * 4. ConversationThemeService → retrieve the theme by ID (deleted_at IS NULL).
+         * 5. ConversationThemeService → apply titleJapanese and jlptLevel changes without altering the original title.
+         * 6. ConversationThemeService → persist the updated theme.
+         * 7. System → return HTTP 200 with the updated theme response (original title unchanged).
          */
         @Test
         @DisplayName("TC_CT_UTH_002 — optional fields only → HTTP 200, title unchanged in DB")
@@ -586,6 +679,13 @@ class ConversationThemeManagementTest {
          * TC_CT_UTH_003
          * Update theme with blank title — returns VALIDATION_ERROR.
          * Dev handles blank title in service via BusinessException → data=null, message="Title must not be blank".
+         *
+         * Procedure:
+         * 1. Client → PUT `/api/v1/manager/conversation/themes/{id}` with a valid MANAGER Bearer token and `{"title":""}`.
+         * 2. AuthFilter → parse the token and resolve the user identity.
+         * 3. ConversationThemeController → call `ConversationThemeService.updateTheme()`.
+         * 4. ConversationThemeService → detect that the provided title is blank (BusinessException).
+         * 5. System → return HTTP 400 VALIDATION_ERROR response (data=null, message='Title must not be blank').
          */
         @Test
         @DisplayName("TC_CT_UTH_003 — blank title → HTTP 400 VALIDATION_ERROR, message='Title must not be blank'")
@@ -608,6 +708,14 @@ class ConversationThemeManagementTest {
         /**
          * TC_CT_UTH_004
          * Update non-existent theme (all-zeros UUID) → HTTP 404.
+         *
+         * Procedure:
+         * 1. Client → PUT `/api/v1/manager/conversation/themes/00000000-0000-0000-0000-000000000000` with a valid MANAGER Bearer token.
+         * 2. AuthFilter → parse the token and resolve the user identity.
+         * 3. ConversationThemeController → call `ConversationThemeService.updateTheme()`.
+         * 4. ConversationThemeService → attempt to retrieve the theme by ID.
+         * 5. ConversationThemeService → detect that no theme with the given ID exists.
+         * 6. System → return HTTP 404 NOT_FOUND response.
          */
         @Test
         @DisplayName("TC_CT_UTH_004 — non-existent themeId → HTTP 404, code='NOT_FOUND'")
@@ -628,6 +736,14 @@ class ConversationThemeManagementTest {
         /**
          * TC_CT_UTH_005
          * Update soft-deleted theme → HTTP 404 (service filters deleted_at IS NULL).
+         *
+         * Procedure:
+         * 1. Client → PUT `/api/v1/manager/conversation/themes/{id}` with a valid MANAGER Bearer token (theme is soft-deleted).
+         * 2. AuthFilter → parse the token and resolve the user identity.
+         * 3. ConversationThemeController → call `ConversationThemeService.updateTheme()`.
+         * 4. ConversationThemeService → attempt to retrieve the theme by ID (deleted_at IS NULL filter).
+         * 5. ConversationThemeService → detect that the theme has been soft-deleted (not found).
+         * 6. System → return HTTP 404 NOT_FOUND response.
          */
         @Test
         @DisplayName("TC_CT_UTH_005 — soft-deleted theme → HTTP 404, code='NOT_FOUND'")
@@ -650,6 +766,12 @@ class ConversationThemeManagementTest {
         /**
          * TC_CT_UTH_006
          * Unauthenticated request → HTTP 401 Unauthorized.
+         *
+         * Procedure:
+         * 1. Client → PUT `/api/v1/manager/conversation/themes/{id}` with no Authorization header.
+         * 2. AuthFilter → detect that no token is present.
+         * 3. AuthFilter → reject the request as unauthenticated.
+         * 4. System → return HTTP 401 Unauthorized response.
          */
         @Test
         @DisplayName("TC_CT_UTH_006 — no token → HTTP 401 Unauthorized")
@@ -666,6 +788,12 @@ class ConversationThemeManagementTest {
         /**
          * TC_CT_UTH_007
          * LEARNER attempts to update theme → HTTP 403 Forbidden.
+         *
+         * Procedure:
+         * 1. Client → PUT `/api/v1/manager/conversation/themes/{id}` with a valid LEARNER Bearer token.
+         * 2. AuthFilter → parse the token and resolve the user identity (role=LEARNER).
+         * 3. AuthFilter → detect that the LEARNER role is not authorized for this endpoint.
+         * 4. System → return HTTP 403 Forbidden response.
          */
         @Test
         @DisplayName("TC_CT_UTH_007 — LEARNER updates theme → HTTP 403 Forbidden")
@@ -698,6 +826,15 @@ class ConversationThemeManagementTest {
          * MANAGER soft-deletes theme with no child topics.
          * Expected: HTTP 200, deleted_at set in DB, deleted_by = manager UUID,
          * all other fields unchanged, theme absent from list response.
+         *
+         * Procedure:
+         * 1. Client → DELETE `/api/v1/manager/conversation/themes/{id}` with a valid MANAGER Bearer token (theme has no topics).
+         * 2. AuthFilter → parse the token and resolve the user identity.
+         * 3. ConversationThemeController → call `ConversationThemeService.deleteTheme()`.
+         * 4. ConversationThemeService → retrieve the theme by ID (deleted_at IS NULL).
+         * 5. ConversationThemeService → set deleted_at and deleted_by (manager UUID) on the theme.
+         * 6. ConversationThemeService → persist the soft-deleted theme.
+         * 7. System → return HTTP 200 success response ("Nội dung đã được xoá"); theme absent from subsequent list queries.
          */
         @Test
         @DisplayName("TC_CT_DTH_001 — delete theme (no topics) → HTTP 200, deleted_at set, absent from list")
@@ -733,6 +870,16 @@ class ConversationThemeManagementTest {
          * MANAGER soft-deletes theme with mixed topics (2 active + 1 pre-deleted).
          * Expected: HTTP 200, theme soft-deleted, 2 active topics cascade soft-deleted,
          * pre-deleted topic's deleted_at NOT overwritten.
+         *
+         * Procedure:
+         * 1. Client → DELETE `/api/v1/manager/conversation/themes/{id}` with a valid MANAGER Bearer token (theme has 2 active topics + 1 pre-deleted topic).
+         * 2. AuthFilter → parse the token and resolve the user identity.
+         * 3. ConversationThemeController → call `ConversationThemeService.deleteTheme()`.
+         * 4. ConversationThemeService → retrieve the theme by ID (deleted_at IS NULL).
+         * 5. ConversationThemeService → cascade-delete all active child topics (set deleted_at and deleted_by = manager UUID).
+         * 6. ConversationThemeService → skip the pre-deleted topic (deleted_at already set — NOT overwritten).
+         * 7. ConversationThemeService → soft-delete the theme itself.
+         * 8. System → return HTTP 200 success response; all active topics cascade-deleted, pre-deleted topic's deleted_at unchanged.
          */
         @Test
         @DisplayName("TC_CT_DTH_002 — mixed topics → active cascade-deleted, pre-deleted unchanged")
@@ -781,6 +928,14 @@ class ConversationThemeManagementTest {
         /**
          * TC_CT_DTH_003
          * Delete non-existent theme (all-zeros UUID) → HTTP 404.
+         *
+         * Procedure:
+         * 1. Client → DELETE `/api/v1/manager/conversation/themes/00000000-0000-0000-0000-000000000000` with a valid MANAGER Bearer token.
+         * 2. AuthFilter → parse the token and resolve the user identity.
+         * 3. ConversationThemeController → call `ConversationThemeService.deleteTheme()`.
+         * 4. ConversationThemeService → attempt to retrieve the theme by ID.
+         * 5. ConversationThemeService → detect that no theme with the given ID exists.
+         * 6. System → return HTTP 404 NOT_FOUND response.
          */
         @Test
         @DisplayName("TC_CT_DTH_003 — non-existent themeId → HTTP 404, code='NOT_FOUND'")
@@ -799,6 +954,14 @@ class ConversationThemeManagementTest {
         /**
          * TC_CT_DTH_004
          * Delete already-soft-deleted theme → HTTP 404.
+         *
+         * Procedure:
+         * 1. Client → DELETE `/api/v1/manager/conversation/themes/{id}` with a valid MANAGER Bearer token (theme already soft-deleted).
+         * 2. AuthFilter → parse the token and resolve the user identity.
+         * 3. ConversationThemeController → call `ConversationThemeService.deleteTheme()`.
+         * 4. ConversationThemeService → attempt to retrieve the theme by ID (deleted_at IS NULL filter).
+         * 5. ConversationThemeService → detect that the theme is already soft-deleted (not found).
+         * 6. System → return HTTP 404 NOT_FOUND response.
          */
         @Test
         @DisplayName("TC_CT_DTH_004 — already-deleted theme → HTTP 404, code='NOT_FOUND'")
@@ -819,6 +982,12 @@ class ConversationThemeManagementTest {
         /**
          * TC_CT_DTH_005
          * Unauthenticated request → HTTP 401 Unauthorized.
+         *
+         * Procedure:
+         * 1. Client → DELETE `/api/v1/manager/conversation/themes/{id}` with no Authorization header.
+         * 2. AuthFilter → detect that no token is present.
+         * 3. AuthFilter → reject the request as unauthenticated.
+         * 4. System → return HTTP 401 Unauthorized response.
          */
         @Test
         @DisplayName("TC_CT_DTH_005 — no token → HTTP 401 Unauthorized")
@@ -833,6 +1002,12 @@ class ConversationThemeManagementTest {
         /**
          * TC_CT_DTH_006
          * LEARNER attempts to delete theme → HTTP 403 Forbidden.
+         *
+         * Procedure:
+         * 1. Client → DELETE `/api/v1/manager/conversation/themes/{id}` with a valid LEARNER Bearer token.
+         * 2. AuthFilter → parse the token and resolve the user identity (role=LEARNER).
+         * 3. AuthFilter → detect that the LEARNER role is not authorized for this endpoint.
+         * 4. System → return HTTP 403 Forbidden response.
          */
         @Test
         @DisplayName("TC_CT_DTH_006 — LEARNER deletes theme → HTTP 403 Forbidden")
@@ -864,6 +1039,14 @@ class ConversationThemeManagementTest {
          * Fields asserted: id, title, status, createdAt, updatedAt, topicCount.
          * Fields NOT asserted (nullable, stripped by @JsonInclude NON_NULL when absent):
          *   courseId, courseName, description, thumbnailUrl, aiGeneratedContext.
+         *
+         * Procedure:
+         * 1. Client → GET `/api/v1/manager/conversation/themes/{id}` with a valid MANAGER Bearer token.
+         * 2. AuthFilter → parse the token and resolve the user identity.
+         * 3. ConversationThemeController → call `ConversationThemeService.getThemeById()`.
+         * 4. ConversationThemeService → retrieve the theme by ID (deleted_at IS NULL).
+         * 5. ConversationThemeService → build the ConversationThemeResponse with all required fields.
+         * 6. System → return HTTP 200 with the theme detail response (id, title, status, createdAt, updatedAt, topicCount present).
          */
         @Test
         @DisplayName("TC_CT_VTI_001 — view detail → HTTP 200, id/title/status/createdAt/updatedAt/topicCount present")
@@ -887,3 +1070,4 @@ class ConversationThemeManagementTest {
         }
     }
 }
+

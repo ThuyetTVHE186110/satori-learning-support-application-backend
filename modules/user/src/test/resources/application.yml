@@ -1,0 +1,9 @@
+# =============================================================================
+# Test base config — overrides start/application.yml for user module tests.
+# Forces profile to "test" so application-test.yml is always loaded,
+# even if start/application.yml sets profiles.active=local via @EntityScan scan.
+# =============================================================================
+spring:
+    profiles:
+        active: test
+

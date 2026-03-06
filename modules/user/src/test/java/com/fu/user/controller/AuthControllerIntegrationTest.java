@@ -115,8 +115,15 @@ class AuthControllerIntegrationTest {
 
         /**
          * TC_AUTH_LG_001 — Happy path
-         * Valid credentials → HTTP 200, accessToken + refreshToken present, role =
-         * LEARNER.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/login with email and password.
+         *   2. AuthController → extract client metadata and call AuthService.login().
+         *   3. AuthService    → retrieve the user account from the database.
+         *   4. AuthService    → validate the credentials and account status.
+         *   5. AuthService    → create a login session.
+         *   6. AuthService    → generate the authentication tokens.
+         *   7. System         → return the authentication response.
          */
         @Test
         @DisplayName("TC_AUTH_LG_001 — Valid credentials → 200, tokens issued")
@@ -141,7 +148,13 @@ class AuthControllerIntegrationTest {
         /**
          * TC_AUTH_LG_002 — Wrong password.
          *
-         * INVALID_CREDENTIALS → 400
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/login with a correct email but wrong password.
+         *   2. AuthController → call AuthService.login().
+         *   3. AuthService    → retrieve the user account from the database.
+         *   4. AuthService    → fail password verification.
+         *   5. AuthService    → increment the failed login attempt counter.
+         *   6. System         → return the authentication error response.
          */
         @Test
         @DisplayName("TC_AUTH_LG_002 — Wrong password → INVALID_CREDENTIALS (current: 400, plan: 401)")
@@ -160,9 +173,14 @@ class AuthControllerIntegrationTest {
         }
 
         /**
-         * TC_AUTH_LG_003 — Non-existing email returns same error as wrong password.
-         * Security: prevents email enumeration.
+         * TC_AUTH_LG_003 — Non-existing email.
          *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/login with a non-existing email.
+         *   2. AuthController → call AuthService.login().
+         *   3. AuthService    → attempt to retrieve the user account from the database — not found.
+         *   4. AuthService    → treat as invalid credentials to prevent email enumeration.
+         *   5. System         → return the authentication error response.
          */
         @Test
         @DisplayName("TC_AUTH_LG_003 — Non-existing email → INVALID_CREDENTIALS (same as LG_002)")
@@ -182,6 +200,13 @@ class AuthControllerIntegrationTest {
         /**
          * TC_AUTH_LG_004 — SUSPENDED account.
          *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/login with valid credentials.
+         *   2. AuthController → call AuthService.login().
+         *   3. AuthService    → retrieve the user account from the database.
+         *   4. AuthService    → validate the credentials.
+         *   5. AuthService    → detect that the account status is SUSPENDED.
+         *   6. System         → return the account suspended error response.
          */
         @Test
         @DisplayName("TC_AUTH_LG_004 — SUSPENDED account → ACCOUNT_SUSPENDED (current: 400, plan: 403)")
@@ -210,6 +235,12 @@ class AuthControllerIntegrationTest {
         /**
          * TC_AUTH_LG_005 — Soft-deleted account.
          *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/login with valid credentials.
+         *   2. AuthController → call AuthService.login().
+         *   3. AuthService    → retrieve the user account from the database.
+         *   4. AuthService    → detect that the account has been soft-deleted.
+         *   5. System         → return the account deleted error response.
          */
         @Test
         @DisplayName("TC_AUTH_LG_005 — Soft-deleted account → ACCOUNT_DELETED (current: 400, plan: 403)")
@@ -240,10 +271,13 @@ class AuthControllerIntegrationTest {
         /**
          * TC_AUTH_LG_006 — Account locked after reaching maximum failed login attempts (5th wrong attempt).
          *
-         * Setup : Insert ACTIVE LEARNER with failedAttempts=4, lockedUntil=null.
-         * Action: POST /api/v1/auth/login with wrong password (this is the 5th attempt).
-         * Assert response: HTTP 400, success=false, errorCode="ACCOUNT_LOCKED".
-         * Assert DB state: lockedUntil ≈ now+30min (±5 sec), failedAttempts=5.
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/login with wrong password (5th attempt).
+         *   2. AuthController → call AuthService.login().
+         *   3. AuthService    → retrieve the user account from the database (failedAttempts = 4).
+         *   4. AuthService    → fail password verification.
+         *   5. AuthService    → increment failedAttempts to 5 and set lockedUntil = now + 30 min.
+         *   6. System         → return the account locked error response.
          *
          * Fix applied in AuthServiceImpl:
          *   - login() annotated @Transactional(noRollbackFor = BusinessException.class)
@@ -293,9 +327,17 @@ class AuthControllerIntegrationTest {
          * TC_AUTH_LG_007 — Login succeeds after lock period expires; counter resets to
          * 0.
          *
-         * NOTE FOR DEV: Directly sets lockedUntil in DB (expired lock) to test reset
-         * logic.
-         * This is independent of the LG_006 transaction bug.
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/login with valid credentials (lock already expired).
+         *   2. AuthController → call AuthService.login().
+         *   3. AuthService    → retrieve the user account from the database (lockedUntil < now).
+         *   4. AuthService    → detect that the lock has expired and reset the failed attempt counter.
+         *   5. AuthService    → validate the credentials and account status.
+         *   6. AuthService    → create a login session.
+         *   7. AuthService    → generate the authentication tokens.
+         *   8. System         → return the authentication response.
+         *
+         * NOTE: Directly sets lockedUntil in DB (expired lock) to test reset logic.
          */
         @Test
         @DisplayName("TC_AUTH_LG_007 — Login succeeds after lock expires; failedAttempts reset to 0")
@@ -322,8 +364,12 @@ class AuthControllerIntegrationTest {
         }
 
         /**
-         * TC_AUTH_LG_008 — Expired access token on a protected endpoint → HTTP 401.
-         * Generates a token signed with the same secret but expiry in the past.
+         * TC_AUTH_LG_008 — Expired access token on a protected endpoint.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/change-password with an expired Bearer token.
+         *   2. AuthFilter     → parse the token and detect it is expired.
+         *   3. System         → return the unauthorized error response.
          *
          * JwtAuthenticationFilter catches ExpiredJwtException, sets header
          * X-Token-Expired: true, then continues the filter chain.
@@ -363,6 +409,14 @@ class AuthControllerIntegrationTest {
 
         /**
          * TC_AUTH_LG_009 — Valid refresh token → new access token issued, same refresh token returned (no rotation).
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/refresh with a valid refreshToken.
+         *   2. AuthController → call AuthService.refresh().
+         *   3. AuthService    → retrieve the session from the database.
+         *   4. AuthService    → validate that the session is active and not expired.
+         *   5. AuthService    → generate a new accessToken (same refreshToken — no rotation).
+         *   6. System         → return the authentication response.
          */
         @Test
         @DisplayName("TC_AUTH_LG_009 — Valid refresh → new accessToken different from old, same refreshToken")
@@ -407,8 +461,13 @@ class AuthControllerIntegrationTest {
         /**
          * TC_AUTH_LG_010 — Refresh token reuse is allowed by design (no rotation implemented).
          *
-         * KNOWN SECURITY GAP — documented, not a blocker.
-         * Same refresh token can be used repeatedly until it expires naturally.
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/refresh with a valid refreshToken (first use).
+         *   2. AuthService    → retrieve the session from the database — active, issue a new accessToken.
+         *   3. Client         → POST /api/v1/auth/refresh with the same refreshToken (second use).
+         *   4. AuthService    → retrieve the session from the database — still active, issue a new accessToken.
+         *   5. System         → return the authentication response.
+         *      (KNOWN GAP: token rotation not yet implemented)
          */
         @Test
         @DisplayName("TC_AUTH_LG_010 — Refresh token reuse succeeds (KNOWN GAP: rotation not implemented)")
@@ -448,9 +507,11 @@ class AuthControllerIntegrationTest {
 
         /**
          * TC_AUTH_LG_011 — SQL injection in email field does not compromise the system.
-         * The @Email / @NotBlank constraint on LoginRequest rejects the malformed value
-         * before it reaches the service layer → HTTP 400, no DB query executed.
-         * Must NOT expose DB schema, stack trace, or any internal details.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/login with a malformed email containing SQL injection.
+         *   2. AuthController → validate the request body — @Email constraint rejects the value.
+         *   3. System         → return the validation error response before reaching AuthService.
          */
         @Test
         @DisplayName("TC_AUTH_LG_011 — SQL injection in email → 400, no internal details exposed")
@@ -466,9 +527,12 @@ class AuthControllerIntegrationTest {
         }
 
         /**
-         * TC_AUTH_LG_012 — Empty body {} → required-field validation fires → HTTP 400.
-         * Simulates submit-button logic enforced at API level.
-         * Validation error message must be present in the response.
+         * TC_AUTH_LG_012 — Empty body {} → required-field validation fires.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/login with an empty body {}.
+         *   2. AuthController → validate the request body — @NotBlank constraints fire on email and password.
+         *   3. System         → return the validation error response before reaching AuthService.
          */
         @Test
         @DisplayName("TC_AUTH_LG_012 — Empty body {} → 400, validation error message present")
@@ -480,6 +544,96 @@ class AuthControllerIntegrationTest {
                     .andExpect(jsonPath("$.success").value(false))
                     // At least one validation error message must be present
                     .andExpect(jsonPath("$.message").exists());
+        }
+
+        /**
+         * TC_AUTH_LG_013 — Expired refresh token.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/refresh with an expired refreshToken.
+         *   2. AuthController → call AuthService.refresh().
+         *   3. AuthService    → retrieve the session by token.
+         *   4. AuthService    → detect that the session has expired.
+         *   5. System         → return the session expired error response.
+         */
+        @Test
+        @DisplayName("TC_AUTH_LG_013 — Expired refresh token → SESSION_EXPIRED")
+        void tc_lg_013_expiredRefreshToken() throws Exception {
+            // Login to get a valid session
+            LoginRequest loginReq = new LoginRequest();
+            loginReq.setEmail("learner@test.com");
+            loginReq.setPassword("ValidPass@1");
+
+            MvcResult loginResult = mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(loginReq)))
+                    .andExpect(status().isOk())
+                    .andReturn();
+
+            String refreshToken = objectMapper.readTree(
+                            loginResult.getResponse().getContentAsString())
+                    .path("data").path("refreshToken").asText();
+
+            // Expire the session directly in DB
+            sessionRepository.findAll().forEach(session -> {
+                session.setExpiresAt(LocalDateTime.now().minusSeconds(1));
+                sessionRepository.save(session);
+            });
+
+            RefreshTokenRequest refreshReq = new RefreshTokenRequest();
+            refreshReq.setRefreshToken(refreshToken);
+
+            mockMvc.perform(post("/api/v1/auth/refresh")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(refreshReq)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("SESSION_EXPIRED"));
+        }
+
+        /**
+         * TC_AUTH_LG_014 — Revoked refresh token.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/refresh with a revoked refreshToken.
+         *   2. AuthController → call AuthService.refresh().
+         *   3. AuthService    → retrieve the session by token.
+         *   4. AuthService    → detect that the session has been revoked.
+         *   5. System         → return the session expired error response.
+         */
+        @Test
+        @DisplayName("TC_AUTH_LG_014 — Revoked refresh token → SESSION_EXPIRED")
+        void tc_lg_014_revokedRefreshToken() throws Exception {
+            // Login to get a valid session
+            LoginRequest loginReq = new LoginRequest();
+            loginReq.setEmail("learner@test.com");
+            loginReq.setPassword("ValidPass@1");
+
+            MvcResult loginResult = mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(loginReq)))
+                    .andExpect(status().isOk())
+                    .andReturn();
+
+            String refreshToken = objectMapper.readTree(
+                            loginResult.getResponse().getContentAsString())
+                    .path("data").path("refreshToken").asText();
+
+            // Revoke the session directly in DB
+            sessionRepository.findAll().forEach(session -> {
+                session.setRevokedAt(LocalDateTime.now().minusSeconds(1));
+                sessionRepository.save(session);
+            });
+
+            RefreshTokenRequest refreshReq = new RefreshTokenRequest();
+            refreshReq.setRefreshToken(refreshToken);
+
+            mockMvc.perform(post("/api/v1/auth/refresh")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(refreshReq)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("SESSION_EXPIRED"));
         }
     }
 
@@ -493,6 +647,24 @@ class AuthControllerIntegrationTest {
 
         /**
          * TC_AUTH_FP_001 — Full flow: sendOtp → verifyOtp → resetPassword.
+         *
+         * Test Procedure:
+         *   1.  Client         → POST /api/v1/auth/forgot-password with a registered email.
+         *   2.  AuthController → call AuthService.sendPasswordResetOtp().
+         *   3.  AuthService    → retrieve the user account from the database.
+         *   4.  AuthService    → generate a 6-digit OTP and save it to the database.
+         *   5.  AuthService    → send the OTP to the user via EmailService.
+         *   6.  Client         → POST /api/v1/auth/verify-otp with the correct OTP.
+         *   7.  AuthController → call AuthService.verifyOtp().
+         *   8.  AuthService    → retrieve and validate the OTP from the database.
+         *   9.  AuthService    → generate a resetToken and save it to the database.
+         *   10. Client         → POST /api/v1/auth/reset-password with resetToken and new password.
+         *   11. AuthController → call AuthService.resetPassword().
+         *   12. AuthService    → retrieve the account by resetToken from the database.
+         *   13. AuthService    → validate that the token is not expired and not yet used.
+         *   14. AuthService    → save the new password and clear the resetToken.
+         *   15. AuthService    → notify the user via EmailService.
+         *   16. System         → return the success response.
          */
         @Test
         @DisplayName("TC_AUTH_FP_001 — Full forgot-password flow succeeds end-to-end")
@@ -560,6 +732,13 @@ class AuthControllerIntegrationTest {
 
         /**
          * TC_AUTH_FP_002 — Wrong OTP.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/forgot-password — OTP generated and saved.
+         *   2. Client         → POST /api/v1/auth/verify-otp with a wrong OTP.
+         *   3. AuthController → call AuthService.verifyOtp().
+         *   4. AuthService    → retrieve the OTP from the database — value does not match.
+         *   5. System         → return the invalid OTP error response.
          */
         @Test
         @DisplayName("TC_AUTH_FP_002 — Wrong OTP → INVALID_OTP")
@@ -585,6 +764,12 @@ class AuthControllerIntegrationTest {
 
         /**
          * TC_AUTH_FP_003 — Expired OTP.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/verify-otp with a correct but expired OTP.
+         *   2. AuthController → call AuthService.verifyOtp().
+         *   3. AuthService    → retrieve the OTP from the database — found but already expired.
+         *   4. System         → return the OTP expired error response.
          */
         @Test
         @DisplayName("TC_AUTH_FP_003 — Expired OTP → OTP_EXPIRED")
@@ -608,7 +793,13 @@ class AuthControllerIntegrationTest {
         }
 
         /**
-         * TC_AUTH_FP_004 — Reset token invalid → INVALID_TOKEN.
+         * TC_AUTH_FP_004 — Reset token invalid.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/reset-password with a non-existing resetToken.
+         *   2. AuthController → call AuthService.resetPassword().
+         *   3. AuthService    → retrieve the account by resetToken from the database — not found.
+         *   4. System         → return the invalid token error response.
          */
         @Test
         @DisplayName("TC_AUTH_FP_004 — Invalid reset token → INVALID_TOKEN")
@@ -628,9 +819,13 @@ class AuthControllerIntegrationTest {
         }
 
         /**
-         * TC_AUTH_FP_005 — Reset token expired → TOKEN_EXPIRED.
-         * Obtains a real resetToken via forgot-password → verify-otp flow,
-         * then manually expires it in DB before calling reset-password.
+         * TC_AUTH_FP_005 — Reset token expired.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/reset-password with a valid but expired resetToken.
+         *   2. AuthController → call AuthService.resetPassword().
+         *   3. AuthService    → retrieve the account by resetToken from the database — found but token expired.
+         *   4. System         → return the token expired error response.
          */
         @Test
         @DisplayName("TC_AUTH_FP_005 — Expired reset token → TOKEN_EXPIRED")
@@ -684,6 +879,13 @@ class AuthControllerIntegrationTest {
 
         /**
          * TC_AUTH_FP_006 — Reset token is single-use; reuse after successful reset is rejected.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/reset-password with a valid resetToken (first use) — succeeds.
+         *   2. AuthService    → clear the resetToken from the database after the first use.
+         *   3. Client         → POST /api/v1/auth/reset-password with the same resetToken (second use).
+         *   4. AuthService    → retrieve the account by resetToken from the database — not found.
+         *   5. System         → return the invalid token error response.
          */
         @Test
         @DisplayName("TC_AUTH_FP_006 — Reset token single-use: reuse after success → INVALID_TOKEN")
@@ -740,7 +942,12 @@ class AuthControllerIntegrationTest {
         }
 
         /**
-         * TC_AUTH_FP_007 — Weak new password → 400 validation error.
+         * TC_AUTH_FP_007 — Weak new password.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/reset-password with a weak new password.
+         *   2. AuthController → validate the request body — password policy constraint fails.
+         *   3. System         → return the validation error response before reaching AuthService.
          */
         @Test
         @DisplayName("TC_AUTH_FP_007 — Weak new password on reset → 400 validation error")
@@ -759,8 +966,14 @@ class AuthControllerIntegrationTest {
         }
 
         /**
-         * TC_AUTH_FP_008 — Confirm password mismatch on reset → PASSWORD_MISMATCH (MSG18).
-         * Gets a valid resetToken first, then submits mismatched passwords.
+         * TC_AUTH_FP_008 — Confirm password mismatch on reset.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/reset-password with newPassword ≠ confirmPassword.
+         *   2. AuthController → call AuthService.resetPassword().
+         *   3. AuthService    → retrieve the account by resetToken from the database.
+         *   4. AuthService    → detect the password mismatch.
+         *   5. System         → return the password mismatch error response.
          */
         @Test
         @DisplayName("TC_AUTH_FP_008 — Confirm password mismatch on reset → PASSWORD_MISMATCH")
@@ -848,6 +1061,16 @@ class AuthControllerIntegrationTest {
 
         /**
          * TC_AUTH_CP_001 — Successful password change.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/change-password with a valid Bearer token and correct currentPassword.
+         *   2. AuthFilter     → parse the token and resolve the user identity.
+         *   3. AuthController → call AuthService.changePassword().
+         *   4. AuthService    → retrieve the user account from the database.
+         *   5. AuthService    → verify the current password.
+         *   6. AuthService    → save the new password to the database.
+         *   7. AuthService    → notify the user via EmailService.
+         *   8. System         → return the success response.
          */
         @Test
         @DisplayName("TC_AUTH_CP_001 — Change password succeeds, old password no longer works")
@@ -894,9 +1117,16 @@ class AuthControllerIntegrationTest {
 
         /**
          * TC_AUTH_CP_002 — logoutOtherDevices=true revokes all other sessions.
-         * DB check: only current session remains active.
-         * API check: revoked session's refreshToken is rejected with SESSION_EXPIRED.
          *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/change-password with logoutOtherDevices = true.
+         *   2. AuthFilter     → parse the token and resolve the user identity.
+         *   3. AuthController → call AuthService.changePassword().
+         *   4. AuthService    → retrieve the user account from the database.
+         *   5. AuthService    → verify the current password and save the new password.
+         *   6. AuthService    → retrieve all active sessions from the database.
+         *   7. AuthService    → revoke all sessions except the current one.
+         *   8. System         → return the success response.
          */
         @Test
         @DisplayName("TC_AUTH_CP_002 — logoutOtherDevices=true revokes other sessions; revoked refresh rejected")
@@ -943,6 +1173,14 @@ class AuthControllerIntegrationTest {
 
         /**
          * TC_AUTH_CP_003 — Wrong current password.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/change-password with a wrong currentPassword.
+         *   2. AuthFilter     → parse the token and resolve the user identity.
+         *   3. AuthController → call AuthService.changePassword().
+         *   4. AuthService    → retrieve the user account from the database.
+         *   5. AuthService    → fail current password verification.
+         *   6. System         → return the wrong password error response.
          */
         @Test
         @DisplayName("TC_AUTH_CP_003 — Wrong current password → WRONG_PASSWORD")
@@ -968,9 +1206,17 @@ class AuthControllerIntegrationTest {
         /**
          * TC_AUTH_CP_004 — New password identical to current password.
          *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/change-password with newPassword = currentPassword.
+         *   2. AuthFilter     → parse the token and resolve the user identity.
+         *   3. AuthController → call AuthService.changePassword().
+         *   4. AuthService    → retrieve the user account from the database.
+         *   5. AuthService    → verify the current password — passes.
+         *   6. AuthService    → detect that the new password is identical to the current one (BR-59).
+         *   7. System         → return the password reuse error response.
+         *
          * BR-59 is implemented in AuthServiceImpl.changePassword():
-         *   throws BusinessException("PASSWORD_REUSE", "Mật khẩu mới không được trùng với mật khẩu cũ.")
-         * → GlobalExceptionHandler maps BusinessException → HTTP 400.
+         *   throws BusinessException("PASSWORD_REUSE", ...)
          */
         @Test
         @DisplayName("TC_AUTH_CP_004 — New password identical to current password → 400 (MSG16, BR-59)")
@@ -999,6 +1245,13 @@ class AuthControllerIntegrationTest {
 
         /**
          * TC_AUTH_CP_005 — Confirm password mismatch.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/change-password with newPassword ≠ confirmPassword.
+         *   2. AuthFilter     → parse the token and resolve the user identity.
+         *   3. AuthController → call AuthService.changePassword().
+         *   4. AuthService    → detect the password mismatch.
+         *   5. System         → return the password mismatch error response.
          */
         @Test
         @DisplayName("TC_AUTH_CP_005 — Confirm password mismatch → PASSWORD_MISMATCH")
@@ -1021,7 +1274,12 @@ class AuthControllerIntegrationTest {
         }
 
         /**
-         * TC_AUTH_CP_006 — Weak new password → validation error.
+         * TC_AUTH_CP_006 — Weak new password.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/change-password with a weak new password.
+         *   2. AuthController → validate the request body — password policy constraint fails.
+         *   3. System         → return the validation error response before reaching AuthService.
          */
         @Test
         @DisplayName("TC_AUTH_CP_006 — Weak new password → 400 validation error")
@@ -1043,8 +1301,12 @@ class AuthControllerIntegrationTest {
         }
 
         /**
-         * TC_AUTH_CP_007 — Unauthenticated request → 400.
-         * Full filter chain is active in @SpringBootTest, so 400 is returned correctly
+         * TC_AUTH_CP_007 — Unauthenticated request.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/change-password with no Authorization header.
+         *   2. AuthFilter     → find no token — reject the request as unauthenticated.
+         *   3. System         → return the unauthorized error response.
          */
         @Test
         @DisplayName("TC_AUTH_CP_007 — No token → 400 Unauthorized (full filter chain)")
@@ -1063,16 +1325,12 @@ class AuthControllerIntegrationTest {
         }
 
         /**
-         * TC_AUTH_CP_008 — Change password with expired Access Token → 401.
+         * TC_AUTH_CP_008 — Change password with an expired access token.
          *
-         * Steps:
-         *   1. ACTIVE LEARNER already inserted by @BeforeEach (learner@test.com).
-         *   2. Build an expired JWT signed with the same accessTokenKey via
-         *      ReflectionTestUtils (mirrors TC_AUTH_LG_008 pattern).
-         *   3. POST /api/v1/auth/change-password with Authorization: Bearer <expiredToken>
-         *      and a valid body.
-         *   4. Assert HTTP 401 and success = false.
-         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/change-password with an expired Bearer token.
+         *   2. AuthFilter     → parse the token and detect it is expired.
+         *   3. System         → return the unauthorized error response.
          */
         @Test
         @DisplayName("TC_AUTH_CP_008 — Expired Access Token → 401 Unauthorized")
@@ -1135,6 +1393,14 @@ class AuthControllerIntegrationTest {
 
         /**
          * TC_AUTH_LO_001 — Logout revokes the session in DB (revokedAt is set).
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/logout with a valid Bearer token and refreshToken.
+         *   2. AuthFilter     → parse the token and resolve the user identity.
+         *   3. AuthController → call AuthService.logout().
+         *   4. AuthService    → retrieve the session from the database.
+         *   5. AuthService    → set revokedAt on the session.
+         *   6. System         → return the success response.
          */
         @Test
         @DisplayName("TC_AUTH_LO_001 — Logout revokes session in DB (revokedAt set)")
@@ -1177,8 +1443,14 @@ class AuthControllerIntegrationTest {
 
         /**
          * TC_AUTH_LO_002 — logoutAll=true revokes all sessions.
-         * DB check: all sessions have revokedAt set.
-         * API check: refresh tokens from other sessions are rejected.
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/logout with logoutAll = true.
+         *   2. AuthFilter     → parse the token and resolve the user identity.
+         *   3. AuthController → call AuthService.logout().
+         *   4. AuthService    → retrieve all active sessions for the user from the database.
+         *   5. AuthService    → set revokedAt on all sessions.
+         *   6. System         → return the success response.
          */
         @Test
         @DisplayName("TC_AUTH_LO_002 — logoutAll=true revokes all sessions; other refresh tokens rejected")
