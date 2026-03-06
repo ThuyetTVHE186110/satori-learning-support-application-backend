@@ -239,22 +239,37 @@ async def extract_text(request: OcrRequest):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid image data: {exc}")
 
+    img_w, img_h = img.size
+    logger.debug("Image dimensions: %dx%d", img_w, img_h)
+
     # Run both models — each may fail independently
     result_ja = None
     result_vi = None
+    ja_error = None
+    vi_error = None
 
     try:
         result_ja = _ocr_ja.ocr(img_array, cls=True)
     except Exception as exc:
-        logger.exception("Japanese OCR engine error")
+        ja_error = str(exc) or type(exc).__name__
+        logger.exception("Japanese OCR engine error on %dx%d image", img_w, img_h)
 
     try:
         result_vi = _ocr_vi.ocr(img_array, cls=True)
     except Exception as exc:
-        logger.exception("Vietnamese OCR engine error")
+        vi_error = str(exc) or type(exc).__name__
+        logger.exception("Vietnamese OCR engine error on %dx%d image", img_w, img_h)
 
     if result_ja is None and result_vi is None:
-        raise HTTPException(status_code=500, detail="Both OCR engines failed")
+        errors = []
+        if ja_error:
+            errors.append(f"ja: {ja_error}")
+        if vi_error:
+            errors.append(f"vi: {vi_error}")
+        detail = f"Both OCR engines failed on {img_w}x{img_h} image"
+        if errors:
+            detail += f" — {'; '.join(errors)}"
+        raise HTTPException(status_code=500, detail=detail)
 
     ja_lines = _extract_lines(result_ja) if result_ja else []
     vi_lines = _extract_lines(result_vi) if result_vi else []
@@ -264,8 +279,13 @@ async def extract_text(request: OcrRequest):
         merged = _merge_dual_results(ja_lines, vi_lines)
     elif ja_lines:
         merged = [(text, conf) for _, text, conf in ja_lines]
-    else:
+    elif vi_lines:
         merged = [(text, conf) for _, text, conf in vi_lines]
+    else:
+        # Both models returned results but extracted zero lines
+        elapsed_ms = int((time.time() - t0) * 1000)
+        logger.info("OCR: 0 lines from %dx%d image, %dms", img_w, img_h, elapsed_ms)
+        return OcrResponse(text="", confidence=0.0, line_count=0, processing_ms=elapsed_ms)
 
     texts = [t for t, _ in merged]
     confidences = [c for _, c in merged]

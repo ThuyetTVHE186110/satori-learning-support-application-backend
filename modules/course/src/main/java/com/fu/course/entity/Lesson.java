@@ -57,6 +57,7 @@ public class Lesson extends SoftDeletableEntity {
      * Structure varies by lesson type.
      */
     @Column(name = "content", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "CAST(? AS jsonb)")
     private String content;
 
     /**

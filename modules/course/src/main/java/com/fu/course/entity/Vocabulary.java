@@ -58,6 +58,7 @@ public class Vocabulary extends SoftDeletableEntity {
     private String kanjiWriting;
 
     @Column(name = "example_sentences", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "CAST(? AS jsonb)")
     @Builder.Default
     private String exampleSentences = "[]";
 
@@ -77,6 +78,7 @@ public class Vocabulary extends SoftDeletableEntity {
     private String usageNotes;
 
     @Column(name = "common_collocations", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "CAST(? AS jsonb)")
     @Builder.Default
     private String commonCollocations = "[]";
 
