@@ -20,8 +20,16 @@ import java.util.UUID;
 public interface VocabularyRepository extends JpaRepository<Vocabulary, UUID> {
 
     /**
-     * Find vocabulary by japanese text and JLPT level (unique constraint)
+     * Find vocabulary by japanese text and JLPT level, excluding soft-deleted records.
+     * Used by curriculum import deduplication to avoid resurrecting deleted items.
      */
+    Optional<Vocabulary> findByJapaneseTextAndJlptLevelAndDeletedAtIsNull(String japaneseText, JlptLevel jlptLevel);
+
+    /**
+     * Find vocabulary by japanese text and JLPT level (includes soft-deleted).
+     * @deprecated Use {@link #findByJapaneseTextAndJlptLevelAndDeletedAtIsNull} to exclude deleted records.
+     */
+    @Deprecated
     Optional<Vocabulary> findByJapaneseTextAndJlptLevel(String japaneseText, JlptLevel jlptLevel);
 
     /**
@@ -55,6 +63,16 @@ public interface VocabularyRepository extends JpaRepository<Vocabulary, UUID> {
             "JOIN Lesson l ON l.id = lv.lesson.id " +
             "WHERE l.course.id = :courseId AND v.deletedAt IS NULL")
     Page<Vocabulary> findByCourseId(@Param("courseId") UUID courseId, Pageable pageable);
+
+    /**
+     * Find vocabulary linked to a specific import (through lessons with import_id).
+     * This is import-specific — only returns vocab created/linked by THIS import.
+     */
+    @Query("SELECT DISTINCT v FROM Vocabulary v " +
+            "JOIN LessonVocabulary lv ON lv.vocabulary.id = v.id " +
+            "JOIN Lesson l ON l.id = lv.lesson.id " +
+            "WHERE l.importId = :importId AND l.deletedAt IS NULL AND v.deletedAt IS NULL")
+    Page<Vocabulary> findByImportId(@Param("importId") UUID importId, Pageable pageable);
 
     /**
      * Search non-deleted vocabulary by keyword (text, reading, or meaning)
