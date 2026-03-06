@@ -16,7 +16,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Composite provider that calls both SpeechSuper (segmental scoring) and
+ * Composite provider that selects the best available primary provider
+ * (Azure preferred, SpeechSuper fallback) and optionally runs
  * the custom Japanese pronunciation service (pitch accent + mora timing)
  * in parallel. Marked @Primary so Spring injects this wherever
  * PronunciationAssessmentProvider is needed.
@@ -26,16 +27,19 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class CompositePronunciationProvider implements PronunciationAssessmentProvider {
 
+    private final AzureSpeechProvider azureSpeechProvider;
     private final SpeechSuperProvider speechSuperProvider;
     private final JapanesePronunciationProvider japanesePronunciationProvider;
     private final JapanesePronunciationProperties japaneseProperties;
     private final ObjectMapper objectMapper;
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
 
-    public CompositePronunciationProvider(SpeechSuperProvider speechSuperProvider,
+    public CompositePronunciationProvider(AzureSpeechProvider azureSpeechProvider,
+                                          SpeechSuperProvider speechSuperProvider,
                                           JapanesePronunciationProvider japanesePronunciationProvider,
                                           JapanesePronunciationProperties japaneseProperties,
                                           ObjectMapper objectMapper) {
+        this.azureSpeechProvider = azureSpeechProvider;
         this.speechSuperProvider = speechSuperProvider;
         this.japanesePronunciationProvider = japanesePronunciationProvider;
         this.japaneseProperties = japaneseProperties;
@@ -57,15 +61,35 @@ public class CompositePronunciationProvider implements PronunciationAssessmentPr
 
     @Override
     public AssessmentResult assess(AssessmentRequest request) {
-        // Task A: SpeechSuper (segmental scores)
-        CompletableFuture<AssessmentResult> speechSuperFuture = CompletableFuture
-                .supplyAsync(() -> speechSuperProvider.assess(request), executor)
-                .exceptionally(ex -> {
-                    log.error("SpeechSuper assessment failed: {}", ex.getMessage());
-                    return AssessmentResult.failure("SpeechSuper failed: " + ex.getMessage());
-                });
+        // Task A: Primary provider (Azure preferred, SpeechSuper fallback)
+        CompletableFuture<AssessmentResult> primaryFuture;
+        if (azureSpeechProvider.isAvailable()) {
+            log.debug("Using Azure Speech as primary pronunciation provider");
+            primaryFuture = CompletableFuture
+                    .supplyAsync(() -> azureSpeechProvider.assess(request), executor)
+                    .exceptionally(ex -> {
+                        log.error("Azure Speech assessment failed: {}", ex.getMessage());
+                        // Fallback to SpeechSuper if Azure fails and SpeechSuper is available
+                        if (speechSuperProvider.isAvailable()) {
+                            log.info("Falling back to SpeechSuper after Azure failure");
+                            return speechSuperProvider.assess(request);
+                        }
+                        return AssessmentResult.failure("Azure failed: " + ex.getMessage());
+                    });
+        } else if (speechSuperProvider.isAvailable()) {
+            log.debug("Using SpeechSuper as primary pronunciation provider");
+            primaryFuture = CompletableFuture
+                    .supplyAsync(() -> speechSuperProvider.assess(request), executor)
+                    .exceptionally(ex -> {
+                        log.error("SpeechSuper assessment failed: {}", ex.getMessage());
+                        return AssessmentResult.failure("SpeechSuper failed: " + ex.getMessage());
+                    });
+        } else {
+            primaryFuture = CompletableFuture.completedFuture(
+                    AssessmentResult.failure("No pronunciation provider available"));
+        }
 
-        // Task B: Japanese pronunciation (pitch accent + mora timing)
+        // Task B: Japanese pronunciation (pitch accent + mora timing) — parallel
         CompletableFuture<JapaneseAssessmentResult> japaneseFuture;
         if (japaneseProperties.isEnabled() && japanesePronunciationProvider.isAvailable()) {
             japaneseFuture = CompletableFuture
@@ -86,24 +110,24 @@ public class CompositePronunciationProvider implements PronunciationAssessmentPr
         }
 
         // Wait for both
-        CompletableFuture.allOf(speechSuperFuture, japaneseFuture).join();
+        CompletableFuture.allOf(primaryFuture, japaneseFuture).join();
 
-        AssessmentResult speechSuperResult = speechSuperFuture.join();
+        AssessmentResult primaryResult = primaryFuture.join();
         JapaneseAssessmentResult japaneseResult = japaneseFuture.join();
 
         // Merge results
-        return mergeResults(speechSuperResult, japaneseResult);
+        return mergeResults(primaryResult, japaneseResult);
     }
 
     @Override
     public boolean isAvailable() {
-        return speechSuperProvider.isAvailable();
+        return azureSpeechProvider.isAvailable() || speechSuperProvider.isAvailable();
     }
 
-    private AssessmentResult mergeResults(AssessmentResult speechSuper,
+    private AssessmentResult mergeResults(AssessmentResult primary,
                                            JapaneseAssessmentResult japanese) {
-        if (speechSuper == null || !speechSuper.isSuccess()) {
-            // If SpeechSuper failed, still return what we can
+        if (primary == null || !primary.isSuccess()) {
+            // If primary provider failed, still return what we can
             if (japanese != null && japanese.isSuccess()) {
                 return AssessmentResult.builder()
                         .success(true)
@@ -112,26 +136,29 @@ public class CompositePronunciationProvider implements PronunciationAssessmentPr
                         .detailedPronunciationFeedback(serializeFeedback(japanese))
                         .build();
             }
-            return speechSuper != null ? speechSuper : AssessmentResult.failure("Both providers failed");
+            return primary != null ? primary : AssessmentResult.failure("All providers failed");
         }
 
-        // SpeechSuper succeeded; add Japanese scores if available
+        // Primary succeeded; add Japanese scores if available
         if (japanese != null && japanese.isSuccess()) {
             return AssessmentResult.builder()
-                    .success(speechSuper.isSuccess())
-                    .overallScore(speechSuper.getOverallScore())
-                    .accuracyScore(speechSuper.getAccuracyScore())
-                    .fluencyScore(speechSuper.getFluencyScore())
-                    .prosodyScore(speechSuper.getProsodyScore())
-                    .transcribedText(speechSuper.getTranscribedText())
-                    .rawResponse(speechSuper.getRawResponse())
+                    .success(true)
+                    .overallScore(primary.getOverallScore())
+                    .accuracyScore(primary.getAccuracyScore())
+                    .fluencyScore(primary.getFluencyScore())
+                    .prosodyScore(primary.getProsodyScore())
+                    .completenessScore(primary.getCompletenessScore())
+                    .transcribedText(primary.getTranscribedText())
+                    .rawResponse(primary.getRawResponse())
+                    .providerName(primary.getProviderName())
+                    .wordDetails(primary.getWordDetails())
                     .pitchAccentScore(japanese.getPitchAccentScore())
                     .moraTimingScore(japanese.getMoraTimingScore())
                     .detailedPronunciationFeedback(serializeFeedback(japanese))
                     .build();
         }
 
-        return speechSuper;
+        return primary;
     }
 
     private String serializeFeedback(JapaneseAssessmentResult result) {

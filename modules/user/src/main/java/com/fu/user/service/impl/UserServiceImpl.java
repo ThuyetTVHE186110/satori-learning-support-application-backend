@@ -163,15 +163,9 @@ public class UserServiceImpl implements UserService {
     public UserDetailResponse getUserDetailById(UserRole userRole, UUID id) {
 
         log.debug("Fetching detailed user information for id: {}", id);
-        User user = new User();
-        switch (userRole) {
-            case ADMIN:
-                user = findUserByIdIncludingDeleted(id);
-                break;
-            default:
-                user = findUserById(id);
-                break;
-        }
+        User user = userRole == UserRole.ADMIN
+                ? findUserByIdIncludingDeleted(id)
+                : findUserById(id);
         if (userRole == UserRole.MANAGER && user.getRole() == UserRole.MANAGER) {
             throw new BusinessException("FORBIDDEN", "Bạn không có quyền xem chi tiết tài khoản Manager/Admin");
         }
@@ -271,16 +265,10 @@ public class UserServiceImpl implements UserService {
     @Transactional
     public UserResponse updateUser(UUID id, UpdateUserRequest request, UUID updatedByUserId, UserRole updaterRole) {
         log.info("User {} (role: {}) updating user with id: {}", updatedByUserId, updaterRole, id);
-        User user = new User();
         // Find user based on updater role
-        switch (updaterRole) {
-            case ADMIN:
-                user = findUserByIdIncludingDeleted(id);
-                break;
-            default:
-                user = findUserById(id);
-                break;
-        }
+        User user = updaterRole == UserRole.ADMIN
+                ? findUserByIdIncludingDeleted(id)
+                : findUserById(id);
         // Validate user is not deleted
         if (user.getDeletedAt() != null) {
             throw new BusinessException("USER_DELETED", "Không thể chỉnh sửa tài khoản đã bị xóa");

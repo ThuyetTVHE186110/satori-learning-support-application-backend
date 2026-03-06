@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.util.LlmResponseUtils;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
@@ -30,11 +29,15 @@ import java.util.Map;
  */
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class ContentClassifierAgent {
 
-    private final OpenAiChatModel chatModel;
+    private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
+
+    public ContentClassifierAgent(OpenAiChatModel chatModel, ObjectMapper objectMapper) {
+        this.chatClient = ChatClient.builder(chatModel).build();
+        this.objectMapper = objectMapper;
+    }
 
     private static final String SYSTEM_PROMPT = """
             You are a Japanese language textbook content classifier.
@@ -82,7 +85,6 @@ public class ContentClassifierAgent {
                     chunk.getPageStart(), chunk.getPageEnd(),
                     truncateForClassification(chunk.getContent()));
 
-            ChatClient chatClient = ChatClient.builder(chatModel).build();
             String response = chatClient.prompt()
                     .system(SYSTEM_PROMPT)
                     .user(userPrompt)

@@ -52,14 +52,11 @@ public class PdfIngestionService {
             // Extract text page by page
             PDFTextStripper stripper = new PDFTextStripper();
             List<String> pageTexts = new ArrayList<>();
-            StringBuilder fullText = new StringBuilder();
 
             for (int i = 1; i <= totalPages; i++) {
                 stripper.setStartPage(i);
                 stripper.setEndPage(i);
-                String pageText = stripper.getText(document).trim();
-                pageTexts.add(pageText);
-                fullText.append(pageText).append("\n\n");
+                pageTexts.add(stripper.getText(document).trim());
             }
 
             // Create chunks
@@ -70,7 +67,7 @@ public class PdfIngestionService {
 
             return DocumentParseResult.builder()
                     .totalPages(totalPages)
-                    .fullText(fullText.toString())
+                    .fullText(String.join("\n\n", pageTexts))
                     .pageTexts(pageTexts)
                     .chunks(chunks)
                     .build();

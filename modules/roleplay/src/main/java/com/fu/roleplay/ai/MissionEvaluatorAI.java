@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.roleplay.entity.ConversationMessage;
 import com.fu.roleplay.entity.SessionMission;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
@@ -16,7 +15,6 @@ import java.util.Map;
 
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class MissionEvaluatorAI {
 
     private static final String MISSION_EVAL_SYSTEM_PROMPT = """
@@ -38,8 +36,13 @@ public class MissionEvaluatorAI {
 
     private static final int MAX_EVAL_MESSAGES = 20;
 
-    private final OpenAiChatModel chatModel;
+    private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
+
+    public MissionEvaluatorAI(OpenAiChatModel chatModel, ObjectMapper objectMapper) {
+        this.chatClient = ChatClient.builder(chatModel).build();
+        this.objectMapper = objectMapper;
+    }
 
     public List<MissionProgress> evaluateProgress(List<ConversationMessage> history,
                                                    String latestMessage,
@@ -69,7 +72,6 @@ public class MissionEvaluatorAI {
                         .append(", Current Progress: ").append(m.getProgressPct()).append("%\n");
             }
 
-            ChatClient chatClient = ChatClient.builder(chatModel).build();
             String rawResponse = chatClient.prompt()
                     .system(MISSION_EVAL_SYSTEM_PROMPT)
                     .user(userPrompt.toString())
