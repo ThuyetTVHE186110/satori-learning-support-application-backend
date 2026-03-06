@@ -194,8 +194,13 @@ class CourseManagementTest {
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     @BeforeEach
-    void resetCloudinaryMock() {
+    void setUp() {
         Mockito.reset(cloudinaryService);
+        // Clean up any leftover data from a previously-failed test
+        lessonRepository.deleteAll();
+        courseRepository.deleteAll();
+        sessionRepository.deleteAll();
+        userRepository.deleteAll();
     }
 
     @AfterEach

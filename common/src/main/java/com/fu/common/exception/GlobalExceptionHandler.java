@@ -12,6 +12,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -78,6 +79,28 @@ public class GlobalExceptionHandler {
             }
         }
         log.warn("Message not readable: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.error("VALIDATION_ERROR", message));
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMethodArgumentTypeMismatch(
+            MethodArgumentTypeMismatchException ex) {
+        String message = "Invalid value";
+        Class<?> requiredType = ex.getRequiredType();
+        if (requiredType != null && requiredType.isEnum()) {
+            Object[] enumConstants = requiredType.getEnumConstants();
+            String validValues = java.util.Arrays.stream(enumConstants)
+                    .map(Object::toString)
+                    .collect(java.util.stream.Collectors.joining(", "));
+            message = String.format("Invalid value '%s'. Accepted values: [%s]",
+                    ex.getValue(), validValues);
+        } else {
+            message = String.format("Invalid value '%s' for parameter '%s'",
+                    ex.getValue(), ex.getName());
+        }
+        log.warn("Type mismatch: {}", message);
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.error("VALIDATION_ERROR", message));

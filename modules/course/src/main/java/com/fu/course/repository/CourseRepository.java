@@ -21,9 +21,14 @@ import java.util.UUID;
 public interface CourseRepository extends JpaRepository<Course, UUID> {
 
     /**
-     * Find all non-deleted courses
+     * Find all non-deleted courses (list)
      */
     List<Course> findByDeletedAtIsNull();
+
+    /**
+     * Find all non-deleted courses (paginated)
+     */
+    Page<Course> findByDeletedAtIsNull(Pageable pageable);
 
     /**
      * Find course by ID (non-deleted)
