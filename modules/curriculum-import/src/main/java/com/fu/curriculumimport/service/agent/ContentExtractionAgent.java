@@ -3,6 +3,7 @@ package com.fu.curriculumimport.service.agent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.RequiredArgsConstructor;
@@ -112,20 +113,23 @@ public class ContentExtractionAgent {
             """;
 
     /**
-     * Extract structured content from a document chunk using AI.
+     * Extract structured content from a document chunk using AI, with optional RAG context.
      *
      * @param chunk      the document chunk to process
      * @param jlptLevel  the target JLPT level for the course (hint)
+     * @param ragContext optional RAG context with previously extracted similar items
      * @return extraction result with vocabulary, grammar, and lessons
      */
-    public ExtractionResult extractContent(DocumentChunk chunk, String jlptLevel) {
+    public ExtractionResult extractContent(DocumentChunk chunk, String jlptLevel, RagContext ragContext) {
         long startTime = System.currentTimeMillis();
 
         try {
+            String ragSection = formatRagContext(ragContext);
             String userPrompt = String.format(EXTRACTION_PROMPT,
                     chunk.getPageStart(), chunk.getPageEnd(),
                     chunk.getContent(),
-                    chunk.getPageStart(), chunk.getPageEnd());
+                    chunk.getPageStart(), chunk.getPageEnd())
+                    + ragSection;
 
             ChatClient chatClient = ChatClient.builder(chatModel).build();
             String response = chatClient.prompt()
@@ -152,6 +156,17 @@ public class ContentExtractionAgent {
                     .grammarPoints(Collections.emptyList())
                     .build();
         }
+    }
+
+    /**
+     * Extract structured content from a document chunk using AI (no RAG context).
+     *
+     * @param chunk      the document chunk to process
+     * @param jlptLevel  the target JLPT level for the course (hint)
+     * @return extraction result with vocabulary, grammar, and lessons
+     */
+    public ExtractionResult extractContent(DocumentChunk chunk, String jlptLevel) {
+        return extractContent(chunk, jlptLevel, null);
     }
 
     /**
@@ -208,5 +223,19 @@ public class ContentExtractionAgent {
             log.warn("Failed to parse field '{}': {}", field, e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Format RAG context (existing similar content) as additional prompt text.
+     */
+    private String formatRagContext(RagContext ragContext) {
+        if (ragContext == null || !ragContext.hasContext()) return "";
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n\nEXISTING CONTENT ALREADY IN DATABASE (avoid duplicates, maintain consistency):\n");
+        for (RagContext.SimilarItem item : ragContext.getSimilarItems()) {
+            sb.append("- [").append(item.getContentType()).append("] ")
+                    .append(item.getTextContent()).append("\n");
+        }
+        return sb.toString();
     }
 }

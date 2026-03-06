@@ -49,7 +49,7 @@ public class ImportItemPersistenceHelper {
             JlptLevel level = parseJlptLevel(ev.getJlptLevel());
 
             return vocabularyRepository
-                    .findByJapaneseTextAndJlptLevel(ev.getJapaneseText(), level)
+                    .findByJapaneseTextAndJlptLevelAndDeletedAtIsNull(ev.getJapaneseText(), level)
                     .orElseGet(() -> vocabularyRepository.save(Vocabulary.builder()
                             .japaneseText(ev.getJapaneseText())
                             .reading(ev.getReading())
@@ -79,7 +79,7 @@ public class ImportItemPersistenceHelper {
             JlptLevel level = parseJlptLevel(eg.getJlptLevel());
 
             return grammarPointRepository
-                    .findByPatternAndJlptLevel(eg.getPattern(), level)
+                    .findByPatternAndJlptLevelAndDeletedAtIsNull(eg.getPattern(), level)
                     .orElseGet(() -> grammarPointRepository.save(GrammarPoint.builder()
                             .pattern(eg.getPattern())
                             .patternReading(eg.getPatternReading())

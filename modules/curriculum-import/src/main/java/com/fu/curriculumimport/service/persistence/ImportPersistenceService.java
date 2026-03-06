@@ -136,8 +136,43 @@ public class ImportPersistenceService {
                 }
             }
 
-            // 3. Persist lessons and link vocab/grammar to them
-            for (ExtractionResult.ExtractedLesson el : result.getLessons()) {
+            // 3. Build the list of lessons to persist.
+            //    If the extraction result has explicit lessons, use them.
+            //    Otherwise, auto-generate a lesson per chunk so that
+            //    vocabulary/grammar items are always linked to a lesson
+            //    (VocabularyExtractionAgent and GrammarExtractionAgent return
+            //    empty lesson lists — this fallback ensures content is visible
+            //    via the course → lesson → vocab/grammar joins).
+            List<ExtractionResult.ExtractedLesson> lessonsToCreate = result.getLessons();
+
+            if ((lessonsToCreate == null || lessonsToCreate.isEmpty())
+                    && (!persistedVocab.isEmpty() || !persistedGrammar.isEmpty())
+                    && course != null) {
+
+                String autoTitle = buildAutoLessonTitle(result, importEntity);
+                String autoType = !persistedGrammar.isEmpty() && persistedVocab.isEmpty()
+                        ? "GRAMMAR"
+                        : !persistedVocab.isEmpty() && persistedGrammar.isEmpty()
+                                ? "VOCABULARY"
+                                : "MIXED";
+
+                ExtractionResult.ExtractedLesson autoLesson = ExtractionResult.ExtractedLesson.builder()
+                        .title(autoTitle)
+                        .description("Auto-generated lesson from imported content (chunk "
+                                + result.getChunkIndex() + ")")
+                        .lessonType(autoType)
+                        .orderIndex(result.getChunkIndex())
+                        .pageStart(0)
+                        .pageEnd(0)
+                        .build();
+
+                lessonsToCreate = List.of(autoLesson);
+                log.info("Auto-generated lesson '{}' for chunk {} (no explicit lesson from extraction agent)",
+                        autoTitle, result.getChunkIndex());
+            }
+
+            // 4. Persist lessons and link vocab/grammar to them
+            for (ExtractionResult.ExtractedLesson el : lessonsToCreate) {
                 if (course == null) continue;
 
                 Lesson lesson = Lesson.builder()
@@ -226,6 +261,30 @@ public class ImportPersistenceService {
         }
         log.info("Soft-deleted {} lessons (cleaned up join records for {}) for import {}",
                 lessons.size(), joinRecordsRemoved, importId);
+    }
+
+    /**
+     * Build a human-readable lesson title from the extraction result.
+     * E.g. "Vocabulary — Chunk 3 (Mina N5.pdf)"
+     */
+    private String buildAutoLessonTitle(ExtractionResult result, CurriculumImport importEntity) {
+        String typeLabel;
+        if (!result.getGrammarPoints().isEmpty() && result.getVocabulary().isEmpty()) {
+            typeLabel = "Grammar";
+        } else if (!result.getVocabulary().isEmpty() && result.getGrammarPoints().isEmpty()) {
+            typeLabel = "Vocabulary";
+        } else {
+            typeLabel = "Mixed Content";
+        }
+
+        String fileName = importEntity.getOriginalFilename() != null
+                ? importEntity.getOriginalFilename() : "import";
+        // Truncate filename if too long
+        if (fileName.length() > 40) {
+            fileName = fileName.substring(0, 37) + "...";
+        }
+
+        return String.format("%s — Chunk %d (%s)", typeLabel, result.getChunkIndex(), fileName);
     }
 
     private Lesson.LessonType parseLessonType(String type) {
