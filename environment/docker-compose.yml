@@ -77,9 +77,9 @@ services:
             - redis
 
     # ==================== PaddleOCR Microservice ====================
-    # Handles scanned PDF OCR for Japanese text extraction (PaddleOCR 3.0)
+    # Dual-language OCR for Japanese + Vietnamese text extraction (PaddleOCR 3.0)
     # Built from environment/docker/ocr-service/
-    # First start downloads Japanese model weights (~2-3 min); subsequent starts
+    # First start downloads both model weights (~3-5 min); subsequent starts
     # are fast because weights are cached in the named volume below.
     ocr-service:
         build:
@@ -87,8 +87,6 @@ services:
             dockerfile: Dockerfile
         container_name: satori-ocr
         restart: unless-stopped
-        environment:
-            MODEL_LANG: ${OCR_MODEL_LANG:-japan}
         ports:
             - "8090:8090"
         volumes:
@@ -97,20 +95,21 @@ services:
         networks:
             - satori-network
         # OCR is CPU-heavy; cap resources so other services aren't starved
+        # 4G needed for two PaddleOCR models (japan + vi) loaded simultaneously
         deploy:
             resources:
                 limits:
-                    memory: 3G
+                    memory: 4G
                     cpus: "2.0"
                 reservations:
-                    memory: 1G
+                    memory: 1.5G
         healthcheck:
             test:
                 ["CMD-SHELL", "curl -sf http://localhost:8090/health || exit 1"]
             interval: 30s
             timeout: 10s
             retries: 5
-            start_period: 180s # Allow time for model download on first start
+            start_period: 240s # Allow time for dual model download on first start
 
     # ==================== Japanese Pronunciation Assessment Microservice ====================
     # Assesses pitch accent and mora timing for Japanese speech using pyopenjtalk + librosa.
@@ -154,5 +153,5 @@ volumes:
         name: satori-redis-data
     ocr_model_cache:
         name: satori-ocr-model-cache
-        # Stores PaddleOCR Japanese model weights (~300 MB).
+        # Stores PaddleOCR Japanese + Vietnamese model weights (~600 MB).
         # Remove with: docker volume rm satori-ocr-model-cache

@@ -7,6 +7,7 @@ import com.fu.curriculumimport.config.AgenticRagProperties;
 import com.fu.curriculumimport.service.agent.ReflectionResult.ItemReflection;
 import com.fu.curriculumimport.service.agent.ReflectionResult.ReflectionVerdict;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
+import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -161,7 +162,7 @@ public class SelfReflectionAgent {
      */
     private ReflectionResult parseReflectionResponse(String jsonResponse) {
         try {
-            String cleaned = cleanJson(jsonResponse);
+            String cleaned = LlmResponseUtils.cleanJson(jsonResponse);
             Map<String, Object> parsed = objectMapper.readValue(cleaned, new TypeReference<>() {});
 
             // Parse verdict
@@ -210,7 +211,7 @@ public class SelfReflectionAgent {
             sb.append("VOCABULARY ITEMS:\n");
             for (ExtractionResult.ExtractedVocabulary vocab : result.getVocabulary()) {
                 sb.append(String.format("- %s (%s) [%s]: %s / %s [%s]\n",
-                        vocab.getJapaneseText(),
+                        vocab.getJapaneseText() != null ? vocab.getJapaneseText() : "?",
                         vocab.getReading() != null ? vocab.getReading() : "?",
                         vocab.getRomaji() != null ? vocab.getRomaji() : "?",
                         vocab.getMeaningVi() != null ? vocab.getMeaningVi() : "?",
@@ -223,7 +224,7 @@ public class SelfReflectionAgent {
             sb.append("GRAMMAR POINTS:\n");
             for (ExtractionResult.ExtractedGrammar grammar : result.getGrammarPoints()) {
                 sb.append(String.format("- %s: %s / %s — %s\n",
-                        grammar.getPattern(),
+                        grammar.getPattern() != null ? grammar.getPattern() : "?",
                         grammar.getMeaningVi() != null ? grammar.getMeaningVi() : "?",
                         grammar.getMeaningEn() != null ? grammar.getMeaningEn() : "?",
                         grammar.getShortExplanation() != null ? grammar.getShortExplanation() : "?"));
@@ -299,13 +300,5 @@ public class SelfReflectionAgent {
                 .combinedVerdict(ReflectionResult.CombinedVerdict.GOOD)
                 .needsReExtraction(false)
                 .build();
-    }
-
-    private String cleanJson(String json) {
-        String cleaned = json.strip();
-        if (cleaned.startsWith("```json")) cleaned = cleaned.substring(7);
-        if (cleaned.startsWith("```")) cleaned = cleaned.substring(3);
-        if (cleaned.endsWith("```")) cleaned = cleaned.substring(0, cleaned.length() - 3);
-        return cleaned.strip();
     }
 }

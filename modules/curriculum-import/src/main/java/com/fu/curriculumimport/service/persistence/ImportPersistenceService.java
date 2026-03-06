@@ -1,11 +1,6 @@
 package com.fu.curriculumimport.service.persistence;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.course.entity.*;
-import com.fu.course.entity.Course.JlptLevel;
-import com.fu.course.entity.Course.ContentStatus;
-import com.fu.course.entity.GrammarPoint.GrammarCategory;
 import com.fu.course.repository.*;
 import com.fu.curriculumimport.entity.CurriculumImport;
 import com.fu.curriculumimport.entity.ImportChunk;
@@ -31,6 +26,11 @@ import java.util.UUID;
  *
  * By placing these methods in a separate @Service bean, Spring correctly
  * creates a proxy and all @Transactional annotations work as expected.
+ *
+ * Individual item persistence (vocabulary, grammar, lesson-links) is delegated
+ * to ImportItemPersistenceHelper which runs each operation in its own
+ * REQUIRES_NEW transaction — preventing the PostgreSQL "current transaction
+ * is aborted" cascade error.
  */
 @Service
 @Slf4j
@@ -41,11 +41,9 @@ public class ImportPersistenceService {
     private final ImportChunkRepository chunkRepository;
     private final CourseRepository courseRepository;
     private final LessonRepository lessonRepository;
-    private final VocabularyRepository vocabularyRepository;
-    private final GrammarPointRepository grammarPointRepository;
     private final LessonVocabularyRepository lessonVocabularyRepository;
     private final LessonGrammarRepository lessonGrammarRepository;
-    private final ObjectMapper objectMapper;
+    private final ImportItemPersistenceHelper itemHelper;
 
     /**
      * Persist document chunks to the database.
@@ -95,15 +93,19 @@ public class ImportPersistenceService {
      * Persist all extracted content (lessons, vocabulary, grammar) to the DB.
      * Handles deduplication for vocabulary and grammar by unique constraints.
      *
+     * Each lesson, vocabulary item, and grammar point is persisted in its own
+     * isolated transaction via ImportItemPersistenceHelper (REQUIRES_NEW).
+     * If one item fails, the rest continue processing normally.
+     *
      * @param importEntity the parent import
      * @param results      list of extraction results from all chunks
      */
-    @Transactional
     public void persistExtractedContent(CurriculumImport importEntity,
                                          List<ExtractionResult> results) {
         int lessonsCount = 0;
         int vocabCount = 0;
         int grammarCount = 0;
+        int failedItems = 0;
 
         Course course = null;
         if (importEntity.getCourseId() != null) {
@@ -111,7 +113,30 @@ public class ImportPersistenceService {
         }
 
         for (ExtractionResult result : results) {
-            // Persist lessons
+
+            // 1. Persist vocabulary independently (not tied to lesson existence)
+            List<Vocabulary> persistedVocab = new ArrayList<>();
+            for (ExtractionResult.ExtractedVocabulary ev : result.getVocabulary()) {
+                Vocabulary vocab = itemHelper.findOrCreateVocabulary(ev, importEntity.getCreatedBy());
+                if (vocab != null) {
+                    persistedVocab.add(vocab);
+                } else {
+                    failedItems++;
+                }
+            }
+
+            // 2. Persist grammar independently (not tied to lesson existence)
+            List<GrammarPoint> persistedGrammar = new ArrayList<>();
+            for (ExtractionResult.ExtractedGrammar eg : result.getGrammarPoints()) {
+                GrammarPoint grammar = itemHelper.findOrCreateGrammarPoint(eg, importEntity.getCreatedBy());
+                if (grammar != null) {
+                    persistedGrammar.add(grammar);
+                } else {
+                    failedItems++;
+                }
+            }
+
+            // 3. Persist lessons and link vocab/grammar to them
             for (ExtractionResult.ExtractedLesson el : result.getLessons()) {
                 if (course == null) continue;
 
@@ -132,54 +157,49 @@ public class ImportPersistenceService {
                         .status(Lesson.ContentStatus.DRAFT)
                         .build();
 
-                Lesson savedLesson = lessonRepository.save(lesson);
+                Lesson savedLesson = itemHelper.saveLesson(lesson);
+                if (savedLesson == null) {
+                    log.warn("Skipping lesson '{}' — failed to save", el.getTitle());
+                    failedItems++;
+                    continue;
+                }
                 lessonsCount++;
 
-                // Link vocabulary
+                // Link already-persisted vocabulary to lesson
                 int vocabOrder = 0;
-                for (ExtractionResult.ExtractedVocabulary ev : result.getVocabulary()) {
-                    Vocabulary vocab = findOrCreateVocabulary(ev, importEntity.getCreatedBy());
-                    if (vocab != null) {
-                        if (!lessonVocabularyRepository.existsByLessonIdAndVocabularyId(
-                                savedLesson.getId(), vocab.getId())) {
-                            LessonVocabulary lv = LessonVocabulary.builder()
-                                    .lesson(savedLesson)
-                                    .vocabulary(vocab)
-                                    .orderIndex(vocabOrder++)
-                                    .isKeyWord(ev.isKeyWord())
-                                    .build();
-                            lessonVocabularyRepository.save(lv);
-                        }
-                    }
+                for (int i = 0; i < persistedVocab.size(); i++) {
+                    Vocabulary vocab = persistedVocab.get(i);
+                    boolean isKeyWord = i < result.getVocabulary().size()
+                            && result.getVocabulary().get(i).isKeyWord();
+                    boolean linked = itemHelper.linkVocabularyToLesson(
+                            savedLesson.getId(), vocab, vocabOrder++, isKeyWord);
+                    if (!linked) failedItems++;
                 }
 
-                // Link grammar
+                // Link already-persisted grammar to lesson
                 int grammarOrder = 0;
-                for (ExtractionResult.ExtractedGrammar eg : result.getGrammarPoints()) {
-                    GrammarPoint grammar = findOrCreateGrammarPoint(eg, importEntity.getCreatedBy());
-                    if (grammar != null) {
-                        if (!lessonGrammarRepository.existsByLessonIdAndGrammarPointId(
-                                savedLesson.getId(), grammar.getId())) {
-                            LessonGrammar lg = LessonGrammar.builder()
-                                    .lesson(savedLesson)
-                                    .grammarPoint(grammar)
-                                    .orderIndex(grammarOrder++)
-                                    .isKeyPoint(eg.isKeyPoint())
-                                    .build();
-                            lessonGrammarRepository.save(lg);
-                        }
-                    }
+                for (int i = 0; i < persistedGrammar.size(); i++) {
+                    GrammarPoint grammar = persistedGrammar.get(i);
+                    boolean isKeyPoint = i < result.getGrammarPoints().size()
+                            && result.getGrammarPoints().get(i).isKeyPoint();
+                    boolean linked = itemHelper.linkGrammarToLesson(
+                            savedLesson.getId(), grammar, grammarOrder++, isKeyPoint);
+                    if (!linked) failedItems++;
                 }
             }
 
-            vocabCount += result.getVocabulary().size();
-            grammarCount += result.getGrammarPoints().size();
+            vocabCount += persistedVocab.size();
+            grammarCount += persistedGrammar.size();
+        }
+
+        if (failedItems > 0) {
+            log.warn("Import {} completed with {} failed items", importEntity.getId(), failedItems);
         }
 
         importEntity.setLessonsCreated(lessonsCount);
         importEntity.setVocabularyCreated(vocabCount);
         importEntity.setGrammarPointsCreated(grammarCount);
-        importRepository.save(importEntity);
+        updateImportProgress(importEntity);
     }
 
     /**
@@ -208,85 +228,11 @@ public class ImportPersistenceService {
                 lessons.size(), joinRecordsRemoved, importId);
     }
 
-    /**
-     * Find existing vocabulary or create new one (dedup by japanese_text + jlpt_level).
-     */
-    private Vocabulary findOrCreateVocabulary(ExtractionResult.ExtractedVocabulary ev, UUID createdBy) {
-        try {
-            JlptLevel level = JlptLevel.valueOf(ev.getJlptLevel() != null ? ev.getJlptLevel() : "N5");
-
-            return vocabularyRepository
-                    .findByJapaneseTextAndJlptLevel(ev.getJapaneseText(), level)
-                    .orElseGet(() -> vocabularyRepository.save(Vocabulary.builder()
-                            .japaneseText(ev.getJapaneseText())
-                            .reading(ev.getReading())
-                            .romaji(ev.getRomaji())
-                            .meaningVi(ev.getMeaningVi())
-                            .meaningEn(ev.getMeaningEn())
-                            .partOfSpeech(ev.getPartOfSpeech())
-                            .jlptLevel(level)
-                            .kanjiWriting(ev.getKanjiWriting())
-                            .exampleSentences(serializeJson(ev.getExampleSentences()))
-                            .status(ContentStatus.DRAFT)
-                            .createdBy(createdBy)
-                            .build()));
-        } catch (Exception e) {
-            log.warn("Failed to persist vocabulary '{}': {}", ev.getJapaneseText(), e.getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * Find existing grammar point or create new one (dedup by pattern + jlpt_level).
-     */
-    private GrammarPoint findOrCreateGrammarPoint(ExtractionResult.ExtractedGrammar eg, UUID createdBy) {
-        try {
-            JlptLevel level = JlptLevel.valueOf(eg.getJlptLevel() != null ? eg.getJlptLevel() : "N5");
-
-            return grammarPointRepository
-                    .findByPatternAndJlptLevel(eg.getPattern(), level)
-                    .orElseGet(() -> grammarPointRepository.save(GrammarPoint.builder()
-                            .pattern(eg.getPattern())
-                            .patternReading(eg.getPatternReading())
-                            .meaningVi(eg.getMeaningVi())
-                            .meaningEn(eg.getMeaningEn())
-                            .shortExplanation(eg.getShortExplanation())
-                            .detailedExplanation(eg.getDetailedExplanation())
-                            .jlptLevel(level)
-                            .category(parseGrammarCategory(eg.getCategory()))
-                            .exampleSentences(serializeJson(eg.getExampleSentences()))
-                            .commonMistakes(serializeJson(eg.getCommonMistakes()))
-                            .status(ContentStatus.DRAFT)
-                            .createdBy(createdBy)
-                            .build()));
-        } catch (Exception e) {
-            log.warn("Failed to persist grammar '{}': {}", eg.getPattern(), e.getMessage());
-            return null;
-        }
-    }
-
     private Lesson.LessonType parseLessonType(String type) {
         try {
             return Lesson.LessonType.valueOf(type);
         } catch (Exception e) {
             return Lesson.LessonType.MIXED;
-        }
-    }
-
-    private GrammarCategory parseGrammarCategory(String category) {
-        try {
-            return GrammarCategory.valueOf(category);
-        } catch (Exception e) {
-            return GrammarCategory.OTHER;
-        }
-    }
-
-    private String serializeJson(Object obj) {
-        if (obj == null) return "[]";
-        try {
-            return objectMapper.writeValueAsString(obj);
-        } catch (JsonProcessingException e) {
-            return "[]";
         }
     }
 }

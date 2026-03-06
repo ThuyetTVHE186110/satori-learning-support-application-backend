@@ -18,6 +18,7 @@ import com.fu.curriculumimport.repository.CurriculumImportRepository;
 import com.fu.curriculumimport.repository.ImportChunkRepository;
 import com.fu.curriculumimport.service.CurriculumImportService;
 import com.fu.curriculumimport.service.embedding.EmbeddingService;
+import com.fu.curriculumimport.service.ingestion.InMemoryMultipartFile;
 import com.fu.curriculumimport.service.orchestrator.ImportOrchestrator;
 import com.fu.curriculumimport.service.persistence.ImportPersistenceService;
 import lombok.RequiredArgsConstructor;
@@ -27,8 +28,11 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
@@ -85,8 +89,23 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
         CurriculumImport saved = importRepository.save(importEntity);
         log.info("Import record created: {}", saved.getId());
 
-        // Trigger async processing
-        orchestrator.processImportAsync(saved.getId(), file);
+        // Snapshot file bytes NOW — Spring's temp file backing the MultipartFile
+        // will be deleted when the HTTP request completes, but the @Async executor
+        // runs on a different thread AFTER the request is done.
+        final InMemoryMultipartFile snapshot;
+        try {
+            snapshot = InMemoryMultipartFile.from(file);
+        } catch (IOException e) {
+            throw new InvalidImportFileException("Failed to read uploaded file: " + e.getMessage());
+        }
+
+        // Trigger async processing AFTER transaction commits to avoid race condition
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                orchestrator.processImportAsync(saved.getId(), snapshot);
+            }
+        });
 
         CurriculumImportResponse response = importMapper.toResponse(saved);
         response.setCourseName(courseName);

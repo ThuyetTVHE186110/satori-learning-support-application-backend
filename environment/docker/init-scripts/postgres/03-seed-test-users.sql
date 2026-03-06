@@ -22,7 +22,7 @@ INSERT INTO user_management.users (
 ) VALUES (
     'a0000000-0000-0000-0000-000000000001',
     'admin@test.satori.com',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqBuBNO7SxaU8JGzPM2AOuLkSzKWe', -- Password123!
+    '$2a$12$wXFj.DR15CKPFTyhwFL.XuV8JvVqvnTPSIK3E8w0WTNC5omj9Lzp2', -- Password123!
     'Admin',
     'System',
     'System Admin',
@@ -43,7 +43,7 @@ INSERT INTO user_management.users (
 ) VALUES (
     'a0000000-0000-0000-0000-000000000002',
     'manager@test.satori.com',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqBuBNO7SxaU8JGzPM2AOuLkSzKWe', -- Password123!
+    '$2a$12$wXFj.DR15CKPFTyhwFL.XuV8JvVqvnTPSIK3E8w0WTNC5omj9Lzp2', -- Password123!
     'Manager',
     'Test',
     'Test Manager',
@@ -65,7 +65,7 @@ INSERT INTO user_management.users (
 ) VALUES (
     'a0000000-0000-0000-0000-000000000003',
     'teacher@test.satori.com',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqBuBNO7SxaU8JGzPM2AOuLkSzKWe', -- Password123!
+    '$2a$12$wXFj.DR15CKPFTyhwFL.XuV8JvVqvnTPSIK3E8w0WTNC5omj9Lzp2', -- Password123!
     'Tanaka',
     'Sensei',
     'Tanaka Sensei',
@@ -90,7 +90,7 @@ INSERT INTO user_management.users (
 ) VALUES (
     'a0000000-0000-0000-0000-000000000004',
     'learner1@test.satori.com',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqBuBNO7SxaU8JGzPM2AOuLkSzKWe', -- Password123!
+    '$2a$12$wXFj.DR15CKPFTyhwFL.XuV8JvVqvnTPSIK3E8w0WTNC5omj9Lzp2', -- Password123!
     'Nguyen',
     'Van A',
     'Nguyen Van A',
@@ -115,7 +115,7 @@ INSERT INTO user_management.users (
 ) VALUES (
     'a0000000-0000-0000-0000-000000000005',
     'learner2@test.satori.com',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqBuBNO7SxaU8JGzPM2AOuLkSzKWe', -- Password123!
+    '$2a$12$wXFj.DR15CKPFTyhwFL.XuV8JvVqvnTPSIK3E8w0WTNC5omj9Lzp2', -- Password123!
     'Tran',
     'Thi B',
     'Tran Thi B',
@@ -141,7 +141,7 @@ INSERT INTO user_management.users (
 ) VALUES (
     'a0000000-0000-0000-0000-000000000006',
     'suspended@test.satori.com',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqBuBNO7SxaU8JGzPM2AOuLkSzKWe', -- Password123!
+    '$2a$12$wXFj.DR15CKPFTyhwFL.XuV8JvVqvnTPSIK3E8w0WTNC5omj9Lzp2', -- Password123!
     'Suspended',
     'User',
     'Suspended User',
@@ -162,7 +162,7 @@ INSERT INTO user_management.users (
 ) VALUES (
     'a0000000-0000-0000-0000-000000000007',
     'inactive@test.satori.com',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqBuBNO7SxaU8JGzPM2AOuLkSzKWe', -- Password123!
+    '$2a$12$wXFj.DR15CKPFTyhwFL.XuV8JvVqvnTPSIK3E8w0WTNC5omj9Lzp2', -- Password123!
     'Inactive',
     'User',
     'Inactive User',
@@ -183,7 +183,7 @@ INSERT INTO user_management.users (
 ) VALUES (
     'a0000000-0000-0000-0000-000000000008',
     'pending@test.satori.com',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqBuBNO7SxaU8JGzPM2AOuLkSzKWe', -- Password123!
+    '$2a$12$wXFj.DR15CKPFTyhwFL.XuV8JvVqvnTPSIK3E8w0WTNC5omj9Lzp2', -- Password123!
     'Pending',
     'User',
     'Pending User',
@@ -204,7 +204,7 @@ INSERT INTO user_management.users (
 ) VALUES (
     'a0000000-0000-0000-0000-000000000009',
     'locked@test.satori.com',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMy.MqrqBuBNO7SxaU8JGzPM2AOuLkSzKWe', -- Password123!
+    '$2a$12$wXFj.DR15CKPFTyhwFL.XuV8JvVqvnTPSIK3E8w0WTNC5omj9Lzp2', -- Password123!
     'Locked',
     'User',
     'Locked User',

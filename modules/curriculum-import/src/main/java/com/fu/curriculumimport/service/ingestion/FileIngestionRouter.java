@@ -93,15 +93,25 @@ public class FileIngestionRouter {
             String sample = stripper.getText(doc);
 
             double charsPerPage = (double) sample.length() / Math.min(totalPages, 5);
-            log.debug("PDF sample: {:.1f} chars/page (threshold={})",
-                    charsPerPage, ocrProps.getScannedPageThreshold());
+            log.debug("PDF sample: {} chars/page (threshold={})",
+                    String.format("%.1f", charsPerPage), ocrProps.getScannedPageThreshold());
 
+            // Check 1: Too few chars → clearly scanned
             if (charsPerPage < ocrProps.getScannedPageThreshold()) {
-                log.info("Scanned PDF detected ({:.1f} chars/page). Routing to OCR pipeline.", charsPerPage);
+                log.info("Scanned PDF detected ({} chars/page). Routing to OCR pipeline.",
+                        String.format("%.1f", charsPerPage));
                 return scannedPdfIngestionService.parse(file);
             }
 
-            log.info("Text-based PDF detected ({:.1f} chars/page). Using native extraction.", charsPerPage);
+            // Check 2: Many chars but garbled → scanned PDF with broken font mappings
+            if (isLikelyGarbledText(sample)) {
+                log.info("Garbled text detected ({} chars/page but low quality). "
+                        + "Routing to OCR pipeline.", String.format("%.1f", charsPerPage));
+                return scannedPdfIngestionService.parse(file);
+            }
+
+            log.info("Text-based PDF detected ({} chars/page). Using native extraction.",
+                    String.format("%.1f", charsPerPage));
             return pdfIngestionService.parsePdf(file);
 
         } catch (InvalidImportFileException e) {
@@ -109,6 +119,80 @@ public class FileIngestionRouter {
         } catch (IOException e) {
             throw new InvalidImportFileException("Cannot read PDF file: " + e.getMessage());
         }
+    }
+
+    // ── Garbled text detection ────────────────────────────────────────────────
+
+    /**
+     * Detect garbled text from scanned PDFs with broken font-to-Unicode mappings.
+     *
+     * Some scanned PDFs embed an invisible text layer whose fonts don't map
+     * correctly to Unicode. PDFBox extracts many characters, but the text is
+     * gibberish — e.g. Japanese hiragana becomes {@code fJ'fJ'} and Vietnamese
+     * diacritics are lost ({@code "uống" → "u6ng"}).
+     *
+     * Indicators:
+     * <ul>
+     *   <li><b>High special-char density</b>: {@code ~ { } \ | ^ ` _} and curly
+     *       quotes appearing frequently in running text (> 5%).</li>
+     *   <li><b>Digits embedded in words</b>: e.g. {@code u6ng}, {@code s6'm},
+     *       {@code thu6c} — a hallmark of broken font mappings where diacritics
+     *       are replaced by nearby ASCII glyphs.</li>
+     * </ul>
+     */
+    boolean isLikelyGarbledText(String sample) {
+        if (sample.length() < 100) return false;
+
+        int totalNonSpace = 0;
+        int specialChars = 0;
+        int digitsInsideWords = 0;
+
+        boolean prevIsLetter = false;
+        boolean pendingDigitAfterLetter = false;
+
+        for (int i = 0; i < sample.length(); i++) {
+            char ch = sample.charAt(i);
+            if (Character.isWhitespace(ch)) {
+                prevIsLetter = false;
+                pendingDigitAfterLetter = false;
+                continue;
+            }
+            totalNonSpace++;
+
+            // Special chars that rarely appear in natural-language running text
+            if ("~{}\\|^`_'".indexOf(ch) >= 0) {
+                specialChars++;
+            }
+
+            // Detect digit-in-word: letter → digit → letter (e.g. "u6ng")
+            if (Character.isLetter(ch)) {
+                if (pendingDigitAfterLetter) {
+                    digitsInsideWords++;
+                }
+                prevIsLetter = true;
+                pendingDigitAfterLetter = false;
+            } else if (Character.isDigit(ch) && prevIsLetter) {
+                pendingDigitAfterLetter = true;
+                prevIsLetter = false;
+            } else {
+                prevIsLetter = false;
+                pendingDigitAfterLetter = false;
+            }
+        }
+
+        if (totalNonSpace == 0) return false;
+
+        double specialRatio = (double) specialChars / totalNonSpace;
+        // High special-char ratio (> 5%) is a strong indicator of broken fonts
+        // Digits-in-words > 10 across the sample is another strong indicator
+        boolean garbled = specialRatio > 0.05 || digitsInsideWords > 10;
+
+        if (garbled) {
+            log.info("Text quality check: specialRatio={}, digitsInWords={} → garbled",
+                    String.format("%.3f", specialRatio), digitsInsideWords);
+        }
+
+        return garbled;
     }
 
     // ── Validation ──────────────────────────────────────────────────────────

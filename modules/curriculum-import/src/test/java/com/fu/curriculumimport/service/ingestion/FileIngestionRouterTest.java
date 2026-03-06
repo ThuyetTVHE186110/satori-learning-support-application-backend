@@ -445,4 +445,77 @@ class FileIngestionRouterTest {
             assertThat(actual).isSameAs(expected);
         }
     }
+
+    // =========================================================================
+    // isLikelyGarbledText() — garbled text detection
+    // =========================================================================
+
+    @Nested
+    @DisplayName("isLikelyGarbledText() — garbled text quality check")
+    class GarbledTextDetectionTests {
+
+        @Test
+        @DisplayName("Short text (< 100 chars) → false (not enough data to assess)")
+        void garbled_shortText_returnsFalse() {
+            assertThat(router.isLikelyGarbledText("short")).isFalse();
+        }
+
+        @Test
+        @DisplayName("Normal English text → false")
+        void garbled_normalEnglish_returnsFalse() {
+            String normal = "Korean vocabulary lesson content with grammar points. "
+                    .repeat(5); // ~275 chars
+            assertThat(router.isLikelyGarbledText(normal)).isFalse();
+        }
+
+        @Test
+        @DisplayName("Normal Japanese + Vietnamese text → false")
+        void garbled_normalJapaneseVietnamese_returnsFalse() {
+            // Mix of real Japanese and Vietnamese with proper diacritics
+            String normal = "これは日本語のテキストです。Đây là bài học tiếng Nhật. "
+                    + "食べる means ăn in Vietnamese. 飲む means uống. "
+                    + "文法の練習をしましょう。Hãy luyện tập ngữ pháp nhé. "
+                    + "This lesson covers vocabulary and grammar patterns. ";
+            assertThat(router.isLikelyGarbledText(normal)).isFalse();
+        }
+
+        @Test
+        @DisplayName("Garbled text with high special-char ratio → true")
+        void garbled_highSpecialCharRatio_returnsTrue() {
+            // Mimics broken font mapping producing ~{}\\ in place of Japanese
+            String garbled = "fJ'fJ' -~'J.' \\ \\ t: ~- i -t - t: ~ - -~'J.' \\ \\ "
+                    + "i !i- i -t - i f: - -~'J.' \\ \\ -t~-i-t -th--~'J.'\\\\ "
+                    + "li-~'J.'_1_-i-t- li-~'J.'~--~'J.'\\\\ more garbled text here "
+                    + "~{}\\|^`_ \\\\ ~'J.' more broken chars following ";
+            assertThat(router.isLikelyGarbledText(garbled)).isTrue();
+        }
+
+        @Test
+        @DisplayName("Garbled text with digits embedded in words → true")
+        void garbled_digitsInsideWords_returnsTrue() {
+            // Mimics Vietnamese diacritics replaced by digits
+            String garbled = "ong hay u6ng thu6c va di ngu s6'm "
+                    + "Bac si Them m1a hom nay ong dung t3m nhe "
+                    + "toi hi3u r6i Bac si 6ng nh6' giu gin sue kh6e "
+                    + "dau d4u dau b5ng dau r3ng bi s6t ho chay nu6c "
+                    + "mui s6 mui chay m4u bufm n2n gai ngu6i on l3nh ";
+            assertThat(router.isLikelyGarbledText(garbled)).isTrue();
+        }
+
+        @Test
+        @DisplayName("Empty string → false")
+        void garbled_emptyString_returnsFalse() {
+            assertThat(router.isLikelyGarbledText("")).isFalse();
+        }
+
+        @Test
+        @DisplayName("Text with occasional numbers (N5, N4) → false (not garbled)")
+        void garbled_normalTextWithNumbers_returnsFalse() {
+            String normal = "JLPT N5 vocabulary list. Level N4 grammar patterns. "
+                    + "Lesson 12 covers basic sentence structures. Page 45 has exercises. "
+                    + "Chapter 3 introduces new kanji with readings and meanings. "
+                    + "Practice set A1 and B2 from the main textbook edition. ";
+            assertThat(router.isLikelyGarbledText(normal)).isFalse();
+        }
+    }
 }

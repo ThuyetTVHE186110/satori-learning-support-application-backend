@@ -54,13 +54,6 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
-        <!-- Spring AI (OpenAI) - provided by infrastructure -->
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-openai-spring-boot-starter</artifactId>
-            <version>1.0.0-M4</version>
-        </dependency>
-
         <!-- Test dependencies -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

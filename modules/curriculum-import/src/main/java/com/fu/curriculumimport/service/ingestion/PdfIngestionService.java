@@ -1,6 +1,7 @@
 package com.fu.curriculumimport.service.ingestion;
 
 import com.fu.curriculumimport.exception.InvalidImportFileException;
+import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -135,7 +136,7 @@ public class PdfIngestionService {
                         .pageStart(chunkPageStart)
                         .pageEnd(pageNum)
                         .chunkType("TEXT")
-                        .estimatedTokenCount(estimateTokens(currentChunk.toString()))
+                        .estimatedTokenCount(LlmResponseUtils.estimateTokens(currentChunk.toString()))
                         .build());
 
                 // Keep overlap from end for context continuity
@@ -154,17 +155,11 @@ public class PdfIngestionService {
                     .pageStart(chunkPageStart)
                     .pageEnd(pageTexts.size())
                     .chunkType("TEXT")
-                    .estimatedTokenCount(estimateTokens(currentChunk.toString()))
+                    .estimatedTokenCount(LlmResponseUtils.estimateTokens(currentChunk.toString()))
                     .build());
         }
 
         return chunks;
     }
 
-    /**
-     * Rough token estimation: ~4 chars per token for mixed JP/EN content
-     */
-    private int estimateTokens(String text) {
-        return text.length() / 4;
-    }
 }
