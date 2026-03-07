@@ -119,9 +119,9 @@ public class ConversationThemeServiceImpl implements ConversationThemeService {
     public Page<ConversationThemeSummaryResponse> getPublishedThemes(Course.JlptLevel jlptLevel, Pageable pageable) {
         Page<ConversationTheme> page = jlptLevel != null
                 ? themeRepository.findByJlptLevelAndStatusAndDeletedAtIsNull(
-                        jlptLevel, Course.ContentStatus.PUBLISHED, pageable)
+                        jlptLevel.name(), Course.ContentStatus.PUBLISHED.name(), pageable)
                 : themeRepository.findByStatusAndDeletedAtIsNull(
-                        Course.ContentStatus.PUBLISHED, pageable);
+                        Course.ContentStatus.PUBLISHED.name(), pageable);
         return page.map(this::buildThemeSummaryResponse);
     }
 
