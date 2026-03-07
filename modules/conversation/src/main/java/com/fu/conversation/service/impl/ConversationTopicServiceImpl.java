@@ -91,7 +91,7 @@ public class ConversationTopicServiceImpl implements ConversationTopicService {
     @Override
     public List<ConversationTopicSummaryResponse> getPublishedTopicsByTheme(UUID themeId) {
         return topicRepository.findByThemeIdAndStatusAndDeletedAtIsNullOrderByOrderIndexAsc(
-                        themeId, Course.ContentStatus.PUBLISHED)
+                        themeId, Course.ContentStatus.PUBLISHED.name())
                 .stream()
                 .map(topicMapper::toSummaryResponse)
                 .collect(Collectors.toList());
