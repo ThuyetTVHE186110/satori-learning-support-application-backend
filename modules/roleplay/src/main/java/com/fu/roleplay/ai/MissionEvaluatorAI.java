@@ -7,6 +7,8 @@ import com.fu.roleplay.entity.SessionMission;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.retry.NonTransientAiException;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -34,6 +36,7 @@ public class MissionEvaluatorAI {
             If they clearly accomplish the criteria, mark COMPLETED.
             """;
 
+    private static final String EVALUATOR_MODEL = "gpt-4.1-mini";
     private static final int MAX_EVAL_MESSAGES = 20;
 
     private final ChatClient chatClient;
@@ -73,6 +76,7 @@ public class MissionEvaluatorAI {
             }
 
             String rawResponse = chatClient.prompt()
+                    .options(OpenAiChatOptions.builder().model(EVALUATOR_MODEL).build())
                     .system(MISSION_EVAL_SYSTEM_PROMPT)
                     .user(userPrompt.toString())
                     .call()
@@ -93,6 +97,9 @@ public class MissionEvaluatorAI {
             }
             return progressList;
 
+        } catch (NonTransientAiException e) {
+            log.warn("Mission evaluation skipped - AI unavailable (quota/billing): {}", e.getMessage());
+            return new ArrayList<>();
         } catch (Exception e) {
             log.error("Mission evaluation failed: {}", e.getMessage());
             return new ArrayList<>();

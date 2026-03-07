@@ -232,7 +232,7 @@ pronunciation:
     azure:
         enabled: ${AZURE_SPEECH_ENABLED:false}
         subscription-key: ${AZURE_SPEECH_KEY:}
-        region: ${AZURE_SPEECH_REGION:japaneast}
+        region: ${AZURE_SPEECH_REGION:southeastasia}
         language: ${AZURE_SPEECH_LANGUAGE:ja-JP}
         timeout: ${AZURE_SPEECH_TIMEOUT:30000}
         granularity: PHONEME  # FULL_TEXT | WORD | PHONEME

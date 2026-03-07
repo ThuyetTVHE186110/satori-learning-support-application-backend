@@ -30,6 +30,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
@@ -117,7 +119,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                         "ConversationTopic", "id", request.getTopicId().toString()));
 
         // 2. Check active sessions limit
-        long activeSessions = sessionRepository.countByUserIdAndStatus(userId, ConversationSession.SessionStatus.ACTIVE);
+        long activeSessions = sessionRepository.countByUserIdAndStatus(userId, ConversationSession.SessionStatus.ACTIVE.name());
         if (activeSessions >= properties.getMaxActiveSessions()) {
             throw new BusinessException("SESSION_LIMIT", "Maximum active sessions reached (" + properties.getMaxActiveSessions() + ")");
         }
@@ -193,7 +195,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             throw new BusinessException("SESSION_INACTIVE", "Session is not active");
         }
 
-        long currentMessages = messageRepository.countBySessionIdAndRole(sessionId, ConversationMessage.MessageRole.USER);
+        long currentMessages = messageRepository.countBySessionIdAndRole(sessionId, ConversationMessage.MessageRole.USER.name());
         if (currentMessages >= properties.getMaxMessages()) {
             throw new BusinessException("MESSAGE_LIMIT", "Maximum messages reached (" + properties.getMaxMessages() + ")");
         }
@@ -239,25 +241,29 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         final String cachedPrompt = systemPrompt;
         long startTime = System.currentTimeMillis();
 
-        // Task A: Pronunciation assessment (if audio provided)
-        CompletableFuture<AssessmentResult> pronunciationFuture;
+        // Task A: Pronunciation assessment — fire-and-forget after tx commit
+        // Dispatched via afterCommit hook so message_id FK is guaranteed to exist in DB
         if (audioBytes != null && pronunciationProvider.isAvailable()) {
             final byte[] audioBytesRef = audioBytes;
             final String audioFormatRef = getAudioFormat(audioContentType);
-            pronunciationFuture = CompletableFuture.supplyAsync(() -> {
-                try {
-                    return pronunciationProvider.assess(AssessmentRequest.builder()
-                            .audioData(audioBytesRef)
-                            .audioFormat(audioFormatRef)
-                            .referenceText(request.getContent())
-                            .build());
-                } catch (Exception e) {
-                    log.error("Pronunciation assessment failed: {}", e.getMessage());
-                    return AssessmentResult.failure(e.getMessage());
+            final UUID userMessageId = userMessage.getId();
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    CompletableFuture.supplyAsync(() ->
+                            pronunciationProvider.assess(AssessmentRequest.builder()
+                                    .audioData(audioBytesRef)
+                                    .audioFormat(audioFormatRef)
+                                    .referenceText(request.getContent())
+                                    .build()),
+                            roleplayTaskExecutor)
+                            .thenAccept(result -> savePronunciationResult(result, userMessageId, sessionId))
+                            .exceptionally(ex -> {
+                                log.error("Pronunciation assessment failed for message {}: {}", userMessageId, ex.getMessage());
+                                return null;
+                            });
                 }
-            }, roleplayTaskExecutor);
-        } else {
-            pronunciationFuture = CompletableFuture.completedFuture(null);
+            });
         }
 
         // Task B: AI response
@@ -278,39 +284,10 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     return new ArrayList<>();
                 });
 
-        // 4. Wait for all
-        CompletableFuture.allOf(pronunciationFuture, aiResponseFuture, missionFuture).join();
+        // 4. Wait for AI + mission only (pronunciation runs independently in background)
+        CompletableFuture.allOf(aiResponseFuture, missionFuture).join();
 
         long processingTime = System.currentTimeMillis() - startTime;
-
-        // 5. Save pronunciation result
-        AssessmentResult pronunciationResult = pronunciationFuture.join();
-        PronunciationScoreResponse pronouncScore = null;
-        if (pronunciationResult != null && pronunciationResult.isSuccess()) {
-            MessagePronunciation mp = MessagePronunciation.builder()
-                    .messageId(userMessage.getId())
-                    .sessionId(sessionId)
-                    .overallScore(toBigDecimal(pronunciationResult.getOverallScore()))
-                    .accuracyScore(toBigDecimal(pronunciationResult.getAccuracyScore()))
-                    .fluencyScore(toBigDecimal(pronunciationResult.getFluencyScore()))
-                    .prosodyScore(toBigDecimal(pronunciationResult.getProsodyScore()))
-                    .pitchAccentScore(pronunciationResult.getPitchAccentScore() > 0 ? toBigDecimal(pronunciationResult.getPitchAccentScore()) : null)
-                    .moraTimingScore(pronunciationResult.getMoraTimingScore() > 0 ? toBigDecimal(pronunciationResult.getMoraTimingScore()) : null)
-                    .transcribedText(pronunciationResult.getTranscribedText())
-                    .rawResponse(pronunciationResult.getRawResponse() != null ? pronunciationResult.getRawResponse() : "{}")
-                    .build();
-            pronunciationRepository.save(mp);
-
-            pronouncScore = PronunciationScoreResponse.builder()
-                    .overallScore(mp.getOverallScore())
-                    .accuracyScore(mp.getAccuracyScore())
-                    .fluencyScore(mp.getFluencyScore())
-                    .prosodyScore(mp.getProsodyScore())
-                    .pitchAccentScore(mp.getPitchAccentScore())
-                    .moraTimingScore(mp.getMoraTimingScore())
-                    .transcribedText(mp.getTranscribedText())
-                    .build();
-        }
 
         // 7. Parse AI response and save as assistant message
         String aiResponseJson = aiResponseFuture.join();
@@ -332,10 +309,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         sessionRepository.save(session);
 
         // 10. Build response
-        MessageResponse response = messageMapper.toResponse(aiMessage);
-        response.setPronunciationScore(pronouncScore);
-
-        return response;
+        return messageMapper.toResponse(aiMessage);
     }
 
     @Override
@@ -429,17 +403,27 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 .divide(BigDecimal.valueOf(4), 2, RoundingMode.HALF_UP);
 
         // 5. Calculate overall score with weights
+        boolean hasMissions = !sessionMissions.isEmpty();
+        boolean hasPronunciation = !pronunciations.isEmpty();
         BigDecimal overallScore;
-        if (pronunciations.isEmpty()) {
-            // No pronunciation: redistribute weight (mission 50% + language 50%)
-            overallScore = missionScore.multiply(BigDecimal.valueOf(0.50))
-                    .add(languageScore.multiply(BigDecimal.valueOf(0.50)))
-                    .setScale(2, RoundingMode.HALF_UP);
-        } else {
+        if (hasMissions && hasPronunciation) {
             overallScore = missionScore.multiply(BigDecimal.valueOf(properties.getScoring().getMissionWeight()))
                     .add(pronunciationScore.multiply(BigDecimal.valueOf(properties.getScoring().getPronunciationWeight())))
                     .add(languageScore.multiply(BigDecimal.valueOf(properties.getScoring().getLanguageWeight())))
                     .setScale(2, RoundingMode.HALF_UP);
+        } else if (hasMissions) {
+            // No pronunciation: mission 50% + language 50%
+            overallScore = missionScore.multiply(BigDecimal.valueOf(0.50))
+                    .add(languageScore.multiply(BigDecimal.valueOf(0.50)))
+                    .setScale(2, RoundingMode.HALF_UP);
+        } else if (hasPronunciation) {
+            // No missions: pronunciation 50% + language 50%
+            overallScore = pronunciationScore.multiply(BigDecimal.valueOf(0.50))
+                    .add(languageScore.multiply(BigDecimal.valueOf(0.50)))
+                    .setScale(2, RoundingMode.HALF_UP);
+        } else {
+            // No missions, no pronunciation: language score only
+            overallScore = languageScore.setScale(2, RoundingMode.HALF_UP);
         }
 
         // 6. Update session
@@ -540,7 +524,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     @Transactional(readOnly = true)
     public Page<SessionSummaryResponse> getSessionHistory(UUID userId, Pageable pageable) {
         return sessionRepository.findByUserIdAndSessionTypeOrderByCreatedAtDesc(
-                        userId, ConversationSession.SessionType.ROLEPLAY, pageable)
+                        userId, ConversationSession.SessionType.ROLEPLAY.name(), pageable)
                 .map(sessionMapper::toSummaryResponse);
     }
 
@@ -608,6 +592,27 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
     private BigDecimal toBigDecimal(double value) {
         return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private void savePronunciationResult(AssessmentResult result, UUID messageId, UUID sessionId) {
+        if (result == null || !result.isSuccess()) return;
+        try {
+            MessagePronunciation mp = MessagePronunciation.builder()
+                    .messageId(messageId)
+                    .sessionId(sessionId)
+                    .overallScore(toBigDecimal(result.getOverallScore()))
+                    .accuracyScore(toBigDecimal(result.getAccuracyScore()))
+                    .fluencyScore(toBigDecimal(result.getFluencyScore()))
+                    .prosodyScore(toBigDecimal(result.getProsodyScore()))
+                    .pitchAccentScore(result.getPitchAccentScore() > 0 ? toBigDecimal(result.getPitchAccentScore()) : null)
+                    .moraTimingScore(result.getMoraTimingScore() > 0 ? toBigDecimal(result.getMoraTimingScore()) : null)
+                    .transcribedText(result.getTranscribedText())
+                    .rawResponse(result.getRawResponse() != null ? result.getRawResponse() : "{}")
+                    .build();
+            pronunciationRepository.save(mp);
+        } catch (Exception e) {
+            log.error("Failed to save pronunciation result for message {}: {}", messageId, e.getMessage());
+        }
     }
 
     private String getAudioFormat(String contentType) {

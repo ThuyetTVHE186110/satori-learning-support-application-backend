@@ -16,8 +16,11 @@ import java.util.UUID;
 @Repository
 public interface ConversationSessionRepository extends JpaRepository<ConversationSession, UUID> {
 
+    @Query(value = "SELECT * FROM ai_conversation.conversation_sessions WHERE user_id = :userId AND session_type = CAST(:sessionType AS session_type) ORDER BY created_at DESC",
+           countQuery = "SELECT COUNT(*) FROM ai_conversation.conversation_sessions WHERE user_id = :userId AND session_type = CAST(:sessionType AS session_type)",
+           nativeQuery = true)
     Page<ConversationSession> findByUserIdAndSessionTypeOrderByCreatedAtDesc(
-            UUID userId, ConversationSession.SessionType sessionType, Pageable pageable);
+            @Param("userId") UUID userId, @Param("sessionType") String sessionType, Pageable pageable);
 
     Page<ConversationSession> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
 
@@ -31,8 +34,13 @@ public interface ConversationSessionRepository extends JpaRepository<Conversatio
     @Query("SELECT s FROM ConversationSession s WHERE s.id = :id AND s.userId = :userId")
     Optional<ConversationSession> findByIdAndUserIdForUpdate(@Param("id") UUID id, @Param("userId") UUID userId);
 
-    long countByUserIdAndStatus(UUID userId, ConversationSession.SessionStatus status);
+    @Query(value = "SELECT COUNT(*) FROM ai_conversation.conversation_sessions WHERE user_id = :userId AND status = CAST(:status AS session_status)",
+           nativeQuery = true)
+    long countByUserIdAndStatus(@Param("userId") UUID userId, @Param("status") String status);
 
+    @Query(value = "SELECT * FROM ai_conversation.conversation_sessions WHERE user_id = :userId AND status = CAST(:status AS session_status) ORDER BY created_at DESC",
+           countQuery = "SELECT COUNT(*) FROM ai_conversation.conversation_sessions WHERE user_id = :userId AND status = CAST(:status AS session_status)",
+           nativeQuery = true)
     Page<ConversationSession> findByUserIdAndStatusOrderByCreatedAtDesc(
-            UUID userId, ConversationSession.SessionStatus status, Pageable pageable);
+            @Param("userId") UUID userId, @Param("status") String status, Pageable pageable);
 }
