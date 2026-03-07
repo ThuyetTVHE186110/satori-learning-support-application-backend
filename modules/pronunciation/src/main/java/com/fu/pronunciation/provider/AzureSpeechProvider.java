@@ -15,6 +15,7 @@ import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -56,14 +57,22 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
             );
             pronConfig.enableProsodyAssessment();
 
-            // 3. Convert audio bytes to PushAudioInputStream
-            byte[] wavBytes = ensureWavFormat(request.getAudioData(), request.getAudioFormat());
-            PushAudioInputStream pushStream = AudioInputStream.createPushStream(
-                    AudioStreamFormat.getWaveFormatPCM(16000, (short) 16, (short) 1));
-            pushStream.write(wavBytes);
-            pushStream.close();
-
+            // 3. Create PushAudioInputStream with appropriate format for the audio type
+            String fmt = request.getAudioFormat() != null ? request.getAudioFormat().toLowerCase() : "";
+            PushAudioInputStream pushStream;
+            byte[] audioBytes;
+            if ("mp3".equals(fmt)) {
+                pushStream = AudioInputStream.createPushStream(
+                        AudioStreamFormat.getCompressedFormat(AudioStreamContainerFormat.MP3));
+                audioBytes = request.getAudioData();
+            } else {
+                audioBytes = ensureWavFormat(request.getAudioData(), request.getAudioFormat());
+                pushStream = AudioInputStream.createPushStream(
+                        AudioStreamFormat.getWaveFormatPCM(16000, (short) 16, (short) 1));
+            }
+            pushStream.write(audioBytes);
             audioConfig = AudioConfig.fromStreamInput(pushStream);
+            pushStream.close(); // Signal end-of-audio so SDK doesn't wait for silence detection
 
             // 4. Create recognizer and apply pronunciation assessment
             recognizer = new SpeechRecognizer(speechConfig, audioConfig);
@@ -71,8 +80,8 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
 
             // 5. Recognize
             long timeoutMs = properties.getTimeout();
-            SpeechRecognitionResult result = recognizer.recognizeOnceAsync()
-                    .get(timeoutMs, TimeUnit.MILLISECONDS);
+            Future<SpeechRecognitionResult> recognitionFuture = recognizer.recognizeOnceAsync();
+            SpeechRecognitionResult result = recognitionFuture.get(timeoutMs, TimeUnit.MILLISECONDS);
 
             // 6. Check result
             if (result.getReason() == ResultReason.RecognizedSpeech) {
@@ -92,6 +101,12 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
             return AssessmentResult.failure("Recognition failed: " + e.getCause().getMessage());
         } catch (TimeoutException e) {
             log.error("Azure Speech recognition timed out after {}ms", properties.getTimeout());
+            // Cannot close the recognizer while async recognition is still running.
+            // Schedule deferred cleanup so resources are freed once the native call finishes.
+            scheduleDeferredCleanup(recognizer, audioConfig, speechConfig);
+            recognizer = null;
+            audioConfig = null;
+            speechConfig = null;
             return AssessmentResult.failure("Recognition timed out");
         } catch (Exception e) {
             log.error("Azure Speech assessment error: {}", e.getMessage(), e);
@@ -262,6 +277,30 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
             return pcmData;
         }
         return out.toByteArray();
+    }
+
+    /**
+     * Closes Azure Speech SDK resources in a daemon thread after the native async
+     * recognition completes. Called only on timeout, where closing immediately
+     * raises IllegalStateException.
+     */
+    private void scheduleDeferredCleanup(SpeechRecognizer recognizer,
+                                          AudioConfig audioConfig,
+                                          SpeechConfig speechConfig) {
+        Thread t = new Thread(() -> {
+            try {
+                // Give the SDK up to 10 s to finish before forcing close.
+                Thread.sleep(10_000);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            } finally {
+                try { if (recognizer != null) recognizer.close(); } catch (Exception ignored) {}
+                try { if (audioConfig != null) audioConfig.close(); } catch (Exception ignored) {}
+                try { if (speechConfig != null) speechConfig.close(); } catch (Exception ignored) {}
+            }
+        }, "azure-speech-cleanup");
+        t.setDaemon(true);
+        t.start();
     }
 
     private PronunciationAssessmentGranularity mapGranularity(AzureSpeechProperties.GranularityLevel level) {

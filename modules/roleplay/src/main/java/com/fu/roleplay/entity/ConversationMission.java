@@ -5,6 +5,8 @@ import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.hibernate.annotations.ColumnTransformer;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.util.UUID;
 
@@ -40,14 +42,17 @@ public class ConversationMission extends SoftDeletableEntity {
     @Builder.Default
     private MissionType missionType = MissionType.CUSTOM;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "success_criteria", columnDefinition = "jsonb")
     @Builder.Default
     private String successCriteria = "{}";
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "required_vocabulary", columnDefinition = "jsonb")
     @Builder.Default
     private String requiredVocabulary = "[]";
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "required_grammar", columnDefinition = "jsonb")
     @Builder.Default
     private String requiredGrammar = "[]";

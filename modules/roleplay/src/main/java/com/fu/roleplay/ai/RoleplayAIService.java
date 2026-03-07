@@ -8,6 +8,8 @@ import com.fu.roleplay.entity.SessionMission;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.retry.NonTransientAiException;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -21,6 +23,7 @@ import java.util.regex.Pattern;
 @Slf4j
 public class RoleplayAIService {
 
+    private static final String ROLEPLAY_MODEL = "gpt-4.1-mini";
     private static final String REDIS_KEY_PREFIX = "roleplay:history:";
     private static final Duration HISTORY_TTL = Duration.ofHours(2);
     private static final int MAX_CONTEXT_MESSAGES = 20; // sliding window: last 20 messages
@@ -118,12 +121,16 @@ public class RoleplayAIService {
             conversationHistory.append("</conversation_history>\n");
 
             String rawResponse = chatClient.prompt()
+                    .options(OpenAiChatOptions.builder().model(ROLEPLAY_MODEL).build())
                     .system(systemPrompt)
                     .user(conversationHistory.toString())
                     .call()
                     .content();
 
             return cleanJson(rawResponse);
+        } catch (NonTransientAiException e) {
+            log.warn("AI service unavailable for session {} (quota/billing): {}", sessionId, e.getMessage());
+            return defaultResponse();
         } catch (Exception e) {
             log.error("Failed to generate roleplay response for session {}: {}", sessionId, e.getMessage());
             return defaultResponse();
@@ -133,12 +140,16 @@ public class RoleplayAIService {
     public String generateOpeningMessage(String systemPrompt) {
         try {
             String rawResponse = chatClient.prompt()
+                    .options(OpenAiChatOptions.builder().model(ROLEPLAY_MODEL).build())
                     .system(systemPrompt)
                     .user("Start the roleplay conversation. Greet the learner and set the scene according to the scenario. Keep it brief and welcoming.")
                     .call()
                     .content();
 
             return cleanJson(rawResponse);
+        } catch (NonTransientAiException e) {
+            log.warn("AI service unavailable for opening message (quota/billing): {}", e.getMessage());
+            return defaultResponse();
         } catch (Exception e) {
             log.error("Failed to generate opening message: {}", e.getMessage());
             return defaultResponse();
