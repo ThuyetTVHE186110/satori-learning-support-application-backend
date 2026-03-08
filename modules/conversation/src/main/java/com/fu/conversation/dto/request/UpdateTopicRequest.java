@@ -27,6 +27,8 @@ public class UpdateTopicRequest {
 
     private String description;
 
+    private String descriptionVi;
+
     private String scenario;
 
     private String vocabularyHints;

@@ -23,6 +23,7 @@ public class ConversationTopicResponse {
     private String title;
     private String titleJapanese;
     private String description;
+    private String descriptionVi;
     private String scenario;
     private String vocabularyHints;
     private String grammarPoints;

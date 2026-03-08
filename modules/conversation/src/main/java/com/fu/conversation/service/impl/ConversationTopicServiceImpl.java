@@ -20,7 +20,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -89,12 +91,51 @@ public class ConversationTopicServiceImpl implements ConversationTopicService {
     }
 
     @Override
-    public List<ConversationTopicSummaryResponse> getPublishedTopicsByTheme(UUID themeId) {
-        return topicRepository.findByThemeIdAndStatusAndDeletedAtIsNullOrderByOrderIndexAsc(
-                        themeId, Course.ContentStatus.PUBLISHED.name())
-                .stream()
-                .map(topicMapper::toSummaryResponse)
+    public List<ConversationTopicSummaryResponse> getPublishedTopicsByTheme(UUID themeId, UUID userId) {
+        List<ConversationTopic> topics = topicRepository
+                .findByThemeIdAndStatusAndDeletedAtIsNullOrderByOrderIndexAsc(
+                        themeId, Course.ContentStatus.PUBLISHED.name());
+
+        if (topics.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // Build practice stats map in a single query (topic_id → stats)
+        Map<UUID, ConversationTopicRepository.PracticeStatsProjection> practiceStats =
+                buildPracticeStatsMap(userId, topics);
+
+        return topics.stream()
+                .map(topic -> {
+                    ConversationTopicSummaryResponse dto = topicMapper.toSummaryResponse(topic);
+                    ConversationTopicRepository.PracticeStatsProjection stats =
+                            practiceStats.get(topic.getId());
+                    if (stats != null) {
+                        dto.setPracticed(true);
+                        dto.setPracticeCount(stats.getPracticeCount().intValue());
+                        dto.setLastPracticedAt(stats.getLastPracticedAt());
+                    }
+                    return dto;
+                })
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Executes a single query to get practice stats for all given topics.
+     * Returns an empty map when userId is null (manager view) or topics list is empty.
+     */
+    private Map<UUID, ConversationTopicRepository.PracticeStatsProjection> buildPracticeStatsMap(
+            UUID userId, List<ConversationTopic> topics) {
+        if (userId == null) {
+            return Collections.emptyMap();
+        }
+        List<UUID> topicIds = topics.stream()
+                .map(ConversationTopic::getId)
+                .collect(Collectors.toList());
+        return topicRepository.findPracticeStatsByUserIdAndTopicIds(userId, topicIds)
+                .stream()
+                .collect(Collectors.toMap(
+                        ConversationTopicRepository.PracticeStatsProjection::getTopicId,
+                        p -> p));
     }
 
     @Override

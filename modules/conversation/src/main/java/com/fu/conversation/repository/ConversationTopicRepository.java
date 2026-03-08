@@ -8,11 +8,40 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
 @Repository
 public interface ConversationTopicRepository extends JpaRepository<ConversationTopic, UUID> {
+
+    /**
+     * Projection for practice statistics per topic.
+     * Used to enrich ConversationTopicSummaryResponse with learner progress data.
+     */
+    interface PracticeStatsProjection {
+        UUID getTopicId();
+        Long getPracticeCount();
+        LocalDateTime getLastPracticedAt();
+    }
+
+    /**
+     * Returns practice statistics for the given user grouped by topicId.
+     * Queries ai_conversation.conversation_sessions directly (cross-schema native query).
+     * Returns only topics that have at least one session (unpracticed topics are absent).
+     */
+    @Query(value = """
+            SELECT s.topic_id                  AS topicId,
+                   COUNT(*)                    AS practiceCount,
+                   MAX(s.created_at)           AS lastPracticedAt
+            FROM ai_conversation.conversation_sessions s
+            WHERE s.user_id   = :userId
+              AND s.topic_id IN (:topicIds)
+            GROUP BY s.topic_id
+            """, nativeQuery = true)
+    List<PracticeStatsProjection> findPracticeStatsByUserIdAndTopicIds(
+            @Param("userId") UUID userId,
+            @Param("topicIds") List<UUID> topicIds);
 
     Page<ConversationTopic> findByThemeIdAndDeletedAtIsNull(UUID themeId, Pageable pageable);
 

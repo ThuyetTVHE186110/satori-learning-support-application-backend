@@ -23,6 +23,8 @@ public class UpdateThemeRequest {
 
     private String description;
 
+    private String descriptionVi;
+
     @Size(max = 100)
     private String category;
 

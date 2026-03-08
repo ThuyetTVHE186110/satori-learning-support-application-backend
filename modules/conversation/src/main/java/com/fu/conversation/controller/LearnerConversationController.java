@@ -77,9 +77,11 @@ public class LearnerConversationController {
      */
     @GetMapping("/themes/{themeId}/topics")
     public ResponseEntity<ApiResponse<List<ConversationTopicSummaryResponse>>> getTopicsByTheme(
-            @PathVariable UUID themeId) {
+            @PathVariable UUID themeId,
+            @AuthenticationPrincipal(expression = "id") UUID userId) {
 
-        List<ConversationTopicSummaryResponse> topics = topicService.getPublishedTopicsByTheme(themeId);
+        List<ConversationTopicSummaryResponse> topics =
+                topicService.getPublishedTopicsByTheme(themeId, userId);
         return ResponseEntity.ok(ApiResponse.success(topics));
     }
 

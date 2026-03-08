@@ -66,6 +66,10 @@ ALTER TABLE system_admin.import_chunks
 ADD COLUMN IF NOT EXISTS re_extraction_count INT DEFAULT 0;
 COMMENT ON COLUMN system_admin.import_chunks.re_extraction_count IS 'Number of times this chunk was re-extracted due to validation failure';
 
+-- updated_at (required by BaseEntity / Hibernate)
+ALTER TABLE system_admin.import_chunks
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+
 -- ==========================================================================
 -- 3. Add embedding tracking columns to curriculum_imports
 -- ==========================================================================
@@ -105,7 +109,7 @@ BEGIN
     RAISE NOTICE 'Agentic RAG schema updates applied!';
     RAISE NOTICE '==========================================';
     RAISE NOTICE '1. Extended processing_status ENUM: +CLASSIFYING, +VALIDATING, +PERSISTING, +CANCELLED';
-    RAISE NOTICE '2. Added agent columns to import_chunks: content_type, validation_status, validation_details, re_extraction_count';
+    RAISE NOTICE '2. Added agent columns to import_chunks: content_type, validation_status, validation_details, re_extraction_count, updated_at';
     RAISE NOTICE '3. Added tracking to curriculum_imports: validation_passed, validation_failed, re_extractions';
     RAISE NOTICE '4. Added indexes for content_embeddings';
     RAISE NOTICE '==========================================';
