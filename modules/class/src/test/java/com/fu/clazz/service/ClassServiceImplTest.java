@@ -57,6 +57,7 @@ import static org.mockito.Mockito.*;
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("ClazzService Unit Tests")
+@SuppressWarnings("unchecked")
 class ClassServiceImplTest {
 
     @Mock

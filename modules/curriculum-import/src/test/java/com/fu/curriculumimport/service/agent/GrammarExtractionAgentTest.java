@@ -68,7 +68,7 @@ class GrammarExtractionAgentTest {
 
     private void stubModelResponse(String content) {
         AssistantMessage msg = mock(AssistantMessage.class);
-        given(msg.getContent()).willReturn(content);
+        given(msg.getText()).willReturn(content);
 
         Generation gen = mock(Generation.class);
         given(gen.getOutput()).willReturn(msg);
