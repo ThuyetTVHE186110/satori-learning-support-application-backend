@@ -17,7 +17,9 @@ public interface ConversationMessageRepository extends JpaRepository<Conversatio
 
     long countBySessionId(UUID sessionId);
 
-    long countBySessionIdAndRole(UUID sessionId, ConversationMessage.MessageRole role);
+    @Query(value = "SELECT COUNT(*) FROM ai_conversation.conversation_messages WHERE session_id = :sessionId AND role = CAST(:role AS message_role)",
+           nativeQuery = true)
+    long countBySessionIdAndRole(@Param("sessionId") UUID sessionId, @Param("role") String role);
 
     @Query("SELECT MAX(m.sequenceNumber) FROM ConversationMessage m WHERE m.sessionId = :sessionId")
     Optional<Integer> findMaxSequenceNumberBySessionId(@Param("sessionId") UUID sessionId);

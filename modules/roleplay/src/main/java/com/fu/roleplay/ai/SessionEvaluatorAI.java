@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.roleplay.dto.response.SessionEvaluationResponse;
 import com.fu.roleplay.entity.ConversationMessage;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
@@ -17,7 +16,6 @@ import java.util.List;
 
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class SessionEvaluatorAI {
 
     private static final String SESSION_EVAL_SYSTEM_PROMPT = """
@@ -41,8 +39,13 @@ public class SessionEvaluatorAI {
 
     private static final int MAX_EVAL_MESSAGES = 40;
 
-    private final OpenAiChatModel chatModel;
+    private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
+
+    public SessionEvaluatorAI(OpenAiChatModel chatModel, ObjectMapper objectMapper) {
+        this.chatClient = ChatClient.builder(chatModel).build();
+        this.objectMapper = objectMapper;
+    }
 
     public SessionEvaluationResponse.LanguageEvaluationDetail evaluateSession(
             List<ConversationMessage> messages) {
@@ -73,7 +76,6 @@ public class SessionEvaluatorAI {
                 userPrompt.append("\n");
             }
 
-            ChatClient chatClient = ChatClient.builder(chatModel).build();
             String rawResponse = chatClient.prompt()
                     .system(SESSION_EVAL_SYSTEM_PROMPT)
                     .user(userPrompt.toString())

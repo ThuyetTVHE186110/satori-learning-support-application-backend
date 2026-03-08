@@ -579,7 +579,7 @@ public class ImportOrchestrator {
                     .vocabulary(Collections.emptyList())
                     .grammarPoints(Collections.emptyList())
                     .build();
-            default -> extractionAgent.extractContent(chunk, jlptLevel); // MIXED, CONVERSATION
+            default -> extractionAgent.extractContent(chunk, jlptLevel, ragContext); // MIXED, CONVERSATION
         };
     }
 
@@ -592,7 +592,7 @@ public class ImportOrchestrator {
         return switch (contentType) {
             case VOCABULARY -> vocabularyAgent.reExtractWithFeedback(chunk, jlptLevel, ragContext, feedback);
             case GRAMMAR -> grammarAgent.reExtractWithFeedback(chunk, jlptLevel, ragContext, feedback);
-            default -> extractionAgent.extractContent(chunk, jlptLevel); // fallback
+            default -> extractionAgent.extractContent(chunk, jlptLevel, ragContext); // fallback with RAG
         };
     }
 

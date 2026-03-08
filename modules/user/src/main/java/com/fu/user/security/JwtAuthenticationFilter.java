@@ -55,9 +55,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     UUID sessionId = UUID.fromString(claims.get("sessionId", String.class));
                     
                     // Verify session is still active
-                    boolean sessionActive = sessionRepository
-                            .findActiveByRefreshToken(sessionId.toString(), LocalDateTime.now())
-                            .isPresent() || isSessionValid(sessionId);
+                    boolean sessionActive = isSessionValid(sessionId);
                     
                     if (sessionActive) {
                         UserDetails userDetails = userDetailsService.loadUserByIdWithSession(userId, sessionId);

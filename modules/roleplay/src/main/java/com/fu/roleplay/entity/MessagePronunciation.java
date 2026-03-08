@@ -4,6 +4,8 @@ import com.fu.infrastructure.persistence.BaseEntity;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -49,6 +51,7 @@ public class MessagePronunciation extends BaseEntity {
     @Column(name = "mora_timing_score", precision = 5, scale = 2)
     private BigDecimal moraTimingScore;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "raw_response", columnDefinition = "jsonb")
     @Builder.Default
     private String rawResponse = "{}";

@@ -1,7 +1,6 @@
 package com.fu.conversation.repository;
 
 import com.fu.conversation.entity.ConversationTheme;
-import com.fu.course.entity.Course;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -16,10 +15,16 @@ public interface ConversationThemeRepository extends JpaRepository<ConversationT
 
     Page<ConversationTheme> findByDeletedAtIsNull(Pageable pageable);
 
-    Page<ConversationTheme> findByStatusAndDeletedAtIsNull(Course.ContentStatus status, Pageable pageable);
+    @Query(value = "SELECT * FROM speaking.conversation_themes WHERE status = CAST(:status AS content_status) AND deleted_at IS NULL ORDER BY order_index",
+           countQuery = "SELECT COUNT(*) FROM speaking.conversation_themes WHERE status = CAST(:status AS content_status) AND deleted_at IS NULL",
+           nativeQuery = true)
+    Page<ConversationTheme> findByStatusAndDeletedAtIsNull(@Param("status") String status, Pageable pageable);
 
+    @Query(value = "SELECT * FROM speaking.conversation_themes WHERE jlpt_level = CAST(:jlptLevel AS jlpt_level) AND status = CAST(:status AS content_status) AND deleted_at IS NULL ORDER BY order_index",
+           countQuery = "SELECT COUNT(*) FROM speaking.conversation_themes WHERE jlpt_level = CAST(:jlptLevel AS jlpt_level) AND status = CAST(:status AS content_status) AND deleted_at IS NULL",
+           nativeQuery = true)
     Page<ConversationTheme> findByJlptLevelAndStatusAndDeletedAtIsNull(
-            Course.JlptLevel jlptLevel, Course.ContentStatus status, Pageable pageable);
+            @Param("jlptLevel") String jlptLevel, @Param("status") String status, Pageable pageable);
 
     @Query("SELECT t FROM ConversationTheme t WHERE t.deletedAt IS NULL AND (" +
            "LOWER(t.title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +

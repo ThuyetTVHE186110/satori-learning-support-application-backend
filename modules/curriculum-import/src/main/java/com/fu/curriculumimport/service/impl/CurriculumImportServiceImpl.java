@@ -258,19 +258,17 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 100));
 
-        if (importEntity.getCourseId() != null) {
-            Page<Vocabulary> vocabPage = vocabularyRepository
-                    .findByCourseId(importEntity.getCourseId(), pageable);
+        // Query vocabulary linked to THIS specific import through lessons,
+        // not just the course (which would return vocab from ALL imports).
+        Page<Vocabulary> vocabPage = vocabularyRepository
+                .findByImportId(importId, pageable);
 
-            List<VocabularyResponse> content = vocabPage.getContent().stream()
-                    .map(importMapper::toVocabularyResponse)
-                    .toList();
+        List<VocabularyResponse> content = vocabPage.getContent().stream()
+                .map(importMapper::toVocabularyResponse)
+                .toList();
 
-            return PageResponse.of(content, vocabPage.getNumber(), vocabPage.getSize(),
-                    vocabPage.getTotalElements(), vocabPage.getTotalPages());
-        }
-
-        return PageResponse.of(List.of(), page, size, 0, 0);
+        return PageResponse.of(content, vocabPage.getNumber(), vocabPage.getSize(),
+                vocabPage.getTotalElements(), vocabPage.getTotalPages());
     }
 
     @Override
@@ -280,19 +278,17 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 100));
 
-        if (importEntity.getCourseId() != null) {
-            Page<GrammarPoint> grammarPage = grammarPointRepository
-                    .findByCourseId(importEntity.getCourseId(), pageable);
+        // Query grammar linked to THIS specific import through lessons,
+        // not just the course (which would return grammar from ALL imports).
+        Page<GrammarPoint> grammarPage = grammarPointRepository
+                .findByImportId(importId, pageable);
 
-            List<GrammarPointResponse> content = grammarPage.getContent().stream()
-                    .map(importMapper::toGrammarPointResponse)
-                    .toList();
+        List<GrammarPointResponse> content = grammarPage.getContent().stream()
+                .map(importMapper::toGrammarPointResponse)
+                .toList();
 
-            return PageResponse.of(content, grammarPage.getNumber(), grammarPage.getSize(),
-                    grammarPage.getTotalElements(), grammarPage.getTotalPages());
-        }
-
-        return PageResponse.of(List.of(), page, size, 0, 0);
+        return PageResponse.of(content, grammarPage.getNumber(), grammarPage.getSize(),
+                grammarPage.getTotalElements(), grammarPage.getTotalPages());
     }
 
     @Override

@@ -21,8 +21,16 @@ import java.util.UUID;
 public interface GrammarPointRepository extends JpaRepository<GrammarPoint, UUID> {
 
     /**
-     * Find grammar by pattern and JLPT level (unique constraint)
+     * Find grammar by pattern and JLPT level, excluding soft-deleted records.
+     * Used by curriculum import deduplication to avoid resurrecting deleted items.
      */
+    Optional<GrammarPoint> findByPatternAndJlptLevelAndDeletedAtIsNull(String pattern, JlptLevel jlptLevel);
+
+    /**
+     * Find grammar by pattern and JLPT level (includes soft-deleted).
+     * @deprecated Use {@link #findByPatternAndJlptLevelAndDeletedAtIsNull} to exclude deleted records.
+     */
+    @Deprecated
     Optional<GrammarPoint> findByPatternAndJlptLevel(String pattern, JlptLevel jlptLevel);
 
     /**
@@ -60,6 +68,16 @@ public interface GrammarPointRepository extends JpaRepository<GrammarPoint, UUID
             "JOIN Lesson l ON l.id = lg.lesson.id " +
             "WHERE l.course.id = :courseId AND g.deletedAt IS NULL")
     Page<GrammarPoint> findByCourseId(@Param("courseId") UUID courseId, Pageable pageable);
+
+    /**
+     * Find grammar linked to a specific import (through lessons with import_id).
+     * This is import-specific — only returns grammar created/linked by THIS import.
+     */
+    @Query("SELECT DISTINCT g FROM GrammarPoint g " +
+            "JOIN LessonGrammar lg ON lg.grammarPoint.id = g.id " +
+            "JOIN Lesson l ON l.id = lg.lesson.id " +
+            "WHERE l.importId = :importId AND l.deletedAt IS NULL AND g.deletedAt IS NULL")
+    Page<GrammarPoint> findByImportId(@Param("importId") UUID importId, Pageable pageable);
 
     /**
      * Search non-deleted grammar points by pattern or meaning
