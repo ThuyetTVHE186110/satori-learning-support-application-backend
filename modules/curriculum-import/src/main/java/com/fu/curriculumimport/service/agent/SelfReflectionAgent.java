@@ -8,7 +8,6 @@ import com.fu.curriculumimport.service.agent.ReflectionResult.ItemReflection;
 import com.fu.curriculumimport.service.agent.ReflectionResult.ReflectionVerdict;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.util.LlmResponseUtils;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
@@ -44,12 +43,18 @@ import java.util.Map;
  */
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class SelfReflectionAgent {
 
-    private final OpenAiChatModel chatModel;
+    private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
     private final AgenticRagProperties ragProperties;
+
+    public SelfReflectionAgent(OpenAiChatModel chatModel, ObjectMapper objectMapper,
+                                AgenticRagProperties ragProperties) {
+        this.chatClient = ChatClient.builder(chatModel).build();
+        this.objectMapper = objectMapper;
+        this.ragProperties = ragProperties;
+    }
 
     private static final String SYSTEM_PROMPT = """
             You are a quality assurance expert for Japanese language learning content extraction.
@@ -138,7 +143,6 @@ public class SelfReflectionAgent {
                     extractedSummary,
                     jlptLevel, jlptLevel);
 
-            ChatClient chatClient = ChatClient.builder(chatModel).build();
             String response = chatClient.prompt()
                     .system(SYSTEM_PROMPT)
                     .user(userPrompt)

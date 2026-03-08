@@ -20,6 +20,7 @@ import com.fu.course.repository.CourseRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -117,11 +118,14 @@ public class ConversationThemeServiceImpl implements ConversationThemeService {
 
     @Override
     public Page<ConversationThemeSummaryResponse> getPublishedThemes(Course.JlptLevel jlptLevel, Pageable pageable) {
+        // Native queries already contain ORDER BY order_index — strip sort from Pageable
+        // to prevent Spring Data appending "orderIndex asc" (Java field name) to the native SQL.
+        Pageable unsorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
         Page<ConversationTheme> page = jlptLevel != null
                 ? themeRepository.findByJlptLevelAndStatusAndDeletedAtIsNull(
-                        jlptLevel, Course.ContentStatus.PUBLISHED, pageable)
+                        jlptLevel.name(), Course.ContentStatus.PUBLISHED.name(), unsorted)
                 : themeRepository.findByStatusAndDeletedAtIsNull(
-                        Course.ContentStatus.PUBLISHED, pageable);
+                        Course.ContentStatus.PUBLISHED.name(), unsorted);
         return page.map(this::buildThemeSummaryResponse);
     }
 

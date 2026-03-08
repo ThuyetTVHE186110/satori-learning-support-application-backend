@@ -5,6 +5,8 @@ import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.hibernate.annotations.ColumnTransformer;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.util.UUID;
 
@@ -43,6 +45,7 @@ public class SessionMission extends BaseEntity {
     @Builder.Default
     private ConversationMission.MissionType missionType = ConversationMission.MissionType.CUSTOM;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "success_criteria", columnDefinition = "jsonb")
     @Builder.Default
     private String successCriteria = "{}";

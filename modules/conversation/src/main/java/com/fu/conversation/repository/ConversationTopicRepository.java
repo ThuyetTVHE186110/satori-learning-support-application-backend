@@ -1,10 +1,11 @@
 package com.fu.conversation.repository;
 
 import com.fu.conversation.entity.ConversationTopic;
-import com.fu.course.entity.Course;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -15,11 +16,16 @@ public interface ConversationTopicRepository extends JpaRepository<ConversationT
 
     Page<ConversationTopic> findByThemeIdAndDeletedAtIsNull(UUID themeId, Pageable pageable);
 
+    @Query(value = "SELECT * FROM speaking.conversation_topics WHERE theme_id = :themeId AND status = CAST(:status AS content_status) AND deleted_at IS NULL ORDER BY order_index",
+           countQuery = "SELECT COUNT(*) FROM speaking.conversation_topics WHERE theme_id = :themeId AND status = CAST(:status AS content_status) AND deleted_at IS NULL",
+           nativeQuery = true)
     Page<ConversationTopic> findByThemeIdAndStatusAndDeletedAtIsNull(
-            UUID themeId, Course.ContentStatus status, Pageable pageable);
+            @Param("themeId") UUID themeId, @Param("status") String status, Pageable pageable);
 
+    @Query(value = "SELECT * FROM speaking.conversation_topics WHERE theme_id = :themeId AND status = CAST(:status AS content_status) AND deleted_at IS NULL ORDER BY order_index ASC",
+           nativeQuery = true)
     List<ConversationTopic> findByThemeIdAndStatusAndDeletedAtIsNullOrderByOrderIndexAsc(
-            UUID themeId, Course.ContentStatus status);
+            @Param("themeId") UUID themeId, @Param("status") String status);
 
     /** Used for cascade soft-delete when a theme is deleted. */
     List<ConversationTopic> findByThemeIdAndDeletedAtIsNull(UUID themeId);

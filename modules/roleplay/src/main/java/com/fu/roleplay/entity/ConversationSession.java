@@ -40,6 +40,7 @@ public class ConversationSession extends BaseEntity {
     private UUID assignmentId;
 
     @Column(name = "context", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "?::jsonb")
     @Builder.Default
     private String context = "{}";
 
@@ -50,6 +51,7 @@ public class ConversationSession extends BaseEntity {
     private SessionStatus status = SessionStatus.ACTIVE;
 
     @Column(name = "feedback", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "?::jsonb")
     @Builder.Default
     private String feedback = "{}";
 
@@ -90,6 +92,7 @@ public class ConversationSession extends BaseEntity {
     private BigDecimal overallScore;
 
     @Column(name = "mission_summary", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "?::jsonb")
     @Builder.Default
     private String missionSummary = "{}";
 
