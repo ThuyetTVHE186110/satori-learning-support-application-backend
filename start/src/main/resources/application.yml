@@ -194,8 +194,12 @@ curriculum-import:
         rag-similarity-threshold: ${RAG_SIMILARITY_THRESHOLD:0.7}
         # Enable parallel chunk processing
         parallel-processing: ${RAG_PARALLEL_PROCESSING:true}
-        # Max chunks per parallel batch
-        parallel-batch-size: ${RAG_PARALLEL_BATCH_SIZE:3}
+        # Max chunks per parallel batch (increase for faster processing on powerful machines)
+        parallel-batch-size: ${RAG_PARALLEL_BATCH_SIZE:5}
+        # Thread pool for import jobs (core / max / queue)
+        thread-pool-core-size: ${RAG_THREAD_POOL_CORE:4}
+        thread-pool-max-size: ${RAG_THREAD_POOL_MAX:8}
+        thread-pool-queue-capacity: ${RAG_THREAD_POOL_QUEUE:50}
         # Enable embedding generation
         embedding-enabled: ${RAG_EMBEDDING_ENABLED:true}
         # Embedding dimension (text-embedding-3-small = 1536)

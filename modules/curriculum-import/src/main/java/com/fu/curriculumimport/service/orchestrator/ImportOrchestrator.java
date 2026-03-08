@@ -133,21 +133,36 @@ public class ImportOrchestrator {
             importEntity.updateProgress("CLASSIFYING", new BigDecimal("15"));
             persistenceService.updateImportProgress(importEntity);
 
-            Map<Integer, ClassificationResult> classifications = new HashMap<>();
+            // Use ConcurrentHashMap — classification futures write from multiple threads
+            Map<Integer, ClassificationResult> classifications = new ConcurrentHashMap<>();
+            List<CompletableFuture<Void>> classifyFutures = new ArrayList<>();
+
             for (int i = 0; i < parseResult.getChunks().size(); i++) {
-                checkCancelled(cancelFlag, importId);
-                DocumentChunk docChunk = parseResult.getChunks().get(i);
-                ImportChunk dbChunk = dbChunks.get(i);
+                final int idx = i;
+                final DocumentChunk docChunk = parseResult.getChunks().get(idx);
+                final ImportChunk dbChunk = dbChunks.get(idx);
 
-                ClassificationResult classification = classifierAgent.classify(docChunk);
-                classifications.put(i, classification);
+                classifyFutures.add(CompletableFuture.runAsync(() -> {
+                    if (cancelFlag.get()) return;
+                    ClassificationResult classification = classifierAgent.classify(docChunk);
+                    classifications.put(idx, classification);
+                    dbChunk.setContentType(classification.getContentType().name());
+                    persistenceService.saveChunk(dbChunk);
+                    log.debug("[{}] Chunk {} classified as {} (confidence: {})",
+                            importId, idx, classification.getContentType(), classification.getConfidence());
+                }, importTaskExecutor));
+            }
 
-                // Update chunk with classification
-                dbChunk.setContentType(classification.getContentType().name());
-                persistenceService.saveChunk(dbChunk);
-
-                log.debug("[{}] Chunk {} classified as {} (confidence: {})",
-                        importId, i, classification.getContentType(), classification.getConfidence());
+            try {
+                CompletableFuture.allOf(classifyFutures.toArray(new CompletableFuture[0]))
+                        .get(10, TimeUnit.MINUTES);
+            } catch (TimeoutException e) {
+                log.error("[{}] Classification timed out — proceeding with partial results", importId);
+            } catch (ExecutionException e) {
+                log.error("[{}] Classification error: {}", importId, e.getMessage());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new CancelledException("Import " + importId + " interrupted during classification");
             }
 
             // === STAGE 4: AI PROCESSING (Multi-Agent with RAG) ===
