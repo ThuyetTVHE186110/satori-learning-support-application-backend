@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -25,10 +27,35 @@ public class AssessmentResult {
     private double moraTimingScore;
     private String detailedPronunciationFeedback; // JSON string
 
+    // Azure-specific fields (null when using SpeechSuper)
+    private double completenessScore;
+    private String providerName; // "AZURE" | "SPEECHSUPER"
+    private List<WordAssessment> wordDetails;
+
     public static AssessmentResult failure(String errorMessage) {
         return AssessmentResult.builder()
                 .success(false)
                 .errorMessage(errorMessage)
                 .build();
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class WordAssessment {
+        private String word;
+        private double accuracyScore;
+        private String errorType; // None, Omission, Insertion, Mispronunciation
+        private List<PhonemeAssessment> phonemes;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class PhonemeAssessment {
+        private String phoneme; // IPA
+        private double accuracyScore;
     }
 }

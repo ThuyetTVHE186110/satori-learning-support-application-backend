@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.util.LlmResponseUtils;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
@@ -35,11 +34,15 @@ import java.util.Map;
  */
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class VocabularyExtractionAgent {
 
-    private final OpenAiChatModel chatModel;
+    private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
+
+    public VocabularyExtractionAgent(OpenAiChatModel chatModel, ObjectMapper objectMapper) {
+        this.chatClient = ChatClient.builder(chatModel).build();
+        this.objectMapper = objectMapper;
+    }
 
     // ── System prompt ────────────────────────────────────────────────────────
 
@@ -139,8 +142,7 @@ public class VocabularyExtractionAgent {
             String ragSection = formatRagContext(ragContext);
             String prompt = buildPrompt(chunk, jlptLevel, ragSection, "");
 
-            String response = ChatClient.builder(chatModel).build()
-                    .prompt()
+            String response = chatClient.prompt()
                     .system(SYSTEM_PROMPT)
                     .user(prompt)
                     .call()
@@ -167,8 +169,7 @@ public class VocabularyExtractionAgent {
 
             String prompt = buildPrompt(chunk, jlptLevel, ragSection, feedbackSection);
 
-            String response = ChatClient.builder(chatModel).build()
-                    .prompt()
+            String response = chatClient.prompt()
                     .system(SYSTEM_PROMPT + "\nIMPORTANT: You MUST fix every issue noted below.")
                     .user(prompt)
                     .call()

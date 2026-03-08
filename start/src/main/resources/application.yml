@@ -10,7 +10,7 @@ spring:
 
     # ==================== PostgreSQL Configuration ====================
     datasource:
-        url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:satori_learning}
+        url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:satori_learning}?stringtype=unspecified
         username: ${POSTGRES_USER:satori_user}
         password: ${POSTGRES_PASSWORD:SatoriSecure2026!}
         driver-class-name: org.postgresql.Driver
@@ -24,7 +24,7 @@ spring:
     jpa:
         hibernate:
             ddl-auto: validate
-        show-sql: ${SHOW_SQL:true}
+        show-sql: ${SHOW_SQL:false}
         properties:
             hibernate:
                 format_sql: true
@@ -153,8 +153,6 @@ logging:
         root: INFO
         com.fu: DEBUG
         org.springframework.data.redis: DEBUG
-        org.hibernate.SQL: DEBUG
-        org.hibernate.type.descriptor.sql.BasicBinder: TRACE
 
 # ==================== Actuator Configuration ====================
 management:
@@ -228,8 +226,16 @@ curriculum-import:
         # Combined score below this triggers re-extraction
         combined-re-extraction-threshold: ${RAG_COMBINED_RE_EXTRACTION_THRESHOLD:0.5}
 
-# ==================== Pronunciation Assessment (SpeechSuper) ====================
+# ==================== Pronunciation Assessment ====================
+# Provider priority: Azure > SpeechSuper (auto-selected by CompositePronunciationProvider)
 pronunciation:
+    azure:
+        enabled: ${AZURE_SPEECH_ENABLED:false}
+        subscription-key: ${AZURE_SPEECH_KEY:}
+        region: ${AZURE_SPEECH_REGION:southeastasia}
+        language: ${AZURE_SPEECH_LANGUAGE:ja-JP}
+        timeout: ${AZURE_SPEECH_TIMEOUT:30000}
+        granularity: PHONEME  # FULL_TEXT | WORD | PHONEME
     speechsuper:
         app-key: ${SPEECHSUPER_APP_KEY:}
         secret-key: ${SPEECHSUPER_SECRET_KEY:}

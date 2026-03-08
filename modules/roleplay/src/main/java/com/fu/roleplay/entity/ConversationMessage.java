@@ -48,10 +48,12 @@ public class ConversationMessage extends BaseEntity {
     private String userAudioUrl;
 
     @Column(name = "corrections", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "?::jsonb")
     @Builder.Default
     private String corrections = "[]";
 
     @Column(name = "vocabulary_used", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "?::jsonb")
     @Builder.Default
     private String vocabularyUsed = "[]";
 
