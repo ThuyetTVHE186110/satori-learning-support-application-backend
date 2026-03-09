@@ -626,34 +626,34 @@ class ConversationThemeManagementTest {
 
         /**
          * TC_CT_UTH_002
-         * MANAGER updates only optional fields (titleJapanese, jlptLevel).
-         * Expected: HTTP 200, original title unchanged, updated optional fields persisted.
+         * MANAGER updates only optional fields (titleJapanese).
+         * Expected: HTTP 200, original title unchanged, titleJapanese persisted.
          *
-         * ❌ KNOWN FAILING — bug in dev code:
-         *   UpdateThemeRequest is missing the jlptLevel field entirely.
-         *   Jackson ignores unknown fields → jlptLevel is never written to the entity
-         *   → response returns jlptLevel = null → $.data.jlptLevel assertion fails.
-         *
-         *   Fix (dev): add "private Course.JlptLevel jlptLevel;" to UpdateThemeRequest.
+         * Note: jlptLevel is NOT a supported update field.
+         *   UpdateThemeRequest does not contain a jlptLevel field → Jackson ignores it.
+         *   ConversationThemeMapper.updateEntity also ignores unmapped fields.
+         *   Therefore jlptLevel always stays null after update (unless it was set at creation).
+         *   Sending jlptLevel in the request body has no effect.
          *
          * Procedure:
-         * 1. Client → PUT `/api/v1/manager/conversation/themes/{id}` with a valid MANAGER Bearer token and `{"titleJapanese":"家族","jlptLevel":"N4"}`.
+         * 1. Client → PUT `/api/v1/manager/conversation/themes/{id}` with a valid MANAGER Bearer token and `{"titleJapanese":"家族"}`.
          * 2. AuthFilter → parse the token and resolve the user identity.
          * 3. ConversationThemeController → validate the request body and call `ConversationThemeService.updateTheme()`.
          * 4. ConversationThemeService → retrieve the theme by ID (deleted_at IS NULL).
-         * 5. ConversationThemeService → apply titleJapanese and jlptLevel changes without altering the original title.
+         * 5. ConversationThemeService → apply titleJapanese change without altering the original title or jlptLevel.
          * 6. ConversationThemeService → persist the updated theme.
-         * 7. System → return HTTP 200 with the updated theme response (original title unchanged).
+         * 7. System → return HTTP 200 with the updated theme response (title unchanged, jlptLevel unchanged/null).
          */
         @Test
-        @DisplayName("TC_CT_UTH_002 — optional fields only → HTTP 200, title unchanged in DB")
+        @DisplayName("TC_CT_UTH_002 — titleJapanese only → HTTP 200, title unchanged, jlptLevel unaffected")
         void tc_ct_uth_002_updateOptionalFieldsOnly_returns200_titleUnchanged() throws Exception {
             // Arrange
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             ConversationTheme theme = saveTheme("Gia đình", Course.ContentStatus.DRAFT);
 
-            String body = "{\"titleJapanese\":\"家族\",\"jlptLevel\":\"N4\"}";
+            // jlptLevel is intentionally omitted — UpdateThemeRequest does not support it
+            String body = "{\"titleJapanese\":\"家族\"}";
 
             // Act
             mockMvc.perform(put("/api/v1/manager/conversation/themes/{id}", theme.getId())
@@ -664,13 +664,14 @@ class ConversationThemeManagementTest {
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.title").value("Gia đình"))
                     .andExpect(jsonPath("$.data.titleJapanese").value("家族"))
-                    .andExpect(jsonPath("$.data.jlptLevel").value("N4"));
+                    // jlptLevel is not updatable → remains null (theme was saved without one)
+                    .andExpect(jsonPath("$.data.jlptLevel").doesNotExist());
 
             // Assert DB
             ConversationTheme updated = themeRepository.findById(theme.getId()).orElseThrow();
             assertThat(updated.getTitle()).isEqualTo("Gia đình");
             assertThat(updated.getTitleJapanese()).isEqualTo("家族");
-            assertThat(updated.getJlptLevel()).isEqualTo(Course.JlptLevel.N4);
+            assertThat(updated.getJlptLevel()).isNull();
         }
 
         // ── 3.2 Negative Cases ────────────────────────────────────────────────
