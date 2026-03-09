@@ -36,6 +36,7 @@ import static org.mockito.Mockito.never;
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("EmbeddingService")
+@SuppressWarnings("unchecked")
 class EmbeddingServiceTest {
 
     @Mock

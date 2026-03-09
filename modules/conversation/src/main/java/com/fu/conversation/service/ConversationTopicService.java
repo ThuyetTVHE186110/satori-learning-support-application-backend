@@ -25,7 +25,14 @@ public interface ConversationTopicService {
 
     Page<ConversationTopicSummaryResponse> getTopicsByTheme(UUID themeId, Pageable pageable);
 
-    List<ConversationTopicSummaryResponse> getPublishedTopicsByTheme(UUID themeId);
+    /**
+     * Returns published topics for a theme, enriched with the learner's practice history.
+     *
+     * @param themeId the theme to fetch topics for
+     * @param userId  the learner's user ID used to look up practice stats; may be null
+     *                (manager view — practice fields will be left at defaults)
+     */
+    List<ConversationTopicSummaryResponse> getPublishedTopicsByTheme(UUID themeId, UUID userId);
 
     /** Returns an active, published topic — throws 404 for drafts/archived/deleted. */
     ConversationTopicResponse getPublishedTopic(UUID id);

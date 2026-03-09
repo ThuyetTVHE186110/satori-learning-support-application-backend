@@ -123,7 +123,7 @@ class SelfReflectionAgentTest {
         ChatResponse chatResponse = mock(ChatResponse.class);
         Generation generation = mock(Generation.class);
         AssistantMessage msg = mock(AssistantMessage.class);
-        given(msg.getContent()).willReturn(jsonContent);
+        given(msg.getText()).willReturn(jsonContent);
         given(generation.getOutput()).willReturn(msg);
         given(chatResponse.getResult()).willReturn(generation);
         given(chatModel.call(any(Prompt.class))).willReturn(chatResponse);
