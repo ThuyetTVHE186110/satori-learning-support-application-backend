@@ -92,23 +92,10 @@ public class UserServiceImpl implements UserService {
 
         if (existingUserOpt.isPresent()) {
             User existingUser = existingUserOpt.get();
-            // If DELETED status
+            // If DELETED status → always throw DeletedUserExistsException (409 Conflict)
+            // so frontend can prompt the user to restore instead of silently re-creating.
             if (existingUser.getDeletedAt() != null) {
                 log.warn("Email already exists with DELETED status: {}", request.getEmail());
-
-                log.debug("Existing deleted user role: {} ; creatorRole: {} ; requestedRole: {}", existingUser.getRole(), creatorRole, request.getRole());
-                // Explicit permission rules for reactive restore:
-                // - Admin may restore any deleted user
-                // - Manager may restore TEACHER or LEARNER per new policy
-                boolean creatorCanRestore = creatorRole == UserRole.ADMIN
-                        || (creatorRole == UserRole.MANAGER && (existingUser.getRole() == UserRole.TEACHER || existingUser.getRole() == UserRole.LEARNER));
-                boolean requestedMatches = request.getRole() == null || request.getRole() == existingUser.getRole();
-
-                if (creatorCanRestore && requestedMatches) {
-                    log.info("Permission granted to reactively restore deleted user {} by {} (role={})", existingUser.getId(), createdByUserId, creatorRole);
-                    return reactiveRestoreFromCreate(existingUser, request, createdByUserId, creatorRole);
-                }
-                log.info("Creator {} (role={}) not permitted to reactive restore deleted user with role={}", createdByUserId, creatorRole, existingUser.getRole());
                 DeletedUserInfo deletedInfo = DeletedUserInfo.builder()
                         .userId(existingUser.getId())
                         .email(existingUser.getEmail())
@@ -664,69 +651,5 @@ public class UserServiceImpl implements UserService {
         return new String(characters);
     }
 
-    /**
-     * Perform reactive restore when creating a user and a deleted account with same email exists.
-     * This is limited to Manager restoring Teacher in create flow.
-     */
-    private UserResponse reactiveRestoreFromCreate(User existingDeletedUser, CreateUserRequest request, UUID actorId, UserRole actorRole) {
-        log.info("Reactive restore by {} (role: {}) for deleted user id: {}", actorId, actorRole, existingDeletedUser.getId());
-
-        // Ensure the deleted user is indeed deleted
-        if (existingDeletedUser.getDeletedAt() == null) {
-            throw new BusinessException("USER_NOT_DELETED", "Tài khoản này chưa bị xóa");
-        }
-
-        // Validate permissions (Manager may only restore TEACHER here)
-        validateRestorePermission(existingDeletedUser.getRole(), actorRole);
-
-        // Update fields from request where provided
-        existingDeletedUser.setFirstName(request.getFirstName());
-        existingDeletedUser.setLastName(request.getLastName());
-        // Keep the role from the deleted record or update to request role if provided and allowed
-        if (request.getRole() != null) {
-            existingDeletedUser.setRole(request.getRole());
-        }
-
-        existingDeletedUser.setStatus(UserStatus.ACTIVE);
-        existingDeletedUser.setEmailVerifiedAt(LocalDateTime.now());
-        existingDeletedUser.setFailedLoginAttempts(0);
-        existingDeletedUser.setLockedUntil(null);
-
-        // Generate new password
-        String rawPassword = generateRandomPassword();
-        existingDeletedUser.setPasswordHash(passwordEncoder.encode(rawPassword));
-
-        // Clear soft delete markers and set audit fields
-        existingDeletedUser.setDeletedAt(null);
-        existingDeletedUser.setDeletedBy(null);
-        existingDeletedUser.setUpdatedBy(actorId);
-        if (existingDeletedUser.getCreatedBy() == null) {
-            existingDeletedUser.setCreatedBy(actorId);
-        }
-
-        User saved = userRepository.save(existingDeletedUser);
-
-        if (saved == null) {
-            // If save returns null (unexpected), return a DeletedUserExistsException to the caller
-            DeletedUserInfo info = DeletedUserInfo.builder()
-                    .userId(existingDeletedUser.getId())
-                    .email(existingDeletedUser.getEmail())
-                    .firstName(existingDeletedUser.getFirstName())
-                    .lastName(existingDeletedUser.getLastName())
-                    .role(existingDeletedUser.getRole())
-                    .message("Email này đã tồn tại trong hệ thống và không thể khôi phục vào lúc này")
-                    .build();
-            throw new DeletedUserExistsException(info);
-        }
-
-        // Send welcome email with credentials
-        emailService.sendWelcomeEmailWithCredentials(
-                saved.getEmail(),
-                saved.getFullName(),
-                saved.getEmail(),
-                rawPassword
-        );
-
-        return userMapper.toResponse(saved);
-    }
 }
+

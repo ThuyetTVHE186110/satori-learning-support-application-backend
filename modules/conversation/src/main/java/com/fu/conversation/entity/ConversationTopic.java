@@ -51,6 +51,9 @@ public class ConversationTopic extends SoftDeletableEntity {
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 
+    @Column(name = "description_vi", columnDefinition = "TEXT")
+    private String descriptionVi;
+
     @Column(name = "scenario", columnDefinition = "TEXT")
     private String scenario;
 

@@ -179,7 +179,7 @@ class LearnerConversationControllerTest {
         @DisplayName("Should return 200 with published topics")
         @WithMockConversationUser(roles = "LEARNER")
         void shouldReturn200WithTopics() throws Exception {
-            given(topicService.getPublishedTopicsByTheme(themeId))
+            given(topicService.getPublishedTopicsByTheme(eq(themeId), any()))
                     .willReturn(List.of(topicSummary));
 
             mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", themeId))
@@ -191,7 +191,7 @@ class LearnerConversationControllerTest {
         @DisplayName("Should return 200 with empty list when no published topics")
         @WithMockConversationUser(roles = "LEARNER")
         void shouldReturn200WithEmptyList() throws Exception {
-            given(topicService.getPublishedTopicsByTheme(themeId)).willReturn(List.of());
+            given(topicService.getPublishedTopicsByTheme(eq(themeId), any())).willReturn(List.of());
 
             mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", themeId))
                     .andExpect(status().isOk())

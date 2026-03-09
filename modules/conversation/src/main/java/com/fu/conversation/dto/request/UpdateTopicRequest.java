@@ -3,7 +3,6 @@ package com.fu.conversation.dto.request;
 import com.fu.course.entity.Course;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -19,8 +18,7 @@ import java.util.UUID;
 public class UpdateTopicRequest {
 
     private UUID courseId;
-
-    @Pattern(regexp = ".*\\S.*", message = "Title must not be blank")
+    @NotBlank(message = "Title is required")
     @Size(max = 255)
     private String title;
 
@@ -28,6 +26,8 @@ public class UpdateTopicRequest {
     private String titleJapanese;
 
     private String description;
+
+    private String descriptionVi;
 
     private String scenario;
 

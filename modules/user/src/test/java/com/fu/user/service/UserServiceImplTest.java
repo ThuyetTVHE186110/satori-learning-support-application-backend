@@ -268,25 +268,24 @@ class UserServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should throw DeletedUserExistsException when email belongs to deleted user")
+        @DisplayName("Should throw DeletedUserExistsException when email belongs to any deleted user (BR-01)")
         void shouldThrowDeletedUserExistsException() {
-            // Given
+            // Given – deleted LEARNER; createUser must ALWAYS throw regardless of creator role
             User deletedUser = User.builder()
                     .email(createRequest.getEmail())
                     .firstName("Deleted")
                     .lastName("User")
-                    // Manager can now restore LEARNER/TEACHER reactively; use ADMIN here so manager should NOT be able to restore
-                    .role(UserRole.ADMIN)
+                    .role(UserRole.LEARNER)
                     .status(UserStatus.DELETED)
                     .deletedAt(LocalDateTime.now().minusDays(1))
                     .deletedBy(adminId)
                     .build();
             ReflectionTestUtils.setField(deletedUser, "id", UUID.randomUUID());
-            
+
             given(userRepository.findByEmail(createRequest.getEmail())).willReturn(Optional.of(deletedUser));
-            
+
             // When/Then
-            assertThatThrownBy(() -> 
+            assertThatThrownBy(() ->
                 userService.createUser(createRequest, managerId, UserRole.MANAGER)
             )
             .isInstanceOf(DeletedUserExistsException.class)
@@ -294,23 +293,24 @@ class UserServiceImplTest {
                 DeletedUserExistsException deletedEx = (DeletedUserExistsException) ex;
                 assertThat(deletedEx.getDeletedUserInfo()).isNotNull();
                 assertThat(deletedEx.getDeletedUserInfo().getEmail()).isEqualTo(createRequest.getEmail());
+                assertThat(deletedEx.getDeletedUserInfo().getStatus()).isEqualTo(UserStatus.DELETED);
                 assertThat(deletedEx.getDeletedUserInfo().getMessage()).contains("đã tồn tại");
             });
-            
+
             verify(userRepository, never()).save(any(User.class));
             verify(emailService, never()).sendWelcomeEmailWithCredentials(anyString(), anyString(), anyString(), anyString());
         }
 
         @Test
-        @DisplayName("Should reactive restore deleted learner when created by manager")
-        void shouldReactiveRestoreDeletedLearnerByManager() {
-            // Given
+        @DisplayName("Should throw DeletedUserExistsException even when manager creates with matching deleted-learner email")
+        void shouldThrowDeletedUserExistsExceptionEvenForLearnerByManager() {
+            // Given – previously this caused a reactive-restore (silent create); now it must ALWAYS throw 409
             User deletedLearner = User.builder()
                     .email(createRequest.getEmail())
                     .firstName("Old")
                     .lastName("Learner")
                     .role(UserRole.LEARNER)
-                    .status(UserStatus.INACTIVE)
+                    .status(UserStatus.DELETED)
                     .deletedAt(LocalDateTime.now().minusDays(2))
                     .deletedBy(adminId)
                     .build();
@@ -318,43 +318,32 @@ class UserServiceImplTest {
 
             CreateUserRequest learnerCreate = CreateUserRequest.builder()
                     .email(createRequest.getEmail())
-                    .firstName("Restored")
+                    .firstName("New")
                     .lastName("Learner")
                     .role(UserRole.LEARNER)
-                    .build();
-
-            UserResponse restoredResponse = UserResponse.builder()
-                    .id((UUID) ReflectionTestUtils.getField(deletedLearner, "id"))
-                    .email(deletedLearner.getEmail())
-                    .firstName("Restored")
-                    .lastName("Learner")
-                    .role(UserRole.LEARNER)
-                    .status(UserStatus.ACTIVE)
                     .build();
 
             given(userRepository.findByEmail(learnerCreate.getEmail())).willReturn(Optional.of(deletedLearner));
-            given(passwordEncoder.encode(anyString())).willReturn("newHashedPassword");
-            given(userRepository.save(any(User.class))).willAnswer(invocation -> invocation.getArgument(0));
-            given(userMapper.toResponse(any(User.class))).willReturn(restoredResponse);
-            doNothing().when(emailService).sendWelcomeEmailWithCredentials(anyString(), anyString(), anyString(), anyString());
 
-            // When
-            UserResponse result = userService.createUser(learnerCreate, managerId, UserRole.MANAGER);
+            // When/Then – must throw, NOT silently restore
+            assertThatThrownBy(() ->
+                    userService.createUser(learnerCreate, managerId, UserRole.MANAGER)
+            ).isInstanceOf(DeletedUserExistsException.class)
+             .satisfies(ex -> {
+                 DeletedUserExistsException d = (DeletedUserExistsException) ex;
+                 assertThat(d.getDeletedUserInfo()).isNotNull();
+                 assertThat(d.getDeletedUserInfo().getEmail()).isEqualTo(learnerCreate.getEmail());
+                 assertThat(d.getDeletedUserInfo().getRole()).isEqualTo(UserRole.LEARNER);
+                 assertThat(d.getDeletedUserInfo().getStatus()).isEqualTo(UserStatus.DELETED);
+             });
 
-            // Then
-            assertThat(result).isNotNull();
-            assertThat(result.getEmail()).isEqualTo(learnerCreate.getEmail());
-            verify(userRepository).findByEmail(learnerCreate.getEmail());
-            verify(userRepository).save(userCaptor.capture());
-            verify(emailService).sendWelcomeEmailWithCredentials(anyString(), anyString(), anyString(), anyString());
-
-            User saved = userCaptor.getValue();
-            assertThat(saved.getDeletedAt()).isNull();
-            assertThat(saved.getStatus()).isEqualTo(UserStatus.ACTIVE);
+            // Sanity: no save or email sent
+            verify(userRepository, never()).save(any(User.class));
+            verify(emailService, never()).sendWelcomeEmailWithCredentials(anyString(), anyString(), anyString(), anyString());
         }
 
         @Test
-        @DisplayName("Should not allow manager to restore deleted admin during create")
+        @DisplayName("Should throw DeletedUserExistsException when email belongs to deleted admin (all roles throw)")
         void shouldRejectManagerRestoringAdminDuringCreate() {
             // Given
             User deletedAdmin = User.builder()
