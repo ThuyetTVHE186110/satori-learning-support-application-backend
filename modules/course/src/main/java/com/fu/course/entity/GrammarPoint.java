@@ -53,19 +53,23 @@ public class GrammarPoint extends SoftDeletableEntity {
     private String detailedExplanation;
 
     @Column(name = "structure", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "CAST(? AS jsonb)")
     private String structure;
 
     @Column(name = "conjugation_rules", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "CAST(? AS jsonb)")
     private String conjugationRules;
 
     @Column(name = "formation_rules", columnDefinition = "TEXT")
     private String formationRules;
 
     @Column(name = "example_sentences", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "CAST(? AS jsonb)")
     @Builder.Default
     private String exampleSentences = "[]";
 
     @Column(name = "common_mistakes", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "CAST(? AS jsonb)")
     @Builder.Default
     private String commonMistakes = "[]";
 

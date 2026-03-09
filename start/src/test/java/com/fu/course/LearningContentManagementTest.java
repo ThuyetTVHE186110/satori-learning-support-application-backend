@@ -32,7 +32,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
-
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -324,8 +323,8 @@ class LearningContentManagementTest {
         }
 
         @Test
-        @DisplayName("TC_LCM_IR_009 — rollback COMPLETED import → ROLLED_BACK, lessons soft-deleted")
-        void tc_lcm_ir_009_rollbackCompletedImport_lessonsDeleted() throws Exception {
+        @DisplayName("TC_LCM_IH_002 — rollback COMPLETED import → ROLLED_BACK, lessons soft-deleted")
+        void tc_lcm_ih_002_rollbackCompletedImport_lessonsDeleted() throws Exception {
             User manager = saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Tiếng Nhật N5");
@@ -542,7 +541,7 @@ class LearningContentManagementTest {
         }
 
         @Test
-        @DisplayName("TC_LCM_IR_008 — LEARNER token → 403 Forbidden ACCESS_DENIED")
+        @DisplayName("TC_LCM_IR_008 — LEARNER token → 403 Forbidden FORBIDDEN")
         void tc_lcm_ir_008_learnerToken_returns403() throws Exception {
             saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com", "ValidPass@1");
@@ -555,7 +554,7 @@ class LearningContentManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
         }
     }
 
@@ -704,7 +703,7 @@ class LearningContentManagementTest {
         }
 
         @Test
-        @DisplayName("TC_LCM_CL_005 — LEARNER token → 403 Forbidden ACCESS_DENIED")
+        @DisplayName("TC_LCM_CL_005 — LEARNER token → 403 Forbidden FORBIDDEN")
         void tc_lcm_cl_005_learnerToken_returns403() throws Exception {
             saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com", "ValidPass@1");
@@ -717,7 +716,7 @@ class LearningContentManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
         }
     }
 
@@ -918,7 +917,7 @@ class LearningContentManagementTest {
         }
 
         @Test
-        @DisplayName("TC_LCM_DL_004 — LEARNER token → 403 Forbidden ACCESS_DENIED")
+        @DisplayName("TC_LCM_DL_004 — LEARNER token → 403 Forbidden FORBIDDEN")
         void tc_lcm_dl_004_learnerToken_returns403() throws Exception {
             saveLearner("learner@test.com");
             saveManager("manager@test.com");
@@ -930,7 +929,7 @@ class LearningContentManagementTest {
                             .header("Authorization", "Bearer " + learnerToken))
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
 
             // Assert — lesson unchanged
             assertThat(lessonRepository.findByIdAndNotDeleted(lesson.getId())).isPresent();

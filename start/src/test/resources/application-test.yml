@@ -1,12 +1,18 @@
 # =============================================================================
 # Test Configuration — PostgreSQL satori_test database
 # =============================================================================
-# Used for integration tests (@SpringBootTest) in the start module.
-# All modules are on the classpath — no cross-module entity issues.
+# ONE-TIME SETUP (run these once before the first test run):
 #
-# Setup (one-time):
-#   docker exec satori-postgres psql -U satori_user -d satori_learning \
-#     -c "CREATE DATABASE satori_test OWNER satori_user;"
+#   1. Create the test database:
+#      docker exec satori-postgres psql -U satori_user -d satori_learning \
+#        -c "CREATE DATABASE satori_test OWNER satori_user;"
+#
+#   2. Run the init script (creates schemas + ENUM types):
+#      docker exec -i satori-postgres psql -U satori_user -d satori_test \
+#        < src/test/resources/init-test-db.sql
+#
+# After setup: Hibernate ddl-auto=create-drop manages tables automatically
+# on every test run (creates on start, drops on finish).
 # =============================================================================
 
 spring:
@@ -24,7 +30,6 @@ spring:
             hibernate:
                 dialect: org.hibernate.dialect.PostgreSQLDialect
                 format_sql: false
-                default_schema: user_management
         open-in-view: false
 
     data:
@@ -59,4 +64,3 @@ app:
         max-failed-attempts: 5
         lock-duration-minutes: 30
         otp-expiration-minutes: 10
-

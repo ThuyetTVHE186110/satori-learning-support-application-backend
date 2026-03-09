@@ -40,7 +40,8 @@ DO $$ BEGIN CREATE TYPE gender AS ENUM ('MALE', 'FEMALE', 'OTHER', 'PREFER_NOT_T
 DO $$ BEGIN CREATE TYPE jlpt_level AS ENUM ('N5', 'N4', 'N3', 'N2', 'N1'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN CREATE TYPE lesson_type AS ENUM ('VOCABULARY', 'GRAMMAR', 'KANJI', 'LISTENING', 'READING', 'MIXED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN CREATE TYPE content_status AS ENUM ('DRAFT', 'PUBLISHED', 'ARCHIVED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN CREATE TYPE processing_status AS ENUM ('QUEUED', 'EXTRACTING', 'CHUNKING', 'AI_PROCESSING', 'EMBEDDING', 'COMPLETED', 'FAILED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE course_status AS ENUM ('ACTIVE', 'INACTIVE', 'DELETED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE processing_status AS ENUM ('QUEUED', 'EXTRACTING', 'CHUNKING', 'CLASSIFYING', 'AI_PROCESSING', 'EMBEDDING', 'VALIDATING', 'PERSISTING', 'PENDING_APPROVAL', 'COMPLETED', 'ROLLED_BACK', 'FAILED', 'CANCELLED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN CREATE TYPE grammar_category AS ENUM ('VERB_FORM', 'PARTICLE', 'ADJECTIVE', 'CONJUGATION', 'SENTENCE_PATTERN', 'HONORIFIC', 'CONDITIONAL', 'PASSIVE', 'CAUSATIVE', 'OTHER'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN CREATE TYPE learning_pace AS ENUM ('slow', 'normal', 'fast'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN CREATE TYPE formality_level AS ENUM ('casual', 'polite', 'formal'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
@@ -73,4 +74,3 @@ DO $$ BEGIN CREATE TYPE item_rarity AS ENUM ('COMMON', 'UNCOMMON', 'RARE', 'EPIC
 -- Done. Hibernate ddl-auto=create-drop will create/drop all tables on each
 -- test run. No table DDL needed here.
 -- ==========================================================================
-
