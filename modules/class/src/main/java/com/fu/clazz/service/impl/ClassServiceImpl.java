@@ -63,7 +63,7 @@ public class ClassServiceImpl implements ClassService {
         log.info("Tạo lớp học: {} bởi quản lý: {}", request.getName(), managerId);
 
         // Validate date range
-        if (request.getStartDate() != null && request.getStartDate().isBefore(java.time.LocalDate.now())) {
+        if (request.getStartDate() != null && !request.getStartDate().isAfter(java.time.LocalDate.now())) {
             throw new BusinessException("INVALID_START_DATE", "Ngày bắt đầu phải ở tương lai.");
         }
 
