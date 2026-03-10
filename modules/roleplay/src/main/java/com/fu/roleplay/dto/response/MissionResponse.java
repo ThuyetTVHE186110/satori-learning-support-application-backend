@@ -19,7 +19,9 @@ public class MissionResponse {
     private UUID topicId;
     private String title;
     private String titleJapanese;
+    private String titleVi;
     private String description;
+    private String descriptionVi;
     private ConversationMission.MissionType missionType;
     private String successCriteria;
     private String requiredVocabulary;

@@ -2,6 +2,7 @@ package com.fu.roleplay.service.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.conversation.entity.ConversationTopic;
@@ -16,6 +17,7 @@ import com.fu.roleplay.ai.RoleplayAIService;
 import com.fu.roleplay.ai.SessionEvaluatorAI;
 import com.fu.roleplay.config.RoleplayProperties;
 import com.fu.roleplay.dto.request.SendMessageRequest;
+import com.fu.roleplay.dto.request.StartFreeTalkRequest;
 import com.fu.roleplay.dto.request.StartSessionRequest;
 import com.fu.roleplay.dto.response.*;
 import com.fu.roleplay.entity.*;
@@ -42,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
@@ -134,11 +137,12 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 .sessionType(ConversationSession.SessionType.ROLEPLAY)
                 .topicId(request.getTopicId())
                 .status(ConversationSession.SessionStatus.ACTIVE)
+                .conversationPhase("CONVERSATION")
                 .context(topic.getRoleplayContext() != null ? topic.getRoleplayContext() : "{}")
                 .build();
         session = sessionRepository.save(session);
 
-        // 5. Create session missions (snapshot)
+        // 5. Create session missions (snapshot) — copy Vi fields
         List<SessionMission> sessionMissions = new ArrayList<>();
         for (ConversationMission m : missions) {
             SessionMission sm = SessionMission.builder()
@@ -146,7 +150,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     .missionId(m.getId())
                     .title(m.getTitle())
                     .titleJapanese(m.getTitleJapanese())
+                    .titleVi(m.getTitleVi())
                     .description(m.getDescription())
+                    .descriptionVi(m.getDescriptionVi())
                     .missionType(m.getMissionType())
                     .successCriteria(m.getSuccessCriteria())
                     .status(SessionMission.MissionStatus.PENDING)
@@ -162,20 +168,21 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 jlptLevel, sessionMissions);
         roleplayAIService.cacheSystemPrompt(session.getId(), systemPrompt);
 
-        // 7. Generate AI opening message
+        // 7. Generate AI opening (returns JSON array: MISSION_INTRO + SCENE_INTRO + DIALOGUE)
         String aiResponseJson = roleplayAIService.generateOpeningMessage(systemPrompt);
 
-        // 8. Parse and save opening message
-        ConversationMessage openingMessage = parseAndSaveAIMessage(session.getId(), aiResponseJson, 1);
+        // 8. Parse and save all opening message segments
+        List<ConversationMessage> openingMessages = parseAndSaveAIMessages(session.getId(), aiResponseJson, 1);
 
         // Update session stats
-        session.setMessageCount(1);
+        session.setMessageCount(openingMessages.size());
         sessionRepository.save(session);
 
         // 9. Build response
         SessionResponse response = sessionMapper.toResponse(session);
-        MessageResponse msgResponse = messageMapper.toResponse(openingMessage);
-        response.setMessages(List.of(msgResponse));
+        response.setMessages(openingMessages.stream()
+                .map(messageMapper::toResponse)
+                .collect(Collectors.toList()));
         response.setMissions(sessionMissions.stream()
                 .map(missionMapper::toSessionMissionResponse)
                 .collect(Collectors.toList()));
@@ -186,7 +193,56 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
     @Override
     @Transactional
-    public MessageResponse sendMessage(UUID sessionId, SendMessageRequest request, MultipartFile audio, UUID userId) {
+    public SessionResponse startFreeTalk(StartFreeTalkRequest request, UUID userId) {
+        // 1. Check active session limit
+        long activeSessions = sessionRepository.countByUserIdAndStatus(userId, ConversationSession.SessionStatus.ACTIVE.name());
+        if (activeSessions >= properties.getMaxActiveSessions()) {
+            throw new BusinessException("SESSION_LIMIT", "Maximum active sessions reached (" + properties.getMaxActiveSessions() + ")");
+        }
+
+        // 2. Determine JLPT level
+        String jlptLevel = request.getJlptLevel() != null ? request.getJlptLevel() : "N5";
+
+        // 3. Create session (no topicId, SETUP phase)
+        String contextJson = "{\"jlptLevel\":\"" + jlptLevel + "\","
+                + "\"language\":\"" + (request.getLanguage() != null ? request.getLanguage() : "vi") + "\"}";
+
+        ConversationSession session = ConversationSession.builder()
+                .userId(userId)
+                .sessionType(ConversationSession.SessionType.FREE_TALK)
+                .status(ConversationSession.SessionStatus.ACTIVE)
+                .conversationPhase("SETUP")
+                .context(contextJson)
+                .build();
+        session = sessionRepository.save(session);
+
+        // 4. Build setup system prompt and cache it
+        String setupPrompt = roleplayAIService.buildSetupSystemPrompt(jlptLevel);
+        roleplayAIService.cacheSystemPrompt(session.getId(), setupPrompt);
+
+        // 5. Generate the opening setup question
+        String aiResponseJson = roleplayAIService.generateSetupOpening(setupPrompt);
+
+        // 6. Parse and save setup opening messages
+        List<ConversationMessage> openingMessages = parseAndSaveAIMessages(session.getId(), aiResponseJson, 1);
+
+        session.setMessageCount(openingMessages.size());
+        sessionRepository.save(session);
+
+        // 7. Build response (no missions yet during SETUP)
+        SessionResponse response = sessionMapper.toResponse(session);
+        response.setMessages(openingMessages.stream()
+                .map(messageMapper::toResponse)
+                .collect(Collectors.toList()));
+        response.setMissions(List.of());
+
+        log.info("Started FREE_TALK session {} for user {} at JLPT {}", session.getId(), userId, jlptLevel);
+        return response;
+    }
+
+    @Override
+    @Transactional
+    public SendMessageResponse sendMessage(UUID sessionId, SendMessageRequest request, MultipartFile audio, UUID userId) {
         // 1. Validate session (with pessimistic lock to prevent sequence number race condition)
         ConversationSession session = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("ConversationSession", "id", sessionId.toString()));
@@ -230,19 +286,19 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 .build();
         userMessage = messageRepository.save(userMessage);
 
-        // 3. Three parallel tasks
+        // 3. Load conversation history and missions
         List<ConversationMessage> history = messageRepository.findBySessionIdOrderBySequenceNumberAsc(sessionId);
         List<SessionMission> sessionMissions = sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
         String systemPrompt = roleplayAIService.getCachedSystemPrompt(sessionId);
         if (systemPrompt == null) {
-            systemPrompt = "You are a helpful Japanese conversation partner. Respond in JSON with japanese_content, translation, romaji, corrections fields.";
+            // Rebuild a minimal fallback prompt
+            systemPrompt = "You are a helpful Japanese conversation partner. Respond with a JSON array of DIALOGUE segments.";
         }
 
         final String cachedPrompt = systemPrompt;
         long startTime = System.currentTimeMillis();
 
         // Task A: Pronunciation assessment — fire-and-forget after tx commit
-        // Dispatched via afterCommit hook so message_id FK is guaranteed to exist in DB
         if (audioBytes != null && pronunciationProvider.isAvailable()) {
             final byte[] audioBytesRef = audioBytes;
             final String audioFormatRef = getAudioFormat(audioContentType);
@@ -272,44 +328,81 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 roleplayTaskExecutor)
                 .exceptionally(ex -> {
                     log.error("AI response generation failed for session {}: {}", sessionId, ex.getMessage());
-                    return "{\"japanese_content\":\"すみません、もう一度お願いします。\",\"translation\":\"Sorry, could you please say that again?\",\"romaji\":\"Sumimasen, mou ichido onegai shimasu.\",\"corrections\":[]}";
+                    return "[{\"type\":\"DIALOGUE\",\"japanese_content\":\"すみません、もう一度お願いします。\",\"translation\":\"Xin lỗi, bạn có thể nói lại không?\",\"romaji\":\"Sumimasen, mou ichido onegai shimasu.\",\"corrections\":[]}]";
                 });
 
-        // Task C: Mission evaluation
-        CompletableFuture<List<MissionEvaluatorAI.MissionProgress>> missionFuture = CompletableFuture.supplyAsync(() ->
-                missionEvaluatorAI.evaluateProgress(history, request.getContent(), sessionMissions),
-                roleplayTaskExecutor)
-                .exceptionally(ex -> {
-                    log.error("Mission evaluation failed for session {}: {}", sessionId, ex.getMessage());
-                    return new ArrayList<>();
-                });
+        // Task C: Mission evaluation (skip for SETUP phase — no missions yet)
+        final boolean isSetupPhase = "SETUP".equals(session.getConversationPhase());
+        CompletableFuture<List<MissionEvaluatorAI.MissionProgress>> missionFuture = isSetupPhase
+                ? CompletableFuture.completedFuture(new ArrayList<>())
+                : CompletableFuture.supplyAsync(() ->
+                        missionEvaluatorAI.evaluateProgress(history, request.getContent(), sessionMissions),
+                        roleplayTaskExecutor)
+                        .exceptionally(ex -> {
+                            log.error("Mission evaluation failed for session {}: {}", sessionId, ex.getMessage());
+                            return new ArrayList<>();
+                        });
 
-        // 4. Wait for AI + mission only (pronunciation runs independently in background)
+        // 4. Wait for AI + mission
         CompletableFuture.allOf(aiResponseFuture, missionFuture).join();
 
         long processingTime = System.currentTimeMillis() - startTime;
 
-        // 7. Parse AI response and save as assistant message
+        // 5. Parse AI response array and save each segment
         String aiResponseJson = aiResponseFuture.join();
-        int aiSeq = nextSeq + 1;
-        ConversationMessage aiMessage = parseAndSaveAIMessage(sessionId, aiResponseJson, aiSeq);
-        aiMessage.setProcessingTimeMs((int) processingTime);
-        messageRepository.save(aiMessage);
+        int aiStartSeq = nextSeq + 1;
+        List<ConversationMessage> aiMessages = parseAndSaveAIMessages(sessionId, aiResponseJson, aiStartSeq);
 
-        // 8. Update session mission statuses
-        List<MissionEvaluatorAI.MissionProgress> missionProgress = missionFuture.join();
-        if (missionProgress.isEmpty() && !sessionMissions.isEmpty()) {
-            log.warn("Mission evaluation returned no results for session {}", sessionId);
+        // Set processing time on the first AI message
+        if (!aiMessages.isEmpty()) {
+            ConversationMessage first = aiMessages.get(0);
+            first.setProcessingTimeMs((int) processingTime);
+            messageRepository.save(first);
         }
-        updateSessionMissions(sessionMissions, missionProgress);
 
-        // 9. Update session stats
-        session.setMessageCount(aiSeq);
+        // 6. Handle PHASE_TRANSITION (FREE_TALK SETUP → CONVERSATION)
+        boolean hasPhaseTransition = aiMessages.stream()
+                .anyMatch(m -> "PHASE_TRANSITION".equals(m.getMessageType()));
+
+        if (hasPhaseTransition && isSetupPhase) {
+            session.setConversationPhase("CONVERSATION");
+            createDynamicMissionFromTransition(aiResponseJson, sessionId);
+
+            // Rebuild system prompt for roleplay mode and re-cache
+            String newSystemPrompt = roleplayAIService.buildSystemPrompt(
+                    session, session.getContext(), extractJlptFromContext(session.getContext()),
+                    sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId));
+            roleplayAIService.cacheSystemPrompt(sessionId, newSystemPrompt);
+            sessionRepository.save(session);
+        }
+
+        // 7. Update session mission statuses (only in CONVERSATION phase)
+        List<MissionEvaluatorAI.MissionProgress> missionProgress = missionFuture.join();
+        if (!missionProgress.isEmpty()) {
+            updateSessionMissions(sessionMissions, missionProgress);
+        }
+
+        // 8. Update session stats
+        int totalAiSeq = aiStartSeq + aiMessages.size() - 1;
+        session.setMessageCount(totalAiSeq);
         session.setUserMessageCount((int) (currentMessages + 1));
         sessionRepository.save(session);
 
-        // 10. Build response
-        return messageMapper.toResponse(aiMessage);
+        // 9. Load fresh missions for response
+        List<SessionMission> freshMissions = sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+
+        // 10. Build SendMessageResponse
+        List<MessageResponse> messageResponses = aiMessages.stream()
+                .map(messageMapper::toResponse)
+                .collect(Collectors.toList());
+        List<SessionMissionResponse> missionResponses = freshMissions.stream()
+                .map(missionMapper::toSessionMissionResponse)
+                .collect(Collectors.toList());
+
+        return SendMessageResponse.builder()
+                .messages(messageResponses)
+                .missions(missionResponses)
+                .build();
     }
 
     @Override
@@ -362,7 +455,6 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     ? totalMoraTiming.divide(BigDecimal.valueOf(moraTimingCount), 2, RoundingMode.HALF_UP)
                     : null;
 
-            // Composite pronunciation score: if Japanese assessment data exists, blend it in
             if (avgPitchAccent != null && avgMoraTiming != null) {
                 BigDecimal jpAvg = avgPitchAccent.add(avgMoraTiming)
                         .divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
@@ -412,17 +504,14 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     .add(languageScore.multiply(BigDecimal.valueOf(properties.getScoring().getLanguageWeight())))
                     .setScale(2, RoundingMode.HALF_UP);
         } else if (hasMissions) {
-            // No pronunciation: mission 50% + language 50%
             overallScore = missionScore.multiply(BigDecimal.valueOf(0.50))
                     .add(languageScore.multiply(BigDecimal.valueOf(0.50)))
                     .setScale(2, RoundingMode.HALF_UP);
         } else if (hasPronunciation) {
-            // No missions: pronunciation 50% + language 50%
             overallScore = pronunciationScore.multiply(BigDecimal.valueOf(0.50))
                     .add(languageScore.multiply(BigDecimal.valueOf(0.50)))
                     .setScale(2, RoundingMode.HALF_UP);
         } else {
-            // No missions, no pronunciation: language score only
             overallScore = languageScore.setScale(2, RoundingMode.HALF_UP);
         }
 
@@ -442,6 +531,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         List<SessionEvaluationResponse.MissionEvaluationDetail> missionDetails = sessionMissions.stream()
                 .map(sm -> SessionEvaluationResponse.MissionEvaluationDetail.builder()
                         .title(sm.getTitle())
+                        .titleVi(sm.getTitleVi())
                         .titleJapanese(sm.getTitleJapanese())
                         .status(sm.getStatus().name())
                         .progressPct(sm.getProgressPct())
@@ -498,15 +588,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             MessageResponse mr = messageMapper.toResponse(msg);
             MessagePronunciation mp = pronunciationByMessageId.get(msg.getId());
             if (mp != null) {
-                mr.setPronunciationScore(PronunciationScoreResponse.builder()
-                        .overallScore(mp.getOverallScore())
-                        .accuracyScore(mp.getAccuracyScore())
-                        .fluencyScore(mp.getFluencyScore())
-                        .prosodyScore(mp.getProsodyScore())
-                        .pitchAccentScore(mp.getPitchAccentScore())
-                        .moraTimingScore(mp.getMoraTimingScore())
-                        .transcribedText(mp.getTranscribedText())
-                        .build());
+                mr.setPronunciationScore(buildPronunciationResponse(mp));
             }
             return mr;
         }).collect(Collectors.toList());
@@ -530,38 +612,109 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
     // ==================== Private Helpers ====================
 
-    private ConversationMessage parseAndSaveAIMessage(UUID sessionId, String aiResponseJson, int seq) {
-        String japaneseContent = "";
-        String translation = "";
-        String romaji = "";
-        String corrections = "[]";
-
+    /**
+     * Parses a JSON array response from the AI and saves each segment as a separate
+     * ConversationMessage. Falls back to a single DIALOGUE message if parsing fails.
+     */
+    private List<ConversationMessage> parseAndSaveAIMessages(UUID sessionId, String aiResponseJson, int startSeq) {
+        List<ConversationMessage> saved = new ArrayList<>();
         try {
-            JsonNode node = objectMapper.readTree(aiResponseJson);
-            japaneseContent = node.path("japanese_content").asText("");
-            translation = node.path("translation").asText("");
-            romaji = node.path("romaji").asText("");
-            JsonNode correctionsNode = node.path("corrections");
-            if (correctionsNode.isArray()) {
-                corrections = objectMapper.writeValueAsString(correctionsNode);
+            JsonNode root = objectMapper.readTree(aiResponseJson);
+            JsonNode array;
+            if (root.isArray()) {
+                array = root;
+            } else {
+                // Wrap single-object response in an array for backward compatibility
+                ArrayNode wrapper = objectMapper.createArrayNode();
+                wrapper.add(root);
+                array = wrapper;
+            }
+
+            int seq = startSeq;
+            for (JsonNode node : array) {
+                String type = node.path("type").asText("DIALOGUE");
+                String japanese = node.path("japanese_content").asText("");
+                String translation = node.path("translation").asText("");
+                String romaji = node.path("romaji").asText("");
+                String corrections = "[]";
+                JsonNode correctionsNode = node.path("corrections");
+                if (correctionsNode.isArray()) {
+                    corrections = objectMapper.writeValueAsString(correctionsNode);
+                }
+
+                ConversationMessage msg = ConversationMessage.builder()
+                        .sessionId(sessionId)
+                        .role(ConversationMessage.MessageRole.ASSISTANT)
+                        .messageType(type)
+                        .content(japanese.isEmpty() ? aiResponseJson : japanese)
+                        .japaneseContent(japanese)
+                        .translation(translation)
+                        .romaji(romaji)
+                        .corrections(corrections)
+                        .sequenceNumber(seq++)
+                        .build();
+                saved.add(messageRepository.save(msg));
             }
         } catch (Exception e) {
-            log.warn("Failed to parse AI response JSON, using raw: {}", e.getMessage());
-            japaneseContent = aiResponseJson;
+            log.warn("Failed to parse AI response array, saving as raw DIALOGUE: {}", e.getMessage());
+            ConversationMessage msg = ConversationMessage.builder()
+                    .sessionId(sessionId)
+                    .role(ConversationMessage.MessageRole.ASSISTANT)
+                    .messageType("DIALOGUE")
+                    .content(aiResponseJson)
+                    .japaneseContent(aiResponseJson)
+                    .corrections("[]")
+                    .sequenceNumber(startSeq)
+                    .build();
+            saved.add(messageRepository.save(msg));
         }
+        return saved;
+    }
 
-        ConversationMessage aiMessage = ConversationMessage.builder()
-                .sessionId(sessionId)
-                .role(ConversationMessage.MessageRole.ASSISTANT)
-                .content(japaneseContent)
-                .japaneseContent(japaneseContent)
-                .translation(translation)
-                .romaji(romaji)
-                .corrections(corrections)
-                .sequenceNumber(seq)
-                .build();
+    /**
+     * Extracts PHASE_TRANSITION data from the AI response and creates a dynamic SessionMission.
+     * Called only when transitioning from SETUP to CONVERSATION phase.
+     */
+    private void createDynamicMissionFromTransition(String aiResponseJson, UUID sessionId) {
+        try {
+            JsonNode array = objectMapper.readTree(aiResponseJson);
+            if (!array.isArray()) return;
+            for (JsonNode node : array) {
+                if ("PHASE_TRANSITION".equals(node.path("type").asText())) {
+                    String topicSummary = node.path("topicSummary").asText("自由会話");
+                    String missionSummary = node.path("missionSummary").asText("Hoàn thành cuộc hội thoại");
 
-        return messageRepository.save(aiMessage);
+                    SessionMission dynamicMission = SessionMission.builder()
+                            .sessionId(sessionId)
+                            .title(topicSummary)
+                            .titleVi(missionSummary)
+                            .description("Hoàn thành cuộc hội thoại theo chủ đề đã chọn")
+                            .descriptionVi("Hoàn thành cuộc hội thoại theo chủ đề đã chọn")
+                            .missionType(ConversationMission.MissionType.CUSTOM)
+                            .successCriteria("{\"completionConditions\":\"" + missionSummary + "\"}")
+                            .status(SessionMission.MissionStatus.IN_PROGRESS)
+                            .progressPct(0)
+                            .build();
+                    sessionMissionRepository.save(dynamicMission);
+                    log.info("Created dynamic mission for session {}: {}", sessionId, topicSummary);
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse PHASE_TRANSITION for session {}: {}", sessionId, e.getMessage());
+        }
+    }
+
+    /**
+     * Extracts the jlptLevel field from the session context JSON.
+     */
+    private String extractJlptFromContext(String contextJson) {
+        try {
+            JsonNode ctx = objectMapper.readTree(contextJson);
+            return ctx.path("jlptLevel").asText("N5");
+        } catch (Exception e) {
+            return "N5";
+        }
     }
 
     private void updateSessionMissions(List<SessionMission> sessionMissions,
@@ -588,6 +741,59 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         if (!updatedMissions.isEmpty()) {
             sessionMissionRepository.saveAll(updatedMissions);
         }
+    }
+
+    /**
+     * Builds a PronunciationScoreResponse including qualitative criteria evaluations.
+     */
+    private PronunciationScoreResponse buildPronunciationResponse(MessagePronunciation mp) {
+        List<PronunciationScoreResponse.CriteriaEvaluation> criteria = buildCriteriaEvaluations(mp);
+        return PronunciationScoreResponse.builder()
+                .overallScore(mp.getOverallScore())
+                .accuracyScore(mp.getAccuracyScore())
+                .fluencyScore(mp.getFluencyScore())
+                .prosodyScore(mp.getProsodyScore())
+                .pitchAccentScore(mp.getPitchAccentScore())
+                .moraTimingScore(mp.getMoraTimingScore())
+                .transcribedText(mp.getTranscribedText())
+                .criteriaEvaluations(criteria)
+                .build();
+    }
+
+    /**
+     * Maps each pronunciation score to a named Vietnamese label + qualitative grade.
+     * Names: "Tổng quan", "Phát âm", "Mạch lạc", "Nhịp điệu", "Cao độ âm", "Nhịp mora"
+     */
+    private List<PronunciationScoreResponse.CriteriaEvaluation> buildCriteriaEvaluations(MessagePronunciation mp) {
+        List<PronunciationScoreResponse.CriteriaEvaluation> list = new ArrayList<>();
+        list.add(criteria("Tổng quan", mp.getOverallScore()));
+        list.add(criteria("Phát âm", mp.getAccuracyScore()));
+        list.add(criteria("Mạch lạc", mp.getFluencyScore()));
+        list.add(criteria("Nhịp điệu", mp.getProsodyScore()));
+        if (mp.getPitchAccentScore() != null) {
+            list.add(criteria("Cao độ âm", mp.getPitchAccentScore()));
+        }
+        if (mp.getMoraTimingScore() != null) {
+            list.add(criteria("Nhịp mora", mp.getMoraTimingScore()));
+        }
+        return list;
+    }
+
+    private PronunciationScoreResponse.CriteriaEvaluation criteria(String name, BigDecimal score) {
+        return PronunciationScoreResponse.CriteriaEvaluation.builder()
+                .name(name)
+                .score(score)
+                .label(qualitativeLabel(score))
+                .build();
+    }
+
+    private String qualitativeLabel(BigDecimal score) {
+        if (score == null) return null;
+        int s = score.intValue();
+        if (s >= 90) return "Xuất sắc";
+        if (s >= 75) return "Tốt";
+        if (s >= 60) return "Khá";
+        return "Cần cải thiện";
     }
 
     private BigDecimal toBigDecimal(double value) {

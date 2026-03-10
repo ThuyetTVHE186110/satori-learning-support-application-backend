@@ -38,6 +38,7 @@ public class SessionEvaluationResponse {
     @AllArgsConstructor
     public static class MissionEvaluationDetail {
         private String title;
+        private String titleVi;
         private String titleJapanese;
         private String status;
         private Integer progressPct;

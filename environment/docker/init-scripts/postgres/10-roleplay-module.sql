@@ -33,7 +33,9 @@ CREATE TABLE IF NOT EXISTS speaking.conversation_missions (
 
     title VARCHAR(255) NOT NULL,
     title_japanese VARCHAR(255),
+    title_vi VARCHAR(255),
     description TEXT,
+    description_vi TEXT,
     mission_type mission_type NOT NULL DEFAULT 'CUSTOM',
 
     -- Success criteria (JSONB - hidden from learner, used by AI evaluator)
@@ -73,7 +75,9 @@ CREATE TABLE IF NOT EXISTS ai_conversation.session_missions (
     -- Snapshot of mission data at session start
     title VARCHAR(255) NOT NULL,
     title_japanese VARCHAR(255),
+    title_vi VARCHAR(255),
     description TEXT,
+    description_vi TEXT,
     mission_type mission_type NOT NULL DEFAULT 'CUSTOM',
     success_criteria JSONB DEFAULT '{}'::JSONB,
 
@@ -98,6 +102,8 @@ CREATE TABLE IF NOT EXISTS ai_conversation.message_pronunciation (
     accuracy_score DECIMAL(5,2),
     fluency_score DECIMAL(5,2),
     prosody_score DECIMAL(5,2),
+    pitch_accent_score DECIMAL(5,2),
+    mora_timing_score DECIMAL(5,2),
 
     -- Transcribed text from speech recognition
     transcribed_text TEXT,
@@ -116,7 +122,8 @@ ALTER TABLE ai_conversation.conversation_sessions
     ADD COLUMN IF NOT EXISTS pronunciation_score DECIMAL(5,2),
     ADD COLUMN IF NOT EXISTS language_score DECIMAL(5,2),
     ADD COLUMN IF NOT EXISTS overall_score DECIMAL(5,2),
-    ADD COLUMN IF NOT EXISTS mission_summary JSONB DEFAULT '{}'::JSONB;
+    ADD COLUMN IF NOT EXISTS mission_summary JSONB DEFAULT '{}'::JSONB,
+    ADD COLUMN IF NOT EXISTS conversation_phase VARCHAR(20) DEFAULT 'CONVERSATION';
 
 -- ==================== Indexes ====================
 
