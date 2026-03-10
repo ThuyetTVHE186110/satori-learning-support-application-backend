@@ -153,6 +153,9 @@ logging:
         root: INFO
         com.fu: DEBUG
         org.springframework.data.redis: DEBUG
+        # Suppress Hibernate SQL noise (scheduler polls, retry queries, etc.)
+        org.hibernate.SQL: WARN
+        org.hibernate.orm.jdbc.bind: WARN
 
 # ==================== Actuator Configuration ====================
 management:
@@ -168,20 +171,34 @@ management:
 
 # ==================== Curriculum Import - Agentic RAG Configuration ====================
 curriculum-import:
-    # ===== OCR Microservice (PaddleOCR sidecar for scanned PDFs) =====
+    # ===== OCR Subsystem =====
     ocr:
+        # OCR provider: paddle | google_vision | auto
+        #   paddle        — self-hosted PaddleOCR sidecar (free, no egress, default)
+        #   google_vision — Google Cloud Vision DOCUMENT_TEXT_DETECTION
+        #                   (better accuracy for MnN scanned books + table detection)
+        #                   Requires GOOGLE_APPLICATION_CREDENTIALS env var.
+        #   auto          — Google Vision with automatic fallback to PaddleOCR
+        provider: ${OCR_PROVIDER:auto}
         # URL of the PaddleOCR FastAPI container
         service-url: ${OCR_SERVICE_URL:http://localhost:8090}
         # HTTP timeout in seconds per page request
         timeout-seconds: ${OCR_TIMEOUT_SECONDS:60}
         # Set to false to disable OCR (scanned PDFs will be rejected)
         enabled: ${OCR_ENABLED:true}
-        # DPI for rendering PDF pages to images (200 = good quality, 300 = higher accuracy)
-        render-dpi: ${OCR_RENDER_DPI:200}
+        # DPI for rendering PDF pages to images.
+        # 300 DPI = recommended for MnN scanned pages (furigana strokes preserved,
+        #           ~3 MB/page; OCR service downscales to 1800px after preprocessing).
+        # 150 DPI = fallback for memory-constrained environments.
+        render-dpi: ${OCR_RENDER_DPI:300}
         # Chars-per-page below this → treated as scanned PDF (route to OCR)
         scanned-page-threshold: ${OCR_SCANNED_PAGE_THRESHOLD:100.0}
         # Minimum OCR confidence to accept (below = logged as low quality)
         min-confidence: ${OCR_MIN_CONFIDENCE:0.5}
+        # Path to Google Cloud service-account JSON key (for google_vision / auto provider).
+        # If blank, uses GOOGLE_APPLICATION_CREDENTIALS env var (ADC).
+        # Example: environment/secrets/satori-489709-ce922a405186.json
+        credentials-file: ${GOOGLE_APPLICATION_CREDENTIALS:environment/secrets/satori-489709-ce922a405186.json}
 
     agentic-rag:
         # Minimum confidence for extraction (Corrective RAG threshold)
@@ -194,8 +211,12 @@ curriculum-import:
         rag-similarity-threshold: ${RAG_SIMILARITY_THRESHOLD:0.7}
         # Enable parallel chunk processing
         parallel-processing: ${RAG_PARALLEL_PROCESSING:true}
-        # Max chunks per parallel batch
-        parallel-batch-size: ${RAG_PARALLEL_BATCH_SIZE:3}
+        # Max chunks per parallel batch (keep low on machines with <16 GB RAM)
+        parallel-batch-size: ${RAG_PARALLEL_BATCH_SIZE:2}
+        # Thread pool for import jobs (core / max / queue)
+        thread-pool-core-size: ${RAG_THREAD_POOL_CORE:2}
+        thread-pool-max-size: ${RAG_THREAD_POOL_MAX:4}
+        thread-pool-queue-capacity: ${RAG_THREAD_POOL_QUEUE:50}
         # Enable embedding generation
         embedding-enabled: ${RAG_EMBEDDING_ENABLED:true}
         # Embedding dimension (text-embedding-3-small = 1536)
@@ -235,7 +256,7 @@ pronunciation:
         region: ${AZURE_SPEECH_REGION:southeastasia}
         language: ${AZURE_SPEECH_LANGUAGE:ja-JP}
         timeout: ${AZURE_SPEECH_TIMEOUT:30000}
-        granularity: PHONEME  # FULL_TEXT | WORD | PHONEME
+        granularity: PHONEME # FULL_TEXT | WORD | PHONEME
     speechsuper:
         app-key: ${SPEECHSUPER_APP_KEY:}
         secret-key: ${SPEECHSUPER_SECRET_KEY:}

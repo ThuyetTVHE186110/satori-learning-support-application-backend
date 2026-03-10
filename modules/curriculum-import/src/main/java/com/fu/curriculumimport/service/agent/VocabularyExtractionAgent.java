@@ -5,10 +5,14 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
+import com.fu.curriculumimport.service.ingestion.MnNSectionSplitter;
+import com.fu.curriculumimport.service.ingestion.MnNTableParser;
+import com.fu.curriculumimport.service.ingestion.OcrTextPreprocessor;
 import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
@@ -130,14 +134,66 @@ public class VocabularyExtractionAgent {
             %s
             """;
 
+    // ── Full page context template (Page-Index RAG) ──────────────────────────
+
+    /**
+     * When a section chunk is smaller than the full lesson page, inject the full
+     * lesson content so the agent can see words in adjacent sections (examples,
+     * dialogue) that should be extracted alongside the vocabulary list section.
+     */
+    private static final String FULL_PAGE_CONTEXT_TEMPLATE = """
+
+            ─── FULL LESSON PAGE CONTEXT (adjacent sections — use for cross-referencing) ──
+            %s
+            ─────────────────────────────────────────────────────────────────────────────────
+            Note: The section to extract FROM is the "CONTENT" block above.
+            Use this full-page context only to resolve ambiguities and verify readings.
+            """;
+
+
     // ── Public API ───────────────────────────────────────────────────────────
 
     /**
      * Extract vocabulary from a chunk, with optional RAG context.
+     *
+     * <p>Fast path: when the OCR service has detected structured table rows in
+     * the chunk (see {@link DocumentChunk#getStructuredTableRows()}), the rows
+     * are parsed directly by {@link MnNTableParser} — no LLM call needed.
+     * Falls back to LLM extraction when table parsing returns no results.
      */
     public ExtractionResult extractVocabulary(DocumentChunk chunk, String jlptLevel,
                                                RagContext ragContext) {
         long t0 = System.currentTimeMillis();
+
+        // ── Fast path: structured table rows from OCR ─────────────────────────
+        if (chunk.getStructuredTableRows() != null && !chunk.getStructuredTableRows().isEmpty()) {
+            List<ExtractionResult.ExtractedVocabulary> tableVocab =
+                    MnNTableParser.parse(chunk.getStructuredTableRows(), jlptLevel);
+            if (!tableVocab.isEmpty()) {
+                log.info("Chunk {}: table parser extracted {} vocab items (no LLM call)",
+                        chunk.getChunkIndex(), tableVocab.size());
+                return ExtractionResult.builder()
+                        .chunkIndex(chunk.getChunkIndex())
+                        .confidence(0.95)
+                        .tokensUsed(0)
+                        .processingTimeMs(System.currentTimeMillis() - t0)
+                        .lessons(Collections.emptyList())
+                        .vocabulary(tableVocab)
+                        .grammarPoints(Collections.emptyList())
+                        .build();
+            }
+            log.debug("Chunk {}: table parse failed (low rate), falling back to LLM", chunk.getChunkIndex());
+        }
+
+        // ── LLM path ──────────────────────────────────────────────────────────
+
+        // Skip trivial content (noise-only OCR page) before calling LLM
+        if (OcrTextPreprocessor.isTrivial(chunk.getContent())) {
+            log.info("Chunk {}: trivial content — skipping vocabulary LLM extraction",
+                    chunk.getChunkIndex());
+            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - t0);
+        }
+
         try {
             String ragSection = formatRagContext(ragContext);
             String prompt = buildPrompt(chunk, jlptLevel, ragSection, "");
@@ -145,6 +201,7 @@ public class VocabularyExtractionAgent {
             String response = chatClient.prompt()
                     .system(SYSTEM_PROMPT)
                     .user(prompt)
+                    .options(OpenAiChatOptions.builder().maxTokens(4096).build())
                     .call()
                     .content();
 
@@ -172,6 +229,7 @@ public class VocabularyExtractionAgent {
             String response = chatClient.prompt()
                     .system(SYSTEM_PROMPT + "\nIMPORTANT: You MUST fix every issue noted below.")
                     .user(prompt)
+                    .options(OpenAiChatOptions.builder().maxTokens(4096).build())
                     .call()
                     .content();
 
@@ -188,26 +246,86 @@ public class VocabularyExtractionAgent {
                                 String ragSection, String feedbackSection) {
         String lessonTopic = inferLessonTopic(chunk);
         String sourceType = describeSourceType(chunk.getChunkType());
+        String sectionHint = buildSectionHint(chunk);
+        String fullPageSection = buildFullPageContextSection(chunk);
+
+        // Cap content to token budget so the AI response is never truncated
+        String safeContent = OcrTextPreprocessor.truncateToTokenBudget(
+                chunk.getContent(), OcrTextPreprocessor.MAX_CONTENT_TOKENS);
 
         return String.format(EXTRACTION_PROMPT,
                 chunk.getPageStart(), chunk.getPageEnd(),
                 jlptLevel,
                 lessonTopic,
                 sourceType,
-                ragSection + feedbackSection,
-                chunk.getContent(),
+                sectionHint + fullPageSection + ragSection + feedbackSection,
+                safeContent,
                 buildMeaningHint(chunk),
                 jlptLevel);
     }
 
     /**
-     * Attempt to extract a lesson topic from the chunk header (PPTX slides
-     * are formatted as "[SLIDE N] タイトル: <title>").
+     * Build a full-page context block when the chunk is a section sub-chunk.
+     * Injects the full lesson text (all sections) so the agent can cross-reference
+     * readings and meanings found in grammar/example sections on the same page.
+     */
+    private String buildFullPageContextSection(DocumentChunk chunk) {
+        String fullCtx = chunk.getFullPageContext();
+        String content  = chunk.getContent();
+        // Only inject when page context is meaningfully larger than the chunk itself
+        if (fullCtx == null || fullCtx.isBlank() || fullCtx.equals(content)) return "";
+        String trimmed = OcrTextPreprocessor.truncateToTokenBudget(
+                fullCtx, OcrTextPreprocessor.MAX_PAGE_CONTEXT_TOKENS);
+        return String.format(FULL_PAGE_CONTEXT_TEMPLATE, trimmed);
+    }
+
+    /**
+     * Build a structural section hint injected before the content.
+     * Tells the LLM exactly what kind of section it is reading so it can
+     * apply the right extraction strategy without guessing.
+     */
+    private String buildSectionHint(DocumentChunk chunk) {
+        String sectionType = chunk.getSectionType();
+        if (sectionType == null || MnNSectionSplitter.UNKNOWN.equals(sectionType)) return "";
+        return switch (sectionType) {
+            case MnNSectionSplitter.VOCABULARY ->
+                    "\n⚠ SECTION TYPE: VOCABULARY LIST (語彙 / Từ vựng)\n" +
+                    "This section contains the lesson's vocabulary list. " +
+                    "Each entry has a Japanese word, its reading, and meaning. " +
+                    "Extract EVERY word — do not skip any.\n";
+            case MnNSectionSplitter.EXAMPLE ->
+                    "\n⚠ SECTION TYPE: EXAMPLE SENTENCES (例文 / Ví dụ)\n" +
+                    "This section contains illustrative example sentences that use vocabulary " +
+                    "from this lesson. Extract vocabulary items that appear in these examples " +
+                    "if they are not already covered by the vocabulary list section.\n";
+            case MnNSectionSplitter.DIALOG ->
+                    "\n⚠ SECTION TYPE: DIALOGUE (会話 / Hội thoại)\n" +
+                    "This section is a scripted dialogue. Extract key vocabulary items " +
+                    "that appear in the dialogue and are relevant to the lesson theme.\n";
+            default -> "";
+        };
+    }
+
+    /**
+     * Determine the lesson topic/title for use in the extraction prompt.
+     *
+     * <p>Priority:
+     * <ol>
+     *   <li>Lesson title detected by boundary detector (e.g. "Bài 1").</li>
+     *   <li>PPTX slide title ({@code タイトル:} prefix).</li>
+     *   <li>First 120 characters of the chunk content.</li>
+     * </ol>
      */
     private String inferLessonTopic(DocumentChunk chunk) {
+        // 1. Lesson-aware chunking provides the title directly
+        if (chunk.getLessonTitle() != null && !chunk.getLessonTitle().isBlank()) {
+            return chunk.getLessonTitle();
+        }
+
         String content = chunk.getContent();
         if (content == null) return "unknown";
-        // PPTX structured format: first line contains the title
+
+        // 2. PPTX structured format: first line contains the title
         String firstLine = content.lines().findFirst().orElse("").trim();
         if (firstLine.contains("タイトル:")) {
             return firstLine.substring(firstLine.indexOf("タイトル:") + 5).trim();
@@ -215,7 +333,8 @@ public class VocabularyExtractionAgent {
         if (firstLine.contains("[SLIDE")) {
             return firstLine;
         }
-        // Fallback: first 120 chars
+
+        // 3. Fallback: first 120 chars
         return content.substring(0, Math.min(120, content.length())).replaceAll("\\s+", " ").trim();
     }
 

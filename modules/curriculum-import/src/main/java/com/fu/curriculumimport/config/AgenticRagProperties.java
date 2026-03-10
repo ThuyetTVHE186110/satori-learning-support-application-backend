@@ -45,7 +45,7 @@ public class AgenticRagProperties {
     /**
      * Max chunks to process in parallel.
      */
-    private int parallelBatchSize = 3;
+    private int parallelBatchSize = 5;
 
     /**
      * Enable embedding generation after extraction.
@@ -76,18 +76,21 @@ public class AgenticRagProperties {
 
     /**
      * Core pool size for import task executor.
+     * Default 4 — handles classification + extraction batches concurrently.
      */
-    private int threadPoolCoreSize = 2;
+    private int threadPoolCoreSize = 4;
 
     /**
      * Max pool size for import task executor.
+     * Default 8 — allows burst capacity for large textbooks.
      */
-    private int threadPoolMaxSize = 4;
+    private int threadPoolMaxSize = 8;
 
     /**
      * Queue capacity for import task executor.
+     * Default 50 — prevents CallerRunsPolicy from blocking the main import thread.
      */
-    private int threadPoolQueueCapacity = 10;
+    private int threadPoolQueueCapacity = 50;
 
     // ==================== Self-Reflection (Self-RAG) ====================
 
