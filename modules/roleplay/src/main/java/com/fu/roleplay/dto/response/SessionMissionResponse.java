@@ -18,7 +18,10 @@ public class SessionMissionResponse {
     private UUID id;
     private String title;
     private String titleJapanese;
+    private String titleVi;
     private String description;
+    private String descriptionVi;
+    private String aiReasoning;
     private ConversationMission.MissionType missionType;
     private SessionMission.MissionStatus status;
     private Integer progressPct;

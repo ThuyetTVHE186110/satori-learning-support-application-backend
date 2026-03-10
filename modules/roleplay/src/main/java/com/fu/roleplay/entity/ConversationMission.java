@@ -33,8 +33,14 @@ public class ConversationMission extends SoftDeletableEntity {
     @Column(name = "title_japanese", length = 255)
     private String titleJapanese;
 
+    @Column(name = "title_vi", length = 255)
+    private String titleVi;
+
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
+
+    @Column(name = "description_vi", columnDefinition = "TEXT")
+    private String descriptionVi;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "mission_type", nullable = false)

@@ -67,6 +67,9 @@ public class ConversationMessage extends BaseEntity {
     @Column(name = "processing_time_ms")
     private Integer processingTimeMs;
 
+    @Column(name = "message_type", length = 30)
+    private String messageType;
+
     public enum MessageRole {
         USER, ASSISTANT, SYSTEM, HINT
     }
