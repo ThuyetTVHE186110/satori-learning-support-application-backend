@@ -57,6 +57,7 @@ import static org.mockito.Mockito.*;
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("ClazzService Unit Tests")
+@SuppressWarnings("unchecked")
 class ClassServiceImplTest {
 
     @Mock
@@ -300,6 +301,28 @@ class ClassServiceImplTest {
 
             // When/Then
             assertThatThrownBy(() -> clazzService.createClass(badDateRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Ngày bắt đầu phải ở tương lai.");
+
+            verify(classRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Should throw exception when start date is today (E4 - boundary)")
+        void shouldThrowExceptionWhenStartDateIsToday() {
+            // Given – startDate = today is no longer allowed (must be strictly in the future)
+            CreateClassRequest todayDateRequest = CreateClassRequest.builder()
+                    .name("N5 Morning Class")
+                    .description("Beginner Japanese class")
+                    .teacherId(teacherId)
+                    .courseId(courseId)
+                    .maxStudents(30)
+                    .startDate(LocalDate.now()) // Today – should be rejected
+                    .endDate(LocalDate.now().plusMonths(3))
+                    .build();
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.createClass(todayDateRequest, managerId))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Ngày bắt đầu phải ở tương lai.");
 

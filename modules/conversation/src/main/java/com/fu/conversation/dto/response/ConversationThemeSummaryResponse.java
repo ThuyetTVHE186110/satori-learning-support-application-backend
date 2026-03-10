@@ -17,6 +17,7 @@ public class ConversationThemeSummaryResponse {
     private UUID id;
     private String title;
     private String titleJapanese;
+    private String descriptionVi;
     private String category;
     private Course.JlptLevel jlptLevel;
     private String thumbnailUrl;

@@ -406,13 +406,15 @@ class ConversationTopicServiceImplTest {
                     ConversationTopicSummaryResponse.builder().title("Topic 2").build();
 
             when(topicRepository.findByThemeIdAndStatusAndDeletedAtIsNullOrderByOrderIndexAsc(
-                    themeId, "PUBLISHED"))
+                    themeId, Course.ContentStatus.PUBLISHED.name()))
                     .thenReturn(List.of(activeTopic, topic2));
+            when(topicRepository.findPracticeStatsByUserIdAndTopicIds(any(), any()))
+                    .thenReturn(List.of());
             when(topicMapper.toSummaryResponse(activeTopic)).thenReturn(summaryResponse);
             when(topicMapper.toSummaryResponse(topic2)).thenReturn(summary2);
 
             List<ConversationTopicSummaryResponse> result =
-                    topicService.getPublishedTopicsByTheme(themeId);
+                    topicService.getPublishedTopicsByTheme(themeId, UUID.randomUUID());
 
             assertThat(result).hasSize(2);
             assertThat(result.get(0).getTitle()).isEqualTo("At the Restaurant");
@@ -423,11 +425,11 @@ class ConversationTopicServiceImplTest {
         @DisplayName("Should return empty list when no published topics for theme")
         void shouldReturnEmptyListWhenNoPublishedTopics() {
             when(topicRepository.findByThemeIdAndStatusAndDeletedAtIsNullOrderByOrderIndexAsc(
-                    themeId, "PUBLISHED"))
+                    themeId, Course.ContentStatus.PUBLISHED.name()))
                     .thenReturn(Collections.emptyList());
 
             List<ConversationTopicSummaryResponse> result =
-                    topicService.getPublishedTopicsByTheme(themeId);
+                    topicService.getPublishedTopicsByTheme(themeId, null);
 
             assertThat(result).isEmpty();
         }

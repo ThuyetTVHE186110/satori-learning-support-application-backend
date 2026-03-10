@@ -38,6 +38,9 @@ public class ConversationTheme extends SoftDeletableEntity {
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 
+    @Column(name = "description_vi", columnDefinition = "TEXT")
+    private String descriptionVi;
+
     @Column(name = "category", length = 100)
     private String category;
 
