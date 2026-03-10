@@ -1,6 +1,7 @@
 package com.fu.conversation.dto.request;
 
 import com.fu.course.entity.Course;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -14,7 +15,7 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 public class UpdateThemeRequest {
-
+    @NotBlank(message = "Title is required")
     @Size(max = 255)
     private String title;
 
