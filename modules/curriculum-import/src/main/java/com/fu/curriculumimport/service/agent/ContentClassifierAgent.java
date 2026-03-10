@@ -3,6 +3,7 @@ package com.fu.curriculumimport.service.agent;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
+import com.fu.curriculumimport.service.ingestion.MnNSectionSplitter;
 import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -76,10 +77,32 @@ public class ContentClassifierAgent {
     /**
      * Classify the content type of a document chunk.
      *
+     * <p><b>Fast path</b>: if the chunk already carries a {@code sectionType} set by
+     * {@link MnNSectionSplitter} (structural analysis), that signal is mapped directly
+     * to a {@link ClassificationResult.ContentType} with high confidence (0.95).
+     * This avoids an LLM call for the ~60–70% of chunks whose type is unambiguous
+     * from MnN's rigid section headers.
+     *
+     * <p><b>LLM path</b>: used for {@code UNKNOWN} sections or chunks that were not
+     * processed by the section splitter (e.g. character-based fallback chunks).
+     *
      * @param chunk the document chunk to classify
      * @return classification result with content type and confidence
      */
     public ClassificationResult classify(DocumentChunk chunk) {
+        // Fast-path: trust structural section type from MnNSectionSplitter
+        ClassificationResult.ContentType structuralType = mapSectionType(chunk.getSectionType());
+        if (structuralType != null) {
+            log.debug("Chunk {} fast-classified as {} via sectionType '{}'",
+                    chunk.getChunkIndex(), structuralType, chunk.getSectionType());
+            return ClassificationResult.builder()
+                    .contentType(structuralType)
+                    .confidence(0.95)
+                    .reasoning("Structurally classified from MnN section header: " + chunk.getSectionType())
+                    .build();
+        }
+
+        // LLM path: chunk sectionType is null or UNKNOWN
         try {
             String userPrompt = String.format(CLASSIFICATION_PROMPT,
                     chunk.getPageStart(), chunk.getPageEnd(),
@@ -97,6 +120,24 @@ public class ContentClassifierAgent {
             log.error("Classification failed for chunk {}: {}", chunk.getChunkIndex(), e.getMessage());
             return ClassificationResult.fallback();
         }
+    }
+
+    /**
+     * Map a structural section type (from MnNSectionSplitter) to a ContentType.
+     * Returns {@code null} when the section type is null, UNKNOWN, or unrecognized —
+     * signalling that LLM classification is needed.
+     */
+    private ClassificationResult.ContentType mapSectionType(String sectionType) {
+        if (sectionType == null || MnNSectionSplitter.UNKNOWN.equals(sectionType)) return null;
+        return switch (sectionType) {
+            case MnNSectionSplitter.VOCABULARY          -> ClassificationResult.ContentType.VOCABULARY;
+            case MnNSectionSplitter.GRAMMAR_PATTERN,
+                 MnNSectionSplitter.GRAMMAR_EXPLANATION -> ClassificationResult.ContentType.GRAMMAR;
+            case MnNSectionSplitter.DIALOG              -> ClassificationResult.ContentType.CONVERSATION;
+            case MnNSectionSplitter.EXAMPLE             -> ClassificationResult.ContentType.MIXED;
+            case MnNSectionSplitter.EXERCISE            -> ClassificationResult.ContentType.EXERCISE;
+            default                                     -> null;
+        };
     }
 
     private ClassificationResult parseClassificationResponse(String jsonResponse) {

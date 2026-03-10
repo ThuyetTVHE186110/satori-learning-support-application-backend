@@ -224,7 +224,7 @@ class OcrClientTest {
         @DisplayName("Server response has null text field → OcrTextResult.empty()")
         void extractText_nullTextField_returnsEmpty() {
             given(mockedResponseSpec.body(OcrClient.OcrServiceResponse.class))
-                    .willReturn(new OcrClient.OcrServiceResponse(null, 0.9, 0, 100));
+                    .willReturn(new OcrClient.OcrServiceResponse(null, null, 0.9, 0, 0, 100, null, null));
 
             OcrTextResult result = ocrClient.extractText(TEST_IMAGE);
 
@@ -317,6 +317,6 @@ class OcrClientTest {
 
     private void stubOcrResponse(String text, double confidence, int lineCount, int processingMs) {
         given(mockedResponseSpec.body(OcrClient.OcrServiceResponse.class))
-                .willReturn(new OcrClient.OcrServiceResponse(text, confidence, lineCount, processingMs));
+                .willReturn(new OcrClient.OcrServiceResponse(text, null, confidence, lineCount, 0, processingMs, null, null));
     }
 }

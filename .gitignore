@@ -68,4 +68,4 @@ release.properties
 .claude/**
 .github/**
 *.json
-/environment/secrets
+ environment/secrets/

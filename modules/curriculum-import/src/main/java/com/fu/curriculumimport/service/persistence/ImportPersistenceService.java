@@ -13,9 +13,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Service handling all transactional persistence operations for the import pipeline.
@@ -66,6 +65,9 @@ public class ImportPersistenceService {
                     .pageStart(docChunk.getPageStart())
                     .pageEnd(docChunk.getPageEnd())
                     .tokenCount(docChunk.getEstimatedTokenCount())
+                    .lessonTitle(docChunk.getLessonTitle())
+                    .lessonNumber(docChunk.getLessonNumber())
+                    .sectionType(docChunk.getSectionType())
                     .build();
             dbChunks.add(chunkRepository.save(chunk));
         }
@@ -102,76 +104,108 @@ public class ImportPersistenceService {
      */
     public void persistExtractedContent(CurriculumImport importEntity,
                                          List<ExtractionResult> results) {
-        int lessonsCount = 0;
-        int vocabCount = 0;
-        int grammarCount = 0;
-        int failedItems = 0;
-
         Course course = null;
         if (importEntity.getCourseId() != null) {
             course = courseRepository.findById(importEntity.getCourseId()).orElse(null);
         }
 
+        // Group results by lesson title so that oversized lessons that were split
+        // into multiple sub-chunks are merged back into a single lesson entity.
+        // Results without a lessonTitle are each treated as their own group (keyed by chunk index).
+        LinkedHashMap<String, List<ExtractionResult>> lessonGroups = new LinkedHashMap<>();
         for (ExtractionResult result : results) {
+            String groupKey = (result.getLessonTitle() != null && !result.getLessonTitle().isBlank())
+                    ? result.getLessonTitle()
+                    : "chunk-" + result.getChunkIndex();
+            lessonGroups.computeIfAbsent(groupKey, k -> new ArrayList<>()).add(result);
+        }
 
-            // 1. Persist vocabulary independently (not tied to lesson existence)
+        int lessonsCount = 0;
+        int vocabCount   = 0;
+        int grammarCount = 0;
+        int failedItems  = 0;
+
+        for (Map.Entry<String, List<ExtractionResult>> entry : lessonGroups.entrySet()) {
+            String groupKey      = entry.getKey();
+            List<ExtractionResult> groupResults = entry.getValue();
+
+            // 1. Persist all vocabulary for this lesson group
             List<Vocabulary> persistedVocab = new ArrayList<>();
-            for (ExtractionResult.ExtractedVocabulary ev : result.getVocabulary()) {
-                Vocabulary vocab = itemHelper.findOrCreateVocabulary(ev, importEntity.getCreatedBy());
-                if (vocab != null) {
-                    persistedVocab.add(vocab);
-                } else {
-                    failedItems++;
+            List<Boolean>    vocabKeyFlags  = new ArrayList<>();
+            for (ExtractionResult result : groupResults) {
+                for (ExtractionResult.ExtractedVocabulary ev : result.getVocabulary()) {
+                    Vocabulary vocab = itemHelper.findOrCreateVocabulary(ev, importEntity.getCreatedBy());
+                    if (vocab != null) {
+                        persistedVocab.add(vocab);
+                        vocabKeyFlags.add(ev.isKeyWord());
+                    } else {
+                        failedItems++;
+                    }
                 }
             }
 
-            // 2. Persist grammar independently (not tied to lesson existence)
-            List<GrammarPoint> persistedGrammar = new ArrayList<>();
-            for (ExtractionResult.ExtractedGrammar eg : result.getGrammarPoints()) {
-                GrammarPoint grammar = itemHelper.findOrCreateGrammarPoint(eg, importEntity.getCreatedBy());
-                if (grammar != null) {
-                    persistedGrammar.add(grammar);
-                } else {
-                    failedItems++;
+            // 2. Persist all grammar for this lesson group
+            List<GrammarPoint> persistedGrammar  = new ArrayList<>();
+            List<Boolean>      grammarKeyFlags    = new ArrayList<>();
+            for (ExtractionResult result : groupResults) {
+                for (ExtractionResult.ExtractedGrammar eg : result.getGrammarPoints()) {
+                    GrammarPoint grammar = itemHelper.findOrCreateGrammarPoint(eg, importEntity.getCreatedBy());
+                    if (grammar != null) {
+                        persistedGrammar.add(grammar);
+                        grammarKeyFlags.add(eg.isKeyPoint());
+                    } else {
+                        failedItems++;
+                    }
                 }
             }
 
-            // 3. Build the list of lessons to persist.
-            //    If the extraction result has explicit lessons, use them.
-            //    Otherwise, auto-generate a lesson per chunk so that
-            //    vocabulary/grammar items are always linked to a lesson
-            //    (VocabularyExtractionAgent and GrammarExtractionAgent return
-            //    empty lesson lists — this fallback ensures content is visible
-            //    via the course → lesson → vocab/grammar joins).
-            List<ExtractionResult.ExtractedLesson> lessonsToCreate = result.getLessons();
+            // 3. Determine lessons to create for this group.
+            //    Prefer explicit lessons returned by ContentExtractionAgent (MIXED chunks).
+            //    VocabularyExtractionAgent / GrammarExtractionAgent always return empty lists,
+            //    so we auto-generate one lesson per group using the detected lesson title.
+            ExtractionResult firstResult = groupResults.get(0);
+            // Collect all AI-generated lessons from sub-chunks then deduplicate by title.
+            // Multiple sub-chunks of the same lesson each return a lessons[] entry → without
+            // deduplication we'd persist N copies of "Bài 1" for a lesson split into N chunks.
+            Map<String, ExtractionResult.ExtractedLesson> uniqueLessonMap = new LinkedHashMap<>();
+            for (ExtractionResult gr : groupResults) {
+                List<ExtractionResult.ExtractedLesson> grLessons =
+                        gr.getLessons() != null ? gr.getLessons() : List.of();
+                for (ExtractionResult.ExtractedLesson el : grLessons) {
+                    String titleKey = el.getTitle() != null
+                            ? el.getTitle().toLowerCase().strip() : "";
+                    uniqueLessonMap.putIfAbsent(titleKey, el);
+                }
+            }
+            List<ExtractionResult.ExtractedLesson> lessonsToCreate = new ArrayList<>(uniqueLessonMap.values());
 
-            if ((lessonsToCreate == null || lessonsToCreate.isEmpty())
+            if (lessonsToCreate.isEmpty()
                     && (!persistedVocab.isEmpty() || !persistedGrammar.isEmpty())
                     && course != null) {
 
-                String autoTitle = buildAutoLessonTitle(result, importEntity);
-                String autoType = !persistedGrammar.isEmpty() && persistedVocab.isEmpty()
-                        ? "GRAMMAR"
-                        : !persistedVocab.isEmpty() && persistedGrammar.isEmpty()
-                                ? "VOCABULARY"
-                                : "MIXED";
+                String autoTitle = buildAutoLessonTitle(firstResult, importEntity);
+                String autoType  = !persistedGrammar.isEmpty() && persistedVocab.isEmpty() ? "GRAMMAR"
+                        : !persistedVocab.isEmpty() && persistedGrammar.isEmpty() ? "VOCABULARY"
+                        : "MIXED";
+                int orderIdx = firstResult.getLessonNumber() != null
+                        ? firstResult.getLessonNumber()
+                        : firstResult.getChunkIndex();
 
-                ExtractionResult.ExtractedLesson autoLesson = ExtractionResult.ExtractedLesson.builder()
+                lessonsToCreate = List.of(ExtractionResult.ExtractedLesson.builder()
                         .title(autoTitle)
-                        .description("Auto-generated lesson from imported content (chunk "
-                                + result.getChunkIndex() + ")")
+                        .description("Imported from " + importEntity.getOriginalFilename()
+                                + (firstResult.getLessonTitle() != null ? " — " + firstResult.getLessonTitle() : ""))
                         .lessonType(autoType)
-                        .orderIndex(result.getChunkIndex())
+                        .orderIndex(orderIdx)
                         .pageStart(0)
                         .pageEnd(0)
-                        .build();
+                        .build());
 
-                lessonsToCreate = List.of(autoLesson);
-                log.info("Auto-generated lesson '{}' for chunk {} (no explicit lesson from extraction agent)",
-                        autoTitle, result.getChunkIndex());
+                log.info("Auto-generated lesson '{}' for group '{}' ({} vocab, {} grammar)",
+                        autoTitle, groupKey, persistedVocab.size(), persistedGrammar.size());
             }
 
-            // 4. Persist lessons and link vocab/grammar to them
+            // 4. Persist lessons and link vocab/grammar
             for (ExtractionResult.ExtractedLesson el : lessonsToCreate) {
                 if (course == null) continue;
 
@@ -200,30 +234,22 @@ public class ImportPersistenceService {
                 }
                 lessonsCount++;
 
-                // Link already-persisted vocabulary to lesson
-                int vocabOrder = 0;
                 for (int i = 0; i < persistedVocab.size(); i++) {
-                    Vocabulary vocab = persistedVocab.get(i);
-                    boolean isKeyWord = i < result.getVocabulary().size()
-                            && result.getVocabulary().get(i).isKeyWord();
                     boolean linked = itemHelper.linkVocabularyToLesson(
-                            savedLesson.getId(), vocab, vocabOrder++, isKeyWord);
+                            savedLesson.getId(), persistedVocab.get(i), i,
+                            i < vocabKeyFlags.size() && vocabKeyFlags.get(i));
                     if (!linked) failedItems++;
                 }
 
-                // Link already-persisted grammar to lesson
-                int grammarOrder = 0;
                 for (int i = 0; i < persistedGrammar.size(); i++) {
-                    GrammarPoint grammar = persistedGrammar.get(i);
-                    boolean isKeyPoint = i < result.getGrammarPoints().size()
-                            && result.getGrammarPoints().get(i).isKeyPoint();
                     boolean linked = itemHelper.linkGrammarToLesson(
-                            savedLesson.getId(), grammar, grammarOrder++, isKeyPoint);
+                            savedLesson.getId(), persistedGrammar.get(i), i,
+                            i < grammarKeyFlags.size() && grammarKeyFlags.get(i));
                     if (!linked) failedItems++;
                 }
             }
 
-            vocabCount += persistedVocab.size();
+            vocabCount   += persistedVocab.size();
             grammarCount += persistedGrammar.size();
         }
 
@@ -265,21 +291,24 @@ public class ImportPersistenceService {
 
     /**
      * Build a human-readable lesson title from the extraction result.
-     * E.g. "Vocabulary — Chunk 3 (Mina N5.pdf)"
+     * <ul>
+     *   <li>If the chunk had a detected lesson title (e.g. "Bài 1"), use it directly.</li>
+     *   <li>Otherwise fall back to "Vocabulary — Chunk N (filename.pdf)".</li>
+     * </ul>
      */
     private String buildAutoLessonTitle(ExtractionResult result, CurriculumImport importEntity) {
-        String typeLabel;
-        if (!result.getGrammarPoints().isEmpty() && result.getVocabulary().isEmpty()) {
-            typeLabel = "Grammar";
-        } else if (!result.getVocabulary().isEmpty() && result.getGrammarPoints().isEmpty()) {
-            typeLabel = "Vocabulary";
-        } else {
-            typeLabel = "Mixed Content";
+        if (result.getLessonTitle() != null && !result.getLessonTitle().isBlank()) {
+            return result.getLessonTitle();
         }
+
+        String typeLabel = !result.getGrammarPoints().isEmpty() && result.getVocabulary().isEmpty()
+                ? "Grammar"
+                : !result.getVocabulary().isEmpty() && result.getGrammarPoints().isEmpty()
+                        ? "Vocabulary"
+                        : "Mixed Content";
 
         String fileName = importEntity.getOriginalFilename() != null
                 ? importEntity.getOriginalFilename() : "import";
-        // Truncate filename if too long
         if (fileName.length() > 40) {
             fileName = fileName.substring(0, 37) + "...";
         }

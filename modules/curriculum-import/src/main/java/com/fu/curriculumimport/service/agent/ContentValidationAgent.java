@@ -82,13 +82,25 @@ public class ContentValidationAgent {
         ReflectionResult reflectionResult;
         double reflectionScore;
 
-        if (ragProperties.isSelfReflectionEnabled() && sourceChunk != null) {
-            log.debug("  Layer 2: Running LLM self-reflection...");
+        // Skip self-reflection when rule-based score is already high and there are no errors.
+        // This avoids 1 LLM call per chunk when extraction quality is clearly acceptable,
+        // cutting pipeline time significantly for well-formatted textbooks.
+        int totalItems = result.getVocabulary().size() + result.getGrammarPoints().size();
+        boolean selfReflectionNeeded = ruleBasedScore < 0.85
+                || ruleBasedResult.getIssues().stream()
+                        .anyMatch(i -> i.getSeverity() == ValidationIssue.IssueSeverity.ERROR);
+
+        if (ragProperties.isSelfReflectionEnabled() && sourceChunk != null
+                && totalItems > 0 && selfReflectionNeeded) {
+            log.debug("  Layer 2: Running LLM self-reflection (rule score={})...", ruleBasedScore);
             reflectionResult = selfReflectionAgent.reflect(sourceChunk, result, jlptLevel);
             reflectionScore = reflectionResult.getReflectionScore();
             log.debug("  Self-reflection score: {} (verdict: {})",
                     reflectionScore, reflectionResult.getReflectionVerdict());
         } else {
+            if (totalItems > 0) {
+                log.debug("  Layer 2: Self-reflection skipped — rule score {} >= 0.85, no errors", ruleBasedScore);
+            }
             reflectionResult = ReflectionResult.passed();
             reflectionScore = ruleBasedScore; // Use rule-based as proxy
         }

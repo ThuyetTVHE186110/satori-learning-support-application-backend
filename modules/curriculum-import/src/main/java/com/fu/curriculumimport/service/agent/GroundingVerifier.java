@@ -56,14 +56,36 @@ public class GroundingVerifier {
     /**
      * Verify all extracted items are grounded in the source document chunk.
      *
-     * @param chunk            the original source document
+     * <p>Checks both the section chunk text and the full lesson page context
+     * (when available). A vocabulary or grammar item that appears anywhere on
+     * the same lesson page is considered grounded — even if it was in an adjacent
+     * section (e.g. an example sentence section rather than the vocabulary section).
+     *
+     * @param chunk            the original source document chunk (section-level)
      * @param extractionResult the AI extraction to verify
      * @return list of grounding checks with hallucination flags
      */
     public GroundingResult verify(DocumentChunk chunk, ExtractionResult extractionResult) {
+        // Primary source: section chunk content
         String sourceText = chunk.getContent();
+        // Secondary source: full lesson page (section chunk + all siblings)
+        // Falls back to chunk content when fullPageContext is absent or identical.
+        String pageText = (chunk.getFullPageContext() != null
+                && !chunk.getFullPageContext().isBlank()
+                && !chunk.getFullPageContext().equals(sourceText))
+                ? chunk.getFullPageContext()
+                : sourceText;
+
+        // Combined search space: section text + full page (dedup via concatenation)
+        String combinedSource = sourceText.equals(pageText)
+                ? sourceText
+                : sourceText + "\n\n" + pageText;
+
         // Normalize: remove extra whitespace, lowercase for comparison
-        String normalizedSource = normalizeForComparison(sourceText);
+        String normalizedSource = normalizeForComparison(combinedSource);
+        // OCR-condensed: remove whitespace between consecutive Japanese characters.
+        // Scanned PDFs often produce "た べ ま す" instead of "たべます".
+        String condensedSource = condenseJapaneseSpaces(combinedSource);
 
         List<GroundingCheck> checks = new ArrayList<>();
         List<String> hallucinatedItems = new ArrayList<>();
@@ -72,7 +94,7 @@ public class GroundingVerifier {
 
         // Verify vocabulary items
         for (ExtractionResult.ExtractedVocabulary vocab : extractionResult.getVocabulary()) {
-            GroundingCheck check = verifyVocabulary(vocab, sourceText, normalizedSource);
+            GroundingCheck check = verifyVocabulary(vocab, combinedSource, normalizedSource, condensedSource);
             checks.add(check);
 
             if (check.isHallucinated()) {
@@ -85,7 +107,7 @@ public class GroundingVerifier {
 
         // Verify grammar points
         for (ExtractionResult.ExtractedGrammar grammar : extractionResult.getGrammarPoints()) {
-            GroundingCheck check = verifyGrammar(grammar, sourceText, normalizedSource);
+            GroundingCheck check = verifyGrammar(grammar, combinedSource, normalizedSource, condensedSource);
             checks.add(check);
 
             if (check.isHallucinated()) {
@@ -112,7 +134,8 @@ public class GroundingVerifier {
      * Verify a single vocabulary item is grounded in source text.
      */
     private GroundingCheck verifyVocabulary(ExtractionResult.ExtractedVocabulary vocab,
-                                             String sourceText, String normalizedSource) {
+                                             String sourceText, String normalizedSource,
+                                             String condensedSource) {
         String japaneseText = vocab.getJapaneseText();
         if (japaneseText == null || japaneseText.isBlank()) {
             return buildCheck(japaneseText, "VOCABULARY", false, false, 0.0,
@@ -126,18 +149,27 @@ public class GroundingVerifier {
         if (textFound) {
             evidenceSnippet = extractEvidenceSnippet(sourceText, japaneseText);
         } else {
-            // 2. Try character-level match — check if individual kanji are present
-            textFound = checkKanjiDecomposition(japaneseText, sourceText);
+            // 2. Try OCR-condensed source — handles "た べ ま す" → "たべます" mismatch
+            textFound = condensedSource.contains(japaneseText);
             if (textFound) {
-                evidenceSnippet = "[Kanji decomposition match]";
+                evidenceSnippet = "[Condensed kana match]";
+            } else {
+                // 3. Try character-level kanji decomposition — handles OCR spacing in kanji
+                textFound = checkKanjiDecomposition(japaneseText, sourceText);
+                if (textFound) {
+                    evidenceSnippet = "[Kanji decomposition match]";
+                }
             }
         }
 
-        // 3. Check reading grounding
+        // 4. Check reading grounding
         boolean readingFound = false;
         if (vocab.getReading() != null && !vocab.getReading().isBlank()) {
-            readingFound = sourceText.contains(vocab.getReading())
-                    || checkReadingInParentheses(vocab.getReading(), sourceText, japaneseText);
+            String reading = vocab.getReading();
+            readingFound = sourceText.contains(reading)
+                    || condensedSource.contains(reading)
+                    || checkReadingInParentheses(reading, sourceText, japaneseText)
+                    || checkReadingInParentheses(reading, condensedSource, japaneseText);
         } else {
             readingFound = true; // If no reading provided, don't penalize
         }
@@ -162,7 +194,8 @@ public class GroundingVerifier {
      * Verify a single grammar point is grounded in source text.
      */
     private GroundingCheck verifyGrammar(ExtractionResult.ExtractedGrammar grammar,
-                                          String sourceText, String normalizedSource) {
+                                          String sourceText, String normalizedSource,
+                                          String condensedSource) {
         String pattern = grammar.getPattern();
         if (pattern == null || pattern.isBlank()) {
             return buildCheck(pattern, "GRAMMAR", false, false, 0.0,
@@ -172,15 +205,17 @@ public class GroundingVerifier {
         // 1. Check exact pattern presence
         // Grammar patterns often have ～ prefix, try with and without
         String cleanPattern = pattern.replace("～", "").replace("〜", "").strip();
-        boolean textFound = sourceText.contains(pattern) || sourceText.contains(cleanPattern);
+        boolean textFound = sourceText.contains(pattern) || sourceText.contains(cleanPattern)
+                || condensedSource.contains(pattern) || condensedSource.contains(cleanPattern);
         String evidenceSnippet = null;
 
         if (textFound) {
             String searchTerm = sourceText.contains(pattern) ? pattern : cleanPattern;
             evidenceSnippet = extractEvidenceSnippet(sourceText, searchTerm);
         } else {
-            // 2. Check for partial pattern match (key morphemes)
-            textFound = checkPartialPatternMatch(cleanPattern, sourceText);
+            // 2. Check for partial pattern match (key morphemes) in both sources
+            textFound = checkPartialPatternMatch(cleanPattern, sourceText)
+                    || checkPartialPatternMatch(cleanPattern, condensedSource);
             if (textFound) {
                 evidenceSnippet = "[Partial pattern match]";
             }
@@ -191,7 +226,9 @@ public class GroundingVerifier {
         if (grammar.getPatternReading() != null && !grammar.getPatternReading().isBlank()) {
             String cleanReading = grammar.getPatternReading().replace("～", "").replace("〜", "").strip();
             readingFound = sourceText.contains(grammar.getPatternReading())
-                    || sourceText.contains(cleanReading);
+                    || sourceText.contains(cleanReading)
+                    || condensedSource.contains(grammar.getPatternReading())
+                    || condensedSource.contains(cleanReading);
         }
 
         // 4. Check for example sentence fragments in source
@@ -404,6 +441,17 @@ public class GroundingVerifier {
         return text.toLowerCase()
                 .replaceAll("\\s+", " ")
                 .strip();
+    }
+
+    /**
+     * Remove spaces between consecutive CJK/kana characters.
+     *
+     * <p>Scanned PDFs via OCR often produce "た べ ま す" (spaces between kana).
+     * Condensing allows substring matching even when OCR spacing is inconsistent.
+     */
+    private String condenseJapaneseSpaces(String text) {
+        // Replace a space that is flanked by Japanese characters on both sides
+        return text.replaceAll("(?<=[\\u3040-\\u9FFF])[ \\t](?=[\\u3040-\\u9FFF])", "");
     }
 
     private String buildHallucinationReason(boolean textFound, boolean readingFound, String item) {

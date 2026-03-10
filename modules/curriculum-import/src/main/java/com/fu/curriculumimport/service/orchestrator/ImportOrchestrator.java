@@ -15,6 +15,7 @@ import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.service.ingestion.DocumentParseResult;
 import com.fu.curriculumimport.service.ingestion.FileIngestionRouter;
+import com.fu.curriculumimport.service.ingestion.OcrTextPreprocessor;
 import com.fu.curriculumimport.service.persistence.ImportPersistenceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -133,21 +134,36 @@ public class ImportOrchestrator {
             importEntity.updateProgress("CLASSIFYING", new BigDecimal("15"));
             persistenceService.updateImportProgress(importEntity);
 
-            Map<Integer, ClassificationResult> classifications = new HashMap<>();
+            // Use ConcurrentHashMap — classification futures write from multiple threads
+            Map<Integer, ClassificationResult> classifications = new ConcurrentHashMap<>();
+            List<CompletableFuture<Void>> classifyFutures = new ArrayList<>();
+
             for (int i = 0; i < parseResult.getChunks().size(); i++) {
-                checkCancelled(cancelFlag, importId);
-                DocumentChunk docChunk = parseResult.getChunks().get(i);
-                ImportChunk dbChunk = dbChunks.get(i);
+                final int idx = i;
+                final DocumentChunk docChunk = parseResult.getChunks().get(idx);
+                final ImportChunk dbChunk = dbChunks.get(idx);
 
-                ClassificationResult classification = classifierAgent.classify(docChunk);
-                classifications.put(i, classification);
+                classifyFutures.add(CompletableFuture.runAsync(() -> {
+                    if (cancelFlag.get()) return;
+                    ClassificationResult classification = classifierAgent.classify(docChunk);
+                    classifications.put(idx, classification);
+                    dbChunk.setContentType(classification.getContentType().name());
+                    persistenceService.saveChunk(dbChunk);
+                    log.debug("[{}] Chunk {} classified as {} (confidence: {})",
+                            importId, idx, classification.getContentType(), classification.getConfidence());
+                }, importTaskExecutor));
+            }
 
-                // Update chunk with classification
-                dbChunk.setContentType(classification.getContentType().name());
-                persistenceService.saveChunk(dbChunk);
-
-                log.debug("[{}] Chunk {} classified as {} (confidence: {})",
-                        importId, i, classification.getContentType(), classification.getConfidence());
+            try {
+                CompletableFuture.allOf(classifyFutures.toArray(new CompletableFuture[0]))
+                        .get(10, TimeUnit.MINUTES);
+            } catch (TimeoutException e) {
+                log.error("[{}] Classification timed out — proceeding with partial results", importId);
+            } catch (ExecutionException e) {
+                log.error("[{}] Classification error: {}", importId, e.getMessage());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new CancelledException("Import " + importId + " interrupted during classification");
             }
 
             // === STAGE 4: AI PROCESSING (Multi-Agent with RAG) ===
@@ -186,6 +202,12 @@ public class ImportOrchestrator {
                     ExtractionResult result = allResults.get(i);
                     ImportChunk dbChunk = findChunkByIndex(dbChunks, result.getChunkIndex());
                     DocumentChunk sourceDocChunk = findDocChunkByIndex(parseResult.getChunks(), result.getChunkIndex());
+
+                    // Skip validation for trivially-skipped chunks (cover pages, separators)
+                    if (dbChunk != null && "SKIPPED_TRIVIAL".equals(dbChunk.getValidationStatus())) {
+                        validationPassed++;
+                        continue;
+                    }
 
                     // 3-Layer Validation: Rule-Based + Self-Reflection + Grounding
                     ValidationResult validation = validationAgent.validateFull(
@@ -345,7 +367,7 @@ public class ImportOrchestrator {
 
             String jlptLevel = resolveJlptLevel(importEntity);
 
-            // Convert DB chunks back to DocumentChunks for processing
+            // Convert DB chunks back to DocumentChunks for processing (preserving lesson metadata)
             List<DocumentChunk> docChunks = existingChunks.stream()
                     .map(c -> DocumentChunk.builder()
                             .chunkIndex(c.getChunkIndex())
@@ -354,6 +376,9 @@ public class ImportOrchestrator {
                             .pageEnd(c.getPageEnd() != null ? c.getPageEnd() : 0)
                             .chunkType(c.getChunkType())
                             .estimatedTokenCount(c.getTokenCount() != null ? c.getTokenCount() : 0)
+                            .lessonTitle(c.getLessonTitle())
+                            .lessonNumber(c.getLessonNumber())
+                            .sectionType(c.getSectionType())
                             .build())
                     .toList();
 
@@ -421,6 +446,10 @@ public class ImportOrchestrator {
 
     /**
      * Process chunks in parallel using CompletableFuture.
+     *
+     * <p>Results are collected into a {@link ConcurrentHashMap} keyed by
+     * {@code chunkIndex} to guarantee ordering is preserved regardless of
+     * thread scheduling. The final list is sorted by chunkIndex before return.
      */
     private List<ExtractionResult> processChunksParallel(
             List<DocumentChunk> docChunks, List<ImportChunk> dbChunks,
@@ -428,7 +457,8 @@ public class ImportOrchestrator {
             UUID importId, CurriculumImport importEntity,
             AtomicInteger totalTokens, AtomicBoolean cancelFlag) {
 
-        List<ExtractionResult> results = Collections.synchronizedList(new ArrayList<>());
+        // keyed by chunkIndex → guarantees correct ordering after parallel writes
+        ConcurrentHashMap<Integer, ExtractionResult> resultMap = new ConcurrentHashMap<>();
         int batchSize = ragProperties.getParallelBatchSize();
 
         for (int batchStart = 0; batchStart < docChunks.size(); batchStart += batchSize) {
@@ -440,7 +470,12 @@ public class ImportOrchestrator {
             for (int i = batchStart; i < batchEnd; i++) {
                 final int idx = i;
                 final DocumentChunk docChunk = docChunks.get(idx);
-                final ImportChunk dbChunk = dbChunks.get(idx);
+                // Defensive: find dbChunk by chunkIndex rather than positional index
+                final ImportChunk dbChunk = findChunkByIndex(dbChunks, docChunk.getChunkIndex());
+                if (dbChunk == null) {
+                    log.warn("[{}] No DB chunk found for docChunk index {}, skipping", importId, idx);
+                    continue;
+                }
                 final ClassificationResult classification = classifications.getOrDefault(idx,
                         ClassificationResult.fallback());
 
@@ -449,7 +484,8 @@ public class ImportOrchestrator {
                         if (cancelFlag.get()) return;
                         ExtractionResult result = processOneChunk(
                                 docChunk, dbChunk, classification, jlptLevel, importId);
-                        results.add(result);
+                        // Key by chunkIndex — preserves order regardless of thread timing
+                        resultMap.put(docChunk.getChunkIndex(), result);
                         totalTokens.addAndGet(result.getTokensUsed());
                     } catch (Exception e) {
                         log.error("[{}] Parallel chunk {} failed: {}", importId, idx, e.getMessage());
@@ -483,7 +519,11 @@ public class ImportOrchestrator {
             persistenceService.updateImportProgress(importEntity);
         }
 
-        return new ArrayList<>(results);
+        // Return results sorted by chunkIndex to match the original chunk ordering
+        return resultMap.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .map(Map.Entry::getValue)
+                .collect(java.util.stream.Collectors.toList());
     }
 
     /**
@@ -536,6 +576,29 @@ public class ImportOrchestrator {
         dbChunk.setStatus(ImportChunk.ChunkStatus.PROCESSING);
         persistenceService.saveChunk(dbChunk);
 
+        // ── Trivial-content guard ───────────────────────────────────────────
+        // Apply OCR noise cleaning first (handles chunks stored before the cleaner
+        // was introduced, e.g. during retry runs), then decide if there is enough
+        // meaningful text to warrant any AI call.
+        //
+        // Cover/separator pages like "Lorhoctiengnhat.com / Bài 9 / 60 / I."
+        // become trivially small after cleaning and MUST be skipped here — without
+        // this guard the AI hallucinates plausible-looking content (e.g. "Bài 12")
+        // with confidence=1.0, which passes validation and pollutes the DB.
+        String cleanedContent = OcrTextPreprocessor.cleanOcrPage(docChunk.getContent());
+        if (OcrTextPreprocessor.isTrivial(cleanedContent)) {
+            log.info("[{}] Chunk {} skipped — trivial content after cleaning ({} chars raw)",
+                    importId, docChunk.getChunkIndex(),
+                    docChunk.getContent() == null ? 0 : docChunk.getContent().length());
+            ExtractionResult skipped = buildSkippedResult(docChunk.getChunkIndex());
+            dbChunk.markCompleted(serializeResult(skipped), BigDecimal.ONE, 0);
+            dbChunk.setValidationStatus("SKIPPED_TRIVIAL");
+            persistenceService.saveChunk(dbChunk);
+            return skipped;
+        }
+        // Use cleaned content for all downstream agents
+        docChunk.setContent(cleanedContent);
+
         // RAG Retrieval: find existing similar content for context
         RagContext ragContext = ragProperties.isRagRetrievalEnabled()
                 ? embeddingService.retrieveContext(docChunk.getContent())
@@ -544,6 +607,13 @@ public class ImportOrchestrator {
         // Route to specialized agent based on classification
         ExtractionResult result = routeToAgent(docChunk, classification.getContentType(),
                 jlptLevel, ragContext);
+
+        // Propagate lesson metadata from the source chunk so the persistence layer
+        // can group sub-chunks of the same lesson and generate correct titles.
+        if (docChunk.getLessonTitle() != null) {
+            result.setLessonTitle(docChunk.getLessonTitle());
+            result.setLessonNumber(docChunk.getLessonNumber());
+        }
 
         // Update chunk with result
         dbChunk.markCompleted(
@@ -650,6 +720,26 @@ public class ImportOrchestrator {
      */
     private BigDecimal estimateCost(int tokensUsed) {
         return BigDecimal.valueOf(tokensUsed * 0.0000003);
+    }
+
+    /**
+     * Build an extraction result for a trivially-skipped chunk.
+     *
+     * <p>Uses {@code confidence=1.0} so the validation loop does not treat this
+     * as a "low-confidence" result and attempt re-extraction. The result carries
+     * no vocabulary or grammar — it represents a chunk that was determined to
+     * contain no learnable content (cover page, separator, OCR-noise page).
+     */
+    private ExtractionResult buildSkippedResult(int chunkIndex) {
+        return ExtractionResult.builder()
+                .chunkIndex(chunkIndex)
+                .confidence(1.0)
+                .tokensUsed(0)
+                .processingTimeMs(0)
+                .lessons(Collections.emptyList())
+                .vocabulary(Collections.emptyList())
+                .grammarPoints(Collections.emptyList())
+                .build();
     }
 
     /**
