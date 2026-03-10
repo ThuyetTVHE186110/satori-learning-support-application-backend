@@ -67,3 +67,5 @@ release.properties
 /docs
 .claude/**
 .github/**
+*.json
+ environment/secrets/

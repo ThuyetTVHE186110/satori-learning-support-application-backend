@@ -5,13 +5,24 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * Configuration properties for the PaddleOCR microservice.
+ * Configuration properties for the OCR subsystem.
  * Bound from curriculum-import.ocr.* in application.yml.
  */
 @Data
 @Component
 @ConfigurationProperties(prefix = "curriculum-import.ocr")
 public class OcrProperties {
+
+    /**
+     * OCR provider selection.
+     * <ul>
+     *   <li>{@code paddle} — self-hosted PaddleOCR sidecar (default, free)</li>
+     *   <li>{@code google_vision} — Google Cloud Vision Document OCR API
+     *       (better accuracy for scanned books; requires GOOGLE_APPLICATION_CREDENTIALS)</li>
+     *   <li>{@code auto} — try Google Vision first, fall back to PaddleOCR on error</li>
+     * </ul>
+     */
+    private String provider = "paddle";
 
     /** Base URL of the PaddleOCR FastAPI sidecar. */
     private String serviceUrl = "http://localhost:8090";
@@ -44,4 +55,14 @@ public class OcrProperties {
      * Pages with lower confidence are still included but flagged in logs.
      */
     private double minConfidence = 0.5;
+
+    /**
+     * Path to the Google Cloud service-account JSON key file.
+     * Used when {@code provider=google_vision} or {@code provider=auto}.
+     * If empty, the client falls back to Application Default Credentials (ADC /
+     * {@code GOOGLE_APPLICATION_CREDENTIALS} env var).
+     *
+     * <p>Example: {@code environment/secrets/satori-489709-ce922a405186.json}
+     */
+    private String credentialsFile = "";
 }

@@ -9,6 +9,15 @@ services:
             POSTGRES_DB: satori_learning
             POSTGRES_USER: satori_user
             POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-SatoriSecure2026!}
+            # Tune shared_buffers to ~25% of the container memory limit below
+            POSTGRES_INITDB_ARGS: "--auth-local=trust"
+        command: >
+            postgres
+            -c shared_buffers=128MB
+            -c effective_cache_size=256MB
+            -c work_mem=8MB
+            -c maintenance_work_mem=64MB
+            -c max_connections=50
         ports:
             - "5432:5432"
         volumes:
@@ -16,6 +25,12 @@ services:
             - ./docker/init-scripts/postgres:/docker-entrypoint-initdb.d
         networks:
             - satori-network
+        deploy:
+            resources:
+                limits:
+                    memory: 512M
+                reservations:
+                    memory: 256M
         healthcheck:
             test: ["CMD-SHELL", "pg_isready -U satori_user -d satori_learning"]
             interval: 10s
@@ -28,13 +43,19 @@ services:
         image: redis:7.2-alpine
         container_name: satori-redis
         restart: unless-stopped
-        command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-SatoriRedis2026!}
+        command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-SatoriRedis2026!} --maxmemory 128mb --maxmemory-policy allkeys-lru
         ports:
             - "6379:6379"
         volumes:
             - redis_data:/data
         networks:
             - satori-network
+        deploy:
+            resources:
+                limits:
+                    memory: 192M
+                reservations:
+                    memory: 64M
         healthcheck:
             test:
                 [
@@ -77,7 +98,7 @@ services:
             - redis
 
     # ==================== PaddleOCR Microservice ====================
-    # Dual-language OCR for Japanese + Vietnamese text extraction (PaddleOCR 3.0)
+    # Dual-language OCR for Japanese + Vietnamese text extraction (PaddleOCR 4.0)
     # Built from environment/docker/ocr-service/
     # First start downloads both model weights (~3-5 min); subsequent starts
     # are fast because weights are cached in the named volume below.
@@ -92,6 +113,14 @@ services:
         volumes:
             # Persist downloaded model weights across container restarts
             - ocr_model_cache:/root/.paddleocr
+            # Google Vision key (optional — only needed when OCR_PROVIDER=google_vision or auto)
+            # Place your service account JSON at environment/secrets/google-vision-key.json
+            # and uncomment the line below:
+            - ./secrets:/app/secrets:ro
+        environment:
+            # Google Cloud Vision credentials (optional)
+            # Uncomment and set path if using google_vision or auto provider:
+            GOOGLE_APPLICATION_CREDENTIALS: /app/secrets/satori-489709-ce922a405186.json
         networks:
             - satori-network
         # OCR is CPU-heavy; cap resources so other services aren't starved

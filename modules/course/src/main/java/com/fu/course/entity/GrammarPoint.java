@@ -5,6 +5,8 @@ import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.hibernate.annotations.ColumnTransformer;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * GrammarPoint entity - Japanese grammar patterns.
@@ -80,13 +82,13 @@ public class GrammarPoint extends SoftDeletableEntity {
     private String[] relatedGrammar;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "jlpt_level", length = 5)
-    @ColumnTransformer(write = "CAST(? AS jlpt_level)")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "jlpt_level", columnDefinition = "jlpt_level")
     private Course.JlptLevel jlptLevel;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "category", length = 30)
-    @ColumnTransformer(write = "CAST(? AS grammar_category)")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "category", columnDefinition = "grammar_category")
     @Builder.Default
     private GrammarCategory category = GrammarCategory.OTHER;
 
@@ -104,8 +106,8 @@ public class GrammarPoint extends SoftDeletableEntity {
     private String contentHash;
 
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     @Column(name = "status", columnDefinition = "content_status")
-    @ColumnTransformer(write = "CAST(? AS content_status)")
     @Builder.Default
     private Course.ContentStatus status = Course.ContentStatus.DRAFT;
 

@@ -562,7 +562,7 @@ class ConversationThemeServiceImplTest {
         void shouldFilterByJlptLevel() {
             Pageable pageable = PageRequest.of(0, 10);
             when(themeRepository.findByJlptLevelAndStatusAndDeletedAtIsNull(
-                    Course.JlptLevel.N5, Course.ContentStatus.PUBLISHED, pageable))
+                    "N5", "PUBLISHED", pageable))
                     .thenReturn(new PageImpl<>(List.of(activeTheme)));
             when(themeMapper.toSummaryResponse(activeTheme)).thenReturn(summaryResponse);
             mockTopicCount(themeId, 0L);
@@ -570,7 +570,7 @@ class ConversationThemeServiceImplTest {
             themeService.getPublishedThemes(Course.JlptLevel.N5, pageable);
 
             verify(themeRepository).findByJlptLevelAndStatusAndDeletedAtIsNull(
-                    Course.JlptLevel.N5, Course.ContentStatus.PUBLISHED, pageable);
+                    "N5", "PUBLISHED", pageable);
             verify(themeRepository, never())
                     .findByStatusAndDeletedAtIsNull(any(), any());
         }
@@ -580,7 +580,7 @@ class ConversationThemeServiceImplTest {
         void shouldReturnAllPublishedWhenNoLevelFilter() {
             Pageable pageable = PageRequest.of(0, 10);
             when(themeRepository.findByStatusAndDeletedAtIsNull(
-                    Course.ContentStatus.PUBLISHED, pageable))
+                    "PUBLISHED", pageable))
                     .thenReturn(new PageImpl<>(List.of(activeTheme)));
             when(themeMapper.toSummaryResponse(activeTheme)).thenReturn(summaryResponse);
             mockTopicCount(themeId, 0L);
@@ -588,7 +588,7 @@ class ConversationThemeServiceImplTest {
             themeService.getPublishedThemes(null, pageable);
 
             verify(themeRepository).findByStatusAndDeletedAtIsNull(
-                    Course.ContentStatus.PUBLISHED, pageable);
+                    "PUBLISHED", pageable);
             verify(themeRepository, never())
                     .findByJlptLevelAndStatusAndDeletedAtIsNull(any(), any(), any());
         }
@@ -598,7 +598,7 @@ class ConversationThemeServiceImplTest {
         void shouldReturnEmptyWhenNoPublishedThemes() {
             Pageable pageable = PageRequest.of(0, 10);
             when(themeRepository.findByStatusAndDeletedAtIsNull(
-                    Course.ContentStatus.PUBLISHED, pageable))
+                    "PUBLISHED", pageable))
                     .thenReturn(Page.empty());
 
             Page<ConversationThemeSummaryResponse> result =
