@@ -105,8 +105,29 @@ public final class LessonBoundaryDetector {
      *
      * <p>A real lesson page typically contains only its own "Bài N" header.
      * A TOC page lists many lessons (e.g. "Bài 1 ... 5 / Bài 2 ... 10 / …").
+     * Lowered to 3 to catch shorter TOC pages.
      */
-    private static final int TOC_PAGE_LESSON_THRESHOLD = 4;
+    private static final int TOC_PAGE_LESSON_THRESHOLD = 3;
+
+    /**
+     * Minimum meaningful (non-whitespace) characters in accumulated lesson content
+     * before a chunk is emitted. Lesson headers like "Bài 3" on otherwise blank
+     * or OCR-failed pages produce trivial chunks that waste AI tokens and pollute
+     * the database. Chunks shorter than this threshold are silently dropped.
+     */
+    private static final int MIN_LESSON_CONTENT_CHARS = 80;
+
+    /**
+     * Lowercase keywords that signal a table-of-contents or navigation page.
+     * Pages containing any of these strings are excluded from boundary detection
+     * to prevent TOC entries (e.g. "Bài 1 ........... 12") from being mistaken
+     * for actual lesson-start pages.
+     */
+    private static final Set<String> TOC_PAGE_KEYWORDS = Set.of(
+            "mục lục", "muc luc",      // Vietnamese: table of contents
+            "目次", "もくじ",             // Japanese: table of contents
+            "table of contents", "contents"
+    );
 
     public static LinkedHashMap<Integer, Integer> detectBoundaries(List<String> pageTexts) {
         // lessonNumber → first page it appears on
@@ -115,6 +136,15 @@ public final class LessonBoundaryDetector {
         for (int i = 0; i < pageTexts.size(); i++) {
             String pageText = pageTexts.get(i);
             if (pageText == null || pageText.isBlank()) continue;
+
+            // Skip pages that contain table-of-contents keywords.
+            // Such pages list many lesson titles in a navigational context
+            // (e.g. "Bài 1 ........... 12") and must not be treated as
+            // lesson-start pages even if they contain a lesson number.
+            if (isTocPage(pageText)) {
+                log.debug("Page {} skipped — TOC keyword detected", i + 1);
+                continue;
+            }
 
             // Collect all distinct lesson numbers on this page
             Set<Integer> lessonsOnPage = new LinkedHashSet<>();
@@ -240,6 +270,19 @@ public final class LessonBoundaryDetector {
     }
 
     /**
+     * Returns {@code true} when the page text contains a table-of-contents keyword,
+     * indicating that "Bài N" occurrences on this page are navigational references
+     * rather than actual lesson-start markers.
+     */
+    private static boolean isTocPage(String pageText) {
+        String lower = pageText.toLowerCase();
+        for (String kw : TOC_PAGE_KEYWORDS) {
+            if (lower.contains(kw)) return true;
+        }
+        return false;
+    }
+
+    /**
      * Returns the first lesson number matched by {@link #LESSON_PATTERN} in {@code text},
      * or {@code null} if none found. Used by the secondary boundary scan.
      */
@@ -262,6 +305,18 @@ public final class LessonBoundaryDetector {
                                     String content, int pageStart, int pageEnd,
                                     String chunkType, int lessonNum) {
         if (content.isEmpty()) return chunkIndex;
+
+        // Skip trivial lesson chunks — e.g. a page that only contains the lesson
+        // header "Bài 3" because OCR failed on the actual content pages.
+        // Such chunks produce hallucinated AI results and pollute the database.
+        long meaningfulChars = content.chars()
+                .filter(c -> !Character.isWhitespace(c))
+                .count();
+        if (meaningfulChars < MIN_LESSON_CONTENT_CHARS) {
+            log.warn("Lesson {}: skipping trivial chunk ({} non-whitespace chars, pages {}-{})",
+                    lessonNum, meaningfulChars, pageStart, pageEnd);
+            return chunkIndex;
+        }
 
         String lessonTitle = "Bài " + lessonNum;
 

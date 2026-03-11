@@ -9,13 +9,17 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.annotation.PreDestroy;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Multi-provider OCR client — routes to PaddleOCR sidecar or Google Cloud Vision
@@ -83,6 +87,44 @@ public class OcrClient {
             case "google_vision" -> extractWithGoogleVision(image, false);
             case "auto"          -> extractWithGoogleVision(image, true);
             default              -> extractWithPaddle(image);
+        };
+    }
+
+    /** Release the cached Google Vision gRPC channel on Spring context shutdown. */
+    @PreDestroy
+    public void close() {
+        googleVisionClient.close();
+    }
+
+    // ── Batch API ────────────────────────────────────────────────────────────
+
+    /**
+     * OCR multiple pre-encoded JPEG pages.
+     *
+     * <p>For Google Vision the pages are sent as a single {@code batchAnnotateImages}
+     * RPC call (up to {@code curriculum-import.ocr.google-vision-batch-size} images).
+     * For PaddleOCR the call is sequential (no native batch support).
+     *
+     * @param jpegBytesList JPEG-encoded page images
+     * @return one {@link OcrTextResult} per input, in the same order
+     */
+    public List<OcrTextResult> extractTextBatch(List<byte[]> jpegBytesList) {
+        if (!props.isEnabled()) {
+            throw new InvalidImportFileException(
+                    "OCR service is disabled. Cannot process scanned PDF.");
+        }
+        if (jpegBytesList.isEmpty()) return List.of();
+
+        String provider = props.getProvider() != null
+                ? props.getProvider().toLowerCase().trim()
+                : "paddle";
+
+        return switch (provider) {
+            case "google_vision" -> extractBatchWithGoogleVision(jpegBytesList, false);
+            case "auto"          -> extractBatchWithGoogleVision(jpegBytesList, true);
+            default              -> jpegBytesList.stream()
+                                        .map(this::extractWithPaddleBytes)
+                                        .collect(Collectors.toList());
         };
     }
 
@@ -154,6 +196,71 @@ public class OcrClient {
             return OcrTextResult.empty();
         } catch (Exception e) {
             log.error("Unexpected OCR client error", e);
+            return OcrTextResult.empty();
+        }
+    }
+
+    private List<OcrTextResult> extractBatchWithGoogleVision(List<byte[]> jpegBytesList,
+                                                               boolean fallbackToPaddle) {
+        try {
+            List<OcrTextResult> results = googleVisionClient.extractTextBatch(jpegBytesList);
+            if (!fallbackToPaddle) return results;
+
+            // In auto mode, retry empty results individually with PaddleOCR
+            List<OcrTextResult> finalResults = new ArrayList<>(results.size());
+            for (int i = 0; i < results.size(); i++) {
+                OcrTextResult r = results.get(i);
+                if (!r.hasText()) {
+                    log.debug("Page in batch returned empty from Google Vision — falling back to PaddleOCR");
+                    finalResults.add(extractWithPaddleBytes(jpegBytesList.get(i)));
+                } else {
+                    finalResults.add(r);
+                }
+            }
+            return finalResults;
+        } catch (Exception e) {
+            log.warn("Google Vision batch error: {} — {}",
+                    e.getMessage(), fallbackToPaddle ? "falling back to PaddleOCR" : "returning empty");
+            if (fallbackToPaddle) {
+                return jpegBytesList.stream()
+                        .map(this::extractWithPaddleBytes)
+                        .collect(Collectors.toList());
+            }
+            return Collections.nCopies(jpegBytesList.size(), OcrTextResult.empty());
+        }
+    }
+
+    /**
+     * Send a pre-encoded JPEG byte array to the PaddleOCR sidecar.
+     * Avoids re-encoding the image when the caller already holds the bytes.
+     */
+    private OcrTextResult extractWithPaddleBytes(byte[] jpegBytes) {
+        try {
+            String base64 = Base64.getEncoder().encodeToString(jpegBytes);
+            OcrServiceResponse resp = restClient.post()
+                    .uri("/ocr")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(new OcrServiceRequest(base64))
+                    .retrieve()
+                    .body(OcrServiceResponse.class);
+
+            if (resp == null || resp.text() == null) {
+                log.warn("PaddleOCR service returned null response");
+                return OcrTextResult.empty();
+            }
+
+            String bestText = (resp.richText() != null && !resp.richText().isBlank())
+                    ? resp.richText()
+                    : resp.text();
+            List<String> tableRows = resp.tableRows() != null ? resp.tableRows() : List.of();
+
+            return new OcrTextResult(bestText, resp.confidence(), tableRows);
+
+        } catch (ResourceAccessException e) {
+            log.warn("PaddleOCR service unreachable at {}: {}", props.getServiceUrl(), e.getMessage());
+            return OcrTextResult.empty();
+        } catch (Exception e) {
+            log.error("Unexpected OCR client error in batch fallback", e);
             return OcrTextResult.empty();
         }
     }

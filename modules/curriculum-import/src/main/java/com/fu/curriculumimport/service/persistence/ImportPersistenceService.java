@@ -179,6 +179,32 @@ public class ImportPersistenceService {
             }
             List<ExtractionResult.ExtractedLesson> lessonsToCreate = new ArrayList<>(uniqueLessonMap.values());
 
+            // When the chunker detected a canonical lesson title (lesson-aware chunking),
+            // it is authoritative and overrides whatever the LLM extracted.
+            // This prevents hallucinated titles like "Bài 2" for a chunk whose boundary
+            // detector clearly identified it as "Bài 1" (common on TOC/intro pages).
+            String detectedLessonTitle = firstResult.getLessonTitle();
+            if (detectedLessonTitle != null && !detectedLessonTitle.isBlank()
+                    && lessonsToCreate.size() == 1) {
+                ExtractionResult.ExtractedLesson el = lessonsToCreate.get(0);
+                String llmTitle = el.getTitle() != null ? el.getTitle().strip() : "";
+                if (!detectedLessonTitle.equalsIgnoreCase(llmTitle)) {
+                    log.info("Lesson title override: LLM='{}' → detected='{}' (chunk boundary wins)",
+                            llmTitle, detectedLessonTitle);
+                    lessonsToCreate = List.of(ExtractionResult.ExtractedLesson.builder()
+                            .title(detectedLessonTitle)
+                            .titleJapanese(el.getTitleJapanese())
+                            .description(el.getDescription())
+                            .lessonType(el.getLessonType())
+                            .objectives(el.getObjectives())
+                            .pageStart(el.getPageStart())
+                            .pageEnd(el.getPageEnd())
+                            .orderIndex(firstResult.getLessonNumber() != null
+                                    ? firstResult.getLessonNumber() : el.getOrderIndex())
+                            .build());
+                }
+            }
+
             if (lessonsToCreate.isEmpty()
                     && (!persistedVocab.isEmpty() || !persistedGrammar.isEmpty())
                     && course != null) {
