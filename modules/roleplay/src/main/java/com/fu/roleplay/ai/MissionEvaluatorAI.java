@@ -30,7 +30,9 @@ public class MissionEvaluatorAI {
             - missionId (String): UUID of the session mission
             - status (String): PENDING, IN_PROGRESS, COMPLETED, or FAILED
             - progressPct (Integer): 0-100 progress percentage
-            - reasoning (String): Brief explanation of the evaluation
+            - reasoning (String): Giải thích ngắn gọn bằng tiếng Việt về kết quả đánh giá nhiệm vụ
+
+            LANGUAGE REQUIREMENT: The "reasoning" field MUST be written in Vietnamese (Tiếng Việt).
 
             Be generous but fair. If the learner attempts the mission topic, mark as IN_PROGRESS.
             If they clearly accomplish the criteria, mark COMPLETED.

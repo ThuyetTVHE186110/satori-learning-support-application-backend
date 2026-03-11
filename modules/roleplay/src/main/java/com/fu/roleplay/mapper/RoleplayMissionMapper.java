@@ -37,5 +37,8 @@ public interface RoleplayMissionMapper {
 
     MissionResponse toResponse(ConversationMission mission);
 
+    @Mapping(target = "titleVi", source = "titleVi")
+    @Mapping(target = "descriptionVi", source = "descriptionVi")
+    @Mapping(target = "aiReasoning", source = "aiReasoning")
     SessionMissionResponse toSessionMissionResponse(SessionMission sessionMission);
 }
