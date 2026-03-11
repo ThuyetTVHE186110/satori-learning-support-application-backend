@@ -19,6 +19,7 @@
         <module>modules/class</module>
         <module>modules/pronunciation</module>
         <module>modules/roleplay</module>
+        <module>modules/assignment</module>
         <module>start</module>
     </modules>
 
@@ -98,6 +99,11 @@
             <dependency>
                 <groupId>com.fu</groupId>
                 <artifactId>roleplay</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fu</groupId>
+                <artifactId>assignment</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

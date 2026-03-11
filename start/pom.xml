@@ -50,6 +50,10 @@
             <groupId>com.fu</groupId>
             <artifactId>roleplay</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.fu</groupId>
+            <artifactId>assignment</artifactId>
+        </dependency>
 
         <!-- Spring Boot -->
         <dependency>
