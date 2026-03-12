@@ -107,10 +107,6 @@ public class QuizQuestion extends SoftDeletableEntity {
     @Builder.Default
     private Boolean aiGenerated = false;
 
-    /** URL của file PDF/DOCX nguồn (nếu aiGenerated = true) */
-    @Column(name = "source_pdf_url", columnDefinition = "TEXT")
-    private String sourcePdfUrl;
-
     // ── Classification ────────────────────────────────────────────────────────
 
     @Enumerated(EnumType.STRING)
