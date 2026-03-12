@@ -1,6 +1,5 @@
 package com.fu.conversation.dto.request;
 
-import com.fu.course.entity.Course;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;

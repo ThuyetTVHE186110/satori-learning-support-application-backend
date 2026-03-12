@@ -52,7 +52,7 @@ spring:
     # ==================== AI Configuration ====================
     ai:
         openai:
-            api-key: ${OPENAI_API_KEY:}
+            api-key: ${OPENAI_API_KEY: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}
             chat:
                 options:
                     model: gpt-4o-mini
@@ -125,10 +125,11 @@ app:
 
     # Cloudinary Configuration
     cloudinary:
-        enabled: ${CLOUDINARY_ENABLED:true}
-        cloud-name: ${CLOUDINARY_CLOUD_NAME:}
-        api-key: ${CLOUDINARY_API_KEY:}
-        api-secret: ${CLOUDINARY_API_SECRET:}
+      enabled: ${CLOUDINARY_ENABLED:true}
+      cloud-name: ${CLOUDINARY_CLOUD_NAME:dtn0i6fvs}
+      api-key: ${CLOUDINARY_API_KEY:945286173851369}
+      api-secret: ${CLOUDINARY_API_SECRET:oefJ4xJOHTtcwoGfU3Te_MaLMPY}
+
 
 # ==================== Spring Mail Configuration ====================
 spring.mail:

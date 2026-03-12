@@ -757,10 +757,16 @@ class ConversationTopicManagementTest {
 
         /**
          * TC_CTP_UT_002
-         * MANAGER updates only optional fields → title unchanged, updated optional fields persisted.
+         * MANAGER updates optional fields (difficultyScore, isRoleplay) alongside required title.
+         * UI always sends title — UpdateTopicRequest requires @NotBlank on title.
+         * Expected: HTTP 200, title unchanged (same value re-sent), optional fields persisted.
+         *
+         * Note: jlptLevel is NOT a supported update field.
+         *   UpdateTopicRequest does not contain a jlptLevel field → Jackson ignores it.
+         *   Sending jlptLevel in the request body has no effect.
          */
         @Test
-        @DisplayName("TC_CTP_UT_002 — optional fields only → HTTP 200, title unchanged in DB")
+        @DisplayName("TC_CTP_UT_002 — title + optional fields → HTTP 200, title unchanged, optional fields persisted")
         void tc_ctp_ut_002_updateOptionalFieldsOnly_returns200_titleUnchanged() throws Exception {
             // Arrange
             saveManager("manager@test.com");
@@ -774,7 +780,9 @@ class ConversationTopicManagementTest {
                     .orderIndex(0)
                     .build());
 
-            String body = "{\"jlptLevel\":\"N3\",\"difficultyScore\":5,\"isRoleplay\":true}";
+            // UI always sends title alongside other fields — title is required (@NotBlank)
+            // jlptLevel is intentionally omitted — UpdateTopicRequest does not support it
+            String body = "{\"title\":\"Mua sắm\",\"difficultyScore\":5,\"isRoleplay\":true}";
 
             // Act
             mockMvc.perform(put("/api/v1/manager/conversation/topics/{topicId}", topic.getId())

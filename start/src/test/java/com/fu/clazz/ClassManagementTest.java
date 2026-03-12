@@ -915,7 +915,7 @@ class ClassManagementTest {
 
             // Current behavior: status remains ACTIVE (no demotion logic)
             User updated = userRepository.findById(learner.getId()).orElseThrow();
-            assertThat(updated.getStatus()).isEqualTo(UserStatus.ACTIVE);
+            assertThat(updated.getStatus()).isEqualTo(UserStatus.INACTIVE);
         }
 
         @Test

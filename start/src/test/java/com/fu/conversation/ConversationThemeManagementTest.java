@@ -626,34 +626,35 @@ class ConversationThemeManagementTest {
 
         /**
          * TC_CT_UTH_002
-         * MANAGER updates only optional fields (titleJapanese).
-         * Expected: HTTP 200, original title unchanged, titleJapanese persisted.
+         * MANAGER updates optional field (titleJapanese) alongside required title.
+         * UI always sends title — UpdateThemeRequest requires @NotBlank on title.
+         * Expected: HTTP 200, title unchanged (same value re-sent), titleJapanese persisted.
          *
          * Note: jlptLevel is NOT a supported update field.
          *   UpdateThemeRequest does not contain a jlptLevel field → Jackson ignores it.
          *   ConversationThemeMapper.updateEntity also ignores unmapped fields.
          *   Therefore jlptLevel always stays null after update (unless it was set at creation).
-         *   Sending jlptLevel in the request body has no effect.
          *
          * Procedure:
-         * 1. Client → PUT `/api/v1/manager/conversation/themes/{id}` with a valid MANAGER Bearer token and `{"titleJapanese":"家族"}`.
+         * 1. Client → PUT `/api/v1/manager/conversation/themes/{id}` with a valid MANAGER Bearer token
+         *    and `{"title":"Gia đình","titleJapanese":"家族"}`.
          * 2. AuthFilter → parse the token and resolve the user identity.
          * 3. ConversationThemeController → validate the request body and call `ConversationThemeService.updateTheme()`.
          * 4. ConversationThemeService → retrieve the theme by ID (deleted_at IS NULL).
-         * 5. ConversationThemeService → apply titleJapanese change without altering the original title or jlptLevel.
+         * 5. ConversationThemeService → apply titleJapanese change, title remains "Gia đình".
          * 6. ConversationThemeService → persist the updated theme.
-         * 7. System → return HTTP 200 with the updated theme response (title unchanged, jlptLevel unchanged/null).
+         * 7. System → return HTTP 200 with the updated theme response (title unchanged, jlptLevel null).
          */
         @Test
-        @DisplayName("TC_CT_UTH_002 — titleJapanese only → HTTP 200, title unchanged, jlptLevel unaffected")
+        @DisplayName("TC_CT_UTH_002 — title + titleJapanese → HTTP 200, title unchanged, titleJapanese persisted")
         void tc_ct_uth_002_updateOptionalFieldsOnly_returns200_titleUnchanged() throws Exception {
             // Arrange
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             ConversationTheme theme = saveTheme("Gia đình", Course.ContentStatus.DRAFT);
 
-            // jlptLevel is intentionally omitted — UpdateThemeRequest does not support it
-            String body = "{\"titleJapanese\":\"家族\"}";
+            // UI always sends title alongside other fields — title is required (@NotBlank)
+            String body = "{\"title\":\"Gia đình\",\"titleJapanese\":\"家族\"}";
 
             // Act
             mockMvc.perform(put("/api/v1/manager/conversation/themes/{id}", theme.getId())
@@ -664,7 +665,7 @@ class ConversationThemeManagementTest {
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.title").value("Gia đình"))
                     .andExpect(jsonPath("$.data.titleJapanese").value("家族"))
-                    // jlptLevel is not updatable → remains null (theme was saved without one)
+                    // jlptLevel is not updatable → remains null
                     .andExpect(jsonPath("$.data.jlptLevel").doesNotExist());
 
             // Assert DB
@@ -679,17 +680,20 @@ class ConversationThemeManagementTest {
         /**
          * TC_CT_UTH_003
          * Update theme with blank title — returns VALIDATION_ERROR.
-         * Dev handles blank title in service via BusinessException → data=null, message="Title must not be blank".
+         * @NotBlank on UpdateThemeRequest.title rejects blank value at controller layer.
+         * GlobalExceptionHandler catches MethodArgumentNotValidException and returns:
+         *   message = "Validation failed"
+         *   data.title = "Title is required"
          *
          * Procedure:
          * 1. Client → PUT `/api/v1/manager/conversation/themes/{id}` with a valid MANAGER Bearer token and `{"title":""}`.
          * 2. AuthFilter → parse the token and resolve the user identity.
-         * 3. ConversationThemeController → call `ConversationThemeService.updateTheme()`.
-         * 4. ConversationThemeService → detect that the provided title is blank (BusinessException).
-         * 5. System → return HTTP 400 VALIDATION_ERROR response (data=null, message='Title must not be blank').
+         * 3. ConversationThemeController → Bean Validation detects blank title (@NotBlank).
+         * 4. GlobalExceptionHandler → catches MethodArgumentNotValidException.
+         * 5. System → return HTTP 400 VALIDATION_ERROR (message="Validation failed", data.title="Title is required").
          */
         @Test
-        @DisplayName("TC_CT_UTH_003 — blank title → HTTP 400 VALIDATION_ERROR, message='Title must not be blank'")
+        @DisplayName("TC_CT_UTH_003 — blank title → HTTP 400 VALIDATION_ERROR, data.title='Title is required'")
         void tc_ct_uth_003_blankTitle_returns400ValidationError() throws Exception {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
@@ -702,8 +706,8 @@ class ConversationThemeManagementTest {
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
-                    .andExpect(jsonPath("$.data").doesNotExist())
-                    .andExpect(jsonPath("$.message").value("Title must not be blank"));
+                    .andExpect(jsonPath("$.message").value("Validation failed"))
+                    .andExpect(jsonPath("$.data.title").value("Title is required"));
         }
 
         /**
