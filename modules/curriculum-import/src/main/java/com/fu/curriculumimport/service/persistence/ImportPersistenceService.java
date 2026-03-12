@@ -14,7 +14,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * Service handling all transactional persistence operations for the import pipeline.
@@ -195,7 +194,6 @@ public class ImportPersistenceService {
                             .title(detectedLessonTitle)
                             .titleJapanese(el.getTitleJapanese())
                             .description(el.getDescription())
-                            .lessonType(el.getLessonType())
                             .objectives(el.getObjectives())
                             .pageStart(el.getPageStart())
                             .pageEnd(el.getPageEnd())
@@ -209,26 +207,32 @@ public class ImportPersistenceService {
                     && (!persistedVocab.isEmpty() || !persistedGrammar.isEmpty())
                     && course != null) {
 
-                String autoTitle = buildAutoLessonTitle(firstResult, importEntity);
-                String autoType  = !persistedGrammar.isEmpty() && persistedVocab.isEmpty() ? "GRAMMAR"
-                        : !persistedVocab.isEmpty() && persistedGrammar.isEmpty() ? "VOCABULARY"
-                        : "MIXED";
-                int orderIdx = firstResult.getLessonNumber() != null
-                        ? firstResult.getLessonNumber()
-                        : firstResult.getChunkIndex();
+                // Only auto-generate a lesson when the chunk has a structural lesson title
+                // (i.e. it was identified by LessonBoundaryDetector). Chunks without a
+                // structural title are orphans (appendix pages, OCR-failed pages, etc.) —
+                // their vocab/grammar are already persisted to shared tables, so there is
+                // nothing useful to add by creating a noisy "Grammar — Chunk N" lesson.
+                String detectedTitle = firstResult.getLessonTitle();
+                if (detectedTitle == null || detectedTitle.isBlank()) {
+                    log.info("Skipping lesson creation for orphan group '{}' ({} vocab, {} grammar) — no structural lesson boundary",
+                            groupKey, persistedVocab.size(), persistedGrammar.size());
+                } else {
+                    int orderIdx = firstResult.getLessonNumber() != null
+                            ? firstResult.getLessonNumber()
+                            : firstResult.getChunkIndex();
 
-                lessonsToCreate = List.of(ExtractionResult.ExtractedLesson.builder()
-                        .title(autoTitle)
-                        .description("Imported from " + importEntity.getOriginalFilename()
-                                + (firstResult.getLessonTitle() != null ? " — " + firstResult.getLessonTitle() : ""))
-                        .lessonType(autoType)
-                        .orderIndex(orderIdx)
-                        .pageStart(0)
-                        .pageEnd(0)
-                        .build());
+                    lessonsToCreate = List.of(ExtractionResult.ExtractedLesson.builder()
+                            .title(detectedTitle)
+                            .description("Imported from " + importEntity.getOriginalFilename()
+                                    + " — " + detectedTitle)
+                            .orderIndex(orderIdx)
+                            .pageStart(0)
+                            .pageEnd(0)
+                            .build());
 
-                log.info("Auto-generated lesson '{}' for group '{}' ({} vocab, {} grammar)",
-                        autoTitle, groupKey, persistedVocab.size(), persistedGrammar.size());
+                    log.info("Auto-generated lesson '{}' for group '{}' ({} vocab, {} grammar)",
+                            detectedTitle, groupKey, persistedVocab.size(), persistedGrammar.size());
+                }
             }
 
             // 4. Persist lessons and link vocab/grammar
@@ -241,7 +245,7 @@ public class ImportPersistenceService {
                         .title(el.getTitle())
                         .titleJapanese(el.getTitleJapanese())
                         .description(el.getDescription())
-                        .lessonType(parseLessonType(el.getLessonType()))
+                        .lessonType(Lesson.LessonType.MIXED)
                         .content(el.getContent())
                         .objectives(el.getObjectives() != null
                                 ? el.getObjectives().toArray(new String[0]) : null)
@@ -252,7 +256,7 @@ public class ImportPersistenceService {
                         .status(Lesson.ContentStatus.DRAFT)
                         .build();
 
-                Lesson savedLesson = itemHelper.saveLesson(lesson);
+                Lesson savedLesson = itemHelper.findOrCreateLesson(lesson, importEntity.getId());
                 if (savedLesson == null) {
                     log.warn("Skipping lesson '{}' — failed to save", el.getTitle());
                     failedItems++;
@@ -342,11 +346,4 @@ public class ImportPersistenceService {
         return String.format("%s — Chunk %d (%s)", typeLabel, result.getChunkIndex(), fileName);
     }
 
-    private Lesson.LessonType parseLessonType(String type) {
-        try {
-            return Lesson.LessonType.valueOf(type);
-        } catch (Exception e) {
-            return Lesson.LessonType.MIXED;
-        }
-    }
 }
