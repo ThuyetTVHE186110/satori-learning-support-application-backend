@@ -107,12 +107,13 @@ class ConversationThemeServiceImplTest {
         void shouldReturnSuggestionsFromGenerationService() {
             // Given
             GenerateThemeRequest request = GenerateThemeRequest.builder()
-                    .courseId(courseId).count(3).build();
+                    .jlptLevel(Course.JlptLevel.N5).count(3).build();
             List<GeneratedThemeSuggestionResponse> expected = List.of(
                     GeneratedThemeSuggestionResponse.builder().title("Theme A").build(),
                     GeneratedThemeSuggestionResponse.builder().title("Theme B").build()
             );
-            when(generationService.generateThemesForCourse(courseId, 3)).thenReturn(expected);
+            when(generationService.generateThemes(Course.JlptLevel.N5, null, null, 3))
+                    .thenReturn(expected);
 
             // When
             List<GeneratedThemeSuggestionResponse> result =
@@ -120,15 +121,14 @@ class ConversationThemeServiceImplTest {
 
             // Then
             assertThat(result).hasSize(2).isEqualTo(expected);
-            verify(generationService).generateThemesForCourse(courseId, 3);
+            verify(generationService).generateThemes(Course.JlptLevel.N5, null, null, 3);
         }
 
         @Test
         @DisplayName("Should return empty list when generation service finds nothing")
         void shouldReturnEmptyListWhenNoSuggestions() {
-            GenerateThemeRequest request = GenerateThemeRequest.builder()
-                    .courseId(courseId).count(3).build();
-            when(generationService.generateThemesForCourse(any(), anyInt()))
+            GenerateThemeRequest request = GenerateThemeRequest.builder().count(3).build();
+            when(generationService.generateThemes(any(), any(), any(), anyInt()))
                     .thenReturn(Collections.emptyList());
 
             List<GeneratedThemeSuggestionResponse> result =
