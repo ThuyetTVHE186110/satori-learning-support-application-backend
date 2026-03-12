@@ -9,6 +9,7 @@ import com.fu.assignment.dto.request.AiQuizGenerationRequest;
 import com.fu.assignment.dto.response.QuizQuestionResponse;
 import com.fu.assignment.entity.QuizQuestion;
 import com.fu.assignment.mapper.AssignmentMapper;
+import com.fu.assignment.util.MarkdownUtils;
 import com.fu.common.exception.BusinessException;
 import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.repository.ClassRepository;
@@ -63,8 +64,7 @@ public class QuizAiGenerationService {
             FORMATTING RULES (Markdown + Ruby tags):
             ═══════════════════════════════════════════════════════════════
             
-            The fields "questionText", "questionJapanese", "explanation", "explanationVi"
-            use MARKDOWN for text formatting, combined with HTML <ruby><rt> tags for furigana only.
+            The fields "questionText", "questionJapanese", and "options" Use MARKDOWN for text formatting, combined with HTML <ruby><rt> tags for furigana only.
             
             ALLOWED FORMATTING:
             - Markdown: **bold**, *italic*, ____  (four underscores for blank)
@@ -72,14 +72,11 @@ public class QuizAiGenerationService {
             - Do NOT use <b>, <i>, <u>, <span> or any other HTML tags.
             
             1. FURIGANA (reading aid) — use <ruby> tags ONLY for Kanji:
-            - **MANDATORY**: EVERY SINGLE KANJI character in "questionText", "questionJapanese", "options", "explanation", and "explanationVi" MUST have furigana using <ruby> tags. If you output a Kanji without <ruby>, you fail.
-            - ONLY wrap Kanji characters in <ruby> tags.
-            - ABSOLUTELY DO NOT add furigana to Hiragana or Katakana.
+            - **MANDATORY**: EVERY SINGLE KANJI character in "questionText", "questionJapanese", and "options" MUST have furigana using <ruby> tags.
+            - **CRITICAL**: ABSOLUTELY DO NOT add furigana to Hiragana, Katakana, or any non-Kanji characters. 
+            - WRONG: <ruby>いきます<rt>いきます</rt></ruby> (Hiragana only) -> Just write: いきます
+            - WRONG: <ruby>ビール<rt>びーる</rt></ruby> (Katakana only) -> Just write: ビール
             - CORRECT: <ruby>日本語<rt>にほんご</rt></ruby>をべんきょうします。
-            - WRONG (Hiragana with furigana): <ruby>あります<rt>あります</rt></ruby> → Just write: あります
-            - WRONG (Katakana with furigana): <ruby>ビール<rt>びーる</rt></ruby> → Just write: ビール
-            - WRONG (Hiragana with furigana): <ruby>べんきょう<rt>勉強</rt></ruby> → Just write: べんきょう
-            - CORRECT: ビールは<ruby>何<rt>なに</rt></ruby>ですか。(Only 何 is kanji, so only 何 gets furigana)
             - RULE: If the text inside <ruby> does NOT contain any kanji (漢字), do NOT use <ruby> tags at all.
             - IMPORTANT: You MUST write "わたしは<ruby>学生<rt>がくせい</rt></ruby>です" (using kanji for gakusei) instead of writing just hiragana, and when you use Kanji, you MUST wrap it in <ruby>.
             
@@ -92,10 +89,9 @@ public class QuizAiGenerationService {
             4. BLANK marker — for fill_blank questions, use ____ (four underscores) to mark where the answer goes:
                Example: <ruby>昨日<rt>きのう</rt></ruby>、____ を <ruby>食<rt>た</rt></ruby>べました。
             
-            5. Option text — options MUST use "text" for the vocabulary kanji/kana, and "text_reading" for the furigana interpretation (only provide text_reading if text contains Kanji).
-               Example option: {"text": "食べる", "text_reading": "たべる", "isCorrect": true}
-               DO NOT use <ruby> tags inside the "text" field of an option.
-            6. explanation / explanationVi — may use **bold** or <ruby> if helpful, but not required.
+            5. Option text — options MUST use "text" for the vocabulary kanji/kana (**MANDATORY**: wrap all Kanji in <ruby> tags), and "text_reading" for the furigana interpretation (only provide text_reading if text contains Kanji).
+               Example option: {"text": "<ruby>食<rt>た</rt></ruby>べる", "text_reading": "たべる", "isCorrect": true}
+            6. explanation / explanationVi — MUST be plain text (see below).
             
             Example questionJapanese (multiple_choice):
             "<ruby>昨日<rt>きのう</rt></ruby>、<ruby>友達<rt>ともだち</rt></ruby>と <ruby>映画<rt>えいが</rt></ruby>を （____）。"
@@ -122,22 +118,23 @@ public class QuizAiGenerationService {
                - "options": null
                - "correctAnswer": Must be "true" or "false" (string).
                - "correctAnswers": null
-               
+            
             4. "matching":
                - "options": {"type": "matching", "left_items": [{"id": "1", "text": "..."}, {"id": "2", "text": "..."}], "right_items": [{"id": "A", "text": "..."}, {"id": "B", "text": "..."}]}
                - "correctAnswer": null
                - "correctAnswers": {"pairs": [{"left": "1", "right": "A"}, {"left": "2", "right": "B"}]}
-               
+            
             5. "ordering":
                - "options": {"type": "ordering", "items": [{"id": "1", "text": "..."}, {"id": "2", "text": "..."}, {"id": "3", "text": "..."}]}
                - "correctAnswer": null
                - "correctAnswers": {"sequence": ["1", "3", "2"]} -> The correct order of the option IDs.
             
             ═══════════════════════════════════════════════════════════════
-            EXPLANATION RULES (MANDATORY — DO NOT leave empty or null):
+            EXPLANATION RULES (MANDATORY — PLAIN TEXT ONLY):
             ═══════════════════════════════════════════════════════════════
-            - "explanation": MUST explain why the correct answer is correct. Reference grammar rules, vocabulary meanings, or contextual usage. 1-2 sentences. May use <ruby> for kanji. Example: "Thể て của <ruby>取<rt>と</rt></ruby>ります (Nhóm 1, đuôi り) là とって. Quy tắc: り→って."
-            - "explanationVi": MUST be the Vietnamese version of the explanation. Example: "Thể て của <ruby>取<rt>と</rt></ruby>ります (Nhóm 1, đuôi り) là とって. Quy tắc: り→って."
+            - "explanation": MUST explain why the correct answer is correct. 1-2 sentences. 
+            - **STRICTLY PLAIN TEXT**: Do NOT use **bold**, *italic*, <ruby>, <rt>, or any other Markdown/HTML tags in these fields.
+            - "explanationVi": MUST be the Vietnamese version of the explanation.
             - If you leave explanation or explanationVi as empty string "" or null, the question is INVALID.
             """;
 
@@ -362,7 +359,7 @@ public class QuizAiGenerationService {
 
 
     private List<QuizQuestionResponse> mapToPreviewResponses(List<AiQuizQuestionDto> aiDtos,
-                                                              AiQuizGenerationRequest request) {
+                                                             AiQuizGenerationRequest request) {
         List<QuizQuestionResponse> responses = new ArrayList<>();
 
         for (AiQuizQuestionDto dto : aiDtos) {
@@ -384,14 +381,14 @@ public class QuizAiGenerationService {
             }
 
             QuizQuestion q = QuizQuestion.builder()
-                    .questionText(stripInvalidFurigana(dto.questionText()))
-                    .questionJapanese(stripInvalidFurigana(dto.questionJapanese()))
+                    .questionText(MarkdownUtils.stripInvalidFurigana(dto.questionText()))
+                    .questionJapanese(MarkdownUtils.stripInvalidFurigana(dto.questionJapanese()))
                     .questionType(dto.questionType() != null ? dto.questionType() : "multiple_choice")
                     .options(optionsJson)
-                    .correctAnswer(stripInvalidFurigana(resolvedCorrectAnswer))
+                    .correctAnswer(MarkdownUtils.stripInvalidFurigana(resolvedCorrectAnswer))
                     .correctAnswers(correctAnswersJson)
-                    .explanation(stripInvalidFurigana(explanation))
-                    .explanationVi(stripInvalidFurigana(explanationVi))
+                    .explanation(MarkdownUtils.stripInvalidFurigana(explanation))
+                    .explanationVi(MarkdownUtils.stripInvalidFurigana(explanationVi))
                     .questionSubtype("STANDARD")
                     .difficultyScore(1)
                     .jlptLevel(request.getJlptLevel())
@@ -443,18 +440,15 @@ public class QuizAiGenerationService {
     // CONTEXT EXTRACTION & PROMPT BUILDING
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /**
-     * Tries to identify a target lesson from the teacher's prompt and fetches its vocab/grammar.
-     */
     private String extractContextForPrompt(AiQuizGenerationRequest request) {
         if (request.getClassId() == null) {
             return null;
         }
 
         // 1. Ask AI to detect lesson index from prompt
-        Integer lessonIndex = detectLessonIndexFromPrompt(request.getTeacherPrompt());
-        if (lessonIndex == null) {
-            log.info("No explicit lesson number detected in teacher prompt.");
+        String detectionResult = detectLessonIndexFromPrompt(request.getTeacherPrompt());
+        if (detectionResult == null) {
+            log.info("No explicit lesson reference detected in teacher prompt.");
             return null;
         }
 
@@ -466,62 +460,72 @@ public class QuizAiGenerationService {
         }
         UUID courseId = clazz.getCourseId();
 
-        // 3. Find the matching lesson (ordered by orderIndex, 1-based matching if possible)
+        // 3. Find the matching lessons
         List<Lesson> activeLessons = lessonRepository.findByCourseIdAndNotDeleted(courseId);
+        List<Lesson> targetLessons = new ArrayList<>();
 
-        Lesson targetLesson = null;
-        for (Lesson l : activeLessons) {
-            // Attempt to match by orderIndex (1-based if the DB is 1-based, or match the number in title)
-            if (l.getOrderIndex() != null && l.getOrderIndex().equals(lessonIndex)) {
-                targetLesson = l;
-                break;
-            }
-            if (l.getTitle() != null && l.getTitle().contains(String.valueOf(lessonIndex))) {
-                targetLesson = l;
-                break;
-            }
-        }
-
-        if (targetLesson == null) {
-            // If we still can't find it but we have lessons, fallback by position (1-based index)
-            int zeroBased = lessonIndex - 1;
-            if (zeroBased >= 0 && zeroBased < activeLessons.size()) {
-                targetLesson = activeLessons.get(zeroBased);
-            } else {
-                log.warn("Detected lesson {} but could not find a matching lesson in course {}", lessonIndex, courseId);
-                return null;
+        if ("ALL".equalsIgnoreCase(detectionResult)) {
+            targetLessons.addAll(activeLessons);
+        } else {
+            String[] indices = detectionResult.split(",");
+            for (String indexStr : indices) {
+                try {
+                    String clean = indexStr.trim().replaceAll("[^0-9]", "");
+                    if (clean.isEmpty()) continue;
+                    int index = Integer.parseInt(clean);
+                    Lesson target = findLessonByIndex(activeLessons, index);
+                    if (target != null && !targetLessons.contains(target)) {
+                        targetLessons.add(target);
+                    }
+                } catch (NumberFormatException e) {
+                    log.warn("Invalid lesson index detected: {}", indexStr);
+                }
             }
         }
 
-        log.info("Context Resolved: Using Lesson '{}' (ID: {}) for AI quiz generation",
-                targetLesson.getTitle(), targetLesson.getId());
-
-        // 4. Fetch Vocabulary and Grammar for the target lesson
-        List<Vocabulary> vocabList = vocabularyRepository.findByLessonId(targetLesson.getId());
-        List<GrammarPoint> grammarList = grammarPointRepository.findByLessonId(targetLesson.getId());
-
-        if (vocabList.isEmpty() && grammarList.isEmpty()) {
-            log.info("Lesson '{}' has no vocab or grammar linked.", targetLesson.getTitle());
+        if (targetLessons.isEmpty()) {
+            log.warn("No matching lessons found for detection result: {}", detectionResult);
             return null;
         }
 
-        StringBuilder ctx = new StringBuilder();
-        ctx.append("Detected Source Lesson: ").append(targetLesson.getTitle()).append("\n\n");
+        log.info("Context Resolved: Using {} lessons for AI quiz generation", targetLessons.size());
 
-        if (!vocabList.isEmpty()) {
+        // 4. Aggregate Vocabulary and Grammar
+        StringBuilder ctx = new StringBuilder();
+        ctx.append("Detected Source Lessons: ");
+        for (int i = 0; i < targetLessons.size(); i++) {
+            ctx.append(targetLessons.get(i).getTitle());
+            if (i < targetLessons.size() - 1) ctx.append(", ");
+        }
+        ctx.append("\n\n");
+
+        List<Vocabulary> allVocab = new ArrayList<>();
+        List<GrammarPoint> allGrammar = new ArrayList<>();
+
+        for (Lesson l : targetLessons) {
+            allVocab.addAll(vocabularyRepository.findByLessonId(l.getId()));
+            allGrammar.addAll(grammarPointRepository.findByLessonId(l.getId()));
+        }
+
+        if (allVocab.isEmpty() && allGrammar.isEmpty()) {
+            log.info("None of the detected lessons have vocab or grammar linked.");
+            return null;
+        }
+
+        if (!allVocab.isEmpty()) {
             ctx.append("--- TARGET VOCABULARY ---\n");
-            for (Vocabulary v : vocabList) {
+            for (Vocabulary v : allVocab) {
                 ctx.append("- ").append(v.getJapaneseText())
-                   .append(" (").append(v.getMeaningVi() != null ? v.getMeaningVi() : v.getMeaningEn()).append(")\n");
+                        .append(" (").append(v.getMeaningVi() != null ? v.getMeaningVi() : v.getMeaningEn()).append(")\n");
             }
             ctx.append("\n");
         }
 
-        if (!grammarList.isEmpty()) {
+        if (!allGrammar.isEmpty()) {
             ctx.append("--- TARGET GRAMMAR ---\n");
-            for (GrammarPoint g : grammarList) {
+            for (GrammarPoint g : allGrammar) {
                 ctx.append("- ").append(g.getPattern())
-                   .append(": ").append(g.getMeaningVi() != null ? g.getMeaningVi() : g.getMeaningEn()).append("\n");
+                        .append(": ").append(g.getMeaningVi() != null ? g.getMeaningVi() : g.getMeaningEn()).append("\n");
             }
             ctx.append("\n");
         }
@@ -529,21 +533,37 @@ public class QuizAiGenerationService {
         return ctx.toString();
     }
 
-    /**
-     * Helper to use a small AI prompt to extract the lesson number from the teacher's instruction.
-     */
-    private Integer detectLessonIndexFromPrompt(String teacherPrompt) {
-        String systemMsg = "You are an assistant that extracts the target lesson number from a teacher's prompt. " +
-                           "Look for phrases like 'bài số 1', 'bài 1', 'lesson 1', etc. " +
-                           "Respond ONLY with the pure integer number (e.g., '1', '5'). " +
-                           "If no specific lesson number is mentioned at all, respond exactly with the word 'NONE'. " +
-                           "Do NOT include any other text, explanation, or punctuation.";
+    private Lesson findLessonByIndex(List<Lesson> lessons, int index) {
+        for (Lesson l : lessons) {
+            if (l.getOrderIndex() != null && l.getOrderIndex().equals(index)) {
+                return l;
+            }
+            if (l.getTitle() != null && l.getTitle().contains(String.valueOf(index))) {
+                return l;
+            }
+        }
+        int zeroBased = index - 1;
+        if (zeroBased >= 0 && zeroBased < lessons.size()) {
+            return lessons.get(zeroBased);
+        }
+        return null;
+    }
+
+    private String detectLessonIndexFromPrompt(String teacherPrompt) {
+        String systemMsg = "You are an assistant that extracts target lesson numbers from a teacher's prompt. " +
+                "Rules: " +
+                "1. If the teacher wants all lessons, the entire course, or everything (e.g., 'cả khóa học', 'tất cả'), respond 'ALL'. " +
+                "2. If they mention ranges (e.g., 'bài 1 đến 5', 'từ bài đầu tiên đến 3'), expand it into a comma-separated list of integers (e.g., '1,2,3,4,5' or '1,2,3'). " +
+                "3. If they list specific lessons (e.g., 'bài 1, 3, 5'), respond with those integers (e.g., '1,3,5'). " +
+                "4. Otherwise, respond with a single integer. " +
+                "5. If no lesson reference is found, respond 'NONE'. " +
+                "Respond ONLY with the keyword or comma-separated integers. No explanation.";
 
         try {
             Map<String, Object> body = Map.of(
                     "model", "gpt-4o-mini",
                     "temperature", 0.0,
-                    "max_tokens", 10,
+                    "max_tokens", 50,
                     "messages", List.of(
                             Map.of("role", "system", "content", systemMsg),
                             Map.of("role", "user", "content", teacherPrompt)
@@ -565,7 +585,7 @@ public class QuizAiGenerationService {
                 return null;
             }
 
-            return Integer.parseInt(text.replaceAll("[^0-9]", ""));
+            return text;
 
         } catch (Exception e) {
             log.warn("Failed to detect lesson index from prompt: {}", e.getMessage());
@@ -595,93 +615,5 @@ public class QuizAiGenerationService {
         sb.append("- 'questionText', 'questionJapanese', option 'text', and 'correctAnswer' MUST use <ruby>漢字<rt>reading</rt></ruby> for ALL kanji.\n");
         sb.append("- Use **bold** (Markdown) for emphasis, ____ (four underscores) for blanks. Do NOT use <b>, <i>, <u> HTML tags.\n");
         return sb.toString();
-    }
-
-
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // FURIGANA SANITIZER — Remove <ruby> tags on non-Kanji text
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * Pattern matching {@code <ruby>BASE_TEXT<rt>READING</rt></ruby>}.
-     * Captures the base text (group 1) so we can check if it contains kanji.
-     */
-    private static final Pattern RUBY_PATTERN =
-            Pattern.compile("<ruby>([^<]*)<rt>[^<]*</rt></ruby>", Pattern.CASE_INSENSITIVE);
-
-    /**
-     * Pattern matching orphaned {@code TEXT<rt>READING</rt>} (no {@code <ruby>} wrapper).
-     * Group 1 = base text before {@code <rt>}, Group 2 = reading inside {@code <rt>}.
-     */
-    private static final Pattern ORPHAN_RT_PATTERN =
-            Pattern.compile("([^<>]+)<rt>([^<]*)</rt>", Pattern.CASE_INSENSITIVE);
-
-    /**
-     * Returns true if the given text contains at least one CJK Kanji character.
-     * Covers CJK Unified Ideographs (U+4E00–U+9FFF) and Extension A (U+3400–U+4DBF).
-     */
-    private static boolean containsKanji(String text) {
-        if (text == null) return false;
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if ((c >= '\u4E00' && c <= '\u9FFF') || (c >= '\u3400' && c <= '\u4DBF')) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Strip {@code <ruby>} tags whose base text does NOT contain any Kanji.
-     * For example:
-     * <ul>
-     *   {@code <ruby>ビール<rt>びーる</rt></ruby>} → {@code ビール} (katakana, no kanji)
-     *   {@code <ruby>あります<rt>あります</rt></ruby>} → {@code あります} (hiragana, no kanji)
-     *   {@code <ruby>日本語<rt>にほんご</rt></ruby>} → kept as-is (contains kanji)
-     *
-     */
-    private static String stripInvalidFurigana(String html) {
-        if (html == null || html.isEmpty()) return html;
-
-        // Pass 1: Handle proper <ruby>BASE<rt>READING</rt></ruby> tags
-        Matcher matcher = RUBY_PATTERN.matcher(html);
-        StringBuilder sb = new StringBuilder();
-        while (matcher.find()) {
-            String baseText = matcher.group(1);
-            if (containsKanji(baseText)) {
-                matcher.appendReplacement(sb, Matcher.quoteReplacement(matcher.group(0)));
-            } else {
-                matcher.appendReplacement(sb, Matcher.quoteReplacement(baseText));
-            }
-        }
-        matcher.appendTail(sb);
-        String result = sb.toString();
-
-        // Pass 2: Handle orphaned TEXT<rt>READING</rt> (no <ruby> wrapper)
-        Matcher rtMatcher = ORPHAN_RT_PATTERN.matcher(result);
-        StringBuilder sb2 = new StringBuilder();
-        while (rtMatcher.find()) {
-            String baseText = rtMatcher.group(1);
-            String reading = rtMatcher.group(2);
-
-            // Check if this <rt> is inside an existing <ruby> block (valid, skip it)
-            String before = result.substring(0, rtMatcher.start());
-            int lastRubyOpen = before.lastIndexOf("<ruby>");
-            int lastRubyClose = before.lastIndexOf("</ruby>");
-            if (lastRubyOpen > lastRubyClose) {
-                // Inside a valid <ruby> block — keep as-is
-                rtMatcher.appendReplacement(sb2, Matcher.quoteReplacement(rtMatcher.group(0)));
-            } else if (containsKanji(baseText)) {
-                // Orphaned but has kanji — wrap in proper <ruby> tags
-                rtMatcher.appendReplacement(sb2,
-                        Matcher.quoteReplacement("<ruby>" + baseText + "<rt>" + reading + "</rt></ruby>"));
-            } else {
-                // Orphaned, no kanji — strip the <rt> tag, keep only base text
-                rtMatcher.appendReplacement(sb2, Matcher.quoteReplacement(baseText));
-            }
-        }
-        rtMatcher.appendTail(sb2);
-        return sb2.toString();
     }
 }

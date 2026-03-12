@@ -120,6 +120,13 @@
                 <artifactId>cloudinary-http5</artifactId>
                 <version>${cloudinary.version}</version>
             </dependency>
+
+            <!-- HTML Sanitization -->
+            <dependency>
+                <groupId>org.jsoup</groupId>
+                <artifactId>jsoup</artifactId>
+                <version>1.18.1</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 

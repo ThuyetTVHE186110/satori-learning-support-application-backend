@@ -13,6 +13,7 @@ import com.fu.assignment.repository.*;
 import com.fu.assignment.service.AssignmentService;
 import com.fu.clazz.repository.ClassMemberRepository;
 import com.fu.clazz.repository.ClassRepository;
+import com.fu.assignment.util.MarkdownUtils;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.course.entity.Course;
@@ -200,14 +201,14 @@ public class AssignmentServiceImpl implements AssignmentService {
                             ? questionRepository.findById(qDto.getId()).orElse(new QuizQuestion())
                             : new QuizQuestion();
 
-                    q.setQuestionText(qDto.getQuestionText());
-                    q.setQuestionJapanese(qDto.getQuestionJapanese());
+                    q.setQuestionText(MarkdownUtils.sanitizeAndValidate(qDto.getQuestionText()));
+                    q.setQuestionJapanese(MarkdownUtils.sanitizeAndValidate(qDto.getQuestionJapanese()));
                     q.setQuestionType(qDto.getQuestionType() != null ? qDto.getQuestionType() : "multiple_choice");
-                    q.setOptions(qDto.getOptions());
-                    q.setCorrectAnswer(qDto.getCorrectAnswer());
+                    q.setOptions(sanitizeOptionsJson(qDto.getOptions()));
+                    q.setCorrectAnswer(MarkdownUtils.sanitizeAndValidate(qDto.getCorrectAnswer()));
                     q.setCorrectAnswers(qDto.getCorrectAnswers());
-                    q.setAiExplanation(qDto.getAiExplanation());
-                    q.setAiExplanationVi(qDto.getAiExplanationVi());
+                    q.setAiExplanation(MarkdownUtils.sanitizePlainExplanation(qDto.getAiExplanation()));
+                    q.setAiExplanationVi(MarkdownUtils.sanitizePlainExplanation(qDto.getAiExplanationVi()));
                     q.setImageUrl(qDto.getImageUrl());
                     q.setJlptLevel(qDto.getJlptLevel());
                     q.setDifficultyScore(qDto.getDifficultyScore() != null ? qDto.getDifficultyScore() : 1);
@@ -293,11 +294,6 @@ public class AssignmentServiceImpl implements AssignmentService {
             hasSubmissions = Boolean.TRUE.equals(assignment.getHasSubmissions());
 
             // If there are submissions AND writing content ACTUALLY changed → reject
-            if (hasSubmissions && hasWritingContentChanged(request, assignment)) {
-                throw new BusinessException("HAS_SUBMISSIONS",
-                        "Bài tập đã có học viên nộp bài. Không thể sửa nội dung đề bài. " +
-                                "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
-            }            // If there are submissions AND teacher is trying to update writing content → reject
             if (hasSubmissions && hasWritingContentChanged(request, assignment)) {
                 throw new BusinessException("HAS_SUBMISSIONS",
                         "Bài tập đã có học viên nộp bài. Không thể sửa nội dung đề bài. " +
@@ -1017,10 +1013,10 @@ public class AssignmentServiceImpl implements AssignmentService {
                     if (question.getOptions() == null) yield false;
                     JsonNode opts = objectMapper.readTree(question.getOptions());
                     for (JsonNode opt : opts) {
-                        if (opt.path("id").asText("").equalsIgnoreCase(selectedAnswer)
-                                && opt.path("isCorrect").asBoolean(false)) {
-                            yield true;
-                        }
+                    if (opt.path("id").asText("").equalsIgnoreCase(selectedAnswer)
+                        && opt.path("isCorrect").asBoolean(false)) {
+                        yield true;
+                    }
                     }
                     yield false;
                 }
@@ -1263,6 +1259,53 @@ public class AssignmentServiceImpl implements AssignmentService {
         }
 
         return false;
+    }
+
+    private String sanitizeOptionsJson(String optionsJson) {
+        if (optionsJson == null || optionsJson.isBlank()) return optionsJson;
+        try {
+            JsonNode root = objectMapper.readTree(optionsJson);
+            // Multiple choice options
+            if (root.has("options") && root.get("options").isArray()) {
+                for (JsonNode optionNode : root.get("options")) {
+                    if (optionNode instanceof com.fasterxml.jackson.databind.node.ObjectNode obj) {
+                        if (obj.has("text") && obj.get("text").isTextual()) {
+                            obj.put("text", MarkdownUtils.sanitizeAndValidate(obj.get("text").asText()));
+                        }
+                        if (obj.has("text_reading") && obj.get("text_reading").isTextual()) {
+                            obj.put("text_reading", MarkdownUtils.sanitizeAndValidate(obj.get("text_reading").asText()));
+                        }
+                    }
+                }
+            }
+            // Matching items
+            if (root.has("left_items") && root.get("left_items").isArray()) {
+                for (JsonNode item : root.get("left_items")) {
+                    if (item instanceof com.fasterxml.jackson.databind.node.ObjectNode obj && obj.has("text") && obj.get("text").isTextual()) {
+                        obj.put("text", MarkdownUtils.sanitizeAndValidate(obj.get("text").asText()));
+                    }
+                }
+            }
+            if (root.has("right_items") && root.get("right_items").isArray()) {
+                for (JsonNode item : root.get("right_items")) {
+                    if (item instanceof com.fasterxml.jackson.databind.node.ObjectNode obj && obj.has("text") && obj.get("text").isTextual()) {
+                        obj.put("text", MarkdownUtils.sanitizeAndValidate(obj.get("text").asText()));
+                    }
+                }
+            }
+            // Ordering items
+            if (root.has("items") && root.get("items").isArray()) {
+                for (JsonNode item : root.get("items")) {
+                    if (item instanceof com.fasterxml.jackson.databind.node.ObjectNode obj && obj.has("text") && obj.get("text").isTextual()) {
+                        obj.put("text", MarkdownUtils.sanitizeAndValidate(obj.get("text").asText()));
+                    }
+                }
+            }
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception e) {
+            log.warn("Failed to sanitize options JSON: {}", e.getMessage());
+            return optionsJson;
+        }
     }
 
     /**
