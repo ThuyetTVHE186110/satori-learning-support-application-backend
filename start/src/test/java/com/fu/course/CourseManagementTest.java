@@ -333,38 +333,37 @@ class CourseManagementTest {
 
         /**
          * TC_CM_VL_004
-         * Combined filter — keyword takes precedence over level+status in current implementation.
-         * Note: controller uses keyword as first-priority filter. Combined filters are not
-         * supported simultaneously in the current implementation.
-         * This test verifies keyword filter returns only name-matching courses.
+         * Combined filter (keyword + level + status) returns only matching courses.
          */
         @Test
-        @DisplayName("TC_CM_VL_004 — keyword='Nhật' as primary filter → only name-matching courses returned")
-        void tc_cm_vl_004_keywordFilter_excludesNonMatchingCourses() throws Exception {
+        @DisplayName("TC_CM_VL_004 — combined filter (keyword='Nhật', level=N5, status=ACTIVE) → 'Nhật N5 Cơ Bản' returned")
+        void tc_cm_vl_004_combinedFilter_returnsOnlyMatchingCourses() throws Exception {
             // Arrange
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
-            saveCourse("Nhật N5 Cơ Bản", JlptLevel.N5, CourseStatus.ACTIVE);   // keyword match
-            saveCourse("Nhật N4 Cơ Bản", JlptLevel.N4, CourseStatus.ACTIVE);   // keyword match (N4)
-            saveCourse("Unrelated", JlptLevel.N5, CourseStatus.ACTIVE);         // keyword mismatch
-            saveCourse("N5 Grammar", JlptLevel.N5, CourseStatus.ACTIVE);        // keyword mismatch
+            // Insert 5 courses
+            saveCourse("Nhật N5 Cơ Bản", JlptLevel.N5, CourseStatus.ACTIVE);     // MATCH
+            saveCourse("Nhật N5 Nâng Cao", JlptLevel.N5, CourseStatus.INACTIVE); // status mismatch
+            saveCourse("Nhật N4 Cơ Bản", JlptLevel.N4, CourseStatus.ACTIVE);     // level mismatch
+            saveCourse("Unrelated", JlptLevel.N5, CourseStatus.ACTIVE);           // keyword mismatch
+            saveCourse("N5 Grammar", JlptLevel.N5, CourseStatus.ACTIVE);          // keyword mismatch
 
-            // Act + Assert — keyword=Nhật returns only 2 courses whose name contains "Nhật"
+            // Act + Assert
             MvcResult result = mockMvc.perform(get("/api/v1/manager/courses")
                             .param("page", "0").param("size", "10")
                             .param("keyword", "Nhật")
+                            .param("level", "N5")
+                            .param("status", "ACTIVE")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.totalElements").value(2))
+                    .andExpect(jsonPath("$.data.totalElements").value(1))
                     .andReturn();
 
             String body = result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
-            var names = new java.util.ArrayList<String>();
-            objectMapper.readTree(body).path("data").path("content")
-                    .forEach(n -> names.add(n.path("name").asText()));
-            assertThat(names).doesNotContain("Unrelated", "N5 Grammar");
+            var content = objectMapper.readTree(body).path("data").path("content");
+            assertThat(content.get(0).path("name").asText()).isEqualTo("Nhật N5 Cơ Bản");
         }
 
         /**
