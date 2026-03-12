@@ -98,7 +98,7 @@ public interface AssignmentService {
     SubmissionResponse submitQuiz(SubmitAssignmentRequest request, UUID learnerId);
 
     /** Submit Writing or Translation (pending teacher grading). Supports optional image uploads. */
-    SubmissionResponse submitWriting(SubmitWritingRequest request, MultipartFile[] images, UUID learnerId);
+    SubmissionResponse submitWriting(UUID assignmentId, SubmitWritingRequest request, MultipartFile[] images, UUID learnerId);
 
     Page<SubmissionSummaryResponse> getMySubmissions(UUID learnerId, Pageable pageable);
 

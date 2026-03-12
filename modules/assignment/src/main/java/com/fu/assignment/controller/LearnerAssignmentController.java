@@ -78,18 +78,10 @@ public class LearnerAssignmentController {
     @Operation(summary = "Submit answers for a WRITING or TRANSLATION assignment (supports image uploads)")
     public ApiResponse<SubmissionResponse> submitWritingAssignment(
             @PathVariable UUID id,
-            @RequestParam(required = false) String writtenAnswer,
-            @RequestParam(required = false) Integer timeSpentSeconds,
+            @RequestPart(value = "data") SubmitWritingRequest request,
             @RequestPart(value = "images", required = false) MultipartFile[] images,
             @AuthenticationPrincipal UserDetails userDetails) {
-
-        SubmitWritingRequest request = SubmitWritingRequest.builder()
-                .assignmentId(id)
-                .writtenAnswer(writtenAnswer)
-                .timeSpentSeconds(timeSpentSeconds)
-                .build();
-
-        return ApiResponse.success(assignmentService.submitWriting(request, images, getUserId(userDetails)));
+        return ApiResponse.success(assignmentService.submitWriting(id,request, images, getUserId(userDetails)));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

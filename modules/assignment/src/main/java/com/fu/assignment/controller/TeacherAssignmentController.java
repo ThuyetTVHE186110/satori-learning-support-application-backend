@@ -336,7 +336,7 @@ public class TeacherAssignmentController {
 
     /**
      * Grade a WRITING or TRANSLATION submission.
-     * The teacher provides a score, comment, and feedback. The submission status changes to GRADED.
+     * The teacher provides a score and feedback. The submission status changes to GRADED.
      * Not applicable for QUIZ submissions (which are auto-graded).
      *
      * @param id          the submission UUID

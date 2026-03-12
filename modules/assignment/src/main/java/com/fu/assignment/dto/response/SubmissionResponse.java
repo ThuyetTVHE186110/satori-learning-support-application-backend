@@ -50,7 +50,6 @@ public class SubmissionResponse {
 
     // Teacher grading
     private BigDecimal teacherScore;
-    private String teacherComment;
 
     private LocalDateTime createdAt;
 }

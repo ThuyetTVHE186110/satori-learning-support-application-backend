@@ -710,7 +710,7 @@ class AssignmentServiceImplTest {
         @Test @DisplayName("should submit writing with text")
         void happyPath() {
             SubmitWritingRequest req = SubmitWritingRequest.builder()
-                    .assignmentId(assignmentId).writtenAnswer("Answer").timeSpentSeconds(120).build();
+                   .writtenAnswer("Answer").timeSpentSeconds(120).build();
             given(submissionRepository.findByAssignmentIdAndUserIdOrderByAttemptDesc(assignmentId, learnerId))
                     .willReturn(List.of(sampleSubmission));
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(writingAssignment));
@@ -718,14 +718,14 @@ class AssignmentServiceImplTest {
             given(submissionRepository.save(any())).willReturn(sampleSubmission);
             given(mapper.toResponse(any(AssignmentSubmission.class))).willReturn(submissionResponse);
 
-            assertThat(service.submitWriting(req, null, learnerId)).isNotNull();
+            assertThat(service.submitWriting(assignmentId, req, null, learnerId)).isNotNull();
             assertThat(sampleSubmission.getStatus()).isEqualTo(SubmissionStatus.SUBMITTED);
         }
 
         @Test @DisplayName("should throw when no text and no images")
         void noInput() {
-            SubmitWritingRequest req = SubmitWritingRequest.builder().assignmentId(assignmentId).build();
-            assertThatThrownBy(() -> service.submitWriting(req, null, learnerId))
+            SubmitWritingRequest req = SubmitWritingRequest.builder().build();
+            assertThatThrownBy(() -> service.submitWriting(assignmentId, req, null, learnerId))
                     .isInstanceOf(BusinessException.class)
                     .hasFieldOrPropertyWithValue("errorCode", "INVALID_INPUT");
         }
@@ -736,14 +736,14 @@ class AssignmentServiceImplTest {
             writingAssignment.setDueDate(LocalDateTime.now().minusDays(1));
             writingAssignment.setLateSubmissionAllowed(false);
             SubmitWritingRequest req = SubmitWritingRequest.builder()
-                    .assignmentId(assignmentId).writtenAnswer("Late").build();
+                    .writtenAnswer("Late").build();
             given(submissionRepository.findByAssignmentIdAndUserIdOrderByAttemptDesc(assignmentId, learnerId))
                     .willReturn(List.of(sampleSubmission));
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(writingAssignment));
             given(submissionRepository.save(any())).willReturn(sampleSubmission);
             given(mapper.toResponse(any(AssignmentSubmission.class))).willReturn(submissionResponse);
 
-            service.submitWriting(req, null, learnerId);
+            service.submitWriting(assignmentId, req, null, learnerId);
             assertThat(sampleSubmission.getStatus()).isEqualTo(SubmissionStatus.OVERDUE);
         }
     }
@@ -760,7 +760,7 @@ class AssignmentServiceImplTest {
         void happyPath() {
             sampleSubmission.setStatus(SubmissionStatus.SUBMITTED);
             GradeWritingRequest req = GradeWritingRequest.builder()
-                    .teacherScore(new BigDecimal("85.00")).teacherComment("Good!").feedback("Well done").build();
+                    .teacherScore(new BigDecimal("85.00")).feedback("Well done").build();
             given(submissionRepository.findById(submissionId)).willReturn(Optional.of(sampleSubmission));
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(writingAssignment));
             given(submissionRepository.save(any())).willReturn(sampleSubmission);

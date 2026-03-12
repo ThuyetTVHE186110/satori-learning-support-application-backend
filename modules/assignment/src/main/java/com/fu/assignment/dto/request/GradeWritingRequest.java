@@ -21,9 +21,7 @@ public class GradeWritingRequest {
     @DecimalMax(value = "100.0", message = "Score cannot exceed 100")
     private BigDecimal teacherScore;
 
-    /** Detailed teacher comment / feedback for the learner */
-    private String teacherComment;
-
-    /** General feedback (optional, shown as summary) */
+    /** Feedback for the learner (required) */
+    @NotNull(message = "Feedback is required")
     private String feedback;
 }

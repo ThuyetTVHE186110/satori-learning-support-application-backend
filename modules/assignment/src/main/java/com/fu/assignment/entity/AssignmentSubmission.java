@@ -104,10 +104,6 @@ public class AssignmentSubmission {
     @Column(name = "teacher_score", precision = 5, scale = 2)
     private BigDecimal teacherScore;
 
-    /** Teacher's detailed comment / feedback */
-    @Column(name = "teacher_comment", columnDefinition = "TEXT")
-    private String teacherComment;
-
     // ── Common Feedback & Grading ─────────────────────────────────────────────
 
     /** General feedback (used for both quiz and writing) */
