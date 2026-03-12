@@ -41,8 +41,10 @@ public class QuizQuestionDraftDto {
     /** JSON string for matching/ordering correct answers */
     private String correctAnswers;
 
-    private String aiExplanation;
-    private String aiExplanationVi;
+
+
+    private String explanation;
+    private String explanationVi;
 
     private String imageUrl;
 

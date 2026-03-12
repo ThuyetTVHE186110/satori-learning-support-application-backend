@@ -87,13 +87,7 @@ public class QuizQuestion extends SoftDeletableEntity {
     @Column(name = "explanation_vi", columnDefinition = "TEXT")
     private String explanationVi;
 
-    /** AI-generated giải thích tại sao đáp án đúng (tiếng Anh/Nhật) */
-    @Column(name = "ai_explanation", columnDefinition = "TEXT")
-    private String aiExplanation;
 
-    /** AI-generated giải thích tiếng Việt */
-    @Column(name = "ai_explanation_vi", columnDefinition = "TEXT")
-    private String aiExplanationVi;
 
     // ── Source References ─────────────────────────────────────────────────────
 

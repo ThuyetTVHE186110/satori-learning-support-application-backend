@@ -123,6 +123,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         boolean isAudioChanged = (audioFile != null && !audioFile.isEmpty())
                 || (request.getAudioUrl() != null && !request.getAudioUrl().equals(assignment.getAudioUrl()));
         if (isAudioChanged && hasSubmissions) {
+            log.warn("Assignment {} update blocked: Audio content changed but assignment has submissions.", assignmentId);
             throw new BusinessException("HAS_SUBMISSIONS",
                     "Bài tập đã có học viên nộp bài. Không thể cập nhật nội dung bài tập đã giao." +
                             "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
@@ -167,6 +168,7 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         // If submissions exist, throw ONLY if questions ACTUALLY changed
         if (hasSubmissions && hasQuizQuestionsChanged(request.getQuestions(), assignmentId)) {
+            log.warn("Assignment {} update blocked: Quiz questions changed but assignment has submissions.", assignmentId);
             throw new BusinessException("HAS_SUBMISSIONS",
                     "Bài tập đã có học viên nộp bài. Không thể cập nhật nội dung đề bài (câu hỏi). " +
                             "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
@@ -207,8 +209,8 @@ public class AssignmentServiceImpl implements AssignmentService {
                     q.setOptions(sanitizeOptionsJson(qDto.getOptions()));
                     q.setCorrectAnswer(MarkdownUtils.sanitizeAndValidate(qDto.getCorrectAnswer()));
                     q.setCorrectAnswers(qDto.getCorrectAnswers());
-                    q.setAiExplanation(MarkdownUtils.sanitizePlainExplanation(qDto.getAiExplanation()));
-                    q.setAiExplanationVi(MarkdownUtils.sanitizePlainExplanation(qDto.getAiExplanationVi()));
+                    q.setExplanation(MarkdownUtils.sanitizePlainExplanation(qDto.getExplanation()));
+                    q.setExplanationVi(MarkdownUtils.sanitizePlainExplanation(qDto.getExplanationVi()));
                     q.setImageUrl(qDto.getImageUrl());
                     q.setJlptLevel(qDto.getJlptLevel());
                     q.setDifficultyScore(qDto.getDifficultyScore() != null ? qDto.getDifficultyScore() : 1);
@@ -295,6 +297,7 @@ public class AssignmentServiceImpl implements AssignmentService {
 
             // If there are submissions AND writing content ACTUALLY changed → reject
             if (hasSubmissions && hasWritingContentChanged(request, assignment)) {
+                log.warn("Assignment {} update blocked: Writing content changed but assignment has submissions.", assignmentId);
                 throw new BusinessException("HAS_SUBMISSIONS",
                         "Bài tập đã có học viên nộp bài. Không thể sửa nội dung đề bài. " +
                                 "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
@@ -489,8 +492,6 @@ public class AssignmentServiceImpl implements AssignmentService {
                     .correctAnswers(original.getCorrectAnswers())
                     .explanation(original.getExplanation())
                     .explanationVi(original.getExplanationVi())
-                    .aiExplanation(original.getAiExplanation())
-                    .aiExplanationVi(original.getAiExplanationVi())
                     .vocabularyId(original.getVocabularyId())
                     .grammarId(original.getGrammarId())
                     .lessonId(original.getLessonId())
@@ -1051,14 +1052,18 @@ public class AssignmentServiceImpl implements AssignmentService {
             // maxScore: locked
             if (request.getMaxScore() != null && assignment.getMaxScore() != null
                     && !request.getMaxScore().equals(assignment.getMaxScore())) {
+                log.warn("Assignment {} update blocked: maxScore changed from {} to {} but assignment has submissions.",
+                        assignment.getId(), assignment.getMaxScore(), request.getMaxScore());
                 throw new BusinessException("HAS_SUBMISSIONS",
                         "Bài tập đã có học viên nộp bài. Không thể thay đổi điểm tối đa.");
             }
             // passingScore: only allow reducing
             if (request.getPassingScore() != null && assignment.getPassingScore() != null
                     && request.getPassingScore() > assignment.getPassingScore()) {
+                log.warn("Assignment {} update blocked: passingScore increased from {} to {} but assignment has submissions.",
+                        assignment.getId(), assignment.getPassingScore(), request.getPassingScore());
                 throw new BusinessException("HAS_SUBMISSIONS",
-                        "Bài tập đã có học viên nộp bài. Không thể tăng điểm đạt (chỉ được hạ xuống).");
+                        "Bài tập đã có học viên nộp bài. Không thể tăng điểm đạt (Chỉ được hạ xuống).");
             }
         }
 
@@ -1161,14 +1166,15 @@ public class AssignmentServiceImpl implements AssignmentService {
             return hasWritingContent(request); // If it historically didn't exist, any content means it changed
         }
 
-        return !Objects.equals(current.getPrompt(), request.getPrompt())
-                || !Objects.equals(current.getPromptJapanese(), request.getPromptJapanese())
-                || !Objects.equals(current.getSampleAnswer(), request.getSampleAnswer())
-                || !Objects.equals(current.getSampleAnswerJapanese(), request.getSampleAnswerJapanese())
-                || !Objects.equals(current.getSourceText(), request.getSourceText())
-                || !Objects.equals(current.getMinWords(), request.getMinWords())
-                || !Objects.equals(current.getMaxWords(), request.getMaxWords())
-                || !Objects.equals(current.getTranslationDirection(), request.getTranslationDirection());
+        if (!Objects.equals(current.getPrompt(), request.getPrompt())) { log.warn("Writing content changed: prompt. Incoming={}, Existing={}", request.getPrompt(), current.getPrompt()); return true; }
+        if (!Objects.equals(current.getPromptJapanese(), request.getPromptJapanese())) { log.warn("Writing content changed: promptJapanese. Incoming={}, Existing={}", request.getPromptJapanese(), current.getPromptJapanese()); return true; }
+        if (!Objects.equals(current.getSampleAnswer(), request.getSampleAnswer())) { log.warn("Writing content changed: sampleAnswer. Incoming={}, Existing={}", request.getSampleAnswer(), current.getSampleAnswer()); return true; }
+        if (!Objects.equals(current.getSampleAnswerJapanese(), request.getSampleAnswerJapanese())) { log.warn("Writing content changed: sampleAnswerJapanese. Incoming={}, Existing={}", request.getSampleAnswerJapanese(), current.getSampleAnswerJapanese()); return true; }
+        if (!Objects.equals(current.getSourceText(), request.getSourceText())) { log.warn("Writing content changed: sourceText. Incoming={}, Existing={}", request.getSourceText(), current.getSourceText()); return true; }
+        if (!Objects.equals(current.getMinWords(), request.getMinWords())) { log.warn("Writing content changed: minWords. Incoming={}, Existing={}", request.getMinWords(), current.getMinWords()); return true; }
+        if (!Objects.equals(current.getMaxWords(), request.getMaxWords())) { log.warn("Writing content changed: maxWords. Incoming={}, Existing={}", request.getMaxWords(), current.getMaxWords()); return true; }
+        if (!Objects.equals(current.getTranslationDirection(), request.getTranslationDirection())) { log.warn("Writing content changed: translationDirection. Incoming={}, Existing={}", request.getTranslationDirection(), current.getTranslationDirection()); return true; }
+        return false;
     }
 
     /**
@@ -1182,6 +1188,7 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         // 1. If counts differ, layout definitely changed
         if (existingLinks.size() != incomingQuestions.size()) {
+            log.warn("Quiz questions changed: count mismatch (existing={}, incoming={})", existingLinks.size(), incomingQuestions.size());
             return true;
         }
 
@@ -1195,67 +1202,51 @@ public class AssignmentServiceImpl implements AssignmentService {
             QuizQuestionDraftDto incoming = incomingQuestions.get(i);
             AssignmentQuestion existingLink = existingLinks.get(i);
 
-            // 2. Identity or sequence changed
             if (incoming.getId() == null || !incoming.getId().equals(existingLink.getQuestionId())) {
+                log.warn("Quiz questions changed: ID mismatch at index {} (incoming ID={}, existing link QID={})", i, incoming.getId(), existingLink.getQuestionId());
                 return true;
             }
 
             // 3. Link properties changed
             Integer incOrder = incoming.getOrderIndex() != null ? incoming.getOrderIndex() : i;
             if (!Objects.equals(incOrder, existingLink.getOrderIndex())) {
+                log.warn("Quiz questions changed: orderIndex mismatch for question {} (incoming={}, existing={})", incoming.getId(), incOrder, existingLink.getOrderIndex());
                 return true;
             }
 
             Integer incPoints = incoming.getPoints() != null ? incoming.getPoints() : 10;
             if (!Objects.equals(incPoints, existingLink.getPoints())) {
+                log.warn("Quiz questions changed: points mismatch for question {} (incoming={}, existing={})", incoming.getId(), incPoints, existingLink.getPoints());
                 return true;
             }
 
             // 4. Question inner values changed
             QuizQuestion existing = existingQuestionsMap.get(incoming.getId());
             if (existing == null) {
+                log.warn("Quiz questions changed: question {} not found in database", incoming.getId());
                 return true;
             }
 
             String incType = incoming.getQuestionType() != null ? incoming.getQuestionType() : "multiple_choice";
             Integer incDiff = incoming.getDifficultyScore() != null ? incoming.getDifficultyScore() : 1;
 
-            if (!Objects.equals(incoming.getQuestionText(), existing.getQuestionText())) {
-                return true;
-            }
-            if (!Objects.equals(incoming.getQuestionJapanese(), existing.getQuestionJapanese())) {
-                return true;
-            }
-            if (!Objects.equals(incType, existing.getQuestionType())) {
-                return true;
-            }
+            if (!Objects.equals(incoming.getQuestionText(), existing.getQuestionText())) { log.warn("Quiz question {} changed: questionText. Incoming={}, Existing={}", incoming.getId(), incoming.getQuestionText(), existing.getQuestionText()); return true; }
+            if (!Objects.equals(incoming.getQuestionJapanese(), existing.getQuestionJapanese())) { log.warn("Quiz question {} changed: questionJapanese. Incoming={}, Existing={}", incoming.getId(), incoming.getQuestionJapanese(), existing.getQuestionJapanese()); return true; }
+            if (!Objects.equals(incType, existing.getQuestionType())) { log.warn("Quiz question {} changed: questionType. Incoming={}, Existing={}", incoming.getId(), incType, existing.getQuestionType()); return true; }
 
             // Options are JSON strings. String comparison will fail if keys are just ordered differently.
             if (!isJsonEqual(incoming.getOptions(), existing.getOptions())) {
+                log.warn("Quiz question {} changed: options JSON mismatch. Incoming={}, Existing={}", incoming.getId(), incoming.getOptions(), existing.getOptions());
                 return true;
             }
 
-            if (!Objects.equals(incoming.getCorrectAnswer(), existing.getCorrectAnswer())) {
-                return true;
-            }
-            if (!Objects.equals(incoming.getCorrectAnswers(), existing.getCorrectAnswers())) {
-                return true;
-            }
-            if (!Objects.equals(incoming.getAiExplanation(), existing.getAiExplanation())) {
-                return true;
-            }
-            if (!Objects.equals(incoming.getAiExplanationVi(), existing.getAiExplanationVi())) {
-                return true;
-            }
-            if (!Objects.equals(incoming.getImageUrl(), existing.getImageUrl())) {
-                return true;
-            }
-            if (!Objects.equals(incoming.getJlptLevel(), existing.getJlptLevel())) {
-                return true;
-            }
-            if (!Objects.equals(incDiff, existing.getDifficultyScore())) {
-                return true;
-            }
+            if (!Objects.equals(incoming.getCorrectAnswer(), existing.getCorrectAnswer())) { log.warn("Quiz question {} changed: correctAnswer. Incoming={}, Existing={}", incoming.getId(), incoming.getCorrectAnswer(), existing.getCorrectAnswer()); return true; }
+            if (!Objects.equals(incoming.getCorrectAnswers(), existing.getCorrectAnswers())) { log.warn("Quiz question {} changed: correctAnswers. Incoming={}, Existing={}", incoming.getId(), incoming.getCorrectAnswers(), existing.getCorrectAnswers()); return true; }
+            if (!Objects.equals(incoming.getExplanation(), existing.getExplanation())) { log.warn("Quiz question {} changed: explanation. Incoming={}, Existing={}", incoming.getId(), incoming.getExplanation(), existing.getExplanation()); return true; }
+            if (!Objects.equals(incoming.getExplanationVi(), existing.getExplanationVi())) { log.warn("Quiz question {} changed: explanationVi. Incoming={}, Existing={}", incoming.getId(), incoming.getExplanationVi(), existing.getExplanationVi()); return true; }
+            if (!Objects.equals(incoming.getImageUrl(), existing.getImageUrl())) { log.warn("Quiz question {} changed: imageUrl. Incoming={}, Existing={}", incoming.getId(), incoming.getImageUrl(), existing.getImageUrl()); return true; }
+            if (!Objects.equals(incoming.getJlptLevel(), existing.getJlptLevel())) { log.warn("Quiz question {} changed: jlptLevel. Incoming={}, Existing={}", incoming.getId(), incoming.getJlptLevel(), existing.getJlptLevel()); return true; }
+            if (!Objects.equals(incDiff, existing.getDifficultyScore())) { log.warn("Quiz question {} changed: difficultyScore. Incoming={}, Existing={}", incoming.getId(), incDiff, existing.getDifficultyScore()); return true; }
         }
 
         return false;

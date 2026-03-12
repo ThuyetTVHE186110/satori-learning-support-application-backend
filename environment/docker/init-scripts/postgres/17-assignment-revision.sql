@@ -26,10 +26,7 @@ CREATE INDEX IF NOT EXISTS idx_assignments_teacher_class
 -- ── 3. quiz_questions: thêm columns ─────────────────────────────────────────
 ALTER TABLE assignment.quiz_questions
     ADD COLUMN IF NOT EXISTS question_subtype VARCHAR(50),  -- 'LISTENING', 'READING', 'STANDARD'
-    ADD COLUMN IF NOT EXISTS ai_explanation TEXT,
-    ADD COLUMN IF NOT EXISTS ai_explanation_vi TEXT,
     ADD COLUMN IF NOT EXISTS ai_generated BOOLEAN NOT NULL DEFAULT FALSE,
-    ADD COLUMN IF NOT EXISTS source_pdf_url TEXT,
     ADD COLUMN IF NOT EXISTS updated_by UUID REFERENCES user_management.users(id);
 
 COMMENT ON COLUMN assignment.quiz_questions.question_subtype IS 'LISTENING (nghe), READING (đọc), STANDARD (thường)';
@@ -105,8 +102,8 @@ COMMENT ON COLUMN assignment.assignments.audio_url
 -- Purpose: Audio is now managed at the assignment level only.
 --          Individual questions no longer hold their own audio file.
 -- ═══════════════════════════════════════════════════════════════════════════════
-
 ALTER TABLE assignment.quiz_questions
     DROP COLUMN IF EXISTS audio_url;
+
 
 

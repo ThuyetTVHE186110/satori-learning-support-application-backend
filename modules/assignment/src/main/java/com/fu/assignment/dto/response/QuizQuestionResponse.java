@@ -25,6 +25,7 @@ public class QuizQuestionResponse {
     private JsonNode correctAnswers;
     private String explanation;
     private String explanationVi;
+
     private UUID vocabularyId;
     private UUID grammarId;
     private UUID lessonId;

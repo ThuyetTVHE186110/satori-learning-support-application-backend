@@ -183,8 +183,8 @@ public class QuizExplanationService {
 
     private void parseAndApply(String rawResponse, QuizQuestion question) {
         AiExplanationResponse response = parseResponse(rawResponse);
-        question.setAiExplanation(response.getExplanation());
-        question.setAiExplanationVi(response.getExplanationVi());
+        question.setExplanation(response.getExplanation());
+        question.setExplanationVi(response.getExplanationVi());
     }
 
     private AiExplanationResponse parseResponse(String rawResponse) {

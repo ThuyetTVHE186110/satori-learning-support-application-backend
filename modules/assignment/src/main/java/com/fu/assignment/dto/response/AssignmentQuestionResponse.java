@@ -28,6 +28,7 @@ public class AssignmentQuestionResponse {
     private JsonNode options;          // JSON tree
     private String explanation;
     private String explanationVi;
+
     private String imageUrl;
     private Course.JlptLevel jlptLevel;
     private Integer difficultyScore;
