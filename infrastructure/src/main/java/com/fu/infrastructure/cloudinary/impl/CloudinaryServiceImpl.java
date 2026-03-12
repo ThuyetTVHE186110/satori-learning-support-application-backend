@@ -83,6 +83,31 @@ public class CloudinaryServiceImpl implements CloudinaryService {
     }
 
     @Override
+    public void deleteAudio(String publicId) {
+        if (!cloudinaryEnabled) {
+            log.info("[CLOUDINARY DISABLED] Would delete audio with public ID: {}", publicId);
+            return;
+        }
+
+        try {
+            log.info("Deleting audio from Cloudinary: {}", publicId);
+
+            Map<?, ?> result = cloudinary.uploader().destroy(publicId,
+                    ObjectUtils.asMap("resource_type", "video"));
+
+            String deleteResult = (String) result.get("result");
+            if ("ok".equals(deleteResult)) {
+                log.info("Audio deleted successfully: {}", publicId);
+            } else {
+                log.warn("Audio deletion returned unexpected result: {} for publicId: {}", deleteResult, publicId);
+            }
+        } catch (IOException e) {
+            log.error("Failed to delete audio from Cloudinary: {}", publicId, e);
+            // Don't throw — deletion failure should not block the main flow
+        }
+    }
+
+    @Override
     public String extractPublicId(String url) {
         if (url == null || url.isBlank()) {
             return null;

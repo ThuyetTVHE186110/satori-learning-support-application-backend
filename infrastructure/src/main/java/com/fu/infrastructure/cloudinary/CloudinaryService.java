@@ -27,6 +27,14 @@ public interface CloudinaryService {
     void deleteImage(String publicId);
 
     /**
+     * Delete an audio file from Cloudinary by its public ID.
+     * Uses resource_type "video" (Cloudinary's convention for audio).
+     *
+     * @param publicId the Cloudinary public ID of the audio file
+     */
+    void deleteAudio(String publicId);
+
+    /**
      * Extract the public ID from a Cloudinary URL.
      *
      * @param url the Cloudinary image URL
