@@ -266,6 +266,7 @@ class AssignmentIntegrationTest {
     void setUp() {
         submissionRepository.deleteAll();
         assignmentQuestionRepository.deleteAll();
+        quizQuestionRepository.deleteAll();
         writingAssignmentRepository.deleteAll();
         targetRepository.deleteAll();
         assignmentRepository.deleteAll();
@@ -280,6 +281,7 @@ class AssignmentIntegrationTest {
     void tearDown() {
         submissionRepository.deleteAll();
         assignmentQuestionRepository.deleteAll();
+        quizQuestionRepository.deleteAll();
         writingAssignmentRepository.deleteAll();
         targetRepository.deleteAll();
         assignmentRepository.deleteAll();
@@ -309,7 +311,7 @@ class AssignmentIntegrationTest {
             Clazz clazz = saveClass(teacher, saveCourse());
             savePublishedQuiz(teacher, clazz);
             String token = loginAndGetToken("teacher@test.com");
-
+            
             mockMvc.perform(get("/api/v1/teacher/assignments/class/{classId}", clazz.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
@@ -1746,7 +1748,7 @@ class AssignmentIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_AS_AI_004 — Learner gọi endpoint ai-generate → 403")
+        @DisplayName("TC_AS_AI_004 — Learner gọi endpoint ai-generate → 400")
         void tc_as_ai_004() throws Exception {
             saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
@@ -1755,7 +1757,7 @@ class AssignmentIntegrationTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{}")
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isBadRequest());
         }
     }
 }

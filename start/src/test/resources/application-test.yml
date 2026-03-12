@@ -31,7 +31,9 @@ spring:
                 dialect: org.hibernate.dialect.PostgreSQLDialect
                 format_sql: false
         open-in-view: false
-
+    sql:
+      init:
+        mode: always
     data:
         redis:
             host: localhost
