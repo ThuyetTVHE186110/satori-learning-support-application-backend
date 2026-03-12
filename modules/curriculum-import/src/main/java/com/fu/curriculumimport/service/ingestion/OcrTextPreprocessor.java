@@ -102,6 +102,15 @@ public final class OcrTextPreprocessor {
     private static final Pattern SEPARATOR_LINE = Pattern.compile(
             "^[\\-=_*~.|\\s\u2500-\u257F]{3,}$");
 
+    /**
+     * Matches Japanese page-number marker lines produced by OCR, e.g.
+     * {@code "11 ページ"}, {@code "第11ページ"}, {@code "ページ 42"}.
+     * These are printed page numbers from scanned textbooks and carry no
+     * learning content — they must be stripped before chunking.
+     */
+    private static final Pattern JAPANESE_PAGE_MARKER = Pattern.compile(
+            "^(第?\\d{1,4}\\s*ページ|ページ\\s*\\d{1,4})$");
+
     // ── Constructor (utility class) ───────────────────────────────────────────
 
     private OcrTextPreprocessor() {}
@@ -196,10 +205,11 @@ public final class OcrTextPreprocessor {
      * dropped from the OCR output.
      */
     private static boolean isNoiseLine(String stripped) {
-        if (URL_WATERMARK.matcher(stripped).matches())  return true;
-        if (STANDALONE_NUMBER.matcher(stripped).matches()) return true;
-        if (SINGLE_LETTER.matcher(stripped).matches())  return true;
-        if (SEPARATOR_LINE.matcher(stripped).matches()) return true;
+        if (URL_WATERMARK.matcher(stripped).matches())       return true;
+        if (STANDALONE_NUMBER.matcher(stripped).matches())   return true;
+        if (SINGLE_LETTER.matcher(stripped).matches())       return true;
+        if (SEPARATOR_LINE.matcher(stripped).matches())      return true;
+        if (JAPANESE_PAGE_MARKER.matcher(stripped).matches()) return true;
 
         // Roman-numeral check: avoid false-positive on Japanese "I" particle
         // (only match when the line is ≤ 5 chars, typical for I–VIII markers)

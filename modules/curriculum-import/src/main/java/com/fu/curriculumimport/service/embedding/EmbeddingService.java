@@ -253,13 +253,46 @@ public class EmbeddingService {
      */
     private float[] generateEmbedding(String text) {
         try {
-            // Truncate to ~8000 tokens max for embedding model
-            String truncated = text.length() > 30000 ? text.substring(0, 30000) : text;
+            String truncated = truncateForEmbedding(text);
             return embeddingModel.embed(truncated);
         } catch (Exception e) {
             log.error("Embedding generation failed: {}", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Truncate text to fit within OpenAI embedding token limits (8,192 tokens).
+     *
+     * Japanese/CJK characters tokenize at ~1 token per character, while ASCII/Latin
+     * text is ~4 characters per token. A naive character limit of 30,000 works for
+     * English but allows up to ~30,000 tokens for Japanese content, causing HTTP 400.
+     *
+     * This method accumulates an estimated token count character-by-character and
+     * stops at 7,500 tokens (leaving a safety buffer under the 8,192 limit).
+     */
+    private String truncateForEmbedding(String text) {
+        if (text == null || text.isEmpty()) return text;
+
+        final int MAX_TOKENS = 7500;
+        double estimatedTokens = 0;
+        int i = 0;
+
+        for (; i < text.length() && estimatedTokens < MAX_TOKENS; i++) {
+            char c = text.charAt(i);
+            // CJK Unified Ideographs, Hiragana, Katakana, CJK Compatibility Ideographs, Hangul
+            if ((c >= 0x3000 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF) || (c >= 0xAC00 && c <= 0xD7AF)) {
+                estimatedTokens += 1.0;
+            } else {
+                estimatedTokens += 0.25; // ASCII/Latin: ~4 chars per token
+            }
+        }
+
+        if (i >= text.length()) return text;
+
+        log.debug("Truncated embedding input from {} to {} chars (~{} estimated tokens)",
+                text.length(), i, (int) estimatedTokens);
+        return text.substring(0, i);
     }
 
     /**

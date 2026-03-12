@@ -14,6 +14,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.TreeMap;
@@ -55,20 +56,38 @@ public class GoogleVisionOcrClient {
     /** Path to service-account JSON key; null/blank = use ADC env var. */
     private final String credentialsFile;
 
+    /**
+     * Shared, reusable Vision API client — created once at construction time.
+     * {@code ImageAnnotatorClient} is thread-safe; reusing it avoids re-reading
+     * credentials from disk and re-establishing a gRPC channel on every page.
+     * Null when initialisation fails (calls return {@link OcrTextResult#empty()}).
+     */
+    private final ImageAnnotatorClient visionClient;
+
     public GoogleVisionOcrClient(String credentialsFile) {
         this.credentialsFile = credentialsFile;
+        ImageAnnotatorClient client = null;
+        try {
+            client = buildClient();
+            log.info("Google Vision client initialised (credentials: {})",
+                    credentialsFile != null && !credentialsFile.isBlank() ? credentialsFile : "ADC");
+        } catch (Exception e) {
+            log.warn("Google Vision client init failed: {} — OCR calls will return empty results",
+                    e.getMessage());
+        }
+        this.visionClient = client;
     }
 
     /**
-     * Call Google Cloud Vision DOCUMENT_TEXT_DETECTION and return structured result.
+     * OCR a single page image using the cached Vision client.
      *
      * @param image page image from PDFRenderer
      * @return OCR result with plain text and optional table rows; {@link OcrTextResult#empty()} on error
      */
     public OcrTextResult extractText(BufferedImage image) {
         try {
-            byte[] imageBytes = encodeToJpeg(image);
-            return callVisionApi(imageBytes);
+            List<OcrTextResult> results = callVisionApi(List.of(encodeToJpeg(image)));
+            return results.isEmpty() ? OcrTextResult.empty() : results.get(0);
         } catch (Exception e) {
             log.warn("Google Vision OCR failed [{}]: {} — falling back to PaddleOCR",
                     e.getClass().getSimpleName(), e.getMessage());
@@ -77,63 +96,80 @@ public class GoogleVisionOcrClient {
         }
     }
 
+    /**
+     * OCR multiple pre-encoded JPEG pages in a single {@code batchAnnotateImages} call.
+     * Google Vision accepts up to 16 images per batch request.
+     *
+     * @param jpegBytesList JPEG-encoded page images (already encoded by caller)
+     * @return one {@link OcrTextResult} per input image, in the same order
+     */
+    public List<OcrTextResult> extractTextBatch(List<byte[]> jpegBytesList) {
+        if (jpegBytesList.isEmpty()) return List.of();
+        try {
+            return callVisionApi(jpegBytesList);
+        } catch (Exception e) {
+            log.warn("Google Vision batch OCR failed: {} — returning empty for {} pages",
+                    e.getMessage(), jpegBytesList.size());
+            return Collections.nCopies(jpegBytesList.size(), OcrTextResult.empty());
+        }
+    }
+
+    /** Release the underlying gRPC channel. Call on application shutdown. */
+    public void close() {
+        if (visionClient != null) {
+            try { visionClient.close(); } catch (Exception ignored) {}
+        }
+    }
+
     // ── Internal implementation ──────────────────────────────────────────────
 
-    private OcrTextResult callVisionApi(byte[] imageBytes) throws IOException {
-
-        ByteString imgBytes = ByteString.copyFrom(imageBytes);
-
-        Image visionImage = Image.newBuilder()
-                .setContent(imgBytes)
-                .build();
+    /**
+     * Send a batch of JPEG images to the Vision API using the cached client.
+     * All images are dispatched in a single RPC call; results are returned in
+     * the same order as the input list.
+     */
+    private List<OcrTextResult> callVisionApi(List<byte[]> jpegBytesList) {
+        if (visionClient == null) {
+            return Collections.nCopies(jpegBytesList.size(), OcrTextResult.empty());
+        }
 
         Feature feature = Feature.newBuilder()
                 .setType(Type.DOCUMENT_TEXT_DETECTION)
                 .build();
 
-        AnnotateImageRequest request = AnnotateImageRequest.newBuilder()
-                .setImage(visionImage)
-                .addFeatures(feature)
-                .build();
+        List<AnnotateImageRequest> requests = new ArrayList<>();
+        for (byte[] bytes : jpegBytesList) {
+            requests.add(AnnotateImageRequest.newBuilder()
+                    .setImage(Image.newBuilder().setContent(ByteString.copyFrom(bytes)))
+                    .addFeatures(feature)
+                    .build());
+        }
 
-        try (ImageAnnotatorClient client = createVisionClient()) {
+        BatchAnnotateImagesResponse batchResp = visionClient.batchAnnotateImages(requests);
 
-            BatchAnnotateImagesResponse batchResp =
-                    client.batchAnnotateImages(List.of(request));
-
-            AnnotateImageResponse resp = batchResp.getResponses(0);
-
+        List<OcrTextResult> results = new ArrayList<>(batchResp.getResponsesCount());
+        for (AnnotateImageResponse resp : batchResp.getResponsesList()) {
             if (resp.hasError()) {
-                log.warn("Google Vision API error: {}", resp.getError().getMessage());
-                return OcrTextResult.empty();
+                log.warn("Google Vision API error for one image: {}", resp.getError().getMessage());
+                results.add(OcrTextResult.empty());
+                continue;
             }
-
             TextAnnotation fullTextAnnotation = resp.getFullTextAnnotation();
             String fullText = fullTextAnnotation.getText();
-
-            // Apply furigana normalization (consistent with PaddleOCR path)
             String normalizedText = FuriganaNormalizer.normalize(fullText != null ? fullText : "");
-
-            // Extract structured blocks for table detection
             List<String> tableRows = extractTableRows(fullTextAnnotation);
-
             log.debug("Google Vision OCR: {} chars, {} table rows detected",
                     normalizedText.length(), tableRows.size());
-
-            return new OcrTextResult(normalizedText, 0.95, tableRows);
+            results.add(new OcrTextResult(normalizedText, 0.95, tableRows));
         }
+        return results;
     }
 
     /**
-     * Create an {@code ImageAnnotatorClient}.
-     * <ul>
-     *   <li>If {@code credentialsFile} is set → load the service-account JSON and pass it
-     *       explicitly via {@code ImageAnnotatorSettings}.</li>
-     *   <li>Otherwise → use Application Default Credentials (ADC /
-     *       {@code GOOGLE_APPLICATION_CREDENTIALS} env var).</li>
-     * </ul>
+     * Build a new {@code ImageAnnotatorClient} using the configured credentials.
+     * Called once from the constructor; the result is cached for the lifetime of this bean.
      */
-    private ImageAnnotatorClient createVisionClient() throws IOException {
+    private ImageAnnotatorClient buildClient() throws IOException {
         if (credentialsFile == null || credentialsFile.isBlank()) {
             log.debug("Google Vision: using Application Default Credentials (ADC)");
             return ImageAnnotatorClient.create();
