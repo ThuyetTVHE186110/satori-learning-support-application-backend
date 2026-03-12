@@ -1,5 +1,5 @@
 -- ==========================================================================
--- Script 16: Cập nhật tiêu đề & mô tả tiếng Việt cho Conversation Themes/Topics
+-- Script 20: Cập nhật tiêu đề & mô tả tiếng Việt cho Conversation Themes/Topics
 --            + Bổ sung thêm topics mới bằng tiếng Việt
 --
 -- Chiến lược:
