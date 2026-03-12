@@ -2,7 +2,6 @@ package com.fu.assignment.ai;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fu.assignment.ai.dto.AiQuizOptionDto;
 import com.fu.assignment.ai.dto.AiQuizQuestionDto;
 import com.fu.assignment.ai.dto.AiQuizResponseWrapper;
 import com.fu.assignment.dto.request.AiQuizGenerationRequest;
@@ -13,7 +12,6 @@ import com.fu.assignment.util.MarkdownUtils;
 import com.fu.common.exception.BusinessException;
 import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.repository.ClassRepository;
-import com.fu.course.entity.Course;
 import com.fu.course.entity.GrammarPoint;
 import com.fu.course.entity.Lesson;
 import com.fu.course.entity.Vocabulary;
@@ -21,35 +19,29 @@ import com.fu.course.repository.GrammarPointRepository;
 import com.fu.course.repository.LessonRepository;
 import com.fu.course.repository.VocabularyRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.converter.BeanOutputConverter;
+import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
 import java.util.Map;
 import java.util.ArrayList;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * AI service to generate quiz questions from a PDF/DOCX file or raw text.
  * <p>
- * Calls OpenAI API directly via {@link RestTemplate} instead of Spring AI's
- * {@code ChatClient}, because Spring AI 1.0.0 cannot deserialize newer OpenAI
- * response fields (e.g., "annotations") added after its release.
- * <p>
+ * Uses Spring AI's {@link ChatClient} for AI interaction.
  * Uses {@link BeanOutputConverter} only for schema generation (prompt formatting),
- * then parses the AI content string ourselves with our own {@link ObjectMapper}.
+ * then parses the AI content string ourselves with our own {@link ObjectMapper}
+ * to handle potential truncation issues.
  */
 @Service
 @Slf4j
 public class QuizAiGenerationService {
-
-    private static final String OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
 
     private static final String SYSTEM_PROMPT = """
             You are an expert Japanese language quiz creator for Vietnamese learners.
@@ -94,7 +86,7 @@ public class QuizAiGenerationService {
             6. explanation / explanationVi — MUST be plain text (see below).
             
             Example questionJapanese (multiple_choice):
-            "<ruby>昨日<rt>きのう</rt></ruby>、<ruby>友達<rt>ともだち</rt></ruby>と <ruby>映画<rt>えいが</rt></ruby>を （____）。"
+            "<ruby>昨日<rt>きのう</rt></ruby>、<ruby>友達<rt>ともだち</rt></ruby>と <ruby>映画<rt>えいが</rt></ruby>uを （____）。"
             
             Example questionText (fill_blank):
             "Điền vào chỗ trống với dạng **thể て** đúng: ここで <ruby>写真<rt>しゃしん</rt></ruby>を （____） ください。"
@@ -138,9 +130,6 @@ public class QuizAiGenerationService {
             - If you leave explanation or explanationVi as empty string "" or null, the question is INVALID.
             """;
 
-    @Value("${spring.ai.openai.api-key}")
-    private String apiKey;
-
     @Value("${spring.ai.openai.chat.options.model}")
     private String model;
 
@@ -152,15 +141,15 @@ public class QuizAiGenerationService {
 
     private final ObjectMapper objectMapper;
     private final AssignmentMapper assignmentMapper;
-    private final RestTemplate restTemplate;
     private final BeanOutputConverter<AiQuizResponseWrapper> outputConverter;
-
+    private final ChatClient chatClient;
     private final ClassRepository classRepository;
     private final LessonRepository lessonRepository;
     private final VocabularyRepository vocabularyRepository;
     private final GrammarPointRepository grammarPointRepository;
 
     public QuizAiGenerationService(ObjectMapper objectMapper,
+                                   OpenAiChatModel chatModel,
                                    AssignmentMapper assignmentMapper,
                                    ClassRepository classRepository,
                                    LessonRepository lessonRepository,
@@ -168,11 +157,11 @@ public class QuizAiGenerationService {
                                    GrammarPointRepository grammarPointRepository) {
         this.objectMapper = objectMapper;
         this.assignmentMapper = assignmentMapper;
+        this.chatClient = ChatClient.builder(chatModel).build();
         this.classRepository = classRepository;
         this.lessonRepository = lessonRepository;
         this.vocabularyRepository = vocabularyRepository;
         this.grammarPointRepository = grammarPointRepository;
-        this.restTemplate = new RestTemplate();
         this.outputConverter = new BeanOutputConverter<>(AiQuizResponseWrapper.class);
     }
 
@@ -191,9 +180,8 @@ public class QuizAiGenerationService {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // AI CALL — 
+    // AI CALL
     // ═══════════════════════════════════════════════════════════════════════════
-
 
     private List<AiQuizQuestionDto> callAi(AiQuizGenerationRequest request) {
         String contextStr = extractContextForPrompt(request);
@@ -201,58 +189,40 @@ public class QuizAiGenerationService {
         String formatInstruction = outputConverter.getFormat();
         log.info("Requesting AI: {} questions, types={}", request.getQuestionCount(), request.getQuestionTypes());
 
-        // Build OpenAI request body
         String fullUserMessage = userPrompt + "\n\n" + formatInstruction;
-        String requestBody;
-        try {
-            Map<String, Object> body = Map.of(
-                    "model", model,
-                    "temperature", temperature,
-                    "max_tokens", maxTokens,
-                    "messages", List.of(
-                            Map.of("role", "system", "content", SYSTEM_PROMPT),
-                            Map.of("role", "user", "content", fullUserMessage)
-                    )
-            );
-            requestBody = objectMapper.writeValueAsString(body);
-        } catch (Exception e) {
-            throw new BusinessException("AI_REQUEST_ERROR", "Failed to build AI request: " + e.getMessage());
-        }
-
-        // Call OpenAI API
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setBearerAuth(apiKey);
-        HttpEntity<String> httpEntity = new HttpEntity<>(requestBody, headers);
 
         String rawContent;
-        boolean wasTruncated = false;
+        String finishReason = "unknown";
         try {
-            ResponseEntity<String> response = restTemplate.exchange(
-                    OPENAI_CHAT_URL, HttpMethod.POST, httpEntity, String.class);
+            var response = chatClient.prompt()
+                    .system(SYSTEM_PROMPT)
+                    .user(fullUserMessage)
+                    .options(OpenAiChatOptions.builder()
+                            .model(model)
+                            .temperature(temperature)
+                            .maxTokens(maxTokens)
+                            .build())
+                    .call()
+                    .chatResponse();
 
-            log.info("OpenAI HTTP {}", response.getStatusCode());
-
-            JsonNode root = objectMapper.readTree(response.getBody());
-            JsonNode choice = root.path("choices").get(0);
-            rawContent = choice.path("message").path("content").asText();
-            String finishReason = choice.path("finish_reason").asText("unknown");
-
-            log.info("AI finish_reason={}, content length={} chars", finishReason, rawContent.length());
-
-            if ("length".equals(finishReason)) {
-                log.warn("AI output TRUNCATED (finish_reason=length). max_tokens={}, requested {} questions.",
-                        maxTokens, request.getQuestionCount());
-                wasTruncated = true;
+            if (response != null && !response.getResults().isEmpty()) {
+                finishReason = response.getResults().get(0).getMetadata().getFinishReason();
+                rawContent = response.getResult().getOutput().getText();
+            } else {
+                throw new BusinessException("AI_EMPTY_RESPONSE", "AI returned empty response object.");
             }
 
-        } catch (HttpClientErrorException e) {
-            log.error("OpenAI API error: HTTP {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
-            throw new BusinessException("AI_RESPONSE_ERROR",
-                    "OpenAI API error (HTTP " + e.getStatusCode().value() + "): " + e.getResponseBodyAsString());
+            log.info("AI finish_reason={}, content length={} chars", finishReason, rawContent != null ? rawContent.length() : 0);
+
         } catch (Exception e) {
-            log.error("OpenAI call failed: {}", e.getMessage(), e);
-            throw new BusinessException("AI_RESPONSE_ERROR", "OpenAI call failed: " + e.getMessage());
+            log.error("AI call failed: {}", e.getMessage(), e);
+            throw new BusinessException("AI_RESPONSE_ERROR", "AI call failed: " + e.getMessage());
+        }
+
+        boolean wasTruncated = "length".equals(finishReason);
+        if (wasTruncated) {
+            log.warn("AI output TRUNCATED (finish_reason=length). max_tokens={}, requested {} questions.",
+                    maxTokens, request.getQuestionCount());
         }
 
         if (rawContent == null || rawContent.isBlank()) {
@@ -262,7 +232,7 @@ public class QuizAiGenerationService {
         // Strip markdown code fences (```json ... ```)
         rawContent = stripMarkdownCodeFences(rawContent);
 
-        // Try normal parse first
+        // 1. Try normal parse first
         try {
             AiQuizResponseWrapper wrapper = outputConverter.convert(rawContent);
             if (wrapper != null && wrapper.questions() != null && !wrapper.questions().isEmpty()) {
@@ -270,26 +240,28 @@ public class QuizAiGenerationService {
                 return wrapper.questions();
             }
         } catch (Exception e) {
-            if (!wasTruncated) {
-                log.error("Parse failed (not truncated). Raw:\n{}", rawContent);
-                throw new BusinessException("AI_PARSE_ERROR", "Failed to parse AI response: " + e.getMessage());
-            }
-            log.warn("Parse failed on truncated output. Attempting salvage...");
+            log.warn("Normal JSON parse failed. finish_reason={}, truncated={}. Error: {}", 
+                    finishReason, wasTruncated, e.getMessage());
         }
 
-        // Truncation recovery: salvage complete questions from truncated JSON
+        // 2. Salvage attempt for ALL parse failures (not just "length" truncation)
+        // Sometimes the AI stops without marking "length" but the JSON is incomplete.
+        List<AiQuizQuestionDto> salvaged = salvageTruncatedResponse(rawContent);
+        if (!salvaged.isEmpty()) {
+            log.info("Salvaged {} complete questions from response (finish_reason={})",
+                    salvaged.size(), finishReason);
+            return salvaged;
+        }
+
+        // 3. Fallback: If no questions could be salvaged, throw error
         if (wasTruncated) {
-            List<AiQuizQuestionDto> salvaged = salvageTruncatedResponse(rawContent);
-            if (!salvaged.isEmpty()) {
-                log.info("Salvaged {} complete questions from truncated response (requested {})",
-                        salvaged.size(), request.getQuestionCount());
-                return salvaged;
-            }
-        }
-
-        throw new BusinessException("AI_PARSE_ERROR",
+            throw new BusinessException("AI_PARSE_ERROR",
                 "AI response was incomplete (output truncated). Try reducing the number of questions (requested "
                         + request.getQuestionCount() + ").");
+        } else {
+            log.error("Parse failed (not truncated) and could not salvage. Raw:\n{}", rawContent);
+            throw new BusinessException("AI_PARSE_ERROR", "Failed to parse AI response. The generated content might be malformed.");
+        }
     }
 
     /**
@@ -357,9 +329,8 @@ public class QuizAiGenerationService {
     // MAPPING — AI DTO → Preview Response (NO database interaction)
     // ═══════════════════════════════════════════════════════════════════════════
 
-
     private List<QuizQuestionResponse> mapToPreviewResponses(List<AiQuizQuestionDto> aiDtos,
-                                                             AiQuizGenerationRequest request) {
+                                                              AiQuizGenerationRequest request) {
         List<QuizQuestionResponse> responses = new ArrayList<>();
 
         for (AiQuizQuestionDto dto : aiDtos) {
@@ -559,38 +530,12 @@ public class QuizAiGenerationService {
                 "5. If no lesson reference is found, respond 'NONE'. " +
                 "Respond ONLY with the keyword or comma-separated integers. No explanation.";
 
-        try {
-            Map<String, Object> body = Map.of(
-                    "model", "gpt-4o-mini",
-                    "temperature", 0.0,
-                    "max_tokens", 50,
-                    "messages", List.of(
-                            Map.of("role", "system", "content", systemMsg),
-                            Map.of("role", "user", "content", teacherPrompt)
-                    )
-            );
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.setBearerAuth(apiKey);
-            HttpEntity<String> httpEntity = new HttpEntity<>(objectMapper.writeValueAsString(body), headers);
-
-            ResponseEntity<String> response = restTemplate.exchange(
-                    OPENAI_CHAT_URL, HttpMethod.POST, httpEntity, String.class);
-
-            JsonNode root = objectMapper.readTree(response.getBody());
-            String text = root.path("choices").get(0).path("message").path("content").asText().trim();
-
-            if ("NONE".equalsIgnoreCase(text)) {
-                return null;
-            }
-
-            return text;
-
-        } catch (Exception e) {
-            log.warn("Failed to detect lesson index from prompt: {}", e.getMessage());
-            return null;
-        }
+        return chatClient.prompt()
+                .system(systemMsg)
+                .user(teacherPrompt)
+                .options(OpenAiChatOptions.builder().temperature(0.0).build()) // Ép temperature về 0
+                .call()
+                .content();
     }
 
     private String buildUserPrompt(AiQuizGenerationRequest request, String contextStr) {
