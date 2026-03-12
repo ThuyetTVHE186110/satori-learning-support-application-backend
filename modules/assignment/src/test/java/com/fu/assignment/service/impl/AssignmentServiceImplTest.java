@@ -82,6 +82,7 @@ class AssignmentServiceImplTest {
     private QuizQuestionResponse questionResponse;
     private SubmissionResponse submissionResponse;
     private SubmissionSummaryResponse submissionSummaryResponse;
+    private AssignmentQuestionResponse assignmentQuestionResponse;
 
     @BeforeEach
     void setUp() {
@@ -147,6 +148,8 @@ class AssignmentServiceImplTest {
                 .id(submissionId).assignmentId(assignmentId).userId(learnerId).build();
         submissionSummaryResponse = SubmissionSummaryResponse.builder()
                 .id(submissionId).assignmentId(assignmentId).build();
+        assignmentQuestionResponse = AssignmentQuestionResponse.builder()
+                .questionId(questionId).questionText("Q").build();
     }
 
     // ── Helper: common mock setup for successful saveFullQuiz ──
@@ -155,6 +158,7 @@ class AssignmentServiceImplTest {
         given(assignmentRepository.save(any(Assignment.class))).willReturn(quizAssignment);
         given(mapper.toResponse(any(Assignment.class))).willReturn(assignmentResponse);
         given(assignmentQuestionRepository.findByAssignmentIdOrderByOrderIndex(assignmentId)).willReturn(List.of());
+        given(mapper.toAssignmentQuestionResponse(any(QuizQuestion.class))).willReturn(assignmentQuestionResponse);
     }
 
     private SaveFullQuizRequest defaultQuizRequest() {
@@ -210,6 +214,7 @@ class AssignmentServiceImplTest {
             given(questionRepository.findById(questionId)).willReturn(Optional.of(sampleQuestion));
             given(assignmentRepository.save(any(Assignment.class))).willReturn(quizAssignment);
             given(mapper.toResponse(any(Assignment.class))).willReturn(assignmentResponse);
+            given(mapper.toAssignmentQuestionResponse(any(QuizQuestion.class))).willReturn(assignmentQuestionResponse);
 
             assertThat(service.saveFullQuiz(assignmentId, null, req, null, teacherId)).isNotNull();
         }
