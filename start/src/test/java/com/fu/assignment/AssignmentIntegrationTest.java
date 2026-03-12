@@ -311,14 +311,13 @@ class AssignmentIntegrationTest {
             Clazz clazz = saveClass(teacher, saveCourse());
             savePublishedQuiz(teacher, clazz);
             String token = loginAndGetToken("teacher@test.com");
-            
+
             mockMvc.perform(get("/api/v1/teacher/assignments/class/{classId}", clazz.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.content").isArray())
-                    .andExpect(jsonPath("$.data.content[0].title").value("Published Quiz"))
-                    .andExpect(jsonPath("$.data.content[0].assignmentType").value("QUIZ"));
+                    .andExpect(jsonPath("$.content").isArray()) // PageResponse direct fields
+                    .andExpect(jsonPath("$.content[0].title").value("Published Quiz"))
+                    .andExpect(jsonPath("$.content[0].assignmentType").value("QUIZ"));
         }
 
         @Test
@@ -330,8 +329,8 @@ class AssignmentIntegrationTest {
             mockMvc.perform(get("/api/v1/teacher/assignments/class/{classId}", UUID.randomUUID())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content").isArray())
-                    .andExpect(jsonPath("$.data.content.length()").value(0));
+                    .andExpect(jsonPath("$.content").isArray())
+                    .andExpect(jsonPath("$.content.length()").value(0));
         }
 
         @Test
@@ -344,7 +343,7 @@ class AssignmentIntegrationTest {
             mockMvc.perform(get("/api/v1/teacher/assignments/class/{classId}", clazz.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content.length()").value(0));
+                    .andExpect(jsonPath("$.content.length()").value(0));
         }
 
         @Test
@@ -391,7 +390,7 @@ class AssignmentIntegrationTest {
             mockMvc.perform(get("/api/v1/teacher/assignments/{id}", a.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.success").value(true)) // ApiResponse wrapper
                     .andExpect(jsonPath("$.data.id").value(a.getId().toString()))
                     .andExpect(jsonPath("$.data.assignmentType").value("QUIZ"))
                     .andExpect(jsonPath("$.data.status").value("PUBLISHED"))
@@ -1115,8 +1114,8 @@ class AssignmentIntegrationTest {
             mockMvc.perform(get("/api/v1/teacher/assignments/{id}/submissions", a.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content").isArray())
-                    .andExpect(jsonPath("$.data.content.length()").value(1));
+                    .andExpect(jsonPath("$.content").isArray()) // PageResponse
+                    .andExpect(jsonPath("$.content.length()").value(1));
         }
 
         @Test
@@ -1130,7 +1129,7 @@ class AssignmentIntegrationTest {
             mockMvc.perform(get("/api/v1/teacher/assignments/{id}/submissions", a.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content.length()").value(0));
+                    .andExpect(jsonPath("$.content.length()").value(0));
         }
 
         @Test
@@ -1213,8 +1212,8 @@ class AssignmentIntegrationTest {
             mockMvc.perform(get("/api/v1/learner/assignments")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content").isArray())
-                    .andExpect(jsonPath("$.data.content.length()").value(1));
+                    .andExpect(jsonPath("$.content").isArray()) // PageResponse
+                    .andExpect(jsonPath("$.content.length()").value(1));
         }
 
         @Test
@@ -1230,7 +1229,7 @@ class AssignmentIntegrationTest {
             mockMvc.perform(get("/api/v1/learner/assignments")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content.length()").value(0));
+                    .andExpect(jsonPath("$.content.length()").value(0));
         }
 
         @Test
@@ -1248,8 +1247,8 @@ class AssignmentIntegrationTest {
             mockMvc.perform(get("/api/v1/learner/assignments")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content.length()").value(1))
-                    .andExpect(jsonPath("$.data.content[0].status").value("CLOSED"));
+                    .andExpect(jsonPath("$.content.length()").value(1))
+                    .andExpect(jsonPath("$.content[0].status").value("CLOSED"));
         }
 
         @Test
@@ -1261,7 +1260,7 @@ class AssignmentIntegrationTest {
             mockMvc.perform(get("/api/v1/learner/assignments")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content.length()").value(0));
+                    .andExpect(jsonPath("$.content.length()").value(0));
         }
 
         @Test

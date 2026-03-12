@@ -174,6 +174,60 @@ END $$;
 
 
 -- ==========================================================================
+-- IMPLICIT CASTS: VARCHAR → ENUM (mirrors 12-enum-implicit-casts.sql)
+-- Required so Hibernate native queries can compare VARCHAR params to ENUM columns
+-- ==========================================================================
+DO $$ BEGIN CREATE CAST (character varying AS jlpt_level)       WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS lesson_type)      WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS content_status)   WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS grammar_category) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS processing_status)WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS course_status)    WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS user_role)        WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS user_status)      WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS assignment_type)  WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS assignment_status)WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS submission_status)WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS feedback_status)  WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS session_type)     WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS session_status)   WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS message_role)     WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS badge_type)       WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS transaction_type) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS item_type)        WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (character varying AS item_rarity)      WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ==========================================================================
+-- REVERSE IMPLICIT CASTS: ENUM → VARCHAR
+-- When Hibernate ddl-auto=create-drop generates enum columns as varchar,
+-- native queries like:  status = CAST(? AS submission_status)
+-- produce:  character varying = submission_status
+-- PostgreSQL cannot resolve this without a cast from enum → varchar.
+-- With IMPLICIT cast, PostgreSQL auto-promotes the enum side to varchar
+-- and uses the built-in varchar = varchar operator.
+-- ==========================================================================
+DO $$ BEGIN CREATE CAST (submission_status  AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (assignment_status  AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (assignment_type    AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (user_role          AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (user_status        AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (content_status     AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (course_status      AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (jlpt_level         AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (lesson_type        AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (grammar_category   AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (processing_status  AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (feedback_status    AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (session_type       AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (session_status     AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (message_role       AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (badge_type         AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (transaction_type   AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (item_type          AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE CAST (item_rarity        AS character varying) WITH INOUT AS IMPLICIT; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+
+-- ==========================================================================
 -- DONE
 -- Hibernate will create/drop tables automatically
 -- ==========================================================================
