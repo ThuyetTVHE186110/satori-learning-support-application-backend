@@ -60,6 +60,7 @@ public class Lesson extends SoftDeletableEntity {
      */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "content", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "CAST(? AS jsonb)")
     private String content;
 
     /**

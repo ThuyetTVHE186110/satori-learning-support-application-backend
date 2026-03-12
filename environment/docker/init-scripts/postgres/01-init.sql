@@ -723,7 +723,8 @@ CREATE TABLE ai_conversation.conversation_messages (
     is_hint_request BOOLEAN DEFAULT FALSE,
     sequence_number INT NOT NULL,
     processing_time_ms INT,
-    
+    message_type VARCHAR(30),
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

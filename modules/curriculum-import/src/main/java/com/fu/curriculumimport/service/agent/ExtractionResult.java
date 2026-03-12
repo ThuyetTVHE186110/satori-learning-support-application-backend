@@ -23,6 +23,18 @@ public class ExtractionResult {
     private int tokensUsed;
     private long processingTimeMs;
 
+    /**
+     * Lesson number detected from the source chunk (e.g. 1 for "Bài 1").
+     * Null when lesson-aware chunking was not used.
+     */
+    private Integer lessonNumber;
+
+    /**
+     * Lesson title detected from the source chunk (e.g. "Bài 1").
+     * Null when lesson-aware chunking was not used.
+     */
+    private String lessonTitle;
+
     private List<ExtractedLesson> lessons;
     private List<ExtractedVocabulary> vocabulary;
     private List<ExtractedGrammar> grammarPoints;

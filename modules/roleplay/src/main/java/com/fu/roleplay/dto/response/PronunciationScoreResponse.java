@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 @Data
 @Builder
@@ -20,4 +21,16 @@ public class PronunciationScoreResponse {
     private String transcribedText;
     private BigDecimal pitchAccentScore;
     private BigDecimal moraTimingScore;
+
+    private List<CriteriaEvaluation> criteriaEvaluations;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class CriteriaEvaluation {
+        private String name;
+        private String label;
+        private BigDecimal score;
+    }
 }

@@ -5,10 +5,13 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
+import com.fu.curriculumimport.service.ingestion.MnNSectionSplitter;
+import com.fu.curriculumimport.service.ingestion.OcrTextPreprocessor;
 import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
@@ -104,9 +107,19 @@ public class GrammarExtractionAgent {
             """;
 
     private static final String RAG_CONTEXT_TEMPLATE = """
-            
+
             EXISTING GRAMMAR POINTS (avoid duplicating these):
             %s
+            """;
+
+    private static final String FULL_PAGE_CONTEXT_TEMPLATE = """
+
+            ─── FULL LESSON PAGE CONTEXT (adjacent sections on the same page) ───────────
+            %s
+            ─────────────────────────────────────────────────────────────────────────────
+            Tip: Use this to find example sentences or explanations that clarify the
+            grammar patterns in the CONTENT block above. Do NOT re-extract vocabulary
+            from this context block — only grammar points.
             """;
 
     /**
@@ -115,15 +128,30 @@ public class GrammarExtractionAgent {
     public ExtractionResult extractGrammar(DocumentChunk chunk, String jlptLevel, RagContext ragContext) {
         long startTime = System.currentTimeMillis();
 
+        // Skip trivial / noise-only chunks
+        if (OcrTextPreprocessor.isTrivial(chunk.getContent())) {
+            log.info("Chunk {}: trivial content — skipping grammar LLM extraction",
+                    chunk.getChunkIndex());
+            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - startTime);
+        }
+
         try {
             String ragSection = formatRagContext(ragContext);
+            String sectionHint = buildSectionHint(chunk);
+            String fullPageSection = buildFullPageContextSection(chunk);
+
+            // Cap content to token budget before sending to model
+            String safeContent = OcrTextPreprocessor.truncateToTokenBudget(
+                    chunk.getContent(), OcrTextPreprocessor.MAX_CONTENT_TOKENS);
+
             String userPrompt = String.format(EXTRACTION_PROMPT,
                     chunk.getPageStart(), chunk.getPageEnd(),
-                    jlptLevel, chunk.getContent(), ragSection, jlptLevel);
+                    jlptLevel, safeContent, sectionHint + fullPageSection + ragSection, jlptLevel);
 
             String response = chatClient.prompt()
                     .system(SYSTEM_PROMPT)
                     .user(userPrompt)
+                    .options(OpenAiChatOptions.builder().maxTokens(4096).build())
                     .call()
                     .content();
 
@@ -145,15 +173,22 @@ public class GrammarExtractionAgent {
 
         try {
             String ragSection = formatRagContext(ragContext);
+            String sectionHint = buildSectionHint(chunk);
+            String fullPageSection = buildFullPageContextSection(chunk);
             String feedbackSection = "\n\nPREVIOUS EXTRACTION ISSUES (please fix):\n" + validationFeedback;
+
+            String safeContentFb = OcrTextPreprocessor.truncateToTokenBudget(
+                    chunk.getContent(), OcrTextPreprocessor.MAX_CONTENT_TOKENS);
 
             String userPrompt = String.format(EXTRACTION_PROMPT,
                     chunk.getPageStart(), chunk.getPageEnd(),
-                    jlptLevel, chunk.getContent(), ragSection + feedbackSection, jlptLevel);
+                    jlptLevel, safeContentFb,
+                    sectionHint + fullPageSection + ragSection + feedbackSection, jlptLevel);
 
             String response = chatClient.prompt()
                     .system(SYSTEM_PROMPT + "\nIMPORTANT: Fix the issues noted in the feedback.")
                     .user(userPrompt)
+                    .options(OpenAiChatOptions.builder().maxTokens(4096).build())
                     .call()
                     .content();
 
@@ -164,6 +199,46 @@ public class GrammarExtractionAgent {
             log.error("Grammar re-extraction failed for chunk {}: {}", chunk.getChunkIndex(), e.getMessage());
             return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - startTime);
         }
+    }
+
+    /**
+     * Inject the full lesson page context when this chunk is a section sub-chunk.
+     * Allows the grammar agent to see example sentences from adjacent sections.
+     */
+    private String buildFullPageContextSection(DocumentChunk chunk) {
+        String fullCtx = chunk.getFullPageContext();
+        String content  = chunk.getContent();
+        if (fullCtx == null || fullCtx.isBlank() || fullCtx.equals(content)) return "";
+        String trimmed = OcrTextPreprocessor.truncateToTokenBudget(
+                fullCtx, OcrTextPreprocessor.MAX_PAGE_CONTEXT_TOKENS);
+        return String.format(FULL_PAGE_CONTEXT_TEMPLATE, trimmed);
+    }
+
+    /**
+     * Build a structural section hint from the chunk's MnN section type.
+     * Guides the LLM on what role this section plays in the lesson.
+     */
+    private String buildSectionHint(DocumentChunk chunk) {
+        String sectionType = chunk.getSectionType();
+        if (sectionType == null || MnNSectionSplitter.UNKNOWN.equals(sectionType)) return "";
+        return switch (sectionType) {
+            case MnNSectionSplitter.GRAMMAR_PATTERN ->
+                    "\n⚠ SECTION TYPE: SENTENCE PATTERNS (文型 / Mẫu câu)\n" +
+                    "This section lists the core grammar patterns introduced in this lesson. " +
+                    "Each numbered item (e.g. '1. ～は ～です') is a distinct grammar pattern. " +
+                    "Extract ALL of them with full structure, meaning, and examples.\n";
+            case MnNSectionSplitter.GRAMMAR_EXPLANATION ->
+                    "\n⚠ SECTION TYPE: GRAMMAR EXPLANATION (文法 / Ngữ pháp)\n" +
+                    "This section provides detailed notes explaining how each grammar pattern works, " +
+                    "including usage rules, nuances, and common mistakes. " +
+                    "Extract each distinct grammar point with its full explanation.\n";
+            case MnNSectionSplitter.EXAMPLE ->
+                    "\n⚠ SECTION TYPE: EXAMPLE SENTENCES (例文 / Ví dụ)\n" +
+                    "This section demonstrates grammar patterns through example sentences. " +
+                    "Identify which grammar pattern each example illustrates and include it " +
+                    "as an exampleSentence for that grammar point.\n";
+            default -> "";
+        };
     }
 
     private ExtractionResult parseResponse(String jsonResponse, int chunkIndex, long processingTimeMs) {

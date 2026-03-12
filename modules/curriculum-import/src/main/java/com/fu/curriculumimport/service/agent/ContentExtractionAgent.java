@@ -5,10 +5,12 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
+import com.fu.curriculumimport.service.ingestion.OcrTextPreprocessor;
 import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
@@ -52,21 +54,21 @@ public class ContentExtractionAgent {
 
     private static final String EXTRACTION_PROMPT = """
             Analyze the following textbook content and extract ALL vocabulary and grammar points.
-            
+            %s
             Content from pages %d-%d:
             ---
             %s
             ---
-            
+
             Return JSON with this EXACT structure:
             {
               "contentType": "VOCABULARY" | "GRAMMAR" | "MIXED" | "OTHER",
               "confidence": 0.0-1.0,
               "lessons": [
                 {
-                  "title": "Lesson title in English",
-                  "titleJapanese": "Title in Japanese (if found)",
-                  "description": "Brief description",
+                  "title": "FORMAL lesson marker only — e.g. 'Bài 1', 'Lesson 1', '第1課'. See rule below.",
+                  "titleJapanese": "Title in Japanese (if found, else null)",
+                  "description": "Brief description of the lesson content",
                   "lessonType": "VOCABULARY" | "GRAMMAR" | "KANJI" | "MIXED",
                   "objectives": ["objective1", "objective2"],
                   "pageStart": %d,
@@ -104,7 +106,7 @@ public class ContentExtractionAgent {
                 }
               ]
             }
-            
+
             Rules:
             - Extract ALL vocabulary and grammar points found in the text
             - Always provide both Vietnamese (Vi) and English (En) meanings
@@ -113,6 +115,11 @@ public class ContentExtractionAgent {
             - For grammar: include pattern, category, examples, common mistakes
             - Grammar categories: VERB_FORM, PARTICLE, ADJECTIVE, CONJUGATION, SENTENCE_PATTERN, HONORIFIC, CONDITIONAL, PASSIVE, CAUSATIVE, OTHER
             - Set confidence based on clarity of source content
+            - LESSON TITLE RULE: lessons[].title MUST be a formal lesson marker ONLY (e.g. 'Bài 1', \
+              'Bài 2', 'Lesson 3', '第4課'). \
+              If the detected lesson title is stated above — use it EXACTLY. \
+              Do NOT use topic headings ('Cách sử dụng...', 'みんなの日本語', etc.) as lesson titles. \
+              If NO formal lesson marker exists in the content AND none was provided, return lessons as [].
             """;
 
     /**
@@ -126,17 +133,48 @@ public class ContentExtractionAgent {
     public ExtractionResult extractContent(DocumentChunk chunk, String jlptLevel, RagContext ragContext) {
         long startTime = System.currentTimeMillis();
 
+        // Skip trivial / noise-only chunks immediately — no AI call needed
+        if (OcrTextPreprocessor.isTrivial(chunk.getContent())) {
+            log.info("Chunk {}: trivial content ({} chars) — skipping AI extraction",
+                    chunk.getChunkIndex(),
+                    chunk.getContent() == null ? 0 : chunk.getContent().length());
+            return ExtractionResult.builder()
+                    .chunkIndex(chunk.getChunkIndex())
+                    .confidence(1.0)
+                    .tokensUsed(0)
+                    .processingTimeMs(System.currentTimeMillis() - startTime)
+                    .lessons(Collections.emptyList())
+                    .vocabulary(Collections.emptyList())
+                    .grammarPoints(Collections.emptyList())
+                    .build();
+        }
+
         try {
             String ragSection = formatRagContext(ragContext);
+
+            // If the boundary detector identified a lesson title, inject it so the AI
+            // uses the canonical title instead of inventing one from topic headings.
+            String lessonHint = (chunk.getLessonTitle() != null && !chunk.getLessonTitle().isBlank())
+                    ? "\n⚠ DETECTED LESSON: \"" + chunk.getLessonTitle()
+                      + "\" — use this exact string as lessons[0].title.\n"
+                    : "";
+
+            // Enforce token budget on content before building the prompt to prevent
+            // the model's JSON response from being cut off mid-object.
+            String safeContent = OcrTextPreprocessor.truncateToTokenBudget(
+                    chunk.getContent(), OcrTextPreprocessor.MAX_CONTENT_TOKENS);
+
             String userPrompt = String.format(EXTRACTION_PROMPT,
+                    lessonHint,
                     chunk.getPageStart(), chunk.getPageEnd(),
-                    chunk.getContent(),
+                    safeContent,
                     chunk.getPageStart(), chunk.getPageEnd())
                     + ragSection;
 
             String response = chatClient.prompt()
                     .system(SYSTEM_PROMPT + "\nTarget JLPT Level: " + jlptLevel)
                     .user(userPrompt)
+                    .options(OpenAiChatOptions.builder().maxTokens(4096).build())
                     .call()
                     .content();
 

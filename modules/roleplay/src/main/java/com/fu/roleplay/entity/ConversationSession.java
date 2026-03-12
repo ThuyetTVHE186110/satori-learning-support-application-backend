@@ -96,6 +96,10 @@ public class ConversationSession extends BaseEntity {
     @Builder.Default
     private String missionSummary = "{}";
 
+    @Column(name = "conversation_phase", length = 20)
+    @Builder.Default
+    private String conversationPhase = "CONVERSATION";
+
     public enum SessionType {
         GUIDED_CONVERSATION, ROLEPLAY, FREE_TALK, PRACTICE_ASSIGNMENT
     }

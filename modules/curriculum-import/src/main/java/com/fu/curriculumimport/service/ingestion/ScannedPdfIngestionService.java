@@ -14,7 +14,10 @@ import org.springframework.web.multipart.MultipartFile;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Ingestion service for <b>scanned (image-based) PDFs</b>.
@@ -62,24 +65,54 @@ public class ScannedPdfIngestionService {
             List<String> pageTexts = new ArrayList<>();
             StringBuilder fullText = new StringBuilder();
             int totalLinesOcrd = 0;
+            // 0-based page index → structured table rows from OCR (may be empty for most pages)
+            Map<Integer, List<String>> pageTableRows = new HashMap<>();
+
+            int renderFailures = 0;
 
             for (int i = 0; i < totalPages; i++) {
-                BufferedImage pageImage = renderer.renderImageWithDPI(
-                        i, ocrProps.getRenderDpi(), ImageType.RGB);
+                BufferedImage pageImage = null;
+                try {
+                    pageImage = renderer.renderImageWithDPI(
+                            i, ocrProps.getRenderDpi(), ImageType.RGB);
 
-                OcrTextResult ocr = ocrClient.extractText(pageImage);
+                    OcrTextResult ocr = ocrClient.extractText(pageImage);
 
-                if (!ocr.hasText()) {
-                    log.warn("Page {} OCR produced no text (conf={})", i + 1, ocr.confidence());
-                    pageTexts.add("");
-                } else {
-                    if (ocr.confidence() < ocrProps.getMinConfidence()) {
-                        log.warn("Page {} low OCR confidence: {}", i + 1, ocr.confidence());
+                    if (!ocr.hasText()) {
+                        log.warn("Page {} OCR produced no text (conf={})", i + 1, ocr.confidence());
+                        pageTexts.add("");
+                    } else {
+                        if (ocr.confidence() < ocrProps.getMinConfidence()) {
+                            log.warn("Page {} low OCR confidence: {}", i + 1, ocr.confidence());
+                        }
+                        // Normalize furigana brackets, then strip OCR noise (watermarks,
+                        // page numbers, separator lines) before chunking.
+                        String normalizedText = FuriganaNormalizer.normalize(ocr.text());
+                        String cleanedText    = OcrTextPreprocessor.cleanOcrPage(normalizedText);
+                        pageTexts.add(cleanedText);
+                        fullText.append(cleanedText).append("\n\n");
+                        totalLinesOcrd += cleanedText.split("\n").length;
+                        // Store structured table rows per page for later propagation
+                        if (ocr.hasTableData()) {
+                            pageTableRows.put(i, ocr.structuredTableRows());
+                        }
                     }
-                    pageTexts.add(ocr.text());
-                    fullText.append(ocr.text()).append("\n\n");
-                    totalLinesOcrd += ocr.text().split("\n").length;
+                } catch (Exception e) {
+                    log.warn("Page {} render/OCR failed ({}), skipping", i + 1, e.getMessage());
+                    pageTexts.add("");
+                    renderFailures++;
+                } finally {
+                    // Explicitly release native image resources before next iteration.
+                    // A4 @ 200 DPI ≈ 11 MB per BufferedImage — must free to prevent heap buildup.
+                    if (pageImage != null) {
+                        pageImage.flush();
+                    }
                 }
+            }
+
+            if (renderFailures > 0) {
+                log.warn("{} of {} pages failed to render (missing image codecs?)",
+                        renderFailures, totalPages);
             }
 
             if (fullText.isEmpty()) {
@@ -88,7 +121,7 @@ public class ScannedPdfIngestionService {
                                 + "Please check if the OCR service is running and the file is readable.");
             }
 
-            List<DocumentChunk> chunks = createChunks(pageTexts);
+            List<DocumentChunk> chunks = createChunks(pageTexts, pageTableRows);
             log.info("Scanned-PDF ingestion done: {} pages, {} OCR lines, {} chunks",
                     totalPages, totalLinesOcrd, chunks.size());
 
@@ -107,9 +140,94 @@ public class ScannedPdfIngestionService {
         }
     }
 
-    // ── Chunking (same sliding-window logic as PdfIngestionService) ─────────
+    // ── Chunking ─────────────────────────────────────────────────────────────
 
-    private List<DocumentChunk> createChunks(List<String> pageTexts) {
+    /**
+     * Create chunks from OCR page texts.
+     *
+     * <p>Strategy (in priority order):
+     * <ol>
+     *   <li><b>Lesson-aware + section-aware</b>: if lesson boundaries ("Bài N") are
+     *       detected, each lesson is first grouped (Layer 1), then split into
+     *       MnN functional sections such as "Từ vựng", "Mẫu câu" (Layer 2).</li>
+     *   <li><b>Character-based fallback</b>: sliding-window when no lesson markers found.</li>
+     * </ol>
+     *
+     * @param pageTableRows 0-based page index → table rows from OCR (propagated to VOCABULARY chunks)
+     */
+    private List<DocumentChunk> createChunks(List<String> pageTexts,
+                                              Map<Integer, List<String>> pageTableRows) {
+        LinkedHashMap<Integer, Integer> boundaries = LessonBoundaryDetector.detectBoundaries(pageTexts);
+        if (!boundaries.isEmpty()) {
+            List<DocumentChunk> lessonChunks = LessonBoundaryDetector.createLessonChunks(
+                    pageTexts, boundaries, "SCANNED");
+            log.info("Layer 1 (lesson-aware, scanned): {} lessons → {} chunks",
+                    boundaries.size(), lessonChunks.size());
+
+            // Layer 2: MnN intra-lesson section splitting
+            List<DocumentChunk> sectionChunks = applyMnNSectionSplitting(lessonChunks);
+
+            // Propagate table rows to VOCABULARY section chunks
+            propagateTableRows(sectionChunks, pageTableRows);
+
+            log.info("Layer 2 (section-aware, scanned): {} lesson chunks → {} section chunks",
+                    lessonChunks.size(), sectionChunks.size());
+            return sectionChunks;
+        }
+
+        log.info("No lesson boundaries detected in scanned PDF — using character-based chunking");
+        return createCharacterBasedChunks(pageTexts);
+    }
+
+    /**
+     * Attach structured table rows from OCR to VOCABULARY section chunks.
+     *
+     * <p>Each vocabulary chunk spans one or more pages. For every page that has
+     * table rows, aggregate them and set them on the matching chunk.
+     */
+    private void propagateTableRows(List<DocumentChunk> chunks,
+                                     Map<Integer, List<String>> pageTableRows) {
+        if (pageTableRows.isEmpty()) return;
+        for (DocumentChunk chunk : chunks) {
+            if (!MnNSectionSplitter.VOCABULARY.equals(chunk.getSectionType())) continue;
+            List<String> allRows = new ArrayList<>();
+            // pageStart/pageEnd are 1-based; pageTableRows uses 0-based index
+            for (int p = chunk.getPageStart(); p <= chunk.getPageEnd(); p++) {
+                List<String> rows = pageTableRows.get(p - 1);
+                if (rows != null) allRows.addAll(rows);
+            }
+            if (!allRows.isEmpty()) {
+                chunk.setStructuredTableRows(allRows);
+                log.debug("Propagated {} table rows to VOCABULARY chunk {} (pages {}-{})",
+                        allRows.size(), chunk.getChunkIndex(),
+                        chunk.getPageStart(), chunk.getPageEnd());
+            }
+        }
+    }
+
+    /**
+     * Apply MnN section splitting to each lesson chunk and re-index the result.
+     *
+     * <p>Each section child chunk receives the parent lesson's full content as
+     * {@code fullPageContext} so extraction agents can see sibling sections together.
+     */
+    private List<DocumentChunk> applyMnNSectionSplitting(List<DocumentChunk> lessonChunks) {
+        List<DocumentChunk> result = new ArrayList<>();
+        for (DocumentChunk lessonChunk : lessonChunks) {
+            String fullLessonText = lessonChunk.getContent();
+            List<DocumentChunk> sectionChunks = MnNSectionSplitter.split(lessonChunk);
+            for (DocumentChunk section : sectionChunks) {
+                section.setFullPageContext(fullLessonText);
+            }
+            result.addAll(sectionChunks);
+        }
+        for (int i = 0; i < result.size(); i++) {
+            result.get(i).setChunkIndex(i);
+        }
+        return result;
+    }
+
+    private List<DocumentChunk> createCharacterBasedChunks(List<String> pageTexts) {
         List<DocumentChunk> chunks = new ArrayList<>();
         int chunkIndex = 0;
         StringBuilder current = new StringBuilder();
@@ -145,6 +263,7 @@ public class ScannedPdfIngestionService {
         return DocumentChunk.builder()
                 .chunkIndex(index)
                 .content(content)
+                .fullPageContext(content) // same as content for char-based chunks
                 .pageStart(pageStart)
                 .pageEnd(pageEnd)
                 .chunkType("SCANNED")           // signals OCR origin to downstream agents

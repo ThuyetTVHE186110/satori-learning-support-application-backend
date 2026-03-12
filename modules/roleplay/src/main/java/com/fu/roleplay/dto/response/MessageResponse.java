@@ -30,5 +30,6 @@ public class MessageResponse {
     private Integer sequenceNumber;
     private LocalDateTime createdAt;
 
+    private String messageType;
     private PronunciationScoreResponse pronunciationScore;
 }

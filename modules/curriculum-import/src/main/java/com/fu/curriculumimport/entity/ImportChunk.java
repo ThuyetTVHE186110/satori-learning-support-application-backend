@@ -40,6 +40,26 @@ public class ImportChunk extends BaseEntity {
     @Column(name = "chunk_type", length = 50)
     private String chunkType;
 
+    /**
+     * Lesson title detected by boundary analysis (e.g. "Bài 1").
+     * Preserved so retry processing can reconstruct lesson-aware DocumentChunks.
+     */
+    @Column(name = "lesson_title", length = 100)
+    private String lessonTitle;
+
+    /**
+     * Lesson number corresponding to {@link #lessonTitle}.
+     */
+    @Column(name = "lesson_number")
+    private Integer lessonNumber;
+
+    /**
+     * Functional section type within a lesson, set by MnNSectionSplitter.
+     * Values: VOCABULARY, GRAMMAR_PATTERN, EXAMPLE, DIALOG, GRAMMAR_EXPLANATION, EXERCISE, UNKNOWN.
+     */
+    @Column(name = "section_type", length = 30)
+    private String sectionType;
+
     @Column(name = "content", nullable = false, columnDefinition = "TEXT")
     private String content;
 

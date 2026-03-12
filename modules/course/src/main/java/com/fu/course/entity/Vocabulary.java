@@ -5,6 +5,8 @@ import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.hibernate.annotations.ColumnTransformer;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * Vocabulary entity - Japanese vocabulary words.
@@ -50,8 +52,8 @@ public class Vocabulary extends SoftDeletableEntity {
     private String partOfSpeech;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "jlpt_level", length = 5)
-    @ColumnTransformer(write = "CAST(? AS jlpt_level)")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "jlpt_level", columnDefinition = "jlpt_level")
     private Course.JlptLevel jlptLevel;
 
     @Column(name = "kanji_writing", length = 255)
@@ -89,8 +91,8 @@ public class Vocabulary extends SoftDeletableEntity {
     private String contentHash;
 
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     @Column(name = "status", columnDefinition = "content_status")
-    @ColumnTransformer(write = "CAST(? AS content_status)")
     @Builder.Default
     private Course.ContentStatus status = Course.ContentStatus.DRAFT;
 }

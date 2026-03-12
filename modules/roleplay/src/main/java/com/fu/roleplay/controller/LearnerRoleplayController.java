@@ -3,8 +3,9 @@ package com.fu.roleplay.controller;
 import com.fu.common.response.ApiResponse;
 import com.fu.common.response.PageResponse;
 import com.fu.roleplay.dto.request.SendMessageRequest;
+import com.fu.roleplay.dto.request.StartFreeTalkRequest;
 import com.fu.roleplay.dto.request.StartSessionRequest;
-import com.fu.roleplay.dto.response.MessageResponse;
+import com.fu.roleplay.dto.response.SendMessageResponse;
 import com.fu.roleplay.dto.response.SessionEvaluationResponse;
 import com.fu.roleplay.dto.response.SessionResponse;
 import com.fu.roleplay.dto.response.SessionSummaryResponse;
@@ -47,15 +48,26 @@ public class LearnerRoleplayController {
                 .body(ApiResponse.success("Roleplay session started", response));
     }
 
+    @PostMapping("/free-talk/sessions")
+    public ResponseEntity<ApiResponse<SessionResponse>> startFreeTalk(
+            @Valid @RequestBody StartFreeTalkRequest request,
+            @AuthenticationPrincipal(expression = "id") UUID userId) {
+
+        log.info("User {} starting free-talk session at JLPT {}", userId, request.getJlptLevel());
+        SessionResponse response = sessionService.startFreeTalk(request, userId);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("Free-talk session started", response));
+    }
+
     @PostMapping(value = "/sessions/{sessionId}/messages", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<ApiResponse<MessageResponse>> sendMessage(
+    public ResponseEntity<ApiResponse<SendMessageResponse>> sendMessage(
             @PathVariable UUID sessionId,
             @Valid @RequestPart("message") SendMessageRequest request,
             @RequestPart(value = "audio", required = false) MultipartFile audio,
             @AuthenticationPrincipal(expression = "id") UUID userId) {
 
         log.info("User {} sending message to session {}", userId, sessionId);
-        MessageResponse response = sessionService.sendMessage(sessionId, request, audio, userId);
+        SendMessageResponse response = sessionService.sendMessage(sessionId, request, audio, userId);
         return ResponseEntity.ok(ApiResponse.success("Message sent", response));
     }
 
