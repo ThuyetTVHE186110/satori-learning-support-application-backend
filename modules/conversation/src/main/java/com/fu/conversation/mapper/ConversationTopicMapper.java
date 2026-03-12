@@ -37,6 +37,7 @@ public interface ConversationTopicMapper {
 
     @Mapping(target = "themeName", ignore = true)
     @Mapping(target = "courseName", ignore = true)
+    @Mapping(target = "missions", ignore = true)
     ConversationTopicResponse toResponse(ConversationTopic topic);
 
     ConversationTopicSummaryResponse toSummaryResponse(ConversationTopic topic);

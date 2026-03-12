@@ -1,7 +1,7 @@
 package com.fu.roleplay.dto.response;
 
-import com.fu.roleplay.entity.ConversationMission;
-import com.fu.roleplay.entity.SessionMission;
+import com.fu.conversation.entity.ConversationMission;
+import com.fu.roleplay.dto.entity.SessionMission;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;

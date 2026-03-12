@@ -32,6 +32,7 @@ class ConversationGenerationServiceTest {
     @Mock private VocabularyRepository vocabularyRepository;
     @Mock private GrammarPointRepository grammarPointRepository;
     @Mock private CourseRepository courseRepository;
+    @Mock private ChatClient chatClient;
     @Spy  private ObjectMapper objectMapper = new ObjectMapper();
 
     @InjectMocks
@@ -69,6 +70,9 @@ class ConversationGenerationServiceTest {
 
     @BeforeEach
     void setUp() {
+        // Inject the mock chatClient into the service (field set in constructor)
+        ReflectionTestUtils.setField(generationService, "chatClient", chatClient);
+
         courseId = UUID.randomUUID();
 
         course = Course.builder().name("N5 Beginner").build();
@@ -92,350 +96,159 @@ class ConversationGenerationServiceTest {
         grammarList    = List.of(grammar);
     }
 
-    // ── helper: build full ChatClient mock chain ─────────────────────────────
-    private ChatClient.ChatClientRequestSpec mockChatClientChain(String returnedContent) {
-        ChatClient.Builder           builder      = mock(ChatClient.Builder.class);
-        ChatClient                   client       = mock(ChatClient.class);
-        ChatClient.ChatClientRequestSpec promptSpec   = mock(ChatClient.ChatClientRequestSpec.class);
-        ChatClient.CallResponseSpec  callSpec     = mock(ChatClient.CallResponseSpec.class);
+    // ── helper: stub chatClient call chain ──────────────────────────────────
+    private void stubChatResponse(String returnedContent) {
+        ChatClient.ChatClientRequestSpec promptSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
 
-        when(builder.build()).thenReturn(client);
-        when(client.prompt()).thenReturn(promptSpec);
+        when(chatClient.prompt()).thenReturn(promptSpec);
         when(promptSpec.system(anyString())).thenReturn(promptSpec);
         when(promptSpec.user(anyString())).thenReturn(promptSpec);
         when(promptSpec.call()).thenReturn(callSpec);
         when(callSpec.content()).thenReturn(returnedContent);
+    }
 
-        return promptSpec;
+    private ArgumentCaptor<String> stubChatResponseAndCaptureUserPrompt(String returnedContent) {
+        ChatClient.ChatClientRequestSpec promptSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+        ArgumentCaptor<String> userCaptor = ArgumentCaptor.forClass(String.class);
+
+        when(chatClient.prompt()).thenReturn(promptSpec);
+        when(promptSpec.system(anyString())).thenReturn(promptSpec);
+        when(promptSpec.user(userCaptor.capture())).thenReturn(promptSpec);
+        when(promptSpec.call()).thenReturn(callSpec);
+        when(callSpec.content()).thenReturn(returnedContent);
+
+        return userCaptor;
     }
 
     // ════════════════════════════════════════════════════════════════════════
     @Nested
-    @DisplayName("generateThemesForCourse")
-    class GenerateThemesForCourseTests {
-
-        @Test
-        @DisplayName("Should return empty list immediately when course has no vocabulary and no grammar")
-        void shouldReturnEmptyWhenNoCourseContent() {
-            // Given
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            when(vocabularyRepository.findByCourseId(courseId, PageRequest.of(0, 30)))
-                    .thenReturn(new PageImpl<>(Collections.emptyList()));
-            when(grammarPointRepository.findByCourseId(courseId, PageRequest.of(0, 20)))
-                    .thenReturn(new PageImpl<>(Collections.emptyList()));
-
-            // When
-            List<GeneratedThemeSuggestionResponse> result =
-                    generationService.generateThemesForCourse(courseId, 3);
-
-            // Then — AI is never called
-            assertThat(result).isEmpty();
-        }
-
-        @Test
-        @DisplayName("Should use 'Unknown Course' when courseId does not match any course")
-        void shouldUseUnknownCourseWhenNotFound() {
-            // Given
-            when(courseRepository.findById(courseId)).thenReturn(Optional.empty());
-            when(vocabularyRepository.findByCourseId(courseId, PageRequest.of(0, 30)))
-                    .thenReturn(new PageImpl<>(Collections.emptyList()));
-            when(grammarPointRepository.findByCourseId(courseId, PageRequest.of(0, 20)))
-                    .thenReturn(new PageImpl<>(Collections.emptyList()));
-
-            // When — empty vocab/grammar triggers early return regardless
-            List<GeneratedThemeSuggestionResponse> result =
-                    generationService.generateThemesForCourse(courseId, 3);
-
-            assertThat(result).isEmpty();
-        }
+    @DisplayName("generateThemes")
+    class GenerateThemesTests {
 
         @Test
         @DisplayName("Should return parsed theme list when AI call succeeds")
         void shouldReturnParsedThemesOnSuccessfulAiCall() {
             // Given
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            when(vocabularyRepository.findByCourseId(courseId, PageRequest.of(0, 30)))
-                    .thenReturn(new PageImpl<>(vocabularyList));
-            when(grammarPointRepository.findByCourseId(courseId, PageRequest.of(0, 20)))
-                    .thenReturn(new PageImpl<>(grammarList));
+            stubChatResponse(VALID_THEMES_JSON);
 
-            try (MockedStatic<ChatClient> mockedStatic = mockStatic(ChatClient.class)) {
-                ChatClient.Builder builder = mock(ChatClient.Builder.class);
-                ChatClient client = mock(ChatClient.class);
-                ChatClient.ChatClientRequestSpec promptSpec =
-                        mock(ChatClient.ChatClientRequestSpec.class);
-                ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+            // When
+            List<GeneratedThemeSuggestionResponse> result =
+                    generationService.generateThemes(Course.JlptLevel.N5, "shopping", null, 1);
 
-                mockedStatic.when(() -> ChatClient.builder(chatModel)).thenReturn(builder);
-                when(builder.build()).thenReturn(client);
-                when(client.prompt()).thenReturn(promptSpec);
-                when(promptSpec.system(anyString())).thenReturn(promptSpec);
-                when(promptSpec.user(anyString())).thenReturn(promptSpec);
-                when(promptSpec.call()).thenReturn(callSpec);
-                when(callSpec.content()).thenReturn(VALID_THEMES_JSON);
-
-                // When
-                List<GeneratedThemeSuggestionResponse> result =
-                        generationService.generateThemesForCourse(courseId, 1);
-
-                // Then
-                assertThat(result).hasSize(1);
-                assertThat(result.get(0).getTitle()).isEqualTo("Daily Shopping");
-                assertThat(result.get(0).getTitleJapanese()).isEqualTo("日常のショッピング");
-                assertThat(result.get(0).getCategory()).isEqualTo("shopping");
-                assertThat(result.get(0).getVocabularyHints()).contains("買い物", "値段");
-            }
+            // Then
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getTitle()).isEqualTo("Daily Shopping");
+            assertThat(result.get(0).getTitleJapanese()).isEqualTo("日常のショッピング");
+            assertThat(result.get(0).getCategory()).isEqualTo("shopping");
+            assertThat(result.get(0).getVocabularyHints()).contains("買い物", "値段");
         }
 
         @Test
         @DisplayName("Should strip markdown code fences from AI response before parsing")
         void shouldStripMarkdownCodeFences() {
             String wrappedJson = "```json\n" + VALID_THEMES_JSON + "\n```";
+            stubChatResponse(wrappedJson);
 
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            when(vocabularyRepository.findByCourseId(courseId, PageRequest.of(0, 30)))
-                    .thenReturn(new PageImpl<>(vocabularyList));
-            when(grammarPointRepository.findByCourseId(courseId, PageRequest.of(0, 20)))
-                    .thenReturn(new PageImpl<>(grammarList));
+            List<GeneratedThemeSuggestionResponse> result =
+                    generationService.generateThemes(null, null, null, 1);
 
-            try (MockedStatic<ChatClient> mockedStatic = mockStatic(ChatClient.class)) {
-                ChatClient.Builder builder = mock(ChatClient.Builder.class);
-                ChatClient client = mock(ChatClient.class);
-                ChatClient.ChatClientRequestSpec promptSpec =
-                        mock(ChatClient.ChatClientRequestSpec.class);
-                ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
-
-                mockedStatic.when(() -> ChatClient.builder(chatModel)).thenReturn(builder);
-                when(builder.build()).thenReturn(client);
-                when(client.prompt()).thenReturn(promptSpec);
-                when(promptSpec.system(anyString())).thenReturn(promptSpec);
-                when(promptSpec.user(anyString())).thenReturn(promptSpec);
-                when(promptSpec.call()).thenReturn(callSpec);
-                when(callSpec.content()).thenReturn(wrappedJson);
-
-                List<GeneratedThemeSuggestionResponse> result =
-                        generationService.generateThemesForCourse(courseId, 1);
-
-                assertThat(result).hasSize(1);
-                assertThat(result.get(0).getTitle()).isEqualTo("Daily Shopping");
-            }
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getTitle()).isEqualTo("Daily Shopping");
         }
 
         @Test
         @DisplayName("Should return empty list when AI throws an exception")
         void shouldReturnEmptyListOnAiException() {
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            when(vocabularyRepository.findByCourseId(courseId, PageRequest.of(0, 30)))
-                    .thenReturn(new PageImpl<>(vocabularyList));
-            when(grammarPointRepository.findByCourseId(courseId, PageRequest.of(0, 20)))
-                    .thenReturn(new PageImpl<>(grammarList));
+            ChatClient.ChatClientRequestSpec promptSpec = mock(ChatClient.ChatClientRequestSpec.class);
+            ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
 
-            try (MockedStatic<ChatClient> mockedStatic = mockStatic(ChatClient.class)) {
-                ChatClient.Builder builder = mock(ChatClient.Builder.class);
-                ChatClient client = mock(ChatClient.class);
-                ChatClient.ChatClientRequestSpec promptSpec =
-                        mock(ChatClient.ChatClientRequestSpec.class);
-                ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+            when(chatClient.prompt()).thenReturn(promptSpec);
+            when(promptSpec.system(anyString())).thenReturn(promptSpec);
+            when(promptSpec.user(anyString())).thenReturn(promptSpec);
+            when(promptSpec.call()).thenReturn(callSpec);
+            when(callSpec.content()).thenThrow(new RuntimeException("OpenAI API error"));
 
-                mockedStatic.when(() -> ChatClient.builder(chatModel)).thenReturn(builder);
-                when(builder.build()).thenReturn(client);
-                when(client.prompt()).thenReturn(promptSpec);
-                when(promptSpec.system(anyString())).thenReturn(promptSpec);
-                when(promptSpec.user(anyString())).thenReturn(promptSpec);
-                when(promptSpec.call()).thenReturn(callSpec);
-                when(callSpec.content()).thenThrow(new RuntimeException("OpenAI API error"));
+            List<GeneratedThemeSuggestionResponse> result =
+                    generationService.generateThemes(null, null, null, 3);
 
-                List<GeneratedThemeSuggestionResponse> result =
-                        generationService.generateThemesForCourse(courseId, 3);
-
-                // Then — graceful fallback, not rethrown
-                assertThat(result).isEmpty();
-            }
+            assertThat(result).isEmpty();
         }
 
         @Test
         @DisplayName("Should return empty list when AI returns invalid JSON")
         void shouldReturnEmptyListOnInvalidJson() {
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            when(vocabularyRepository.findByCourseId(courseId, PageRequest.of(0, 30)))
-                    .thenReturn(new PageImpl<>(vocabularyList));
-            when(grammarPointRepository.findByCourseId(courseId, PageRequest.of(0, 20)))
-                    .thenReturn(new PageImpl<>(grammarList));
+            stubChatResponse("not valid json at all {{{");
 
-            try (MockedStatic<ChatClient> mockedStatic = mockStatic(ChatClient.class)) {
-                ChatClient.Builder builder = mock(ChatClient.Builder.class);
-                ChatClient client = mock(ChatClient.class);
-                ChatClient.ChatClientRequestSpec promptSpec =
-                        mock(ChatClient.ChatClientRequestSpec.class);
-                ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+            List<GeneratedThemeSuggestionResponse> result =
+                    generationService.generateThemes(null, null, null, 1);
 
-                mockedStatic.when(() -> ChatClient.builder(chatModel)).thenReturn(builder);
-                when(builder.build()).thenReturn(client);
-                when(client.prompt()).thenReturn(promptSpec);
-                when(promptSpec.system(anyString())).thenReturn(promptSpec);
-                when(promptSpec.user(anyString())).thenReturn(promptSpec);
-                when(promptSpec.call()).thenReturn(callSpec);
-                when(callSpec.content()).thenReturn("not valid json at all {{{}");
-
-                List<GeneratedThemeSuggestionResponse> result =
-                        generationService.generateThemesForCourse(courseId, 1);
-
-                assertThat(result).isEmpty();
-            }
+            assertThat(result).isEmpty();
         }
 
         @Test
-        @DisplayName("Should request vocabulary and grammar with correct page sizes")
-        void shouldFetchVocabularyAndGrammarWithCorrectPageSizes() {
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            when(vocabularyRepository.findByCourseId(courseId, PageRequest.of(0, 30)))
-                    .thenReturn(new PageImpl<>(Collections.emptyList()));
-            when(grammarPointRepository.findByCourseId(courseId, PageRequest.of(0, 20)))
-                    .thenReturn(new PageImpl<>(Collections.emptyList()));
+        @DisplayName("Should include JLPT level in prompt when provided")
+        void shouldIncludeJlptLevelInPromptWhenProvided() {
+            ArgumentCaptor<String> userCaptor = stubChatResponseAndCaptureUserPrompt(VALID_THEMES_JSON);
 
-            generationService.generateThemesForCourse(courseId, 3);
+            generationService.generateThemes(Course.JlptLevel.N5, null, null, 1);
 
-            verify(vocabularyRepository).findByCourseId(courseId, PageRequest.of(0, 30));
-            verify(grammarPointRepository).findByCourseId(courseId, PageRequest.of(0, 20));
+            assertThat(userCaptor.getValue()).contains("N5");
         }
 
         @Test
-        @DisplayName("Should call AI when vocab is non-empty but grammar list is empty")
-        void shouldCallAiWhenOnlyVocabularyPresent() {
-            // Branch: vocabulary.isEmpty() == false, grammar.isEmpty() == true → NOT early return
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            when(vocabularyRepository.findByCourseId(courseId, PageRequest.of(0, 30)))
-                    .thenReturn(new PageImpl<>(vocabularyList));   // non-empty
-            when(grammarPointRepository.findByCourseId(courseId, PageRequest.of(0, 20)))
-                    .thenReturn(new PageImpl<>(Collections.emptyList())); // empty
+        @DisplayName("Should include category in prompt when provided")
+        void shouldIncludeCategoryInPromptWhenProvided() {
+            ArgumentCaptor<String> userCaptor = stubChatResponseAndCaptureUserPrompt(VALID_THEMES_JSON);
 
-            try (MockedStatic<ChatClient> mockedStatic = mockStatic(ChatClient.class)) {
-                ChatClient.Builder builder = mock(ChatClient.Builder.class);
-                ChatClient client = mock(ChatClient.class);
-                ChatClient.ChatClientRequestSpec promptSpec =
-                        mock(ChatClient.ChatClientRequestSpec.class);
-                ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+            generationService.generateThemes(null, "restaurant", null, 1);
 
-                mockedStatic.when(() -> ChatClient.builder(chatModel)).thenReturn(builder);
-                when(builder.build()).thenReturn(client);
-                when(client.prompt()).thenReturn(promptSpec);
-                when(promptSpec.system(anyString())).thenReturn(promptSpec);
-                when(promptSpec.user(anyString())).thenReturn(promptSpec);
-                when(promptSpec.call()).thenReturn(callSpec);
-                when(callSpec.content()).thenReturn(VALID_THEMES_JSON);
-
-                List<GeneratedThemeSuggestionResponse> result =
-                        generationService.generateThemesForCourse(courseId, 1);
-
-                assertThat(result).isNotEmpty(); // AI was called and returned results
-            }
+            assertThat(userCaptor.getValue()).contains("restaurant");
         }
 
         @Test
-        @DisplayName("Should call AI when grammar is non-empty but vocabulary list is empty")
-        void shouldCallAiWhenOnlyGrammarPresent() {
-            // Branch: vocabulary.isEmpty() == true, grammar.isEmpty() == false → NOT early return
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            when(vocabularyRepository.findByCourseId(courseId, PageRequest.of(0, 30)))
-                    .thenReturn(new PageImpl<>(Collections.emptyList())); // empty
-            when(grammarPointRepository.findByCourseId(courseId, PageRequest.of(0, 20)))
-                    .thenReturn(new PageImpl<>(grammarList));   // non-empty
+        @DisplayName("Should include hint in prompt when provided")
+        void shouldIncludeHintInPromptWhenProvided() {
+            ArgumentCaptor<String> userCaptor = stubChatResponseAndCaptureUserPrompt(VALID_THEMES_JSON);
 
-            try (MockedStatic<ChatClient> mockedStatic = mockStatic(ChatClient.class)) {
-                ChatClient.Builder builder = mock(ChatClient.Builder.class);
-                ChatClient client = mock(ChatClient.class);
-                ChatClient.ChatClientRequestSpec promptSpec =
-                        mock(ChatClient.ChatClientRequestSpec.class);
-                ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+            generationService.generateThemes(null, null, "focus on polite speech", 2);
 
-                mockedStatic.when(() -> ChatClient.builder(chatModel)).thenReturn(builder);
-                when(builder.build()).thenReturn(client);
-                when(client.prompt()).thenReturn(promptSpec);
-                when(promptSpec.system(anyString())).thenReturn(promptSpec);
-                when(promptSpec.user(anyString())).thenReturn(promptSpec);
-                when(promptSpec.call()).thenReturn(callSpec);
-                when(callSpec.content()).thenReturn(VALID_THEMES_JSON);
-
-                List<GeneratedThemeSuggestionResponse> result =
-                        generationService.generateThemesForCourse(courseId, 1);
-
-                assertThat(result).isNotEmpty();
-            }
+            assertThat(userCaptor.getValue()).contains("focus on polite speech");
         }
 
         @Test
-        @DisplayName("Should fall back to meaningEn in prompt when vocabulary meaningVi is null")
-        void shouldFallbackToMeaningEnWhenMeaningViIsNull() {
-            Vocabulary vocabNoVi = Vocabulary.builder()
-                    .japaneseText("食べる")
-                    .meaningVi(null)
-                    .meaningEn("to eat")
-                    .partOfSpeech("verb")
-                    .build();
+        @DisplayName("Should include count in prompt text")
+        void shouldIncludeCountInPromptText() {
+            ArgumentCaptor<String> userCaptor = stubChatResponseAndCaptureUserPrompt(VALID_THEMES_JSON);
 
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            when(vocabularyRepository.findByCourseId(courseId, PageRequest.of(0, 30)))
-                    .thenReturn(new PageImpl<>(List.of(vocabNoVi)));
-            when(grammarPointRepository.findByCourseId(courseId, PageRequest.of(0, 20)))
-                    .thenReturn(new PageImpl<>(Collections.emptyList()));
+            generationService.generateThemes(null, null, null, 3);
 
-            try (MockedStatic<ChatClient> mockedStatic = mockStatic(ChatClient.class)) {
-                ChatClient.Builder builder = mock(ChatClient.Builder.class);
-                ChatClient client = mock(ChatClient.class);
-                ChatClient.ChatClientRequestSpec promptSpec =
-                        mock(ChatClient.ChatClientRequestSpec.class);
-                ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
-
-                mockedStatic.when(() -> ChatClient.builder(chatModel)).thenReturn(builder);
-                when(builder.build()).thenReturn(client);
-                when(client.prompt()).thenReturn(promptSpec);
-                when(promptSpec.system(anyString())).thenReturn(promptSpec);
-                ArgumentCaptor<String> userCaptor = ArgumentCaptor.forClass(String.class);
-                when(promptSpec.user(userCaptor.capture())).thenReturn(promptSpec);
-                when(promptSpec.call()).thenReturn(callSpec);
-                when(callSpec.content()).thenReturn(VALID_THEMES_JSON);
-
-                generationService.generateThemesForCourse(courseId, 1);
-
-                assertThat(userCaptor.getValue()).contains("to eat"); // English fallback in prompt
-            }
+            assertThat(userCaptor.getValue()).contains("3");
         }
 
         @Test
-        @DisplayName("Should use 'N/A' in prompt when vocabulary partOfSpeech is null")
-        void shouldUseNAWhenPartOfSpeechIsNull() {
-            Vocabulary vocabNoPos = Vocabulary.builder()
-                    .japaneseText("食べる")
-                    .meaningVi("ăn")
-                    .partOfSpeech(null)  // null partOfSpeech
-                    .build();
+        @DisplayName("Should omit optional fields from prompt when all are null")
+        void shouldOmitOptionalFieldsWhenNull() {
+            ArgumentCaptor<String> userCaptor = stubChatResponseAndCaptureUserPrompt(VALID_THEMES_JSON);
 
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            when(vocabularyRepository.findByCourseId(courseId, PageRequest.of(0, 30)))
-                    .thenReturn(new PageImpl<>(List.of(vocabNoPos)));
-            when(grammarPointRepository.findByCourseId(courseId, PageRequest.of(0, 20)))
-                    .thenReturn(new PageImpl<>(Collections.emptyList()));
+            generationService.generateThemes(null, null, null, 1);
 
-            try (MockedStatic<ChatClient> mockedStatic = mockStatic(ChatClient.class)) {
-                ChatClient.Builder builder = mock(ChatClient.Builder.class);
-                ChatClient client = mock(ChatClient.class);
-                ChatClient.ChatClientRequestSpec promptSpec =
-                        mock(ChatClient.ChatClientRequestSpec.class);
-                ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+            // No JLPT or category lines in prompt
+            assertThat(userCaptor.getValue()).doesNotContain("Target JLPT Level");
+            assertThat(userCaptor.getValue()).doesNotContain("Preferred category");
+            assertThat(userCaptor.getValue()).doesNotContain("Additional guidance");
+        }
 
-                mockedStatic.when(() -> ChatClient.builder(chatModel)).thenReturn(builder);
-                when(builder.build()).thenReturn(client);
-                when(client.prompt()).thenReturn(promptSpec);
-                when(promptSpec.system(anyString())).thenReturn(promptSpec);
-                ArgumentCaptor<String> userCaptor = ArgumentCaptor.forClass(String.class);
-                when(promptSpec.user(userCaptor.capture())).thenReturn(promptSpec);
-                when(promptSpec.call()).thenReturn(callSpec);
-                when(callSpec.content()).thenReturn(VALID_THEMES_JSON);
+        @Test
+        @DisplayName("Should return empty list when AI returns null content")
+        void shouldReturnEmptyListWhenAiReturnsNull() {
+            stubChatResponse(null);
 
-                generationService.generateThemesForCourse(courseId, 1);
+            List<GeneratedThemeSuggestionResponse> result =
+                    generationService.generateThemes(null, null, null, 1);
 
-                assertThat(userCaptor.getValue()).contains("[N/A]");
-            }
+            assertThat(result).isEmpty();
         }
     }
 
@@ -453,59 +266,28 @@ class ConversationGenerationServiceTest {
                     .thenReturn(new PageImpl<>(vocabularyList));
             when(grammarPointRepository.findByCourseId(courseId, PageRequest.of(0, 10)))
                     .thenReturn(new PageImpl<>(grammarList));
+            stubChatResponse(VALID_CONTEXT_JSON);
 
-            try (MockedStatic<ChatClient> mockedStatic = mockStatic(ChatClient.class)) {
-                ChatClient.Builder builder = mock(ChatClient.Builder.class);
-                ChatClient client = mock(ChatClient.class);
-                ChatClient.ChatClientRequestSpec promptSpec =
-                        mock(ChatClient.ChatClientRequestSpec.class);
-                ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+            // When
+            String result = generationService.generateUserTopicContext(scenario, courseId);
 
-                mockedStatic.when(() -> ChatClient.builder(chatModel)).thenReturn(builder);
-                when(builder.build()).thenReturn(client);
-                when(client.prompt()).thenReturn(promptSpec);
-                when(promptSpec.system(anyString())).thenReturn(promptSpec);
-                when(promptSpec.user(anyString())).thenReturn(promptSpec);
-                when(promptSpec.call()).thenReturn(callSpec);
-                when(callSpec.content()).thenReturn(VALID_CONTEXT_JSON);
-
-                // When
-                String result = generationService.generateUserTopicContext(scenario, courseId);
-
-                // Then
-                assertThat(result).isNotNull().contains("vocabularyHints");
-                verify(vocabularyRepository).findByCourseId(courseId, PageRequest.of(0, 20));
-                verify(grammarPointRepository).findByCourseId(courseId, PageRequest.of(0, 10));
-            }
+            // Then
+            assertThat(result).isNotNull().contains("vocabularyHints");
+            verify(vocabularyRepository).findByCourseId(courseId, PageRequest.of(0, 20));
+            verify(grammarPointRepository).findByCourseId(courseId, PageRequest.of(0, 10));
         }
 
         @Test
         @DisplayName("Should skip course lookup when courseId is null")
         void shouldSkipCourseLookupWhenCourseIdNull() {
             String scenario = "Talking with a friend";
+            stubChatResponse(VALID_CONTEXT_JSON);
 
-            try (MockedStatic<ChatClient> mockedStatic = mockStatic(ChatClient.class)) {
-                ChatClient.Builder builder = mock(ChatClient.Builder.class);
-                ChatClient client = mock(ChatClient.class);
-                ChatClient.ChatClientRequestSpec promptSpec =
-                        mock(ChatClient.ChatClientRequestSpec.class);
-                ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+            String result = generationService.generateUserTopicContext(scenario, null);
 
-                mockedStatic.when(() -> ChatClient.builder(chatModel)).thenReturn(builder);
-                when(builder.build()).thenReturn(client);
-                when(client.prompt()).thenReturn(promptSpec);
-                when(promptSpec.system(anyString())).thenReturn(promptSpec);
-                when(promptSpec.user(anyString())).thenReturn(promptSpec);
-                when(promptSpec.call()).thenReturn(callSpec);
-                when(callSpec.content()).thenReturn(VALID_CONTEXT_JSON);
-
-                String result = generationService.generateUserTopicContext(scenario, null);
-
-                assertThat(result).isNotNull();
-                // Repositories for vocab/grammar must NOT be queried when courseId is null
-                verify(vocabularyRepository, never()).findByCourseId(any(), any());
-                verify(grammarPointRepository, never()).findByCourseId(any(), any());
-            }
+            assertThat(result).isNotNull();
+            verify(vocabularyRepository, never()).findByCourseId(any(), any());
+            verify(grammarPointRepository, never()).findByCourseId(any(), any());
         }
 
         @Test
@@ -513,141 +295,67 @@ class ConversationGenerationServiceTest {
         void shouldStripMarkdownCodeFencesFromContext() {
             String scenario = "Shopping at a mall";
             String wrappedJson = "```json\n" + VALID_CONTEXT_JSON + "\n```";
+            stubChatResponse(wrappedJson);
 
-            try (MockedStatic<ChatClient> mockedStatic = mockStatic(ChatClient.class)) {
-                ChatClient.Builder builder = mock(ChatClient.Builder.class);
-                ChatClient client = mock(ChatClient.class);
-                ChatClient.ChatClientRequestSpec promptSpec =
-                        mock(ChatClient.ChatClientRequestSpec.class);
-                ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+            String result = generationService.generateUserTopicContext(scenario, null);
 
-                mockedStatic.when(() -> ChatClient.builder(chatModel)).thenReturn(builder);
-                when(builder.build()).thenReturn(client);
-                when(client.prompt()).thenReturn(promptSpec);
-                when(promptSpec.system(anyString())).thenReturn(promptSpec);
-                when(promptSpec.user(anyString())).thenReturn(promptSpec);
-                when(promptSpec.call()).thenReturn(callSpec);
-                when(callSpec.content()).thenReturn(wrappedJson);
-
-                String result = generationService.generateUserTopicContext(scenario, null);
-
-                // Result must be valid JSON (no backticks)
-                assertThatCode(() -> new ObjectMapper().readTree(result))
-                        .doesNotThrowAnyException();
-            }
+            assertThatCode(() -> new ObjectMapper().readTree(result))
+                    .doesNotThrowAnyException();
         }
 
         @Test
         @DisplayName("Should return '{}' fallback when AI throws exception")
         void shouldReturnEmptyJsonOnAiException() {
             String scenario = "Meeting a new friend";
+            ChatClient.ChatClientRequestSpec promptSpec = mock(ChatClient.ChatClientRequestSpec.class);
+            ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
 
-            try (MockedStatic<ChatClient> mockedStatic = mockStatic(ChatClient.class)) {
-                ChatClient.Builder builder = mock(ChatClient.Builder.class);
-                ChatClient client = mock(ChatClient.class);
-                ChatClient.ChatClientRequestSpec promptSpec =
-                        mock(ChatClient.ChatClientRequestSpec.class);
-                ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+            when(chatClient.prompt()).thenReturn(promptSpec);
+            when(promptSpec.system(anyString())).thenReturn(promptSpec);
+            when(promptSpec.user(anyString())).thenReturn(promptSpec);
+            when(promptSpec.call()).thenReturn(callSpec);
+            when(callSpec.content()).thenThrow(new RuntimeException("API quota exceeded"));
 
-                mockedStatic.when(() -> ChatClient.builder(chatModel)).thenReturn(builder);
-                when(builder.build()).thenReturn(client);
-                when(client.prompt()).thenReturn(promptSpec);
-                when(promptSpec.system(anyString())).thenReturn(promptSpec);
-                when(promptSpec.user(anyString())).thenReturn(promptSpec);
-                when(promptSpec.call()).thenReturn(callSpec);
-                when(callSpec.content()).thenThrow(new RuntimeException("API quota exceeded"));
+            String result = generationService.generateUserTopicContext(scenario, null);
 
-                String result = generationService.generateUserTopicContext(scenario, null);
-
-                assertThat(result).isEqualTo("{}");
-            }
+            assertThat(result).isEqualTo("{}");
         }
 
         @Test
         @DisplayName("Should return '{}' fallback when AI returns invalid JSON")
         void shouldReturnEmptyJsonOnInvalidJsonResponse() {
             String scenario = "Job interview practice";
+            stubChatResponse("{invalid json{{");
 
-            try (MockedStatic<ChatClient> mockedStatic = mockStatic(ChatClient.class)) {
-                ChatClient.Builder builder = mock(ChatClient.Builder.class);
-                ChatClient client = mock(ChatClient.class);
-                ChatClient.ChatClientRequestSpec promptSpec =
-                        mock(ChatClient.ChatClientRequestSpec.class);
-                ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+            String result = generationService.generateUserTopicContext(scenario, null);
 
-                mockedStatic.when(() -> ChatClient.builder(chatModel)).thenReturn(builder);
-                when(builder.build()).thenReturn(client);
-                when(client.prompt()).thenReturn(promptSpec);
-                when(promptSpec.system(anyString())).thenReturn(promptSpec);
-                when(promptSpec.user(anyString())).thenReturn(promptSpec);
-                when(promptSpec.call()).thenReturn(callSpec);
-                when(callSpec.content()).thenReturn("{invalid json{{");
-
-                String result = generationService.generateUserTopicContext(scenario, null);
-
-                assertThat(result).isEqualTo("{}");
-            }
+            assertThat(result).isEqualTo("{}");
         }
 
         @Test
         @DisplayName("Should include scenario text in prompt sent to AI")
         void shouldIncludeScenarioInUserPrompt() {
             String scenario = "Asking for directions in Tokyo";
+            ArgumentCaptor<String> userPromptCaptor = stubChatResponseAndCaptureUserPrompt(VALID_CONTEXT_JSON);
 
-            try (MockedStatic<ChatClient> mockedStatic = mockStatic(ChatClient.class)) {
-                ChatClient.Builder builder = mock(ChatClient.Builder.class);
-                ChatClient client = mock(ChatClient.class);
-                ChatClient.ChatClientRequestSpec promptSpec =
-                        mock(ChatClient.ChatClientRequestSpec.class);
-                ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+            generationService.generateUserTopicContext(scenario, null);
 
-                mockedStatic.when(() -> ChatClient.builder(chatModel)).thenReturn(builder);
-                when(builder.build()).thenReturn(client);
-                when(client.prompt()).thenReturn(promptSpec);
-                when(promptSpec.system(anyString())).thenReturn(promptSpec);
-                ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
-                when(promptSpec.user(userPromptCaptor.capture())).thenReturn(promptSpec);
-                when(promptSpec.call()).thenReturn(callSpec);
-                when(callSpec.content()).thenReturn(VALID_CONTEXT_JSON);
-
-                generationService.generateUserTopicContext(scenario, null);
-
-                // Scenario text must appear in what's sent to the AI
-                assertThat(userPromptCaptor.getValue()).contains(scenario);
-            }
+            assertThat(userPromptCaptor.getValue()).contains(scenario);
         }
 
         @Test
         @DisplayName("Should still call AI when courseId is present but vocab and grammar lists are empty")
         void shouldCallAiWhenCourseIdPresentButContentEmpty() {
-            // generateUserTopicContext has NO early-return guard on empty vocab/grammar —
-            // it always calls the AI (unlike generateThemesForCourse which guards).
             String scenario = "Visiting a shrine";
             when(vocabularyRepository.findByCourseId(courseId, PageRequest.of(0, 20)))
                     .thenReturn(new PageImpl<>(Collections.emptyList()));
             when(grammarPointRepository.findByCourseId(courseId, PageRequest.of(0, 10)))
                     .thenReturn(new PageImpl<>(Collections.emptyList()));
+            stubChatResponse(VALID_CONTEXT_JSON);
 
-            try (MockedStatic<ChatClient> mockedStatic = mockStatic(ChatClient.class)) {
-                ChatClient.Builder builder = mock(ChatClient.Builder.class);
-                ChatClient client = mock(ChatClient.class);
-                ChatClient.ChatClientRequestSpec promptSpec =
-                        mock(ChatClient.ChatClientRequestSpec.class);
-                ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+            String result = generationService.generateUserTopicContext(scenario, courseId);
 
-                mockedStatic.when(() -> ChatClient.builder(chatModel)).thenReturn(builder);
-                when(builder.build()).thenReturn(client);
-                when(client.prompt()).thenReturn(promptSpec);
-                when(promptSpec.system(anyString())).thenReturn(promptSpec);
-                when(promptSpec.user(anyString())).thenReturn(promptSpec);
-                when(promptSpec.call()).thenReturn(callSpec);
-                when(callSpec.content()).thenReturn(VALID_CONTEXT_JSON);
-
-                String result = generationService.generateUserTopicContext(scenario, courseId);
-
-                // AI was called despite empty content — result is valid JSON
-                assertThat(result).isNotNull().contains("vocabularyHints");
-            }
+            assertThat(result).isNotNull().contains("vocabularyHints");
         }
 
         @Test
@@ -655,31 +363,14 @@ class ConversationGenerationServiceTest {
         void shouldIncludeVocabularyInContextPromptWhenPresent() {
             String scenario = "Ordering ramen at a restaurant";
             when(vocabularyRepository.findByCourseId(courseId, PageRequest.of(0, 20)))
-                    .thenReturn(new PageImpl<>(vocabularyList));   // non-empty
+                    .thenReturn(new PageImpl<>(vocabularyList));
             when(grammarPointRepository.findByCourseId(courseId, PageRequest.of(0, 10)))
                     .thenReturn(new PageImpl<>(Collections.emptyList()));
+            ArgumentCaptor<String> userCaptor = stubChatResponseAndCaptureUserPrompt(VALID_CONTEXT_JSON);
 
-            try (MockedStatic<ChatClient> mockedStatic = mockStatic(ChatClient.class)) {
-                ChatClient.Builder builder = mock(ChatClient.Builder.class);
-                ChatClient client = mock(ChatClient.class);
-                ChatClient.ChatClientRequestSpec promptSpec =
-                        mock(ChatClient.ChatClientRequestSpec.class);
-                ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+            generationService.generateUserTopicContext(scenario, courseId);
 
-                mockedStatic.when(() -> ChatClient.builder(chatModel)).thenReturn(builder);
-                when(builder.build()).thenReturn(client);
-                when(client.prompt()).thenReturn(promptSpec);
-                when(promptSpec.system(anyString())).thenReturn(promptSpec);
-                ArgumentCaptor<String> userCaptor = ArgumentCaptor.forClass(String.class);
-                when(promptSpec.user(userCaptor.capture())).thenReturn(promptSpec);
-                when(promptSpec.call()).thenReturn(callSpec);
-                when(callSpec.content()).thenReturn(VALID_CONTEXT_JSON);
-
-                generationService.generateUserTopicContext(scenario, courseId);
-
-                // The vocabulary word "買い物" from vocabularyList should appear in the prompt
-                assertThat(userCaptor.getValue()).contains("買い物");
-            }
+            assertThat(userCaptor.getValue()).contains("買い物");
         }
     }
 }

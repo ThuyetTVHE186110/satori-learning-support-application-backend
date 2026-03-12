@@ -84,10 +84,6 @@ public class ConversationTopic extends SoftDeletableEntity {
     @Builder.Default
     private Integer difficultyScore = 1;
 
-    @Column(name = "is_roleplay")
-    @Builder.Default
-    private Boolean isRoleplay = false;
-
     @Column(name = "roleplay_context", columnDefinition = "jsonb")
     @ColumnTransformer(write = "CAST(? AS jsonb)")
     private String roleplayContext;

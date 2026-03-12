@@ -2,16 +2,22 @@ package com.fu.conversation.controller;
 
 import com.fu.common.response.ApiResponse;
 import com.fu.common.response.PageResponse;
+import com.fu.conversation.dto.request.CreateMissionRequest;
 import com.fu.conversation.dto.request.CreateThemeRequest;
 import com.fu.conversation.dto.request.CreateTopicRequest;
 import com.fu.conversation.dto.request.GenerateThemeRequest;
+import com.fu.conversation.dto.request.GenerateTopicRequest;
+import com.fu.conversation.dto.request.UpdateMissionRequest;
 import com.fu.conversation.dto.request.UpdateThemeRequest;
 import com.fu.conversation.dto.request.UpdateTopicRequest;
+import com.fu.conversation.dto.response.ConversationMissionResponse;
 import com.fu.conversation.dto.response.ConversationThemeResponse;
 import com.fu.conversation.dto.response.ConversationThemeSummaryResponse;
 import com.fu.conversation.dto.response.ConversationTopicResponse;
 import com.fu.conversation.dto.response.ConversationTopicSummaryResponse;
 import com.fu.conversation.dto.response.GeneratedThemeSuggestionResponse;
+import com.fu.conversation.dto.response.GeneratedTopicSuggestionResponse;
+import com.fu.conversation.service.ConversationMissionService;
 import com.fu.conversation.service.ConversationThemeService;
 import com.fu.conversation.service.ConversationTopicService;
 import com.fu.course.entity.Course;
@@ -44,6 +50,7 @@ public class ManagerConversationController {
 
     private final ConversationThemeService themeService;
     private final ConversationTopicService topicService;
+    private final ConversationMissionService missionService;
 
     // ==================== THEME (Chủ đề lớn) ====================
 
@@ -55,7 +62,7 @@ public class ManagerConversationController {
     public ResponseEntity<ApiResponse<List<GeneratedThemeSuggestionResponse>>> generateThemes(
             @Valid @RequestBody GenerateThemeRequest request) {
 
-        log.info("Generating theme suggestions for course: {}", request.getCourseId());
+        log.info("Generating theme suggestions (jlpt={}, category={})", request.getJlptLevel(), request.getCategory());
         List<GeneratedThemeSuggestionResponse> suggestions = themeService.generateThemeSuggestions(request);
         return ResponseEntity.ok(ApiResponse.success(
                 "Generated " + suggestions.size() + " theme suggestions", suggestions));
@@ -283,5 +290,90 @@ public class ManagerConversationController {
 
         topicService.deleteTopic(topicId, managerId);
         return ResponseEntity.ok(ApiResponse.success("Topic deleted successfully", null));
+    }
+
+    // ==================== TOPIC GENERATION (AI) ====================
+
+    /**
+     * AI-generate topic suggestions for a theme.
+     * POST /api/v1/manager/conversation/topics/generate
+     */
+    @PostMapping("/topics/generate")
+    public ResponseEntity<ApiResponse<List<GeneratedTopicSuggestionResponse>>> generateTopics(
+            @Valid @RequestBody GenerateTopicRequest request) {
+
+        log.info("Generating topic suggestions for theme: {}", request.getThemeId());
+        List<GeneratedTopicSuggestionResponse> suggestions =
+                topicService.generateTopicSuggestions(request);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Generated " + suggestions.size() + " topic suggestions", suggestions));
+    }
+
+    // ==================== MISSION (Nhiệm vụ) ====================
+
+    /**
+     * Create a new mission for a topic.
+     * POST /api/v1/manager/conversation/missions
+     */
+    @PostMapping("/missions")
+    public ResponseEntity<ApiResponse<ConversationMissionResponse>> createMission(
+            @Valid @RequestBody CreateMissionRequest request,
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
+
+        log.info("Manager {} creating mission for topic: {}", managerId, request.getTopicId());
+        ConversationMissionResponse response = missionService.createMission(request, managerId);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("Mission created successfully", response));
+    }
+
+    /**
+     * Get all missions for a topic, sorted by order index.
+     * GET /api/v1/manager/conversation/topics/{topicId}/missions
+     */
+    @GetMapping("/topics/{topicId}/missions")
+    public ResponseEntity<ApiResponse<List<ConversationMissionResponse>>> getMissionsByTopic(
+            @PathVariable UUID topicId) {
+
+        List<ConversationMissionResponse> missions = missionService.getMissionsByTopic(topicId);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Retrieved " + missions.size() + " missions", missions));
+    }
+
+    /**
+     * Get a mission by ID.
+     * GET /api/v1/manager/conversation/missions/{missionId}
+     */
+    @GetMapping("/missions/{missionId}")
+    public ResponseEntity<ApiResponse<ConversationMissionResponse>> getMission(
+            @PathVariable UUID missionId) {
+
+        return ResponseEntity.ok(ApiResponse.success(missionService.getMission(missionId)));
+    }
+
+    /**
+     * Update a mission.
+     * PUT /api/v1/manager/conversation/missions/{missionId}
+     */
+    @PutMapping("/missions/{missionId}")
+    public ResponseEntity<ApiResponse<ConversationMissionResponse>> updateMission(
+            @PathVariable UUID missionId,
+            @Valid @RequestBody UpdateMissionRequest request,
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
+
+        ConversationMissionResponse response = missionService.updateMission(missionId, request, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Mission updated successfully", response));
+    }
+
+    /**
+     * Soft-delete a mission.
+     * DELETE /api/v1/manager/conversation/missions/{missionId}
+     */
+    @DeleteMapping("/missions/{missionId}")
+    public ResponseEntity<ApiResponse<Void>> deleteMission(
+            @PathVariable UUID missionId,
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
+
+        missionService.deleteMission(missionId, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Mission deleted successfully", null));
     }
 }

@@ -64,7 +64,6 @@ class ConversationTopicServiceImplTest {
                 .jlptLevel(Course.JlptLevel.N5)
                 .status(Course.ContentStatus.DRAFT)
                 .difficultyScore(2)
-                .isRoleplay(false)
                 .orderIndex(1)
                 .build();
         ReflectionTestUtils.setField(activeTopic, "id", topicId);

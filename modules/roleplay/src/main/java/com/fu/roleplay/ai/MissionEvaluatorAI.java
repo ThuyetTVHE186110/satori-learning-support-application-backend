@@ -2,8 +2,8 @@ package com.fu.roleplay.ai;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fu.roleplay.entity.ConversationMessage;
-import com.fu.roleplay.entity.SessionMission;
+import com.fu.roleplay.dto.entity.ConversationMessage;
+import com.fu.roleplay.dto.entity.SessionMission;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;

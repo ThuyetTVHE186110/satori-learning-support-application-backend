@@ -1,6 +1,6 @@
 package com.fu.roleplay.repository;
 
-import com.fu.roleplay.entity.ConversationSession;
+import com.fu.roleplay.dto.entity.ConversationSession;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;

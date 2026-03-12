@@ -1,7 +1,7 @@
 package com.fu.roleplay.dto.request;
 
 import com.fu.common.validator.ValidJson;
-import com.fu.roleplay.entity.ConversationMission;
+import com.fu.conversation.entity.ConversationMission;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
