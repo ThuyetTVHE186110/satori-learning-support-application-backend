@@ -1089,11 +1089,11 @@ public class AssignmentServiceImpl implements AssignmentService {
 
     /**
      * Rule 1: Validates assignment status transitions.
-     * <ul>
-     *   <li>DRAFT → PUBLISHED: requires content (questions for quiz, prompt for writing) and dueDate set</li>
-     *   <li>PUBLISHED → DRAFT: blocked (cannot unpublish)</li>
-     *   <li>CLOSED → any: blocked (terminal state)</li>
-     * </ul>
+     * 
+     *   DRAFT → PUBLISHED: requires content (questions for quiz, prompt for writing) and dueDate set
+     *   PUBLISHED → DRAFT: blocked (cannot unpublish)
+     *   CLOSED → any: blocked (terminal state)
+     * 
      *
      * @param questionCount for QUIZ publishing validation — pass null for writing types
      */

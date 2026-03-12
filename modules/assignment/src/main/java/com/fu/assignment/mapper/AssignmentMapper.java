@@ -67,7 +67,7 @@ public abstract class AssignmentMapper {
     @Mapping(target = "correctAnswers", expression = "java(toJsonNode(question.getCorrectAnswers()))")
     public abstract QuizQuestionResponse toResponse(QuizQuestion question);
 
-    @Mapping(target = "options", expression = "java(toJsonNode(question.getOptions()))")
+    @Mapping(target = "options", expression = "java(toLearnerOptions(question.getOptions()))")
     public abstract LearnerQuizQuestionResponse toLearnerQuestionResponse(QuizQuestion question);
 
     @Mapping(target = "assignmentQuestionId", ignore = true)
@@ -82,7 +82,7 @@ public abstract class AssignmentMapper {
     @Mapping(target = "orderIndex", ignore = true)
     @Mapping(target = "points", ignore = true)
     @Mapping(source = "id", target = "questionId")
-    @Mapping(target = "options", expression = "java(toJsonNode(question.getOptions()))")
+    @Mapping(target = "options", expression = "java(toLearnerOptions(question.getOptions()))")
     public abstract LearnerQuizQuestionResponse toLearnerAssignmentQuestionResponse(QuizQuestion question);
 
     // ── AssignmentSubmission ──────────────────────────────────────────────────
@@ -106,6 +106,26 @@ public abstract class AssignmentMapper {
         if (json == null || json.isBlank()) return null;
         try {
             return objectMapper.readTree(json);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Converts options JSON string to JsonNode for learners, stripping the "isCorrect" field.
+     */
+    protected JsonNode toLearnerOptions(String json) {
+        if (json == null || json.isBlank()) return null;
+        try {
+            JsonNode root = objectMapper.readTree(json);
+            if (root.has("options") && root.get("options").isArray()) {
+                for (JsonNode optionNode : root.get("options")) {
+                    if (optionNode instanceof com.fasterxml.jackson.databind.node.ObjectNode obj) {
+                        obj.remove("isCorrect");
+                    }
+                }
+            }
+            return root;
         } catch (Exception e) {
             return null;
         }
