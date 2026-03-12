@@ -496,7 +496,6 @@ public class AssignmentServiceImpl implements AssignmentService {
                     .grammarId(original.getGrammarId())
                     .lessonId(original.getLessonId())
                     .aiGenerated(original.getAiGenerated())
-                    .sourcePdfUrl(original.getSourcePdfUrl())
                     .jlptLevel(original.getJlptLevel())
                     .difficultyScore(original.getDifficultyScore())
                     .tags(original.getTags())

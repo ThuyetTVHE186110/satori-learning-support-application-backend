@@ -364,7 +364,6 @@ public class QuizAiGenerationService {
                     .difficultyScore(1)
                     .jlptLevel(request.getJlptLevel())
                     .aiGenerated(true)
-                    .sourcePdfUrl(null)
                     .build();
 
             responses.add(assignmentMapper.toResponse(q));
