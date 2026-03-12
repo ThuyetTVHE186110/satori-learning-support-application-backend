@@ -46,7 +46,7 @@ public class RoleplayAIService {
      * - AI character identity is anchored explicitly (aiRole) so it never speaks as the learner.
      * - Learner tasks are framed as "LEARNER must do X" — never as the AI's own goals.
      * - translation = Vietnamese translation of WHAT THE AI SAID, not what learner should say.
-     * - MISSION_INTRO is an out-of-character narrator hint (Japanese content intentionally blank).
+     * - MISSION_INTRO is an out-of-character narrator hint in Japanese with Vietnamese translation.
      * - SCENE_INTRO is 3rd-person narration, not in-character dialogue.
      */
     public String buildSystemPrompt(ConversationSession session, String topicContext,
@@ -132,9 +132,9 @@ public class RoleplayAIService {
         sb.append("[\n");
         sb.append("  {\n");
         sb.append("    \"type\": \"MISSION_INTRO\",\n");
-        sb.append("    \"japanese_content\": \"\",\n");
-        sb.append("    \"translation\": \"(Out-of-character narrator hint in Vietnamese ONLY. Do NOT speak as ").append(aiRole).append(" here. Hint at the learner's situation without revealing specific task steps. 1-2 sentences.)\",\n");
-        sb.append("    \"romaji\": \"\"\n");
+        sb.append("    \"japanese_content\": \"(Out-of-character narrator hint in Japanese. 1-2 sentences hinting at the learner's situation without revealing specific task steps.)\",\n");
+        sb.append("    \"translation\": \"(Vietnamese translation of the Japanese narrator hint above.)\",\n");
+        sb.append("    \"romaji\": \"(romaji of the Japanese narrator hint)\"\n");
         sb.append("  },\n");
         sb.append("  {\n");
         sb.append("    \"type\": \"SCENE_INTRO\",\n");
@@ -375,7 +375,7 @@ public class RoleplayAIService {
 
     private String defaultOpeningArrayResponse() {
         return "[" +
-               "{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"本日はよろしくお願いします。\",\"translation\":\"Hôm nay rất vui được luyện tập cùng bạn.\",\"romaji\":\"Honjitsu wa yoroshiku onegai shimasu.\"}," +
+               "{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"本日はよろしくお願いします。会話の練習を始めましょう。\",\"translation\":\"Hôm nay rất vui được luyện tập cùng bạn. Hãy bắt đầu buổi luyện tập hội thoại.\",\"romaji\":\"Honjitsu wa yoroshiku onegai shimasu. Kaiwa no renshuu wo hajimemashou.\"}," +
                "{\"type\":\"SCENE_INTRO\",\"japanese_content\":\"会話の練習を始めましょう。\",\"translation\":\"Hãy bắt đầu buổi luyện tập hội thoại.\",\"romaji\":\"Kaiwa no renshu wo hajimemasho.\"}," +
                "{\"type\":\"DIALOGUE\",\"japanese_content\":\"いらっしゃいませ。本日はどのようなご用件でしょうか？\",\"translation\":\"Xin chào, hôm nay tôi có thể giúp gì cho bạn?\",\"romaji\":\"Irasshaimase. Honjitsu wa dono you na goyo-ken deshou ka?\",\"corrections\":[]}" +
                "]";

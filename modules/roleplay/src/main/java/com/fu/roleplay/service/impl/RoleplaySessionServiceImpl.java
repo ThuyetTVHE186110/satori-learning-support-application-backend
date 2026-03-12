@@ -647,7 +647,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                         .sessionId(sessionId)
                         .role(ConversationMessage.MessageRole.ASSISTANT)
                         .messageType(type)
-                        .content(japanese.isEmpty() ? aiResponseJson : japanese)
+                        .content(japanese.isEmpty() ? translation : japanese)
                         .japaneseContent(japanese)
                         .translation(translation)
                         .romaji(romaji)
