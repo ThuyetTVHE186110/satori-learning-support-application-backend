@@ -1,5 +1,5 @@
 -- ==========================================================================
--- Script 17: Vietnamese Mission Labels + Phase Support
+-- Script 21: Vietnamese Mission Labels + Phase Support
 -- 1. Add title_vi / description_vi to conversation_missions & session_missions
 -- 2. Add conversation_phase to conversation_sessions
 -- 3. Add message_type to conversation_messages
@@ -527,7 +527,7 @@ IF v_topic_id IS NOT NULL AND NOT EXISTS (
     RAISE NOTICE 'Inserted missions for topic: At the Pharmacy';
 END IF;
 
-RAISE NOTICE 'Script 17 complete: missions for new topics inserted.';
+RAISE NOTICE 'Script 21 complete: missions for new topics inserted.';
 END $$;
 
 -- --------------------------------------------------------------------------

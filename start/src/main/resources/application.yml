@@ -49,6 +49,11 @@ spring:
                     max-idle: 8
                     min-idle: 0
 
+    # ==================== Jackson Configuration ====================
+    jackson:
+        deserialization:
+            fail-on-unknown-properties: false
+
     # ==================== AI Configuration ====================
     ai:
         openai:

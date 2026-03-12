@@ -151,13 +151,19 @@ public class ImportItemPersistenceHelper {
     }
 
     /**
-     * Save a lesson entity — in its own transaction.
-     * Returns the saved lesson, or null on failure.
+     * Find an existing lesson by (importId, title) or create a new one — in its own transaction.
+     *
+     * <p>Prevents duplicate lessons when multiple extraction paths (structural chunker +
+     * ContentExtractionAgent) independently resolve to the same lesson title for the same import.
+     *
+     * @return the found-or-created lesson, or null on failure
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public Lesson saveLesson(Lesson lesson) {
+    public Lesson findOrCreateLesson(Lesson lesson, UUID importId) {
         try {
-            return lessonRepository.save(lesson);
+            return lessonRepository
+                    .findByImportIdAndTitleIgnoreCase(importId, lesson.getTitle().strip())
+                    .orElseGet(() -> lessonRepository.save(lesson));
         } catch (Exception e) {
             log.warn("Failed to save lesson '{}': {}", lesson.getTitle(), e.getMessage());
             return null;

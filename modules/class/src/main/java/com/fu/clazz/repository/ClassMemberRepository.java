@@ -46,5 +46,12 @@ public interface ClassMemberRepository extends JpaRepository<ClassMember, UUID> 
      */
     @Query("SELECT m FROM ClassMember m WHERE m.userId = :userId AND m.removedAt IS NULL")
     Page<ClassMember> findActiveByUserId(@Param("userId") UUID userId, Pageable pageable);
+
+    /**
+     * Find all class IDs a user is actively a member of.
+     * Used by assignment service to determine which assignments are visible to a learner.
+     */
+    @Query("SELECT m.classId FROM ClassMember m WHERE m.userId = :userId AND m.removedAt IS NULL")
+    java.util.List<UUID> findActiveClassIdsByUserId(@Param("userId") UUID userId);
 }
 

@@ -19,6 +19,7 @@
         <module>modules/class</module>
         <module>modules/pronunciation</module>
         <module>modules/roleplay</module>
+        <module>modules/assignment</module>
         <module>start</module>
     </modules>
 
@@ -100,6 +101,11 @@
                 <artifactId>roleplay</artifactId>
                 <version>${project.version}</version>
             </dependency>
+            <dependency>
+                <groupId>com.fu</groupId>
+                <artifactId>assignment</artifactId>
+                <version>${project.version}</version>
+            </dependency>
 
             <!-- MapStruct -->
             <dependency>
@@ -113,6 +119,13 @@
                 <groupId>com.cloudinary</groupId>
                 <artifactId>cloudinary-http5</artifactId>
                 <version>${cloudinary.version}</version>
+            </dependency>
+
+            <!-- HTML Sanitization -->
+            <dependency>
+                <groupId>org.jsoup</groupId>
+                <artifactId>jsoup</artifactId>
+                <version>1.18.1</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

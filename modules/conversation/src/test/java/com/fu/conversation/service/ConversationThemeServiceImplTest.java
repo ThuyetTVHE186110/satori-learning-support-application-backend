@@ -562,7 +562,7 @@ class ConversationThemeServiceImplTest {
         void shouldFilterByJlptLevel() {
             Pageable pageable = PageRequest.of(0, 10);
             when(themeRepository.findByJlptLevelAndStatusAndDeletedAtIsNull(
-                    Course.JlptLevel.N5.name(), Course.ContentStatus.PUBLISHED.name(), any(Pageable.class)))
+                    eq(Course.JlptLevel.N5.name()), eq(Course.ContentStatus.PUBLISHED.name()), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of(activeTheme)));
             when(themeMapper.toSummaryResponse(activeTheme)).thenReturn(summaryResponse);
             mockTopicCount(themeId, 0L);
@@ -580,7 +580,7 @@ class ConversationThemeServiceImplTest {
         void shouldReturnAllPublishedWhenNoLevelFilter() {
             Pageable pageable = PageRequest.of(0, 10);
             when(themeRepository.findByStatusAndDeletedAtIsNull(
-                    Course.ContentStatus.PUBLISHED.name(), any(Pageable.class)))
+                    eq(Course.ContentStatus.PUBLISHED.name()), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of(activeTheme)));
             when(themeMapper.toSummaryResponse(activeTheme)).thenReturn(summaryResponse);
             mockTopicCount(themeId, 0L);
@@ -598,7 +598,7 @@ class ConversationThemeServiceImplTest {
         void shouldReturnEmptyWhenNoPublishedThemes() {
             Pageable pageable = PageRequest.of(0, 10);
             when(themeRepository.findByStatusAndDeletedAtIsNull(
-                    Course.ContentStatus.PUBLISHED.name(), any(Pageable.class)))
+                    eq(Course.ContentStatus.PUBLISHED.name()), any(Pageable.class)))
                     .thenReturn(Page.empty());
 
             Page<ConversationThemeSummaryResponse> result =

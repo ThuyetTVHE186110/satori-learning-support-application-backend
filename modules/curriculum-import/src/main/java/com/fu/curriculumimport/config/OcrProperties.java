@@ -65,4 +65,13 @@ public class OcrProperties {
      * <p>Example: {@code environment/secrets/satori-489709-ce922a405186.json}
      */
     private String credentialsFile = "";
+
+    /**
+     * Number of pages sent in a single {@code batchAnnotateImages} call to Google Vision.
+     * Google Vision supports up to 16 images per batch request.
+     * Each page at 300 DPI ≈ 25 MB as a raw image, but is JPEG-encoded to ~200-500 KB
+     * before sending, so memory overhead per batch is small.
+     * Only used when {@code provider=google_vision} or {@code provider=auto}.
+     */
+    private int googleVisionBatchSize = 8;
 }
