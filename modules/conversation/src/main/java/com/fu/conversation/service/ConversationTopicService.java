@@ -1,9 +1,11 @@
 package com.fu.conversation.service;
 
 import com.fu.conversation.dto.request.CreateTopicRequest;
+import com.fu.conversation.dto.request.GenerateTopicRequest;
 import com.fu.conversation.dto.request.UpdateTopicRequest;
 import com.fu.conversation.dto.response.ConversationTopicResponse;
 import com.fu.conversation.dto.response.ConversationTopicSummaryResponse;
+import com.fu.conversation.dto.response.GeneratedTopicSuggestionResponse;
 import com.fu.course.entity.Course;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -38,4 +40,10 @@ public interface ConversationTopicService {
     ConversationTopicResponse getPublishedTopic(UUID id);
 
     Page<ConversationTopicSummaryResponse> getAllTopics(Pageable pageable);
+
+    /**
+     * Uses AI to generate topic suggestions for a theme.
+     * Suggestions are not persisted — the manager reviews and saves them manually.
+     */
+    List<GeneratedTopicSuggestionResponse> generateTopicSuggestions(GenerateTopicRequest request);
 }

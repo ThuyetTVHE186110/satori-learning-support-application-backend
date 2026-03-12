@@ -117,7 +117,6 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         ConversationTopic topic = topicRepository.findById(request.getTopicId())
                 .filter(t -> t.getDeletedAt() == null)
                 .filter(t -> Course.ContentStatus.PUBLISHED.equals(t.getStatus()))
-                .filter(t -> Boolean.TRUE.equals(t.getIsRoleplay()))
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "ConversationTopic", "id", request.getTopicId().toString()));
 

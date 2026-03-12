@@ -44,8 +44,6 @@ public class UpdateTopicRequest {
     @Min(1) @Max(10)
     private Integer difficultyScore;
 
-    private Boolean isRoleplay;
-
     private String roleplayContext;
 
     private String thumbnailUrl;

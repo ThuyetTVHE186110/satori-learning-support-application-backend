@@ -42,8 +42,10 @@ public class ConversationThemeServiceImpl implements ConversationThemeService {
 
     @Override
     public List<GeneratedThemeSuggestionResponse> generateThemeSuggestions(GenerateThemeRequest request) {
-        log.info("Generating theme suggestions for course: {}", request.getCourseId());
-        return generationService.generateThemesForCourse(request.getCourseId(), request.getCount());
+        log.info("Generating {} theme suggestions (jlpt={}, category={})",
+                request.getCount(), request.getJlptLevel(), request.getCategory());
+        return generationService.generateThemes(
+                request.getJlptLevel(), request.getCategory(), request.getHint(), request.getCount());
     }
 
     @Override

@@ -48,7 +48,6 @@ class ConversationTopicMapperTest {
                     .category("restaurant")
                     .jlptLevel(Course.JlptLevel.N4)
                     .difficultyScore(3)
-                    .isRoleplay(true)
                     .roleplayContext("{\"roles\":[\"customer\",\"waiter\"]}")
                     .thumbnailUrl("https://cdn/restaurant.jpg")
                     .orderIndex(2)
@@ -69,7 +68,6 @@ class ConversationTopicMapperTest {
             assertThat(topic.getCategory()).isEqualTo("restaurant");
             assertThat(topic.getJlptLevel()).isEqualTo(Course.JlptLevel.N4);
             assertThat(topic.getDifficultyScore()).isEqualTo(3);
-            assertThat(topic.getIsRoleplay()).isTrue();
             assertThat(topic.getRoleplayContext()).isEqualTo("{\"roles\":[\"customer\",\"waiter\"]}");
             assertThat(topic.getThumbnailUrl()).isEqualTo("https://cdn/restaurant.jpg");
             assertThat(topic.getOrderIndex()).isEqualTo(2);
@@ -93,14 +91,6 @@ class ConversationTopicMapperTest {
             ConversationTopic topic = mapper.toEntity(
                     CreateTopicRequest.builder().title("Test").build());
             assertThat(topic.getStatus()).isEqualTo(Course.ContentStatus.DRAFT);
-        }
-
-        @Test
-        @DisplayName("Should default isRoleplay to false when not specified")
-        void shouldDefaultIsRoleplayFalse() {
-            ConversationTopic topic = mapper.toEntity(
-                    CreateTopicRequest.builder().title("Test").build());
-            assertThat(topic.getIsRoleplay()).isFalse();
         }
 
         @Test
@@ -201,7 +191,6 @@ class ConversationTopicMapperTest {
                     .category("shopping")
                     .jlptLevel(Course.JlptLevel.N5)
                     .difficultyScore(2)
-                    .isRoleplay(false)
                     .thumbnailUrl("https://cdn/shop.jpg")
                     .status(Course.ContentStatus.PUBLISHED)
                     .orderIndex(1)
@@ -252,7 +241,6 @@ class ConversationTopicMapperTest {
                     .category("social")
                     .jlptLevel(Course.JlptLevel.N3)
                     .difficultyScore(3)
-                    .isRoleplay(true)
                     .thumbnailUrl("https://cdn/meeting.jpg")
                     .status(Course.ContentStatus.DRAFT)
                     .orderIndex(4)
@@ -268,7 +256,6 @@ class ConversationTopicMapperTest {
             assertThat(response.getCategory()).isEqualTo("social");
             assertThat(response.getJlptLevel()).isEqualTo(Course.JlptLevel.N3);
             assertThat(response.getDifficultyScore()).isEqualTo(3);
-            assertThat(response.getIsRoleplay()).isTrue();
             assertThat(response.getThumbnailUrl()).isEqualTo("https://cdn/meeting.jpg");
             assertThat(response.getStatus()).isEqualTo(Course.ContentStatus.DRAFT);
             assertThat(response.getOrderIndex()).isEqualTo(4);
