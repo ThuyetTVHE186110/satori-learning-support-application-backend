@@ -122,7 +122,6 @@ public class AssignmentServiceImpl implements AssignmentService {
         boolean isAudioChanged = (audioFile != null && !audioFile.isEmpty())
                 || (request.getAudioUrl() != null && !request.getAudioUrl().equals(assignment.getAudioUrl()));
         if (isAudioChanged && hasSubmissions) {
-            log.warn("HAS_SUBMISSIONS: Audio URL changed for assignment {}", assignmentId);
             throw new BusinessException("HAS_SUBMISSIONS",
                     "Bài tập đã có học viên nộp bài. Không thể cập nhật nội dung bài tập đã giao." +
                             "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
@@ -167,7 +166,6 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         // If submissions exist, throw ONLY if questions ACTUALLY changed
         if (hasSubmissions && hasQuizQuestionsChanged(request.getQuestions(), assignmentId)) {
-            log.warn("HAS_SUBMISSIONS: Quiz questions actually changed for assignment {}", assignmentId);
             throw new BusinessException("HAS_SUBMISSIONS",
                     "Bài tập đã có học viên nộp bài. Không thể cập nhật nội dung đề bài (câu hỏi). " +
                             "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
@@ -296,7 +294,6 @@ public class AssignmentServiceImpl implements AssignmentService {
 
             // If there are submissions AND writing content ACTUALLY changed → reject
             if (hasSubmissions && hasWritingContentChanged(request, assignment)) {
-                log.warn("HAS_SUBMISSIONS: Writing content actually changed for assignment {}", assignmentId);
                 throw new BusinessException("HAS_SUBMISSIONS",
                         "Bài tập đã có học viên nộp bài. Không thể sửa nội dung đề bài. " +
                                 "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
@@ -865,7 +862,6 @@ public class AssignmentServiceImpl implements AssignmentService {
         try {
             return objectMapper.readValue(imageUrlsJson, List.class);
         } catch (Exception e) {
-            log.warn("Failed to parse imageUrls JSON: {}", e.getMessage());
             return null;
         }
     }
@@ -1008,7 +1004,6 @@ public class AssignmentServiceImpl implements AssignmentService {
                 }
             }
         } catch (Exception e) {
-            log.warn("Failed to auto-score answers: {}", e.getMessage());
         }
 
         return new AutoScoreResult(correct, earned, total);
@@ -1060,16 +1055,12 @@ public class AssignmentServiceImpl implements AssignmentService {
             // maxScore: locked
             if (request.getMaxScore() != null && assignment.getMaxScore() != null
                     && !request.getMaxScore().equals(assignment.getMaxScore())) {
-                log.warn("HAS_SUBMISSIONS: maxScore changed from {} to {} for assignment {}",
-                        assignment.getMaxScore(), request.getMaxScore(), assignment.getId());
                 throw new BusinessException("HAS_SUBMISSIONS",
                         "Bài tập đã có học viên nộp bài. Không thể thay đổi điểm tối đa.");
             }
             // passingScore: only allow reducing
             if (request.getPassingScore() != null && assignment.getPassingScore() != null
                     && request.getPassingScore() > assignment.getPassingScore()) {
-                log.warn("HAS_SUBMISSIONS: passingScore increased from {} to {} for assignment {}",
-                        assignment.getPassingScore(), request.getPassingScore(), assignment.getId());
                 throw new BusinessException("HAS_SUBMISSIONS",
                         "Bài tập đã có học viên nộp bài. Không thể tăng điểm đạt (chỉ được hạ xuống).");
             }
@@ -1195,7 +1186,6 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         // 1. If counts differ, layout definitely changed
         if (existingLinks.size() != incomingQuestions.size()) {
-            log.warn("HAS_SUBMISSIONS_DEBUG: Question count changed from {} to {}", existingLinks.size(), incomingQuestions.size());
             return true;
         }
 
@@ -1211,27 +1201,23 @@ public class AssignmentServiceImpl implements AssignmentService {
 
             // 2. Identity or sequence changed
             if (incoming.getId() == null || !incoming.getId().equals(existingLink.getQuestionId())) {
-                log.warn("HAS_SUBMISSIONS_DEBUG: Question ID changed at index {}. Incoming: {}, Existing: {}", i, incoming.getId(), existingLink.getQuestionId());
                 return true;
             }
 
             // 3. Link properties changed
             Integer incOrder = incoming.getOrderIndex() != null ? incoming.getOrderIndex() : i;
             if (!Objects.equals(incOrder, existingLink.getOrderIndex())) {
-                log.warn("HAS_SUBMISSIONS_DEBUG: Order index changed for question {}. Incoming: {}, Existing: {}", incoming.getId(), incOrder, existingLink.getOrderIndex());
                 return true;
             }
 
             Integer incPoints = incoming.getPoints() != null ? incoming.getPoints() : 10;
             if (!Objects.equals(incPoints, existingLink.getPoints())) {
-                log.warn("HAS_SUBMISSIONS_DEBUG: Points changed for question {}. Incoming: {}, Existing: {}", incoming.getId(), incPoints, existingLink.getPoints());
                 return true;
             }
 
             // 4. Question inner values changed
             QuizQuestion existing = existingQuestionsMap.get(incoming.getId());
             if (existing == null) {
-                log.warn("HAS_SUBMISSIONS_DEBUG: Question {} not found in existing map", incoming.getId());
                 return true;
             }
 
@@ -1239,50 +1225,39 @@ public class AssignmentServiceImpl implements AssignmentService {
             Integer incDiff = incoming.getDifficultyScore() != null ? incoming.getDifficultyScore() : 1;
 
             if (!Objects.equals(incoming.getQuestionText(), existing.getQuestionText())) {
-                log.warn("HAS_SUBMISSIONS_DEBUG: questionText changed for q {}", incoming.getId());
                 return true;
             }
             if (!Objects.equals(incoming.getQuestionJapanese(), existing.getQuestionJapanese())) {
-                log.warn("HAS_SUBMISSIONS_DEBUG: questionJapanese changed for q {}", incoming.getId());
                 return true;
             }
             if (!Objects.equals(incType, existing.getQuestionType())) {
-                log.warn("HAS_SUBMISSIONS_DEBUG: questionType changed for q {}", incoming.getId());
                 return true;
             }
 
             // Options are JSON strings. String comparison will fail if keys are just ordered differently.
             if (!isJsonEqual(incoming.getOptions(), existing.getOptions())) {
-                log.warn("HAS_SUBMISSIONS_DEBUG: options changed for q {}. \nIncoming: {}\nExisting: {}", incoming.getId(), incoming.getOptions(), existing.getOptions());
                 return true;
             }
 
             if (!Objects.equals(incoming.getCorrectAnswer(), existing.getCorrectAnswer())) {
-                log.warn("HAS_SUBMISSIONS_DEBUG: correctAnswer changed for q {}", incoming.getId());
                 return true;
             }
             if (!Objects.equals(incoming.getCorrectAnswers(), existing.getCorrectAnswers())) {
-                log.warn("HAS_SUBMISSIONS_DEBUG: correctAnswers changed for q {}", incoming.getId());
                 return true;
             }
             if (!Objects.equals(incoming.getAiExplanation(), existing.getAiExplanation())) {
-                log.warn("HAS_SUBMISSIONS_DEBUG: aiExplanation changed for q {}", incoming.getId());
                 return true;
             }
             if (!Objects.equals(incoming.getAiExplanationVi(), existing.getAiExplanationVi())) {
-                log.warn("HAS_SUBMISSIONS_DEBUG: aiExplanationVi changed for q {}", incoming.getId());
                 return true;
             }
             if (!Objects.equals(incoming.getImageUrl(), existing.getImageUrl())) {
-                log.warn("HAS_SUBMISSIONS_DEBUG: imageUrl changed for q {}", incoming.getId());
                 return true;
             }
             if (!Objects.equals(incoming.getJlptLevel(), existing.getJlptLevel())) {
-                log.warn("HAS_SUBMISSIONS_DEBUG: jlptLevel changed for q {}", incoming.getId());
                 return true;
             }
             if (!Objects.equals(incDiff, existing.getDifficultyScore())) {
-                log.warn("HAS_SUBMISSIONS_DEBUG: difficultyScore changed for q {}", incoming.getId());
                 return true;
             }
         }
@@ -1302,7 +1277,6 @@ public class AssignmentServiceImpl implements AssignmentService {
             JsonNode tree2 = mapper.readTree(json2);
             return tree1.equals(tree2);
         } catch (Exception e) {
-            log.warn("HAS_SUBMISSIONS_DEBUG: Failed to parse JSON for comparison. Falling back to string equals.", e);
             return false;
         }
     }
