@@ -1,69 +1,77 @@
 package com.fu.assignment.ai;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.assignment.dto.request.AiExplanationRequest;
 import com.fu.assignment.dto.response.AiExplanationResponse;
 import com.fu.assignment.entity.QuizQuestion;
 import com.fu.assignment.repository.QuizQuestionRepository;
+import com.fu.assignment.util.MarkdownUtils;
+import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.converter.BeanOutputConverter;
+import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
  * AI service to generate explanation for a quiz question's correct answer.
  * Both an English/Japanese and a Vietnamese explanation are generated simultaneously.
  * <p>
- * Uses RestTemplate to call OpenAI API directly (bypasses Spring AI ChatClient
- * to avoid deserialization issues with newer OpenAI response fields).
+ * Uses Spring AI ChatClient for interaction.
  */
 @Service
 @Slf4j
 public class QuizExplanationService {
 
-    private static final String OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
-
     private static final String SYSTEM_PROMPT = """
-            You are an expert Japanese language teacher.
-            Your task is to explain why a given answer is correct for a Japanese language quiz question.
+            You are a professional and dedicated Japanese language teacher.
+            Your task is to provide a high-quality explanation for why a specific answer is correct in a Japanese language quiz.
             
-            RULES:
-            1. Always respond with ONLY a valid JSON object. No markdown. No extra text.
-            2. Structure:
+            CORE RULES:
+            1. You MUST respond strictly with a valid JSON object.
+            2. JSON Structure:
                {
-                 "explanation": "Explanation in English (or Japanese if the question is in Japanese)",
-                 "explanationVi": "Giải thích bằng tiếng Việt"
+                 "explanation": "Detailed explanation in Vietnamese",
+                 "explanationVi": "Detailed explanation in Vietnamese"
                }
-            3. Keep explanations concise (2-4 sentences each).
-            4. Reference grammar rules, vocabulary meanings, or contextual usage.
-            5. Be encouraging and educational.
+            3. OUTPUT LANGUAGE: BOTH the 'explanation' and 'explanationVi' fields MUST be written in VIETNAMESE.
+            
+            EXPLANATION GUIDELINES (High Quality):
+            - Keep the explanation concise yet comprehensive (3-5 sentences).
+            - Clearly identify the grammar pattern, vocabulary meaning, or situational context used in the question.
+            - Explain the logical reasoning behind the correct answer.
+            - If applicable, briefly contrast the correct choice with distractors (wrong options) to prevent common student mistakes.
+            - Maintain a polite, educational, and encouraging tone.
+            
+            FORMATTING RULES (STRICT):
+            - Use PLAIN TEXT ONLY.
+            - DO NOT use Markdown (no **bold**, *italic*, etc.).
+            - DO NOT use HTML tags (no <ruby>, <rt>, <b>, <i>, etc.).
+            - DO NOT use special decorative characters.
             """;
-
-    @Value("${spring.ai.openai.api-key:}")
-    private String apiKey;
 
     @Value("${spring.ai.openai.chat.options.model:gpt-4o-mini}")
     private String model;
 
-    private final ObjectMapper objectMapper;
-    private final QuizQuestionRepository questionRepository;
-    private final RestTemplate restTemplate;
+    @Value("${spring.ai.openai.chat.options.temperature:0.7}")
+    private double temperature;
 
-    public QuizExplanationService(ObjectMapper objectMapper,
+    private final QuizQuestionRepository questionRepository;
+    private final ChatClient chatClient;
+    private final BeanOutputConverter<AiExplanationResponse> outputConverter;
+
+    public QuizExplanationService(OpenAiChatModel chatModel,
                                   QuizQuestionRepository questionRepository) {
-        this.objectMapper = objectMapper;
         this.questionRepository = questionRepository;
-        this.restTemplate = new RestTemplate();
+        this.chatClient = ChatClient.builder(chatModel).build();
+        this.outputConverter = new BeanOutputConverter<>(AiExplanationResponse.class);
     }
 
     /**
@@ -99,39 +107,26 @@ public class QuizExplanationService {
         return parseResponse(rawResponse);
     }
 
-    // ── OpenAI API Call ──────────────────────────────────────────────────────
+    // ── AI API Call (using ChatClient) ────────────────────────────────────────
 
     private String callOpenAi(String userPrompt) {
         try {
-            String requestBody = objectMapper.writeValueAsString(Map.of(
-                    "model", model,
-                    "temperature", 0.7,
-                    "max_tokens", 1024,
-                    "messages", List.of(
-                            Map.of("role", "system", "content", SYSTEM_PROMPT),
-                            Map.of("role", "user", "content", userPrompt)
-                    )
-            ));
+            String formatInstruction = outputConverter.getFormat();
+            
+            return chatClient.prompt()
+                    .system(SYSTEM_PROMPT)
+                    .user(userPrompt + "\n\n" + formatInstruction)
+                    .options(OpenAiChatOptions.builder()
+                            .model(model)
+                            .temperature(temperature)
+                            .build())
+                    .call()
+                    .content();
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.setBearerAuth(apiKey);
-
-            ResponseEntity<String> response = restTemplate.exchange(
-                    OPENAI_CHAT_URL, HttpMethod.POST,
-                    new HttpEntity<>(requestBody, headers), String.class);
-
-            JsonNode root = objectMapper.readTree(response.getBody());
-            return root.path("choices").get(0).path("message").path("content").asText();
-
-        } catch (HttpClientErrorException e) {
-            log.error("OpenAI API error: HTTP {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
-            throw new com.fu.common.exception.BusinessException("AI_RESPONSE_ERROR",
-                    "OpenAI API error: " + e.getResponseBodyAsString());
         } catch (Exception e) {
-            log.error("OpenAI call failed: {}", e.getMessage());
-            throw new com.fu.common.exception.BusinessException("AI_RESPONSE_ERROR",
-                    "Failed to call OpenAI: " + e.getMessage());
+            log.error("AI call failed: {}", e.getMessage());
+            throw new BusinessException("AI_RESPONSE_ERROR",
+                    "Failed to call AI: " + e.getMessage());
         }
     }
 
@@ -189,18 +184,26 @@ public class QuizExplanationService {
 
     private AiExplanationResponse parseResponse(String rawResponse) {
         try {
-            String cleanJson = cleanJson(rawResponse);
-            JsonNode node = objectMapper.readTree(cleanJson);
-            return AiExplanationResponse.builder()
-                    .explanation(node.path("explanation").asText(null))
-                    .explanationVi(node.path("explanationVi").asText(null))
-                    .build();
+            AiExplanationResponse response = outputConverter.convert(rawResponse);
+            if (response != null) {
+                // Ensure plain text as per prompt rules
+                response.setExplanation(MarkdownUtils.sanitizePlainExplanation(response.getExplanation()));
+                response.setExplanationVi(MarkdownUtils.sanitizePlainExplanation(response.getExplanationVi()));
+            }
+            return response;
         } catch (Exception e) {
             log.error("Failed to parse AI explanation response: {}", e.getMessage());
-            return AiExplanationResponse.builder()
-                    .explanation(rawResponse)
-                    .explanationVi("Lỗi xử lý JSON từ AI: " + e.getMessage())
-                    .build();
+            // Safe fallback attempt
+            String cleaned = cleanJson(rawResponse);
+            try {
+                // Secondary fallback if BeanOutputConverter fails but JSON is mostly okay
+                return new ObjectMapper().readValue(cleaned, AiExplanationResponse.class);
+            } catch (Exception ex) {
+                return AiExplanationResponse.builder()
+                        .explanation(rawResponse)
+                        .explanationVi("Lỗi xử lý kết quả từ AI: " + e.getMessage())
+                        .build();
+            }
         }
     }
 
