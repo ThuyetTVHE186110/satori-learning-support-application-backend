@@ -1,5 +1,5 @@
 -- ==========================================================================
--- Migration 15: Add Vietnamese description columns to conversation tables
+-- Migration 19: Add Vietnamese description columns to conversation tables
 -- - speaking.conversation_themes    → description_vi
 -- - speaking.conversation_topics    → description_vi
 -- ==========================================================================

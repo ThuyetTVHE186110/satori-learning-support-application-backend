@@ -58,10 +58,25 @@ public class VocabularyExtractionAgent {
             The source text may NOT contain Vietnamese or English meanings.
             This is especially common with PowerPoint slides that only list Japanese words.
 
-            • If a meaning IS present in the source text → extract it exactly.
-              Set "meaningSource": "SOURCE".
+            • INLINE MEANING PATTERN (most important rule):
+              Vietnamese-edition textbooks often attach the meaning directly after the
+              Japanese word inside full-width parentheses （）:
+                行きます（đi）        食べます（ăn）        先生（giáo viên）
+              When you see this pattern:
+                - japaneseText = the Japanese part ONLY → "行きます"  (NO brackets, NO meaning)
+                - meaningVi    = the content inside （）   → "đi"
+                - meaningSource = "SOURCE_INLINE"
+              NEVER include the （…） portion in japaneseText. Ever.
 
-            • If a meaning is NOT present →  infer the most accurate meaning using:
+            • EXCEPTION — furigana (kana-only content inside （）):
+              If the content inside （） is hiragana or katakana only, it is a furigana
+              reading, NOT a meaning.  Extract it as the "reading" field instead.
+                先生（せんせい）  → japaneseText="先生", reading="せんせい"  (NOT a meaning)
+
+            • If a meaning IS present in the source text in a separate column or line
+              → extract it exactly. Set "meaningSource": "SOURCE".
+
+            • If a meaning is NOT present → infer the most accurate meaning using:
                 1. The lesson topic / slide title (provided in the prompt).
                 2. The JLPT level context.
                 3. Your knowledge of standard Japanese vocabulary.
@@ -77,6 +92,19 @@ public class VocabularyExtractionAgent {
             • Include example sentences where possible; derive from the slide if present,
               otherwise construct a natural example appropriate for the JLPT level.
             • Respond ONLY with valid JSON — no markdown, no explanations.
+
+            ═══ COUNTRY-LANGUAGE TABLE PATTERN ═══
+            Minna no Nihongo has a 4-column country/language reference table:
+              Col 0: country name (国名)  | Col 1: nationality (〜人) | Col 2: empty | Col 3: language (〜語)
+              アメリカ ( Mý )             |                           |              | 英語 ( tiêng Anh )
+              かんこく                    | かんこくじん               |              | かんこく ご
+
+            CRITICAL RULES for this pattern:
+            • Col 0 (country) and Col 3 (language) are SEPARATE vocabulary items — extract BOTH.
+            • NEVER use the language name (Col 3) as the meaning/definition of the country (Col 0).
+            • If Col 1 (nationality) is non-empty, extract it as a THIRD vocabulary item.
+            • Each item gets its own entry in the "vocabulary" array.
+            • The half-width parentheses pattern word ( meaning ) is the inline Vietnamese meaning.
             """;
 
     // ── Extraction prompt ────────────────────────────────────────────────────

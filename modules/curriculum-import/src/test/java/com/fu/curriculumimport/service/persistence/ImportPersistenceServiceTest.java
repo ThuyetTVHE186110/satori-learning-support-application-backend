@@ -52,7 +52,7 @@ import static org.mockito.BDDMockito.*;
  *   - CourseId set but course not found -> lessons skipped (same as no course)
  *   - Empty results list -> nothing saved, all counts = 0
  *   - No lessons in result -> lesson not created, vocab/grammar counts still updated
- *   - Lesson created via itemHelper.saveLesson
+ *   - Lesson created via itemHelper.findOrCreateLesson (deduplicates by importId+title)
  *   - Lesson save fails -> skips vocab/grammar linking for that lesson
  *   - New vocab -> itemHelper.findOrCreateVocabulary called and linked
  *   - Vocab returns null -> link skipped, failedItems incremented
@@ -108,7 +108,6 @@ class ImportPersistenceServiceTest {
         return ExtractionResult.ExtractedLesson.builder()
                 .title(title)
                 .titleJapanese("タイトル")
-                .lessonType("VOCABULARY")
                 .pageStart(1)
                 .pageEnd(5)
                 .orderIndex(1)
@@ -279,7 +278,7 @@ class ImportPersistenceServiceTest {
             assertThat(entity.getLessonsCreated()).isZero();
             assertThat(entity.getVocabularyCreated()).isZero();
             assertThat(entity.getGrammarPointsCreated()).isZero();
-            then(itemHelper).should(never()).saveLesson(any());
+            then(itemHelper).should(never()).findOrCreateLesson(any(), any());
         }
 
         @Test
@@ -303,7 +302,7 @@ class ImportPersistenceServiceTest {
             service.persistExtractedContent(entity, List.of(result));
 
             // Lessons skipped (no course), but vocab/grammar persisted independently
-            then(itemHelper).should(never()).saveLesson(any());
+            then(itemHelper).should(never()).findOrCreateLesson(any(), any());
             then(itemHelper).should().findOrCreateVocabulary(any(), eq(MANAGER_ID));
             then(itemHelper).should().findOrCreateGrammarPoint(any(), eq(MANAGER_ID));
             assertThat(entity.getLessonsCreated()).isZero();
@@ -323,7 +322,7 @@ class ImportPersistenceServiceTest {
 
             service.persistExtractedContent(entity, List.of(result));
 
-            then(itemHelper).should(never()).saveLesson(any());
+            then(itemHelper).should(never()).findOrCreateLesson(any(), any());
             assertThat(entity.getLessonsCreated()).isZero();
         }
 
@@ -348,7 +347,7 @@ class ImportPersistenceServiceTest {
 
             service.persistExtractedContent(entity, List.of(result));
 
-            then(itemHelper).should(never()).saveLesson(any());
+            then(itemHelper).should(never()).findOrCreateLesson(any(), any());
             then(itemHelper).should(times(2)).findOrCreateVocabulary(any(), eq(MANAGER_ID));
             then(itemHelper).should().findOrCreateGrammarPoint(any(), eq(MANAGER_ID));
             assertThat(entity.getLessonsCreated()).isZero();
@@ -357,7 +356,7 @@ class ImportPersistenceServiceTest {
         }
 
         @Test
-        @DisplayName("Lesson created via itemHelper.saveLesson with correct fields")
+        @DisplayName("Lesson created via itemHelper.findOrCreateLesson with correct fields")
         void persistExtracted_lessonCreatedViaHelper() {
             CurriculumImport entity = makeImport(COURSE_ID);
             Course course = new Course();
@@ -366,7 +365,7 @@ class ImportPersistenceServiceTest {
 
             Lesson savedLesson = new Lesson();
             savedLesson.setId(UUID.randomUUID());
-            given(itemHelper.saveLesson(any(Lesson.class))).willReturn(savedLesson);
+            given(itemHelper.findOrCreateLesson(any(Lesson.class), any(UUID.class))).willReturn(savedLesson);
 
             ExtractionResult result = resultWith(
                     List.of(extractedLesson("Grammar Basics")),
@@ -375,7 +374,7 @@ class ImportPersistenceServiceTest {
             service.persistExtractedContent(entity, List.of(result));
 
             ArgumentCaptor<Lesson> captor = ArgumentCaptor.forClass(Lesson.class);
-            then(itemHelper).should().saveLesson(captor.capture());
+            then(itemHelper).should().findOrCreateLesson(captor.capture(), any());
             Lesson captured = captor.getValue();
 
             assertThat(captured.getCourse()).isSameAs(course);
@@ -393,8 +392,8 @@ class ImportPersistenceServiceTest {
             Course course = new Course();
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
 
-            // itemHelper.saveLesson returns null (failure)
-            given(itemHelper.saveLesson(any(Lesson.class))).willReturn(null);
+            // itemHelper.findOrCreateLesson returns null (failure)
+            given(itemHelper.findOrCreateLesson(any(Lesson.class), any(UUID.class))).willReturn(null);
 
             Vocabulary vocab = new Vocabulary(); vocab.setId(UUID.randomUUID());
             given(itemHelper.findOrCreateVocabulary(any(), eq(MANAGER_ID))).willReturn(vocab);
@@ -428,7 +427,7 @@ class ImportPersistenceServiceTest {
             UUID lessonId = UUID.randomUUID();
             Lesson savedLesson = new Lesson();
             savedLesson.setId(lessonId);
-            given(itemHelper.saveLesson(any(Lesson.class))).willReturn(savedLesson);
+            given(itemHelper.findOrCreateLesson(any(Lesson.class), any(UUID.class))).willReturn(savedLesson);
 
             Vocabulary vocab = new Vocabulary();
             vocab.setId(UUID.randomUUID());
@@ -456,7 +455,7 @@ class ImportPersistenceServiceTest {
 
             Lesson savedLesson = new Lesson();
             savedLesson.setId(UUID.randomUUID());
-            given(itemHelper.saveLesson(any(Lesson.class))).willReturn(savedLesson);
+            given(itemHelper.findOrCreateLesson(any(Lesson.class), any(UUID.class))).willReturn(savedLesson);
             given(itemHelper.findOrCreateVocabulary(any(), any())).willReturn(null);
 
             ExtractionResult result = resultWith(
@@ -479,7 +478,7 @@ class ImportPersistenceServiceTest {
             UUID lessonId = UUID.randomUUID();
             Lesson savedLesson = new Lesson();
             savedLesson.setId(lessonId);
-            given(itemHelper.saveLesson(any(Lesson.class))).willReturn(savedLesson);
+            given(itemHelper.findOrCreateLesson(any(Lesson.class), any(UUID.class))).willReturn(savedLesson);
 
             GrammarPoint grammar = new GrammarPoint();
             grammar.setId(UUID.randomUUID());
@@ -499,26 +498,26 @@ class ImportPersistenceServiceTest {
         }
 
         @Test
-        @DisplayName("Invalid lessonType -> falls back to LessonType.MIXED")
-        void persistExtracted_invalidLessonType_fallsBackToMixed() {
+        @DisplayName("Lesson entity always gets LessonType.MIXED regardless of content")
+        void persistExtracted_lessonType_alwaysMixed() {
             CurriculumImport entity = makeImport(COURSE_ID);
             Course course = new Course();
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
 
-            given(itemHelper.saveLesson(any(Lesson.class))).willAnswer(inv -> inv.getArgument(0));
+            given(itemHelper.findOrCreateLesson(any(Lesson.class), any(UUID.class)))
+                    .willAnswer(inv -> inv.getArgument(0));
 
-            ExtractionResult.ExtractedLesson badTypeLesson = ExtractionResult.ExtractedLesson.builder()
-                    .title("Unknown Type Lesson")
-                    .lessonType("KANJI_ONLY") // invalid enum value
+            ExtractionResult.ExtractedLesson lesson = ExtractionResult.ExtractedLesson.builder()
+                    .title("Some Lesson")
                     .pageStart(1).pageEnd(3).orderIndex(1)
                     .build();
 
-            ExtractionResult result = resultWith(List.of(badTypeLesson), List.of(), List.of());
+            ExtractionResult result = resultWith(List.of(lesson), List.of(), List.of());
 
             service.persistExtractedContent(entity, List.of(result));
 
             ArgumentCaptor<Lesson> captor = ArgumentCaptor.forClass(Lesson.class);
-            then(itemHelper).should().saveLesson(captor.capture());
+            then(itemHelper).should().findOrCreateLesson(captor.capture(), any());
             assertThat(captor.getValue().getLessonType()).isEqualTo(Lesson.LessonType.MIXED);
         }
 

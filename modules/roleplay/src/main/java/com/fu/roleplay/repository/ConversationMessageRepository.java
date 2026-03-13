@@ -1,6 +1,6 @@
 package com.fu.roleplay.repository;
 
-import com.fu.roleplay.entity.ConversationMessage;
+import com.fu.roleplay.dto.entity.ConversationMessage;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;

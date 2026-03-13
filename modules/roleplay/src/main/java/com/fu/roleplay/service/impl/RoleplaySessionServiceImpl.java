@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
+import com.fu.conversation.entity.ConversationMission;
 import com.fu.conversation.entity.ConversationTopic;
+import com.fu.conversation.repository.ConversationMissionRepository;
 import com.fu.conversation.repository.ConversationTopicRepository;
 import com.fu.course.entity.Course;
 import com.fu.pronunciation.config.JapanesePronunciationProperties;
@@ -20,7 +22,7 @@ import com.fu.roleplay.dto.request.SendMessageRequest;
 import com.fu.roleplay.dto.request.StartFreeTalkRequest;
 import com.fu.roleplay.dto.request.StartSessionRequest;
 import com.fu.roleplay.dto.response.*;
-import com.fu.roleplay.entity.*;
+import com.fu.roleplay.dto.entity.*;
 import com.fu.roleplay.mapper.RoleplayMessageMapper;
 import com.fu.roleplay.mapper.RoleplayMissionMapper;
 import com.fu.roleplay.mapper.RoleplaySessionMapper;
@@ -117,7 +119,6 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         ConversationTopic topic = topicRepository.findById(request.getTopicId())
                 .filter(t -> t.getDeletedAt() == null)
                 .filter(t -> Course.ContentStatus.PUBLISHED.equals(t.getStatus()))
-                .filter(t -> Boolean.TRUE.equals(t.getIsRoleplay()))
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "ConversationTopic", "id", request.getTopicId().toString()));
 
@@ -646,7 +647,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                         .sessionId(sessionId)
                         .role(ConversationMessage.MessageRole.ASSISTANT)
                         .messageType(type)
-                        .content(japanese.isEmpty() ? aiResponseJson : japanese)
+                        .content(japanese.isEmpty() ? translation : japanese)
                         .japaneseContent(japanese)
                         .translation(translation)
                         .romaji(romaji)

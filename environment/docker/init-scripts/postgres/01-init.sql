@@ -574,7 +574,7 @@ CREATE TABLE speaking.conversation_topics (
     difficulty_score INT DEFAULT 1,
 
     -- For roleplay
-    is_roleplay BOOLEAN DEFAULT FALSE,
+    is_roleplay BOOLEAN DEFAULT TRUE,
     roleplay_context JSONB,
 
     thumbnail_url TEXT,
@@ -1612,7 +1612,7 @@ INSERT INTO gamification.badges (name, name_japanese, description, badge_type, r
 
 -- Default conversation topics
 INSERT INTO speaking.conversation_topics (title, title_japanese, description, scenario, category, jlpt_level, difficulty_score, is_roleplay, vocabulary_hints, grammar_points, useful_expressions, order_index, status) VALUES
-('Self Introduction', '自己紹介', 'Practice introducing yourself in Japanese', 'You are meeting someone new at a language exchange event.', 'daily_life', 'N5', 1, false,
+('Self Introduction', '自己紹介', 'Practice introducing yourself in Japanese', 'You are meeting someone new at a language exchange event.', 'daily_life', 'N5', 1, true,
     '[{"word": "名前", "reading": "なまえ", "meaning": "name"}, {"word": "出身", "reading": "しゅっしん", "meaning": "hometown"}]'::JSONB,
     '["～です", "～と申します"]'::JSONB,
     '["はじめまして", "よろしくお願いします", "～から来ました"]'::JSONB, 1, 'PUBLISHED'),
@@ -1632,7 +1632,7 @@ INSERT INTO speaking.conversation_topics (title, title_japanese, description, sc
     '["～はどこですか", "～まで行きたいです"]'::JSONB,
     '["すみません、道を教えてください", "右に曲がってください", "左に曲がってください"]'::JSONB, 4, 'PUBLISHED'),
 
-('Making Plans', '予定を立てる', 'Make plans with a friend', 'You are inviting a friend to go somewhere together.', 'daily_life', 'N4', 3, false,
+('Making Plans', '予定を立てる', 'Make plans with a friend', 'You are inviting a friend to go somewhere together.', 'daily_life', 'N4', 3, true,
     '[{"word": "予定", "reading": "よてい", "meaning": "plan"}, {"word": "都合", "reading": "つごう", "meaning": "convenience"}]'::JSONB,
     '["～ませんか", "～ましょう"]'::JSONB,
     '["今週末、暇ですか", "一緒に行きましょう", "何時に会いましょうか"]'::JSONB, 5, 'PUBLISHED'),

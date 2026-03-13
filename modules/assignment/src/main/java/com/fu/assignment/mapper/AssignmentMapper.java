@@ -67,7 +67,7 @@ public abstract class AssignmentMapper {
     @Mapping(target = "correctAnswers", expression = "java(toJsonNode(question.getCorrectAnswers()))")
     public abstract QuizQuestionResponse toResponse(QuizQuestion question);
 
-    @Mapping(target = "options", expression = "java(toLearnerOptions(question.getOptions()))")
+    @Mapping(target = "options", expression = "java(toJsonNode(question.getOptions()))")
     public abstract LearnerQuizQuestionResponse toLearnerQuestionResponse(QuizQuestion question);
 
     @Mapping(target = "assignmentQuestionId", ignore = true)
@@ -82,7 +82,7 @@ public abstract class AssignmentMapper {
     @Mapping(target = "orderIndex", ignore = true)
     @Mapping(target = "points", ignore = true)
     @Mapping(source = "id", target = "questionId")
-    @Mapping(target = "options", expression = "java(toLearnerOptions(question.getOptions()))")
+    @Mapping(target = "options", expression = "java(toJsonNode(question.getOptions()))")
     public abstract LearnerQuizQuestionResponse toLearnerAssignmentQuestionResponse(QuizQuestion question);
 
     // ── AssignmentSubmission ──────────────────────────────────────────────────

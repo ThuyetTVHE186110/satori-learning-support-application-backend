@@ -11,9 +11,12 @@ import org.apache.pdfbox.rendering.PDFRenderer;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -62,53 +65,69 @@ public class ScannedPdfIngestionService {
             log.info("Rendering {} pages at {} DPI…", totalPages, ocrProps.getRenderDpi());
 
             PDFRenderer renderer = new PDFRenderer(document);
-            List<String> pageTexts = new ArrayList<>();
+            // Pre-sized array so batch results can be stored at the correct page index.
+            String[] pageTextArray = new String[totalPages];
+            Arrays.fill(pageTextArray, "");
             StringBuilder fullText = new StringBuilder();
             int totalLinesOcrd = 0;
             // 0-based page index → structured table rows from OCR (may be empty for most pages)
             Map<Integer, List<String>> pageTableRows = new HashMap<>();
 
             int renderFailures = 0;
+            int batchSize = ocrProps.getGoogleVisionBatchSize();
+
+            // Accumulate JPEG-encoded pages for the current batch.
+            // Pages are encoded to JPEG immediately after rendering so the large
+            // raw BufferedImage can be flushed before the next render, keeping
+            // heap usage to O(batchSize × JPEG_size) ≈ O(batchSize × 300 KB).
+            List<byte[]> batchJpeg   = new ArrayList<>(batchSize);
+            List<Integer> batchPages = new ArrayList<>(batchSize); // 0-based page indices
 
             for (int i = 0; i < totalPages; i++) {
                 BufferedImage pageImage = null;
                 try {
                     pageImage = renderer.renderImageWithDPI(
                             i, ocrProps.getRenderDpi(), ImageType.RGB);
-
-                    OcrTextResult ocr = ocrClient.extractText(pageImage);
-
-                    if (!ocr.hasText()) {
-                        log.warn("Page {} OCR produced no text (conf={})", i + 1, ocr.confidence());
-                        pageTexts.add("");
-                    } else {
-                        if (ocr.confidence() < ocrProps.getMinConfidence()) {
-                            log.warn("Page {} low OCR confidence: {}", i + 1, ocr.confidence());
-                        }
-                        // Normalize furigana brackets, then strip OCR noise (watermarks,
-                        // page numbers, separator lines) before chunking.
-                        String normalizedText = FuriganaNormalizer.normalize(ocr.text());
-                        String cleanedText    = OcrTextPreprocessor.cleanOcrPage(normalizedText);
-                        pageTexts.add(cleanedText);
-                        fullText.append(cleanedText).append("\n\n");
-                        totalLinesOcrd += cleanedText.split("\n").length;
-                        // Store structured table rows per page for later propagation
-                        if (ocr.hasTableData()) {
-                            pageTableRows.put(i, ocr.structuredTableRows());
-                        }
-                    }
+                    // Encode to JPEG right away so we can flush the raw image.
+                    batchJpeg.add(encodeToJpeg(pageImage));
+                    batchPages.add(i);
                 } catch (Exception e) {
-                    log.warn("Page {} render/OCR failed ({}), skipping", i + 1, e.getMessage());
-                    pageTexts.add("");
+                    log.warn("Page {} render/encode failed ({}), skipping", i + 1, e.getMessage());
                     renderFailures++;
                 } finally {
-                    // Explicitly release native image resources before next iteration.
-                    // A4 @ 200 DPI ≈ 11 MB per BufferedImage — must free to prevent heap buildup.
-                    if (pageImage != null) {
-                        pageImage.flush();
+                    // A4 @ 300 DPI ≈ 25 MB per BufferedImage — flush immediately after JPEG encode.
+                    if (pageImage != null) pageImage.flush();
+                }
+
+                boolean lastPage = (i == totalPages - 1);
+                if (batchJpeg.size() == batchSize || (lastPage && !batchJpeg.isEmpty())) {
+                    List<OcrTextResult> ocrResults = ocrClient.extractTextBatch(batchJpeg);
+                    for (int j = 0; j < ocrResults.size(); j++) {
+                        int pageIdx = batchPages.get(j);
+                        OcrTextResult ocr = ocrResults.get(j);
+                        if (!ocr.hasText()) {
+                            log.warn("Page {} OCR produced no text (conf={})", pageIdx + 1, ocr.confidence());
+                        } else {
+                            if (ocr.confidence() < ocrProps.getMinConfidence()) {
+                                log.warn("Page {} low OCR confidence: {}", pageIdx + 1, ocr.confidence());
+                            }
+                            String normalizedText = FuriganaNormalizer.normalize(ocr.text());
+                            String cleanedText    = OcrTextPreprocessor.cleanOcrPage(normalizedText);
+                            pageTextArray[pageIdx] = cleanedText;
+                            fullText.append(cleanedText).append("\n\n");
+                            totalLinesOcrd += cleanedText.split("\n").length;
+                            if (ocr.hasTableData()) {
+                                pageTableRows.put(pageIdx, ocr.structuredTableRows());
+                            }
+                        }
                     }
+                    batchJpeg.clear();
+                    batchPages.clear();
+                    log.debug("Batch OCR done: pages up to {} of {}", i + 1, totalPages);
                 }
             }
+
+            List<String> pageTexts = Arrays.asList(pageTextArray);
 
             if (renderFailures > 0) {
                 log.warn("{} of {} pages failed to render (missing image codecs?)",
@@ -257,6 +276,12 @@ public class ScannedPdfIngestionService {
                     chunkPageStart, pageTexts.size()));
         }
         return chunks;
+    }
+
+    private byte[] encodeToJpeg(BufferedImage image) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ImageIO.write(image, "jpg", baos);
+        return baos.toByteArray();
     }
 
     private DocumentChunk buildChunk(int index, String content, int pageStart, int pageEnd) {

@@ -97,16 +97,9 @@ public class AssignmentServiceImpl implements AssignmentService {
         if (assignmentId == null) {
             // -- CREATE NEW ASSIGNMENT --
             if (classId != null) {
-                classRepository.findByIdAndNotDeleted(classId)
-                        .orElseThrow(() -> new BusinessException("CLASS_NOT_FOUND", "Class not found."));
+                classRepository.findByIdAndNotDeleted(classId).orElseThrow(() -> new BusinessException("CLASS_NOT_FOUND", "Class not found."));
             }
-            assignment = Assignment.builder()
-                    .assignmentType(AssignmentType.QUIZ)
-                    .classId(classId)
-                    .createdBy(teacherId)
-                    .createdAt(LocalDateTime.now())
-                    .hasSubmissions(false)
-                    .build();
+            assignment = Assignment.builder().assignmentType(AssignmentType.QUIZ).classId(classId).createdBy(teacherId).createdAt(LocalDateTime.now()).hasSubmissions(false).build();
         } else {
             // -- UPDATE EXISTING ASSIGNMENT --
             assignment = findAssignmentOrThrow(assignmentId);
@@ -120,13 +113,10 @@ public class AssignmentServiceImpl implements AssignmentService {
         }
 
         // Handle audio upload — blocked when submissions exist
-        boolean isAudioChanged = (audioFile != null && !audioFile.isEmpty())
-                || (request.getAudioUrl() != null && !request.getAudioUrl().equals(assignment.getAudioUrl()));
+        boolean isAudioChanged = (audioFile != null && !audioFile.isEmpty()) || (request.getAudioUrl() != null && !request.getAudioUrl().equals(assignment.getAudioUrl()));
         if (isAudioChanged && hasSubmissions) {
             log.warn("Assignment {} update blocked: Audio content changed but assignment has submissions.", assignmentId);
-            throw new BusinessException("HAS_SUBMISSIONS",
-                    "Bài tập đã có học viên nộp bài. Không thể cập nhật nội dung bài tập đã giao." +
-                            "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
+            throw new BusinessException("HAS_SUBMISSIONS", "Bài tập đã có học viên nộp bài. Không thể cập nhật nội dung bài tập đã giao." + "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
         }
         if (!hasSubmissions) {
             if (audioFile != null && !audioFile.isEmpty()) {
@@ -147,11 +137,12 @@ public class AssignmentServiceImpl implements AssignmentService {
         // Apply common metadata — includes all hasSubmissions validation rules
         applyCommonMetadata(assignment, request, hasSubmissions, teacherId);
         // Status — validate transition before applying
-        if (request.getStatus() != null) {
-            validateStatusTransition(assignment, request.getStatus(),
-                    request.getQuestions() != null ? request.getQuestions().size() : assignment.getQuestionCount());
+        if (request.getStatus() != null && !isNewAssignment) {
+            validateStatusTransition(assignment, request.getStatus(), request.getQuestions() != null ? request.getQuestions().size() : assignment.getQuestionCount());
             assignment.setStatus(request.getStatus());
-        } else if (isNewAssignment) {
+        } else if (isNewAssignment && request.getStatus() != null) {
+            assignment.setStatus(request.getStatus());
+        } else {
             assignment.setStatus(AssignmentStatus.DRAFT);
         }
 
@@ -169,9 +160,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         // If submissions exist, throw ONLY if questions ACTUALLY changed
         if (hasSubmissions && hasQuizQuestionsChanged(request.getQuestions(), assignmentId)) {
             log.warn("Assignment {} update blocked: Quiz questions changed but assignment has submissions.", assignmentId);
-            throw new BusinessException("HAS_SUBMISSIONS",
-                    "Bài tập đã có học viên nộp bài. Không thể cập nhật nội dung đề bài (câu hỏi). " +
-                            "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
+            throw new BusinessException("HAS_SUBMISSIONS", "Bài tập đã có học viên nộp bài. Không thể cập nhật nội dung đề bài (câu hỏi). " + "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
         }
 
         // Save assignment
@@ -180,28 +169,20 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         // If new assignment, bind it to the class target
         if (isNewAssignment && classId != null) {
-            AssignmentTarget target = AssignmentTarget.builder()
-                    .assignmentId(finalAssignmentId)
-                    .classId(classId)
-                    .assignedBy(teacherId)
-                    .assignedAt(LocalDateTime.now())
-                    .build();
+            AssignmentTarget target = AssignmentTarget.builder().assignmentId(finalAssignmentId).classId(classId).assignedBy(teacherId).assignedAt(LocalDateTime.now()).build();
             targetRepository.save(target);
         }
 
         // -- SYNC QUESTIONS (only when no submissions) --
         if (!hasSubmissions) {
-            List<AssignmentQuestion> existingLinks = assignmentQuestionRepository
-                    .findByAssignmentIdOrderByOrderIndex(finalAssignmentId);
+            List<AssignmentQuestion> existingLinks = assignmentQuestionRepository.findByAssignmentIdOrderByOrderIndex(finalAssignmentId);
             List<UUID> incomingQuestionIds = new ArrayList<>();
 
             if (request.getQuestions() != null) {
                 for (int i = 0; i < request.getQuestions().size(); i++) {
                     QuizQuestionDraftDto qDto = request.getQuestions().get(i);
 
-                    QuizQuestion q = (qDto.getId() != null)
-                            ? questionRepository.findById(qDto.getId()).orElse(new QuizQuestion())
-                            : new QuizQuestion();
+                    QuizQuestion q = (qDto.getId() != null) ? questionRepository.findById(qDto.getId()).orElse(new QuizQuestion()) : new QuizQuestion();
 
                     q.setQuestionText(MarkdownUtils.sanitizeAndValidate(qDto.getQuestionText()));
                     q.setQuestionJapanese(MarkdownUtils.sanitizeAndValidate(qDto.getQuestionJapanese()));
@@ -225,12 +206,7 @@ public class AssignmentServiceImpl implements AssignmentService {
                     QuizQuestion savedQ = questionRepository.save(q);
                     incomingQuestionIds.add(savedQ.getId());
 
-                    AssignmentQuestion link = assignmentQuestionRepository
-                            .findByAssignmentIdAndQuestionId(finalAssignmentId, savedQ.getId())
-                            .orElse(AssignmentQuestion.builder()
-                                    .assignmentId(finalAssignmentId)
-                                    .questionId(savedQ.getId())
-                                    .build());
+                    AssignmentQuestion link = assignmentQuestionRepository.findByAssignmentIdAndQuestionId(finalAssignmentId, savedQ.getId()).orElse(AssignmentQuestion.builder().assignmentId(finalAssignmentId).questionId(savedQ.getId()).build());
 
                     link.setOrderIndex(qDto.getOrderIndex() != null ? qDto.getOrderIndex() : i);
                     link.setPoints(qDto.getPoints() != null ? qDto.getPoints() : 10);
@@ -252,8 +228,7 @@ public class AssignmentServiceImpl implements AssignmentService {
 
     @Override
     @Transactional
-    public AssignmentResponse saveFullWriting(UUID assignmentId, UUID classId, SaveFullWritingRequest request,
-                                              AssignmentType assignmentType, UUID teacherId) {
+    public AssignmentResponse saveFullWriting(UUID assignmentId, UUID classId, SaveFullWritingRequest request, AssignmentType assignmentType, UUID teacherId) {
         if (assignmentType == AssignmentType.QUIZ) {
             throw new BusinessException("INVALID_TYPE", "Use saveFullQuiz for QUIZ assignments.");
         }
@@ -265,25 +240,16 @@ public class AssignmentServiceImpl implements AssignmentService {
         if (assignmentId == null) {
             // -- CREATE NEW --
             if (classId != null) {
-                classRepository.findByIdAndNotDeleted(classId)
-                        .orElseThrow(() -> new BusinessException("CLASS_NOT_FOUND", "Class not found."));
+                classRepository.findByIdAndNotDeleted(classId).orElseThrow(() -> new BusinessException("CLASS_NOT_FOUND", "Class not found."));
             }
 
             if (assignmentType == AssignmentType.TRANSLATION) {
-                if (request.getTranslationDirection() != null
-                        && !request.getTranslationDirection().equals("JA_TO_VI")
-                        && !request.getTranslationDirection().equals("VI_TO_JA")) {
+                if (request.getTranslationDirection() != null && !request.getTranslationDirection().equals("JA_TO_VI") && !request.getTranslationDirection().equals("VI_TO_JA")) {
                     throw new BusinessException("INVALID_DIRECTION", "Translation direction must be JA_TO_VI or VI_TO_JA.");
                 }
             }
 
-            assignment = Assignment.builder()
-                    .assignmentType(assignmentType)
-                    .classId(classId)
-                    .createdBy(teacherId)
-                    .createdAt(LocalDateTime.now())
-                    .hasSubmissions(false)
-                    .build();
+            assignment = Assignment.builder().assignmentType(assignmentType).classId(classId).createdBy(teacherId).createdAt(LocalDateTime.now()).hasSubmissions(false).build();
         } else {
             // -- UPDATE EXISTING --
             assignment = findAssignmentOrThrow(assignmentId);
@@ -298,19 +264,19 @@ public class AssignmentServiceImpl implements AssignmentService {
             // If there are submissions AND writing content ACTUALLY changed → reject
             if (hasSubmissions && hasWritingContentChanged(request, assignment)) {
                 log.warn("Assignment {} update blocked: Writing content changed but assignment has submissions.", assignmentId);
-                throw new BusinessException("HAS_SUBMISSIONS",
-                        "Bài tập đã có học viên nộp bài. Không thể sửa nội dung đề bài. " +
-                                "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
+                throw new BusinessException("HAS_SUBMISSIONS", "Bài tập đã có học viên nộp bài. Không thể sửa nội dung đề bài. " + "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
             }
         }
 
         // Apply common metadata — includes all hasSubmissions validation rules
         applyCommonMetadata(assignment, request, hasSubmissions, teacherId);
         // Validate status transition for writing assignments
-        if (request.getStatus() != null) {
+        if (request.getStatus() != null && !isNewAssignment) {
             validateStatusTransition(assignment, request.getStatus(), null);
             assignment.setStatus(request.getStatus());
-        } else if (isNewAssignment) {
+        } else if (isNewAssignment && request.getStatus() != null) {
+            assignment.setStatus(request.getStatus());
+        } else {
             assignment.setStatus(AssignmentStatus.DRAFT);
         }
 
@@ -325,20 +291,13 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         // If new assignment, bind it to the class target
         if (isNewAssignment && classId != null) {
-            AssignmentTarget target = AssignmentTarget.builder()
-                    .assignmentId(savedId)
-                    .classId(classId)
-                    .build();
+            AssignmentTarget target = AssignmentTarget.builder().assignmentId(savedId).classId(classId).build();
             targetRepository.save(target);
         }
 
         // Save or update writing content — only when no submissions
         if (!hasSubmissions) {
-            WritingAssignment content = writingAssignmentRepository.findByAssignmentId(savedId)
-                    .orElse(WritingAssignment.builder()
-                            .assignmentId(savedId)
-                            .createdAt(LocalDateTime.now())
-                            .build());
+            WritingAssignment content = writingAssignmentRepository.findByAssignmentId(savedId).orElse(WritingAssignment.builder().assignmentId(savedId).createdAt(LocalDateTime.now()).build());
 
             content.setPrompt(request.getPrompt());
             content.setPromptJapanese(request.getPromptJapanese());
@@ -352,8 +311,7 @@ public class AssignmentServiceImpl implements AssignmentService {
             writingAssignmentRepository.save(content);
         }
 
-        log.info("UPSERT Full Writing ({}) completed for Assignment {} by Teacher {}",
-                assignmentType, savedId, teacherId);
+        log.info("UPSERT Full Writing ({}) completed for Assignment {} by Teacher {}", assignmentType, savedId, teacherId);
         return enrichAssignmentResponse(savedAssignment, teacherId);
     }
 
@@ -363,8 +321,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         validateDueDate(request.getDueDate());
 
         if (classId != null) {
-            classRepository.findByIdAndNotDeleted(classId)
-                    .orElseThrow(() -> new BusinessException("CLASS_NOT_FOUND", "Class not found."));
+            classRepository.findByIdAndNotDeleted(classId).orElseThrow(() -> new BusinessException("CLASS_NOT_FOUND", "Class not found."));
         }
 
         Assignment assignment = mapper.toEntity(request);
@@ -399,14 +356,12 @@ public class AssignmentServiceImpl implements AssignmentService {
 
     @Override
     public Page<AssignmentSummaryResponse> getAssignmentsByClass(UUID classId, Pageable pageable) {
-        return assignmentRepository.findByClassId(classId, pageable)
-                .map(a -> buildSummaryResponse(a));
+        return assignmentRepository.findByClassId(classId, pageable).map(a -> buildSummaryResponse(a));
     }
 
     @Override
     public Page<AssignmentSummaryResponse> getMyAssignments(UUID teacherId, Pageable pageable) {
-        return assignmentRepository.findByCreatedByAndNotDeleted(teacherId, pageable)
-                .map(a -> buildSummaryResponse(a));
+        return assignmentRepository.findByCreatedByAndNotDeleted(teacherId, pageable).map(a -> buildSummaryResponse(a));
     }
 
 
@@ -423,36 +378,10 @@ public class AssignmentServiceImpl implements AssignmentService {
         verifyTeacherOwnership(source, teacherId);
 
         // 2. Verify target class exists
-        classRepository.findByIdAndNotDeleted(request.getTargetClassId())
-                .orElseThrow(() -> new BusinessException("CLASS_NOT_FOUND", "Target class not found."));
+        classRepository.findByIdAndNotDeleted(request.getTargetClassId()).orElseThrow(() -> new BusinessException("CLASS_NOT_FOUND", "Target class not found."));
 
         // 3. Build cloned assignment (new entity, DRAFT, no submissions)
-        Assignment cloned = Assignment.builder()
-                .title(request.getNewTitle() != null ? request.getNewTitle() : source.getTitle())
-                .description(source.getDescription())
-                .instructions(source.getInstructions())
-                .assignmentType(source.getAssignmentType())
-                .classId(request.getTargetClassId())
-                .dueDate(request.getNewDueDate())
-                .startDate(null)
-                .timeLimitMinutes(source.getTimeLimitMinutes())
-                .lateSubmissionAllowed(source.getLateSubmissionAllowed())
-                .lateSubmissionPenaltyPercent(source.getLateSubmissionPenaltyPercent())
-                .maxScore(source.getMaxScore())
-                .passingScore(source.getPassingScore())
-                .shuffleQuestions(source.getShuffleQuestions())
-                .shuffleOptions(source.getShuffleOptions())
-                .showCorrectAnswers(source.getShowCorrectAnswers())
-                .allowRetry(source.getAllowRetry())
-                .maxRetries(source.getMaxRetries())
-                .lessonId(source.getLessonId())
-                .questionCount(source.getQuestionCount())
-                .status(AssignmentStatus.DRAFT)
-                .hasSubmissions(false)
-                .createdBy(teacherId)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .build();
+        Assignment cloned = Assignment.builder().title(request.getNewTitle() != null ? request.getNewTitle() : source.getTitle()).description(source.getDescription()).instructions(source.getInstructions()).assignmentType(source.getAssignmentType()).classId(request.getTargetClassId()).dueDate(request.getNewDueDate()).startDate(null).timeLimitMinutes(source.getTimeLimitMinutes()).lateSubmissionAllowed(source.getLateSubmissionAllowed()).lateSubmissionPenaltyPercent(source.getLateSubmissionPenaltyPercent()).maxScore(source.getMaxScore()).passingScore(source.getPassingScore()).shuffleQuestions(source.getShuffleQuestions()).shuffleOptions(source.getShuffleOptions()).showCorrectAnswers(source.getShowCorrectAnswers()).allowRetry(source.getAllowRetry()).maxRetries(source.getMaxRetries()).lessonId(source.getLessonId()).questionCount(source.getQuestionCount()).status(AssignmentStatus.DRAFT).hasSubmissions(false).createdBy(teacherId).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
 
         Assignment savedClone = assignmentRepository.save(cloned);
         UUID clonedId = savedClone.getId();
@@ -464,8 +393,7 @@ public class AssignmentServiceImpl implements AssignmentService {
             cloneWritingContent(sourceAssignmentId, clonedId);
         }
 
-        log.info("Assignment {} cloned to class {} as new assignment {} by teacher {}",
-                sourceAssignmentId, request.getTargetClassId(), clonedId, teacherId);
+        log.info("Assignment {} cloned to class {} as new assignment {} by teacher {}", sourceAssignmentId, request.getTargetClassId(), clonedId, teacherId);
         return enrichAssignmentResponse(savedClone, teacherId);
     }
 
@@ -474,46 +402,19 @@ public class AssignmentServiceImpl implements AssignmentService {
      * Each question is duplicated (new UUID) so edits to the clone don't affect the original.
      */
     private void cloneQuizQuestions(UUID sourceAssignmentId, UUID clonedAssignmentId, UUID teacherId) {
-        List<AssignmentQuestion> sourceLinks = assignmentQuestionRepository
-                .findByAssignmentIdOrderByOrderIndex(sourceAssignmentId);
+        List<AssignmentQuestion> sourceLinks = assignmentQuestionRepository.findByAssignmentIdOrderByOrderIndex(sourceAssignmentId);
 
         for (AssignmentQuestion sourceLink : sourceLinks) {
             QuizQuestion original = questionRepository.findById(sourceLink.getQuestionId()).orElse(null);
             if (original == null || original.isDeleted()) continue;
 
             // Deep-copy the question
-            QuizQuestion copy = QuizQuestion.builder()
-                    .questionText(original.getQuestionText())
-                    .questionJapanese(original.getQuestionJapanese())
-                    .questionType(original.getQuestionType())
-                    .questionSubtype(original.getQuestionSubtype())
-                    .options(original.getOptions())
-                    .correctAnswer(original.getCorrectAnswer())
-                    .correctAnswers(original.getCorrectAnswers())
-                    .explanation(original.getExplanation())
-                    .explanationVi(original.getExplanationVi())
-                    .vocabularyId(original.getVocabularyId())
-                    .grammarId(original.getGrammarId())
-                    .lessonId(original.getLessonId())
-                    .aiGenerated(original.getAiGenerated())
-                    .jlptLevel(original.getJlptLevel())
-                    .difficultyScore(original.getDifficultyScore())
-                    .tags(original.getTags())
-                    .imageUrl(original.getImageUrl())
-                    .status(Course.ContentStatus.DRAFT)
-                    .createdBy(teacherId)
-                    .createdAt(LocalDateTime.now())
-                    .build();
+            QuizQuestion copy = QuizQuestion.builder().questionText(original.getQuestionText()).questionJapanese(original.getQuestionJapanese()).questionType(original.getQuestionType()).questionSubtype(original.getQuestionSubtype()).options(original.getOptions()).correctAnswer(original.getCorrectAnswer()).correctAnswers(original.getCorrectAnswers()).explanation(original.getExplanation()).explanationVi(original.getExplanationVi()).vocabularyId(original.getVocabularyId()).grammarId(original.getGrammarId()).lessonId(original.getLessonId()).aiGenerated(original.getAiGenerated()).jlptLevel(original.getJlptLevel()).difficultyScore(original.getDifficultyScore()).tags(original.getTags()).imageUrl(original.getImageUrl()).status(Course.ContentStatus.DRAFT).createdBy(teacherId).createdAt(LocalDateTime.now()).build();
 
             QuizQuestion savedCopy = questionRepository.save(copy);
 
             // Create link to cloned assignment
-            AssignmentQuestion link = AssignmentQuestion.builder()
-                    .assignmentId(clonedAssignmentId)
-                    .questionId(savedCopy.getId())
-                    .orderIndex(sourceLink.getOrderIndex())
-                    .points(sourceLink.getPoints())
-                    .build();
+            AssignmentQuestion link = AssignmentQuestion.builder().assignmentId(clonedAssignmentId).questionId(savedCopy.getId()).orderIndex(sourceLink.getOrderIndex()).points(sourceLink.getPoints()).build();
             assignmentQuestionRepository.save(link);
         }
     }
@@ -523,18 +424,7 @@ public class AssignmentServiceImpl implements AssignmentService {
      */
     private void cloneWritingContent(UUID sourceAssignmentId, UUID clonedAssignmentId) {
         writingAssignmentRepository.findByAssignmentId(sourceAssignmentId).ifPresent(source -> {
-            WritingAssignment copy = WritingAssignment.builder()
-                    .assignmentId(clonedAssignmentId)
-                    .prompt(source.getPrompt())
-                    .promptJapanese(source.getPromptJapanese())
-                    .sampleAnswer(source.getSampleAnswer())
-                    .sampleAnswerJapanese(source.getSampleAnswerJapanese())
-                    .minWords(source.getMinWords())
-                    .maxWords(source.getMaxWords())
-                    .sourceText(source.getSourceText())
-                    .translationDirection(source.getTranslationDirection())
-                    .createdAt(LocalDateTime.now())
-                    .build();
+            WritingAssignment copy = WritingAssignment.builder().assignmentId(clonedAssignmentId).prompt(source.getPrompt()).promptJapanese(source.getPromptJapanese()).sampleAnswer(source.getSampleAnswer()).sampleAnswerJapanese(source.getSampleAnswerJapanese()).minWords(source.getMinWords()).maxWords(source.getMaxWords()).sourceText(source.getSourceText()).translationDirection(source.getTranslationDirection()).createdAt(LocalDateTime.now()).build();
             writingAssignmentRepository.save(copy);
         });
     }
@@ -546,8 +436,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     @Override
     public Page<SubmissionSummaryResponse> getSubmissionsByAssignment(UUID assignmentId, Pageable pageable) {
         findAssignmentOrThrow(assignmentId);
-        return submissionRepository.findByAssignmentId(assignmentId, pageable)
-                .map(s -> enrichSummaryResponse(s));
+        return submissionRepository.findByAssignmentId(assignmentId, pageable).map(s -> enrichSummaryResponse(s));
     }
 
     @Override
@@ -589,8 +478,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     @Override
     public Page<AssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, Pageable pageable) {
         List<UUID> classIds = classMemberRepository.findActiveClassIdsByUserId(learnerId);
-        return assignmentRepository.findPublishedForLearner(learnerId, classIds, pageable)
-                .map(a -> buildSummaryResponse(a));
+        return assignmentRepository.findPublishedForLearner(learnerId, classIds, pageable).map(a -> buildSummaryResponse(a));
     }
 
     @Override
@@ -635,21 +523,8 @@ public class AssignmentServiceImpl implements AssignmentService {
         int totalQ = (int) assignmentQuestionRepository.countByAssignmentId(assignmentId);
         if (assignment.getAssignmentType() == AssignmentType.QUIZ) {
             if (totalQ == 0) totalQ = assignment.getQuestionCount() != null ? assignment.getQuestionCount() : 0;
-        } else
-            totalQ = 1;
-        AssignmentSubmission submission = AssignmentSubmission.builder()
-                .assignmentId(assignmentId)
-                .userId(learnerId)
-                .status(SubmissionStatus.IN_PROGRESS)
-                .attemptNumber((int) attemptCount + 1)
-                .startedAt(LocalDateTime.now())
-                .totalQuestions(totalQ)
-                .answers("[]")
-                .correctCount(0)
-                .timeSpentSeconds(0)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .build();
+        } else totalQ = 1;
+        AssignmentSubmission submission = AssignmentSubmission.builder().assignmentId(assignmentId).userId(learnerId).status(SubmissionStatus.IN_PROGRESS).attemptNumber((int) attemptCount + 1).startedAt(LocalDateTime.now()).totalQuestions(totalQ).answers("[]").correctCount(0).timeSpentSeconds(0).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
 
         submissionRepository.save(submission);
 
@@ -689,8 +564,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         BigDecimal finalScore = BigDecimal.ZERO;
         if (scored.totalPoints > 0) {
             double ratio = (double) scored.earnedPoints / scored.totalPoints;
-            finalScore = BigDecimal.valueOf(ratio * assignment.getMaxScore())
-                    .setScale(2, RoundingMode.HALF_UP);
+            finalScore = BigDecimal.valueOf(ratio * assignment.getMaxScore()).setScale(2, RoundingMode.HALF_UP);
         }
 
         submission.setAnswers(answersJson);
@@ -717,28 +591,20 @@ public class AssignmentServiceImpl implements AssignmentService {
     @Transactional
     public SubmissionResponse submitWriting(UUID assignmentId, SubmitWritingRequest request, MultipartFile[] images, UUID learnerId) {
         boolean hasText = request.getWrittenAnswer() != null && !request.getWrittenAnswer().isBlank();
-        boolean hasImages = images != null && images.length > 0
-                && java.util.Arrays.stream(images).anyMatch(f -> f != null && !f.isEmpty());
+        boolean hasImages = images != null && images.length > 0 && java.util.Arrays.stream(images).anyMatch(f -> f != null && !f.isEmpty());
 
         if (!hasText && !hasImages) {
-            throw new BusinessException("INVALID_INPUT",
-                    "Either written answer or at least one image must be provided.");
+            throw new BusinessException("INVALID_INPUT", "Either written answer or at least one image must be provided.");
         }
 
         if (hasImages && images.length > MAX_SUBMISSION_IMAGES) {
-            throw new BusinessException("TOO_MANY_IMAGES",
-                    "Maximum " + MAX_SUBMISSION_IMAGES + " images allowed per submission.");
+            throw new BusinessException("TOO_MANY_IMAGES", "Maximum " + MAX_SUBMISSION_IMAGES + " images allowed per submission.");
         }
 
         // Find the active IN_PROGRESS submission for this assignment+learner
-        List<AssignmentSubmission> active = submissionRepository
-                .findByAssignmentIdAndUserIdOrderByAttemptDesc(assignmentId, learnerId);
+        List<AssignmentSubmission> active = submissionRepository.findByAssignmentIdAndUserIdOrderByAttemptDesc(assignmentId, learnerId);
 
-        AssignmentSubmission submission = active.stream()
-                .filter(s -> s.getStatus() == SubmissionStatus.IN_PROGRESS)
-                .findFirst()
-                .orElseThrow(() -> new BusinessException("NO_ACTIVE_SUBMISSION",
-                        "No active submission found. Please start the assignment first."));
+        AssignmentSubmission submission = active.stream().filter(s -> s.getStatus() == SubmissionStatus.IN_PROGRESS).findFirst().orElseThrow(() -> new BusinessException("NO_ACTIVE_SUBMISSION", "No active submission found. Please start the assignment first."));
 
         if (!submission.getUserId().equals(learnerId)) {
             throw new BusinessException("ACCESS_DENIED", "Cannot submit on behalf of another learner.");
@@ -772,8 +638,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         }
 
         submissionRepository.save(submission);
-        log.info("Learner {} submitted writing for assignment {} (images: {})",
-                learnerId, assignmentId, hasImages ? images.length : 0);
+        log.info("Learner {} submitted writing for assignment {} (images: {})", learnerId, assignmentId, hasImages ? images.length : 0);
         return enrichSubmissionResponse(submission);
     }
 
@@ -796,14 +661,12 @@ public class AssignmentServiceImpl implements AssignmentService {
     // ═══════════════════════════════════════════════════════════════════════════
 
     private Assignment findAssignmentOrThrow(UUID id) {
-        return assignmentRepository.findByIdAndNotDeleted(id)
-                .orElseThrow(AssignmentNotFoundException::new);
+        return assignmentRepository.findByIdAndNotDeleted(id).orElseThrow(AssignmentNotFoundException::new);
     }
 
 
     private AssignmentSubmission findSubmissionOrThrow(UUID id) {
-        return submissionRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Submission not found."));
+        return submissionRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Submission not found."));
     }
 
     private void requireDraft(Assignment assignment) {
@@ -839,8 +702,7 @@ public class AssignmentServiceImpl implements AssignmentService {
                     log.debug("Uploaded submission image: {}", url);
                 } catch (Exception e) {
                     log.error("Failed to upload submission image: {}", image.getOriginalFilename(), e);
-                    throw new BusinessException("UPLOAD_FAILED",
-                            "Failed to upload image: " + image.getOriginalFilename());
+                    throw new BusinessException("UPLOAD_FAILED", "Failed to upload image: " + image.getOriginalFilename());
                 }
             }
         }
@@ -866,37 +728,29 @@ public class AssignmentServiceImpl implements AssignmentService {
     private AssignmentSummaryResponse buildSummaryResponse(Assignment a) {
         AssignmentSummaryResponse r = mapper.toSummaryResponse(a);
         r.setQuestionCount(assignmentQuestionRepository.countByAssignmentId(a.getId()));
-        r.setSubmissionCount(
-                submissionRepository.countByAssignmentIdAndStatus(a.getId(), SubmissionStatus.SUBMITTED.name())
-                        + submissionRepository.countByAssignmentIdAndStatus(a.getId(), SubmissionStatus.GRADED.name()));
+        r.setSubmissionCount(submissionRepository.countByAssignmentIdAndStatus(a.getId(), SubmissionStatus.SUBMITTED.name()) + submissionRepository.countByAssignmentIdAndStatus(a.getId(), SubmissionStatus.GRADED.name()));
         return r;
     }
 
     private AssignmentResponse enrichAssignmentResponse(Assignment assignment, UUID requesterId) {
         AssignmentResponse response = mapper.toResponse(assignment);
-        List<AssignmentQuestion> aqs = assignmentQuestionRepository
-                .findByAssignmentIdOrderByOrderIndex(assignment.getId());
+        List<AssignmentQuestion> aqs = assignmentQuestionRepository.findByAssignmentIdOrderByOrderIndex(assignment.getId());
         response.setActualQuestionCount((long) aqs.size());
 
-        List<AssignmentQuestionResponse> qList = aqs.stream().map(aq ->
-                questionRepository.findById(aq.getQuestionId()).map(q -> {
-                    AssignmentQuestionResponse qr = mapper.toAssignmentQuestionResponse(q);
-                    qr.setAssignmentQuestionId(aq.getId());
-                    qr.setOrderIndex(aq.getOrderIndex());
-                    qr.setPoints(aq.getPoints());
-                    return qr;
-                }).orElse(new AssignmentQuestionResponse())
-        ).toList();
+        List<AssignmentQuestionResponse> qList = aqs.stream().map(aq -> questionRepository.findById(aq.getQuestionId()).map(q -> {
+            AssignmentQuestionResponse qr = mapper.toAssignmentQuestionResponse(q);
+            qr.setAssignmentQuestionId(aq.getId());
+            qr.setOrderIndex(aq.getOrderIndex());
+            qr.setPoints(aq.getPoints());
+            return qr;
+        }).orElse(new AssignmentQuestionResponse())).toList();
         response.setQuestions(qList);
 
-        response.setSubmissionCount(
-                submissionRepository.countByAssignmentIdAndStatus(assignment.getId(), SubmissionStatus.SUBMITTED.name())
-                        + submissionRepository.countByAssignmentIdAndStatus(assignment.getId(), SubmissionStatus.GRADED.name()));
+        response.setSubmissionCount(submissionRepository.countByAssignmentIdAndStatus(assignment.getId(), SubmissionStatus.SUBMITTED.name()) + submissionRepository.countByAssignmentIdAndStatus(assignment.getId(), SubmissionStatus.GRADED.name()));
 
         // Enrich writing content for WRITING / TRANSLATION assignments
         if (assignment.isWritingOrTranslation()) {
-            writingAssignmentRepository.findByAssignmentId(assignment.getId())
-                    .ifPresent(wc -> response.setWritingContent(mapper.toResponse(wc)));
+            writingAssignmentRepository.findByAssignmentId(assignment.getId()).ifPresent(wc -> response.setWritingContent(mapper.toResponse(wc)));
         }
 
         return response;
@@ -905,29 +759,23 @@ public class AssignmentServiceImpl implements AssignmentService {
     private LearnerAssignmentResponse enrichLearnerAssignmentResponse(Assignment assignment, UUID learnerId) {
         LearnerAssignmentResponse response = mapper.toLearnerResponse(assignment);
 
-        List<AssignmentQuestion> aqs = assignmentQuestionRepository
-                .findByAssignmentIdOrderByOrderIndex(assignment.getId());
+        List<AssignmentQuestion> aqs = assignmentQuestionRepository.findByAssignmentIdOrderByOrderIndex(assignment.getId());
         response.setActualQuestionCount((long) aqs.size());
 
-        List<LearnerQuizQuestionResponse> qList = aqs.stream().map(aq ->
-                questionRepository.findById(aq.getQuestionId()).map(q -> {
-                    LearnerQuizQuestionResponse qr = mapper.toLearnerAssignmentQuestionResponse(q);
-                    qr.setAssignmentQuestionId(aq.getId());
-                    qr.setOrderIndex(aq.getOrderIndex());
-                    qr.setPoints(aq.getPoints());
-                    return qr;
-                }).orElse(new LearnerQuizQuestionResponse())
-        ).toList();
+        List<LearnerQuizQuestionResponse> qList = aqs.stream().map(aq -> questionRepository.findById(aq.getQuestionId()).map(q -> {
+            LearnerQuizQuestionResponse qr = mapper.toLearnerAssignmentQuestionResponse(q);
+            qr.setAssignmentQuestionId(aq.getId());
+            qr.setOrderIndex(aq.getOrderIndex());
+            qr.setPoints(aq.getPoints());
+            return qr;
+        }).orElse(new LearnerQuizQuestionResponse())).toList();
         response.setQuestions(qList);
 
-        response.setSubmissionCount(
-                submissionRepository.countByAssignmentIdAndStatus(assignment.getId(), SubmissionStatus.SUBMITTED.name())
-                        + submissionRepository.countByAssignmentIdAndStatus(assignment.getId(), SubmissionStatus.GRADED.name()));
+        response.setSubmissionCount(submissionRepository.countByAssignmentIdAndStatus(assignment.getId(), SubmissionStatus.SUBMITTED.name()) + submissionRepository.countByAssignmentIdAndStatus(assignment.getId(), SubmissionStatus.GRADED.name()));
 
         // Enrichment for non-quiz
         if (assignment.isWritingOrTranslation()) {
-            writingAssignmentRepository.findByAssignmentId(assignment.getId())
-                    .ifPresent(wc -> response.setWritingContent(mapper.toResponse(wc)));
+            writingAssignmentRepository.findByAssignmentId(assignment.getId()).ifPresent(wc -> response.setWritingContent(mapper.toResponse(wc)));
         }
 
         return response;
@@ -952,13 +800,12 @@ public class AssignmentServiceImpl implements AssignmentService {
 
     private SubmissionSummaryResponse enrichSummaryResponse(AssignmentSubmission s) {
         SubmissionSummaryResponse r = mapper.toSummaryResponse(s);
-        assignmentRepository.findByIdAndNotDeleted(s.getAssignmentId())
-                .ifPresent(a -> {
-                    r.setAssignmentTitle(a.getTitle());
-                    if (s.getScore() != null) {
-                        r.setPassed(s.isPassed(a.getPassingScore()));
-                    }
-                });
+        assignmentRepository.findByIdAndNotDeleted(s.getAssignmentId()).ifPresent(a -> {
+            r.setAssignmentTitle(a.getTitle());
+            if (s.getScore() != null) {
+                r.setPassed(s.isPassed(a.getPassingScore()));
+            }
+        });
         userRepository.findById(s.getUserId()).ifPresent(u -> r.setUserFullName(u.getFullName()));
         return r;
     }
@@ -969,8 +816,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     }
 
     private AutoScoreResult autoScore(String answersJson, UUID assignmentId) {
-        List<AssignmentQuestion> aqs = assignmentQuestionRepository
-                .findByAssignmentIdOrderByOrderIndex(assignmentId);
+        List<AssignmentQuestion> aqs = assignmentQuestionRepository.findByAssignmentIdOrderByOrderIndex(assignmentId);
 
         int correct = 0, earned = 0, total = 0;
 
@@ -1013,15 +859,14 @@ public class AssignmentServiceImpl implements AssignmentService {
                     if (question.getOptions() == null) yield false;
                     JsonNode opts = objectMapper.readTree(question.getOptions());
                     for (JsonNode opt : opts) {
-                    if (opt.path("id").asText("").equalsIgnoreCase(selectedAnswer)
-                        && opt.path("isCorrect").asBoolean(false)) {
-                        yield true;
-                    }
+                        if (opt.path("id").asText("").equalsIgnoreCase(selectedAnswer) && opt.path("isCorrect").asBoolean(false)) {
+                            yield true;
+                        }
                     }
                     yield false;
                 }
-                case "fill_blank", "true_false" -> question.getCorrectAnswer() != null
-                        && question.getCorrectAnswer().trim().equalsIgnoreCase(selectedAnswer.trim());
+                case "fill_blank", "true_false" ->
+                        question.getCorrectAnswer() != null && question.getCorrectAnswer().trim().equalsIgnoreCase(selectedAnswer.trim());
                 default -> false;
             };
         } catch (Exception e) {
@@ -1039,30 +884,21 @@ public class AssignmentServiceImpl implements AssignmentService {
      * passingScore: can only be reduced (more lenient), never raised
      *
      */
-    private void applyCommonMetadata(Assignment assignment, AssignmentMetadataRequest request,
-                                     boolean hasSubmissions, UUID updatedBy) {
+    private void applyCommonMetadata(Assignment assignment, AssignmentMetadataRequest request, boolean hasSubmissions, UUID updatedBy) {
         if (hasSubmissions) {
             // dueDate: only allow extending
-            if (request.getDueDate() != null && assignment.getDueDate() != null
-                    && request.getDueDate().isBefore(assignment.getDueDate())) {
-                throw new BusinessException("INVALID_DUE_DATE",
-                        "Bài tập đã có học viên nộp bài. Chỉ được gia hạn deadline, không được rút ngắn.");
+            if (request.getDueDate() != null && assignment.getDueDate() != null && request.getDueDate().isBefore(assignment.getDueDate())) {
+                throw new BusinessException("INVALID_DUE_DATE", "Bài tập đã có học viên nộp bài. Chỉ được gia hạn deadline, không được rút ngắn.");
             }
             // maxScore: locked
-            if (request.getMaxScore() != null && assignment.getMaxScore() != null
-                    && !request.getMaxScore().equals(assignment.getMaxScore())) {
-                log.warn("Assignment {} update blocked: maxScore changed from {} to {} but assignment has submissions.",
-                        assignment.getId(), assignment.getMaxScore(), request.getMaxScore());
-                throw new BusinessException("HAS_SUBMISSIONS",
-                        "Bài tập đã có học viên nộp bài. Không thể thay đổi điểm tối đa.");
+            if (request.getMaxScore() != null && assignment.getMaxScore() != null && !request.getMaxScore().equals(assignment.getMaxScore())) {
+                log.warn("Assignment {} update blocked: maxScore changed from {} to {} but assignment has submissions.", assignment.getId(), assignment.getMaxScore(), request.getMaxScore());
+                throw new BusinessException("HAS_SUBMISSIONS", "Bài tập đã có học viên nộp bài. Không thể thay đổi điểm tối đa.");
             }
             // passingScore: only allow reducing
-            if (request.getPassingScore() != null && assignment.getPassingScore() != null
-                    && request.getPassingScore() > assignment.getPassingScore()) {
-                log.warn("Assignment {} update blocked: passingScore increased from {} to {} but assignment has submissions.",
-                        assignment.getId(), assignment.getPassingScore(), request.getPassingScore());
-                throw new BusinessException("HAS_SUBMISSIONS",
-                        "Bài tập đã có học viên nộp bài. Không thể tăng điểm đạt (Chỉ được hạ xuống).");
+            if (request.getPassingScore() != null && assignment.getPassingScore() != null && request.getPassingScore() > assignment.getPassingScore()) {
+                log.warn("Assignment {} update blocked: passingScore increased from {} to {} but assignment has submissions.", assignment.getId(), assignment.getPassingScore(), request.getPassingScore());
+                throw new BusinessException("HAS_SUBMISSIONS", "Bài tập đã có học viên nộp bài. Không thể tăng điểm đạt (Chỉ được hạ xuống).");
             }
         }
 
@@ -1070,8 +906,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         Integer effectiveMax = request.getMaxScore() != null ? request.getMaxScore() : assignment.getMaxScore();
         Integer effectivePassing = request.getPassingScore() != null ? request.getPassingScore() : assignment.getPassingScore();
         if (effectiveMax != null && effectivePassing != null && effectivePassing > effectiveMax) {
-            throw new BusinessException("INVALID_PASSING_SCORE",
-                    "Điểm đạt (" + effectivePassing + ") không được vượt quá điểm tối đa (" + effectiveMax + ").");
+            throw new BusinessException("INVALID_PASSING_SCORE", "Điểm đạt (" + effectivePassing + ") không được vượt quá điểm tối đa (" + effectiveMax + ").");
         }
 
         assignment.setTitle(request.getTitle());
@@ -1088,11 +923,10 @@ public class AssignmentServiceImpl implements AssignmentService {
 
     /**
      * Rule 1: Validates assignment status transitions.
-     * 
-     *   DRAFT → PUBLISHED: requires content (questions for quiz, prompt for writing) and dueDate set
-     *   PUBLISHED → DRAFT: blocked (cannot unpublish)
-     *   CLOSED → any: blocked (terminal state)
-     * 
+     * <p>
+     * DRAFT → PUBLISHED: requires content (questions for quiz, prompt for writing) and dueDate set
+     * PUBLISHED → DRAFT: blocked (cannot unpublish)
+     * CLOSED → any: blocked (terminal state)
      *
      * @param questionCount for QUIZ publishing validation — pass null for writing types
      */
@@ -1102,40 +936,32 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         // CLOSED is terminal — no transitions out
         if (current == AssignmentStatus.CLOSED) {
-            throw new BusinessException("INVALID_STATUS_TRANSITION",
-                    "Bài tập đã đóng (CLOSED). Không thể chuyển sang trạng thái khác.");
+            throw new BusinessException("INVALID_STATUS_TRANSITION", "Bài tập đã đóng (CLOSED). Không thể chuyển sang trạng thái khác.");
         }
 
         // PUBLISHED → DRAFT: blocked
         if (current == AssignmentStatus.PUBLISHED && newStatus == AssignmentStatus.DRAFT) {
-            throw new BusinessException("INVALID_STATUS_TRANSITION",
-                    "Không thể chuyển bài tập từ PUBLISHED về DRAFT.");
+            throw new BusinessException("INVALID_STATUS_TRANSITION", "Không thể chuyển bài tập từ PUBLISHED về DRAFT.");
         }
 
         // DRAFT → PUBLISHED: validate content and dueDate
         if (current == AssignmentStatus.DRAFT && newStatus == AssignmentStatus.PUBLISHED) {
             if (assignment.getDueDate() == null) {
-                throw new BusinessException("MISSING_DUE_DATE",
-                        "Phải đặt hạn nộp (dueDate) trước khi xuất bản bài tập.");
+                throw new BusinessException("MISSING_DUE_DATE", "Phải đặt hạn nộp (dueDate) trước khi xuất bản bài tập.");
             }
             if (assignment.getDueDate().isBefore(LocalDateTime.now())) {
-                throw new BusinessException("PAST_DUE_DATE",
-                        "Hạn nộp đã qua. Không thể xuất bản bài tập với deadline trong quá khứ.");
+                throw new BusinessException("PAST_DUE_DATE", "Hạn nộp đã qua. Không thể xuất bản bài tập với deadline trong quá khứ.");
             }
             if (assignment.isQuiz()) {
                 int count = questionCount != null ? questionCount : 0;
                 if (count == 0) {
-                    throw new BusinessException("NO_QUESTIONS",
-                            "Bài kiểm tra phải có ít nhất 1 câu hỏi trước khi xuất bản.");
+                    throw new BusinessException("NO_QUESTIONS", "Bài kiểm tra phải có ít nhất 1 câu hỏi trước khi xuất bản.");
                 }
             } else {
                 // Writing/Translation: check prompt exists
-                boolean hasContent = writingAssignmentRepository.findByAssignmentId(assignment.getId())
-                        .map(w -> w.getPrompt() != null && !w.getPrompt().isBlank())
-                        .orElse(false);
+                boolean hasContent = writingAssignmentRepository.findByAssignmentId(assignment.getId()).map(w -> w.getPrompt() != null && !w.getPrompt().isBlank()).orElse(false);
                 if (!hasContent) {
-                    throw new BusinessException("NO_WRITING_CONTENT",
-                            "Bài viết phải có đề bài (prompt) trước khi xuất bản.");
+                    throw new BusinessException("NO_WRITING_CONTENT", "Bài viết phải có đề bài (prompt) trước khi xuất bản.");
                 }
             }
         }
@@ -1146,14 +972,7 @@ public class AssignmentServiceImpl implements AssignmentService {
      * (prompt, sampleAnswer, sourceText, etc.) that would modify the assignment's core content.
      */
     private boolean hasWritingContent(SaveFullWritingRequest request) {
-        return request.getPrompt() != null
-                || request.getPromptJapanese() != null
-                || request.getSampleAnswer() != null
-                || request.getSampleAnswerJapanese() != null
-                || request.getSourceText() != null
-                || request.getMinWords() != null
-                || request.getMaxWords() != null
-                || request.getTranslationDirection() != null;
+        return request.getPrompt() != null || request.getPromptJapanese() != null || request.getSampleAnswer() != null || request.getSampleAnswerJapanese() != null || request.getSourceText() != null || request.getMinWords() != null || request.getMaxWords() != null || request.getTranslationDirection() != null;
     }
 
     /**
@@ -1165,14 +984,38 @@ public class AssignmentServiceImpl implements AssignmentService {
             return hasWritingContent(request); // If it historically didn't exist, any content means it changed
         }
 
-        if (!Objects.equals(current.getPrompt(), request.getPrompt())) { log.warn("Writing content changed: prompt. Incoming={}, Existing={}", request.getPrompt(), current.getPrompt()); return true; }
-        if (!Objects.equals(current.getPromptJapanese(), request.getPromptJapanese())) { log.warn("Writing content changed: promptJapanese. Incoming={}, Existing={}", request.getPromptJapanese(), current.getPromptJapanese()); return true; }
-        if (!Objects.equals(current.getSampleAnswer(), request.getSampleAnswer())) { log.warn("Writing content changed: sampleAnswer. Incoming={}, Existing={}", request.getSampleAnswer(), current.getSampleAnswer()); return true; }
-        if (!Objects.equals(current.getSampleAnswerJapanese(), request.getSampleAnswerJapanese())) { log.warn("Writing content changed: sampleAnswerJapanese. Incoming={}, Existing={}", request.getSampleAnswerJapanese(), current.getSampleAnswerJapanese()); return true; }
-        if (!Objects.equals(current.getSourceText(), request.getSourceText())) { log.warn("Writing content changed: sourceText. Incoming={}, Existing={}", request.getSourceText(), current.getSourceText()); return true; }
-        if (!Objects.equals(current.getMinWords(), request.getMinWords())) { log.warn("Writing content changed: minWords. Incoming={}, Existing={}", request.getMinWords(), current.getMinWords()); return true; }
-        if (!Objects.equals(current.getMaxWords(), request.getMaxWords())) { log.warn("Writing content changed: maxWords. Incoming={}, Existing={}", request.getMaxWords(), current.getMaxWords()); return true; }
-        if (!Objects.equals(current.getTranslationDirection(), request.getTranslationDirection())) { log.warn("Writing content changed: translationDirection. Incoming={}, Existing={}", request.getTranslationDirection(), current.getTranslationDirection()); return true; }
+        if (!Objects.equals(current.getPrompt(), request.getPrompt())) {
+            log.warn("Writing content changed: prompt. Incoming={}, Existing={}", request.getPrompt(), current.getPrompt());
+            return true;
+        }
+        if (!Objects.equals(current.getPromptJapanese(), request.getPromptJapanese())) {
+            log.warn("Writing content changed: promptJapanese. Incoming={}, Existing={}", request.getPromptJapanese(), current.getPromptJapanese());
+            return true;
+        }
+        if (!Objects.equals(current.getSampleAnswer(), request.getSampleAnswer())) {
+            log.warn("Writing content changed: sampleAnswer. Incoming={}, Existing={}", request.getSampleAnswer(), current.getSampleAnswer());
+            return true;
+        }
+        if (!Objects.equals(current.getSampleAnswerJapanese(), request.getSampleAnswerJapanese())) {
+            log.warn("Writing content changed: sampleAnswerJapanese. Incoming={}, Existing={}", request.getSampleAnswerJapanese(), current.getSampleAnswerJapanese());
+            return true;
+        }
+        if (!Objects.equals(current.getSourceText(), request.getSourceText())) {
+            log.warn("Writing content changed: sourceText. Incoming={}, Existing={}", request.getSourceText(), current.getSourceText());
+            return true;
+        }
+        if (!Objects.equals(current.getMinWords(), request.getMinWords())) {
+            log.warn("Writing content changed: minWords. Incoming={}, Existing={}", request.getMinWords(), current.getMinWords());
+            return true;
+        }
+        if (!Objects.equals(current.getMaxWords(), request.getMaxWords())) {
+            log.warn("Writing content changed: maxWords. Incoming={}, Existing={}", request.getMaxWords(), current.getMaxWords());
+            return true;
+        }
+        if (!Objects.equals(current.getTranslationDirection(), request.getTranslationDirection())) {
+            log.warn("Writing content changed: translationDirection. Incoming={}, Existing={}", request.getTranslationDirection(), current.getTranslationDirection());
+            return true;
+        }
         return false;
     }
 
@@ -1229,9 +1072,18 @@ public class AssignmentServiceImpl implements AssignmentService {
             String incType = incoming.getQuestionType() != null ? incoming.getQuestionType() : "multiple_choice";
             Integer incDiff = incoming.getDifficultyScore() != null ? incoming.getDifficultyScore() : 1;
 
-            if (!Objects.equals(incoming.getQuestionText(), existing.getQuestionText())) { log.warn("Quiz question {} changed: questionText. Incoming={}, Existing={}", incoming.getId(), incoming.getQuestionText(), existing.getQuestionText()); return true; }
-            if (!Objects.equals(incoming.getQuestionJapanese(), existing.getQuestionJapanese())) { log.warn("Quiz question {} changed: questionJapanese. Incoming={}, Existing={}", incoming.getId(), incoming.getQuestionJapanese(), existing.getQuestionJapanese()); return true; }
-            if (!Objects.equals(incType, existing.getQuestionType())) { log.warn("Quiz question {} changed: questionType. Incoming={}, Existing={}", incoming.getId(), incType, existing.getQuestionType()); return true; }
+            if (!Objects.equals(incoming.getQuestionText(), existing.getQuestionText())) {
+                log.warn("Quiz question {} changed: questionText. Incoming={}, Existing={}", incoming.getId(), incoming.getQuestionText(), existing.getQuestionText());
+                return true;
+            }
+            if (!Objects.equals(incoming.getQuestionJapanese(), existing.getQuestionJapanese())) {
+                log.warn("Quiz question {} changed: questionJapanese. Incoming={}, Existing={}", incoming.getId(), incoming.getQuestionJapanese(), existing.getQuestionJapanese());
+                return true;
+            }
+            if (!Objects.equals(incType, existing.getQuestionType())) {
+                log.warn("Quiz question {} changed: questionType. Incoming={}, Existing={}", incoming.getId(), incType, existing.getQuestionType());
+                return true;
+            }
 
             // Options are JSON strings. String comparison will fail if keys are just ordered differently.
             if (!isJsonEqual(incoming.getOptions(), existing.getOptions())) {
@@ -1239,13 +1091,34 @@ public class AssignmentServiceImpl implements AssignmentService {
                 return true;
             }
 
-            if (!Objects.equals(incoming.getCorrectAnswer(), existing.getCorrectAnswer())) { log.warn("Quiz question {} changed: correctAnswer. Incoming={}, Existing={}", incoming.getId(), incoming.getCorrectAnswer(), existing.getCorrectAnswer()); return true; }
-            if (!Objects.equals(incoming.getCorrectAnswers(), existing.getCorrectAnswers())) { log.warn("Quiz question {} changed: correctAnswers. Incoming={}, Existing={}", incoming.getId(), incoming.getCorrectAnswers(), existing.getCorrectAnswers()); return true; }
-            if (!Objects.equals(incoming.getExplanation(), existing.getExplanation())) { log.warn("Quiz question {} changed: explanation. Incoming={}, Existing={}", incoming.getId(), incoming.getExplanation(), existing.getExplanation()); return true; }
-            if (!Objects.equals(incoming.getExplanationVi(), existing.getExplanationVi())) { log.warn("Quiz question {} changed: explanationVi. Incoming={}, Existing={}", incoming.getId(), incoming.getExplanationVi(), existing.getExplanationVi()); return true; }
-            if (!Objects.equals(incoming.getImageUrl(), existing.getImageUrl())) { log.warn("Quiz question {} changed: imageUrl. Incoming={}, Existing={}", incoming.getId(), incoming.getImageUrl(), existing.getImageUrl()); return true; }
-            if (!Objects.equals(incoming.getJlptLevel(), existing.getJlptLevel())) { log.warn("Quiz question {} changed: jlptLevel. Incoming={}, Existing={}", incoming.getId(), incoming.getJlptLevel(), existing.getJlptLevel()); return true; }
-            if (!Objects.equals(incDiff, existing.getDifficultyScore())) { log.warn("Quiz question {} changed: difficultyScore. Incoming={}, Existing={}", incoming.getId(), incDiff, existing.getDifficultyScore()); return true; }
+            if (!Objects.equals(incoming.getCorrectAnswer(), existing.getCorrectAnswer())) {
+                log.warn("Quiz question {} changed: correctAnswer. Incoming={}, Existing={}", incoming.getId(), incoming.getCorrectAnswer(), existing.getCorrectAnswer());
+                return true;
+            }
+            if (!Objects.equals(incoming.getCorrectAnswers(), existing.getCorrectAnswers())) {
+                log.warn("Quiz question {} changed: correctAnswers. Incoming={}, Existing={}", incoming.getId(), incoming.getCorrectAnswers(), existing.getCorrectAnswers());
+                return true;
+            }
+            if (!Objects.equals(incoming.getExplanation(), existing.getExplanation())) {
+                log.warn("Quiz question {} changed: explanation. Incoming={}, Existing={}", incoming.getId(), incoming.getExplanation(), existing.getExplanation());
+                return true;
+            }
+            if (!Objects.equals(incoming.getExplanationVi(), existing.getExplanationVi())) {
+                log.warn("Quiz question {} changed: explanationVi. Incoming={}, Existing={}", incoming.getId(), incoming.getExplanationVi(), existing.getExplanationVi());
+                return true;
+            }
+            if (!Objects.equals(incoming.getImageUrl(), existing.getImageUrl())) {
+                log.warn("Quiz question {} changed: imageUrl. Incoming={}, Existing={}", incoming.getId(), incoming.getImageUrl(), existing.getImageUrl());
+                return true;
+            }
+            if (!Objects.equals(incoming.getJlptLevel(), existing.getJlptLevel())) {
+                log.warn("Quiz question {} changed: jlptLevel. Incoming={}, Existing={}", incoming.getId(), incoming.getJlptLevel(), existing.getJlptLevel());
+                return true;
+            }
+            if (!Objects.equals(incDiff, existing.getDifficultyScore())) {
+                log.warn("Quiz question {} changed: difficultyScore. Incoming={}, Existing={}", incoming.getId(), incDiff, existing.getDifficultyScore());
+                return true;
+            }
         }
 
         return false;

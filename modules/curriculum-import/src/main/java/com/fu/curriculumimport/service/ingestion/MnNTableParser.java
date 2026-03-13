@@ -59,6 +59,22 @@ public final class MnNTableParser {
 
         if (rows == null || rows.isEmpty()) return List.of();
 
+        // ── Fast path: country-language reference table ───────────────────────
+        // Minna no Nihongo has a special 4-column table in the countries chapter:
+        //   Col 0: country name  | Col 1: nationality (〜人) | Col 2: empty | Col 3: language (〜語)
+        //   アメリカ ( Mý )      |                           |              | 英語 ( tiêng Anh )
+        //   かんこく             | かんこくじん              |              | かんこく ご
+        // Each row yields 2–3 separate vocabulary items, not 1.
+        if (isCountryLanguageTable(rows)) {
+            List<ExtractionResult.ExtractedVocabulary> ctResult = parseCountryLanguageTable(rows, jlptLevel);
+            if (!ctResult.isEmpty()) {
+                log.info("MnNTableParser: country-language table detected — extracted {} items from {} rows",
+                        ctResult.size(), rows.size());
+                return ctResult;
+            }
+        }
+
+        // ── Standard vocabulary table ─────────────────────────────────────────
         List<ExtractionResult.ExtractedVocabulary> result = new ArrayList<>();
         int skipped = 0;
 
@@ -108,7 +124,15 @@ public final class MnNTableParser {
         if (cells.length <= colOffset) return null;
 
         // Column 1: Japanese word
-        String japanese = cells[colOffset].trim();
+        // Strip any inline meaning attached to the word: 行きます（đi） → word=行きます, meaning=đi
+        String rawJapanese = cells[colOffset].trim();
+        if (rawJapanese.isBlank() || !CJK_OR_KANA.matcher(rawJapanese).find()) return null;
+
+        FuriganaNormalizer.InlineMeaning inlineResult = FuriganaNormalizer.extractInlineMeaning(rawJapanese);
+        String japanese         = inlineResult.found() ? inlineResult.word() : rawJapanese;
+        String col1InlineMeaning = inlineResult.found() ? inlineResult.meaning() : null;
+
+        // Re-validate: stripped word must still contain CJK/kana
         if (japanese.isBlank() || !CJK_OR_KANA.matcher(japanese).find()) return null;
 
         // Column 2: reading (hiragana/katakana) or romaji
@@ -120,7 +144,7 @@ public final class MnNTableParser {
         }
 
         // Column 3: meaning (may start with POS tag in parentheses)
-        String meaningRaw = cells.length > colOffset + 2 ? cells[colOffset + 2].trim() : "";
+        String meaningRaw   = cells.length > colOffset + 2 ? cells[colOffset + 2].trim() : "";
         String partOfSpeech = "";
         String meaningVi    = meaningRaw;
         String meaningEn    = "";
@@ -130,6 +154,18 @@ public final class MnNTableParser {
             if (m.matches()) {
                 partOfSpeech = normalizePOS(m.group(1).trim());
                 meaningVi    = m.group(2).trim();
+            }
+        }
+
+        // Fallback: if column 3 is blank, use the inline meaning extracted from column 1
+        if (meaningVi.isBlank() && col1InlineMeaning != null) {
+            // Inline meanings may also carry a POS tag: "(đt nhóm I) đi"
+            var inlineM = POS_TAG.matcher(col1InlineMeaning);
+            if (inlineM.matches()) {
+                partOfSpeech = normalizePOS(inlineM.group(1).trim());
+                meaningVi    = inlineM.group(2).trim();
+            } else {
+                meaningVi = col1InlineMeaning;
             }
         }
 
@@ -144,6 +180,13 @@ public final class MnNTableParser {
 
         if (japanese.isBlank() || meaningVi.isBlank()) return null;
 
+        // SOURCE_INLINE: meaning came from （）brackets on the japanese word cell (still source-derived,
+        // but worth a secondary manager review since POS detection is heuristic).
+        // SOURCE: meaning came from a dedicated meaning column (col 3) — higher confidence.
+        String meaningSource = (meaningRaw.isBlank() && col1InlineMeaning != null)
+                ? "SOURCE_INLINE"
+                : "SOURCE";
+
         return ExtractionResult.ExtractedVocabulary.builder()
                 .japaneseText(japanese)
                 .kanjiWriting(CJK_OR_KANA.matcher(japanese).find() ? japanese : null)
@@ -155,7 +198,134 @@ public final class MnNTableParser {
                 .jlptLevel(jlptLevel != null ? jlptLevel : "N5")
                 .exampleSentences(examples)
                 .isKeyWord(false)
-                .meaningSource("SOURCE")
+                .meaningSource(meaningSource)
+                .build();
+    }
+
+    // ── Country-language table support ───────────────────────────────────────
+
+    /**
+     * Detect whether the row list is a country-language reference table rather than
+     * a standard vocabulary table.
+     *
+     * Heuristic: ≥50 % of rows have ≥4 columns where col 0 is CJK/kana, col 2 is
+     * blank, and col 3 is CJK/kana (the language name).
+     */
+    private static boolean isCountryLanguageTable(List<String> rows) {
+        int total = 0;
+        int matched = 0;
+        for (String row : rows) {
+            if (row == null || row.isBlank()) continue;
+            String[] cells = row.split("\t", -1);
+            total++;
+            if (cells.length < 4) continue;
+            int offset = DIGITS_ONLY.matcher(cells[0].trim()).matches() ? 1 : 0;
+            if (cells.length <= offset + 3) continue;
+            String col0 = cells[offset].trim();
+            String col2 = cells[offset + 2].trim();
+            String col3 = cells[offset + 3].trim();
+            if (CJK_OR_KANA.matcher(col0).find()
+                    && col2.isBlank()
+                    && CJK_OR_KANA.matcher(col3).find()
+                    && col3.length() < 60) {
+                matched++;
+            }
+        }
+        return total >= 3 && (matched * 1.0 / total) >= 0.5;
+    }
+
+    /**
+     * Parse a country-language reference table.
+     * Each row yields up to 3 vocabulary items:
+     * (1) country name from col 0,
+     * (2) nationality person form from col 1 (if non-empty),
+     * (3) language name from col 3.
+     */
+    private static List<ExtractionResult.ExtractedVocabulary> parseCountryLanguageTable(
+            List<String> rows, String jlptLevel) {
+        List<ExtractionResult.ExtractedVocabulary> result = new ArrayList<>();
+        for (String row : rows) {
+            if (row == null || row.isBlank()) continue;
+            String[] cells = row.split("\t", -1);
+            if (cells.length < 2) continue;
+            int offset = DIGITS_ONLY.matcher(cells[0].trim()).matches() ? 1 : 0;
+
+            // Col 0: country name (e.g. アメリカ, かんこく, 中国)
+            if (offset < cells.length) {
+                ExtractionResult.ExtractedVocabulary country =
+                        parseSingleVocabCell(cells[offset], jlptLevel);
+                if (country != null) result.add(country);
+            }
+
+            // Col 1: nationality person form (e.g. かんこくじん, アメリカ人) — may be empty
+            int col1 = offset + 1;
+            if (col1 < cells.length && !cells[col1].trim().isBlank()) {
+                ExtractionResult.ExtractedVocabulary person =
+                        parseSingleVocabCell(cells[col1], jlptLevel);
+                if (person != null) result.add(person);
+            }
+
+            // Col 3: language name (e.g. 英語, かんこくご, 中国語)
+            int col3 = offset + 3;
+            if (col3 < cells.length && !cells[col3].trim().isBlank()) {
+                ExtractionResult.ExtractedVocabulary lang =
+                        parseSingleVocabCell(cells[col3], jlptLevel);
+                if (lang != null) result.add(lang);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Parse a single vocabulary cell (country, language, or nationality form).
+     *
+     * Handles:
+     * <ul>
+     *   <li>Full-width inline meaning: {@code アメリカ（Mỹ）} via {@link FuriganaNormalizer#extractInlineMeaning}</li>
+     *   <li>Half-width inline meaning: {@code アメリカ ( Mý )} — OCR output style</li>
+     *   <li>Pure-kana entries without meanings: {@code かんこく} — tagged AI_INFERRED</li>
+     *   <li>Furigana annotations: {@code 英語[えいご]} → reading extracted</li>
+     * </ul>
+     *
+     * @return {@code null} if the cell does not contain a valid CJK/kana word
+     */
+    private static ExtractionResult.ExtractedVocabulary parseSingleVocabCell(
+            String cellText, String jlptLevel) {
+        if (cellText == null || cellText.isBlank()) return null;
+        String raw = cellText.trim();
+        if (!CJK_OR_KANA.matcher(raw).find()) return null;
+
+        // Extract inline meaning (handles both （）full-width and ( ) half-width)
+        FuriganaNormalizer.InlineMeaning inline = FuriganaNormalizer.extractInlineMeaning(raw);
+        // Collapse internal spaces from compound words like "中国 語" → "中国語"
+        String japanese = (inline.found() ? inline.word() : raw).replaceAll("\\s+", "");
+        String meaningVi = inline.found() ? inline.meaning() : null;
+
+        if (japanese.isBlank() || !CJK_OR_KANA.matcher(japanese).find()) return null;
+
+        // Extract reading if furigana was already normalized: 英語[えいご] → reading=えいご
+        String reading = "";
+        int rb = japanese.indexOf('[');
+        int re = rb >= 0 ? japanese.indexOf(']', rb) : -1;
+        if (rb >= 0 && re > rb) {
+            reading = japanese.substring(rb + 1, re);
+            japanese = japanese.substring(0, rb);
+        } else if (PURE_KANA.matcher(japanese).matches()) {
+            reading = japanese; // the word itself is kana (e.g. かんこく)
+        }
+
+        return ExtractionResult.ExtractedVocabulary.builder()
+                .japaneseText(japanese)
+                .kanjiWriting(japanese)
+                .reading(reading)
+                .romaji("")
+                .meaningVi(meaningVi)
+                .meaningEn(null)
+                .partOfSpeech("noun")
+                .jlptLevel(jlptLevel != null ? jlptLevel : "N5")
+                .exampleSentences(new ArrayList<>())
+                .isKeyWord(false)
+                .meaningSource(meaningVi != null ? "SOURCE_INLINE" : "AI_INFERRED")
                 .build();
     }
 

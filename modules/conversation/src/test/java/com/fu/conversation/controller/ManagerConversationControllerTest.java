@@ -118,7 +118,7 @@ class ManagerConversationControllerTest {
         @WithMockConversationUser
         void shouldReturn200WithSuggestions() throws Exception {
             GenerateThemeRequest request = GenerateThemeRequest.builder()
-                    .courseId(courseId).count(2).build();
+                    .count(2).build();
 
             GeneratedThemeSuggestionResponse suggestion = GeneratedThemeSuggestionResponse.builder()
                     .title("Shopping").build();
@@ -138,7 +138,7 @@ class ManagerConversationControllerTest {
         @WithMockConversationUser(roles = "LEARNER")
         void shouldReturn403ForLearner() throws Exception {
             GenerateThemeRequest request = GenerateThemeRequest.builder()
-                    .courseId(courseId).count(2).build();
+                    .count(2).build();
 
             mockMvc.perform(post("/api/v1/manager/conversation/themes/generate")
                             .with(csrf())
@@ -148,11 +148,11 @@ class ManagerConversationControllerTest {
         }
 
         @Test
-        @DisplayName("Should return 400 when courseId is missing")
+        @DisplayName("Should return 400 when count is below minimum")
         @WithMockConversationUser
-        void shouldReturn400WhenCourseIdMissing() throws Exception {
-            // No courseId — violates @NotNull
-            String body = "{\"count\": 2}";
+        void shouldReturn400WhenCountBelowMinimum() throws Exception {
+            // count=0 violates @Min(1)
+            String body = "{\"count\": 0}";
 
             mockMvc.perform(post("/api/v1/manager/conversation/themes/generate")
                             .with(csrf())

@@ -4,8 +4,8 @@ import com.fu.roleplay.dto.request.CreateMissionRequest;
 import com.fu.roleplay.dto.request.UpdateMissionRequest;
 import com.fu.roleplay.dto.response.MissionResponse;
 import com.fu.roleplay.dto.response.SessionMissionResponse;
-import com.fu.roleplay.entity.ConversationMission;
-import com.fu.roleplay.entity.SessionMission;
+import com.fu.conversation.entity.ConversationMission;
+import com.fu.roleplay.dto.entity.SessionMission;
 import org.mapstruct.*;
 
 @Mapper(

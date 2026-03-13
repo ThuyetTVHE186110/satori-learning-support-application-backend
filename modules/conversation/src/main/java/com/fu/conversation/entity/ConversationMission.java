@@ -1,15 +1,18 @@
-package com.fu.roleplay.entity;
+package com.fu.conversation.entity;
 
 import com.fu.infrastructure.persistence.SoftDeletableEntity;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.hibernate.annotations.ColumnTransformer;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
 import java.util.UUID;
 
+/**
+ * ConversationMission - A specific task or goal within a ConversationTopic.
+ * Learners must complete missions during a practice session.
+ * Maps to speaking.conversation_missions table.
+ */
 @Entity
 @Table(name = "conversation_missions", schema = "speaking",
         indexes = {
@@ -24,6 +27,9 @@ import java.util.UUID;
 @ToString(callSuper = true)
 public class ConversationMission extends SoftDeletableEntity {
 
+    /**
+     * Parent topic this mission belongs to.
+     */
     @Column(name = "topic_id", nullable = false)
     private UUID topicId;
 
@@ -43,23 +49,32 @@ public class ConversationMission extends SoftDeletableEntity {
     private String descriptionVi;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "mission_type", nullable = false)
+    @Column(name = "mission_type", columnDefinition = "mission_type")
     @ColumnTransformer(write = "CAST(? AS mission_type)")
-    @Builder.Default
-    private MissionType missionType = MissionType.CUSTOM;
+    private MissionType missionType;
 
-    @JdbcTypeCode(SqlTypes.JSON)
+    /**
+     * JSON object describing conditions required to complete this mission.
+     * Example: {"requiredActions": [...], "requiredVocabulary": [...], "completionConditions": "..."}
+     */
     @Column(name = "success_criteria", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "CAST(? AS jsonb)")
     @Builder.Default
     private String successCriteria = "{}";
 
-    @JdbcTypeCode(SqlTypes.JSON)
+    /**
+     * JSON array of vocabulary words the learner must use.
+     */
     @Column(name = "required_vocabulary", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "CAST(? AS jsonb)")
     @Builder.Default
     private String requiredVocabulary = "[]";
 
-    @JdbcTypeCode(SqlTypes.JSON)
+    /**
+     * JSON array of grammar patterns the learner must use.
+     */
     @Column(name = "required_grammar", columnDefinition = "jsonb")
+    @ColumnTransformer(write = "CAST(? AS jsonb)")
     @Builder.Default
     private String requiredGrammar = "[]";
 
@@ -67,7 +82,15 @@ public class ConversationMission extends SoftDeletableEntity {
     @Builder.Default
     private Integer orderIndex = 0;
 
+    /**
+     * Type of conversation mission — defines the nature of the task.
+     */
     public enum MissionType {
-        INFORMATION_GATHERING, TRANSACTIONAL, SOCIAL, PROBLEM_SOLVING, DESCRIPTIVE, CUSTOM
+        INFORMATION_GATHERING,
+        TRANSACTIONAL,
+        SOCIAL,
+        PROBLEM_SOLVING,
+        DESCRIPTIVE,
+        CUSTOM
     }
 }
