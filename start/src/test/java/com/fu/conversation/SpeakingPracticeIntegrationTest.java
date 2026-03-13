@@ -406,6 +406,23 @@ class SpeakingPracticeIntegrationTest {
                     .andExpect(jsonPath("$.data.totalElements").value(0))
                     .andExpect(jsonPath("$.data.content.length()").value(0));
         }
+
+        @Test
+        @DisplayName("TC_SP_VTH_019 — Theme nháp (DRAFT) hoặc lưu trữ (ARCHIVED) không được hiển thị cho Learner")
+        void tc_sp_vth_019() throws Exception {
+            saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+
+            saveTheme("Theme Published", Course.ContentStatus.PUBLISHED, 1);
+            saveTheme("Theme Draft", Course.ContentStatus.DRAFT, 2);
+            saveTheme("Theme Archived", Course.ContentStatus.ARCHIVED, 3);
+
+            mockMvc.perform(get("/api/v1/learner/conversation/themes")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andExpect(jsonPath("$.data.content[0].title").value("Theme Published"));
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -611,6 +628,24 @@ class SpeakingPracticeIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data[0].lastPracticedAt").isNotEmpty());
+        }
+
+        @Test
+        @DisplayName("TC_SP_VTP_014 — Topic nháp (DRAFT) hoặc lưu trữ (ARCHIVED) không được hiển thị cho Learner")
+        void tc_sp_vtp_014() throws Exception {
+            saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+
+            ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
+            saveTopic(theme.getId(), "Topic Published", Course.ContentStatus.PUBLISHED, 1, true);
+            saveTopic(theme.getId(), "Topic Draft", Course.ContentStatus.DRAFT, 2, true);
+            saveTopic(theme.getId(), "Topic Archived", Course.ContentStatus.ARCHIVED, 3, true);
+
+            mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", theme.getId())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.length()").value(1))
+                    .andExpect(jsonPath("$.data[0].title").value("Topic Published"));
         }
     }
 

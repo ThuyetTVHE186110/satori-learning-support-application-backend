@@ -622,7 +622,7 @@ class AssignmentIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_AS_T_CR_008 — Teacher B tạo vào class của Teacher A → 200 (no class-ownership guard, documents gap)")
+        @DisplayName("TC_AS_T_CR_008 — Teacher B tạo vào class của Teacher A → 403 (ACCESS_DENIED)")
         void tc_as_t_cr_008() throws Exception {
             User teacherA = saveTeacher("teacherA@test.com");
             saveTeacher("teacherB@test.com");
@@ -633,13 +633,11 @@ class AssignmentIntegrationTest {
                     "data", "", "application/json",
                     quizRequestJson(AssignmentStatus.DRAFT, null).getBytes());
 
-            // NOTE: no class-ownership check on create — documents current behavior
-            MvcResult result = mockMvc.perform(
+            mockMvc.perform(
                             multipart("/api/v1/teacher/assignments/class/{classId}/quiz", clazzA.getId())
                                     .file(dataPart)
                                     .header("Authorization", "Bearer " + tokenB))
-                    .andReturn();
-            assertThat(result.getResponse().getStatus()).isEqualTo(200);
+                    .andExpect(status().isForbidden());
         }
     }
 
@@ -831,6 +829,33 @@ class AssignmentIntegrationTest {
                       "questions": []
                     }
                     """.formatted(LocalDateTime.now().plusDays(7)).getBytes());
+
+            mockMvc.perform(multipart(org.springframework.http.HttpMethod.PUT,
+                            "/api/v1/teacher/assignments/{id}/quiz", a.getId())
+                            .file(dataPart)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_UP_008 — Update dueDate vào quá khứ → 400 (INVALID_DUE_DATE)")
+        void tc_as_t_up_008() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            Assignment a = savePublishedQuiz(teacher, clazz);
+            String token = loginAndGetToken("teacher@test.com");
+
+            MockMultipartFile dataPart = new MockMultipartFile(
+                    "data", "", "application/json",
+                    """
+                    {
+                      "title": "Published Quiz",
+                      "dueDate": "%s",
+                      "passingScore": 60,
+                      "status": "PUBLISHED",
+                      "questions": []
+                    }
+                    """.formatted(LocalDateTime.now().minusDays(1)).getBytes());
 
             mockMvc.perform(multipart(org.springframework.http.HttpMethod.PUT,
                             "/api/v1/teacher/assignments/{id}/quiz", a.getId())
@@ -1184,6 +1209,83 @@ class AssignmentIntegrationTest {
             mockMvc.perform(get("/api/v1/teacher/assignments/{id}/submissions", a.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isForbidden());
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 1.8 Grade Writing Submissions (Teacher)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("1.8 Grade Writing Submissions (Teacher)")
+    class GradeWritingSubmissions {
+
+        @Test
+        @DisplayName("TC_AS_T_GR_001 — Teacher chấm điểm bài Writing hợp lệ → thành công, status GRADED")
+        void tc_as_t_gr_001() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedWriting(teacher, clazz);
+            AssignmentSubmission sub = submissionRepository.save(AssignmentSubmission.builder()
+                    .assignmentId(a.getId()).userId(learner.getId())
+                    .status(SubmissionStatus.SUBMITTED).attemptNumber(1)
+                    .writtenAnswer("Tôi là sinh viên.")
+                    .startedAt(LocalDateTime.now().minusMinutes(10))
+                    .submittedAt(LocalDateTime.now().minusMinutes(1))
+                    .correctCount(0).totalQuestions(1).timeSpentSeconds(600)
+                    .answers("[]").createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
+                    .build());
+            String token = loginAndGetToken("teacher@test.com");
+
+            String body = """
+                    {
+                      "teacherScore": 85.5,
+                      "feedback": "Bài viết rất tốt."
+                    }
+                    """;
+
+            mockMvc.perform(post("/api/v1/teacher/assignments/submissions/{id}/grade-writing", sub.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.status").value("GRADED"))
+                    .andExpect(jsonPath("$.data.score").value(85.5))
+                    .andExpect(jsonPath("$.data.feedback").value("Bài viết rất tốt."));
+        }
+        
+        @Test
+        @DisplayName("TC_AS_T_GR_002 — Grade QUIZ submission → 400 (INVALID_TYPE)")
+        void tc_as_t_gr_002() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedQuiz(teacher, clazz);
+            AssignmentSubmission sub = submissionRepository.save(AssignmentSubmission.builder()
+                    .assignmentId(a.getId()).userId(learner.getId())
+                    .status(SubmissionStatus.SUBMITTED).attemptNumber(1)
+                    .startedAt(LocalDateTime.now().minusMinutes(10))
+                    .submittedAt(LocalDateTime.now().minusMinutes(1))
+                    .correctCount(0).totalQuestions(1).timeSpentSeconds(600)
+                    .answers("[]").createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
+                    .build());
+            String token = loginAndGetToken("teacher@test.com");
+
+            String body = """
+                    {
+                      "teacherScore": 85.5,
+                      "feedback": "Feedback."
+                    }
+                    """;
+
+            mockMvc.perform(post("/api/v1/teacher/assignments/submissions/{id}/grade-writing", sub.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
         }
     }
 
@@ -1557,6 +1659,51 @@ class AssignmentIntegrationTest {
                             .content("{\"submissionId\":\"" + UUID.randomUUID() + "\",\"answers\":\"[]\"}")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("TC_AS_L_DO_013 — Start assignment khi đang CLOSED → 400 (ASSIGNMENT_NOT_PUBLISHED)")
+        void tc_as_l_do_013() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedQuiz(teacher, clazz);
+            a.setStatus(AssignmentStatus.CLOSED);
+            assignmentRepository.save(a);
+            String token = loginAndGetToken("learner@test.com");
+
+            mockMvc.perform(post("/api/v1/learner/assignments/{id}/start", a.getId())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("TC_AS_L_DO_014 — Submit assignment khi đang CLOSED → 400 (ASSIGNMENT_CLOSED)")
+        void tc_as_l_do_014() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedQuiz(teacher, clazz);
+            AssignmentSubmission sub = startSubmission(a.getId(), learner.getId());
+            a.setStatus(AssignmentStatus.CLOSED);
+            assignmentRepository.save(a);
+            String token = loginAndGetToken("learner@test.com");
+
+            UUID questionId = assignmentQuestionRepository
+                    .findByAssignmentIdOrderByOrderIndex(a.getId()).getFirst().getQuestionId();
+
+            String body = objectMapper.writeValueAsString(java.util.Map.of(
+                    "submissionId", sub.getId().toString(),
+                    "answers", "[{\"questionId\":\"" + questionId + "\",\"selectedAnswer\":\"A\"}]",
+                    "timeSpentSeconds", 60));
+
+            mockMvc.perform(post("/api/v1/learner/assignments/submit")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
         }
     }
 
