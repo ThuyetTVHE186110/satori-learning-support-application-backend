@@ -84,7 +84,13 @@ public class QuizAiGenerationService {
             5. Option text — options MUST use "text" for the vocabulary kanji/kana (**MANDATORY**: wrap all Kanji in <ruby> tags), and "text_reading" for the furigana interpretation (only provide text_reading if text contains Kanji).
                Example option: {"text": "<ruby>食<rt>た</rt></ruby>べる", "text_reading": "たべる", "isCorrect": true}
             6. explanation / explanationVi — MUST be plain text (see below).
-            
+
+            EXPLANATION GUIDELINES (High Quality):
+            - Keep the explanation concise yet comprehensive (3-5 sentences).
+            - Clearly identify the grammar pattern, vocabulary meaning, or situational context used in the question.
+            - Explain the logical reasoning behind the correct answer.
+            - If applicable, briefly contrast the correct choice with distractors (wrong options) to prevent common student mistakes.
+            - Maintain a polite, educational, and encouraging tone.
             Example questionJapanese (multiple_choice):
             "<ruby>昨日<rt>きのう</rt></ruby>、<ruby>友達<rt>ともだち</rt></ruby>と <ruby>映画<rt>えいが</rt></ruby>uを （____）。"
             
@@ -240,7 +246,7 @@ public class QuizAiGenerationService {
                 return wrapper.questions();
             }
         } catch (Exception e) {
-            log.warn("Normal JSON parse failed. finish_reason={}, truncated={}. Error: {}", 
+            log.warn("Normal JSON parse failed. finish_reason={}, truncated={}. Error: {}",
                     finishReason, wasTruncated, e.getMessage());
         }
 
@@ -256,8 +262,8 @@ public class QuizAiGenerationService {
         // 3. Fallback: If no questions could be salvaged, throw error
         if (wasTruncated) {
             throw new BusinessException("AI_PARSE_ERROR",
-                "AI response was incomplete (output truncated). Try reducing the number of questions (requested "
-                        + request.getQuestionCount() + ").");
+                    "AI response was incomplete (output truncated). Try reducing the number of questions (requested "
+                            + request.getQuestionCount() + ").");
         } else {
             log.error("Parse failed (not truncated) and could not salvage. Raw:\n{}", rawContent);
             throw new BusinessException("AI_PARSE_ERROR", "Failed to parse AI response. The generated content might be malformed.");
@@ -330,7 +336,7 @@ public class QuizAiGenerationService {
     // ═══════════════════════════════════════════════════════════════════════════
 
     private List<QuizQuestionResponse> mapToPreviewResponses(List<AiQuizQuestionDto> aiDtos,
-                                                              AiQuizGenerationRequest request) {
+                                                             AiQuizGenerationRequest request) {
         List<QuizQuestionResponse> responses = new ArrayList<>();
 
         for (AiQuizQuestionDto dto : aiDtos) {
@@ -343,6 +349,11 @@ public class QuizAiGenerationService {
             try {
                 if (dto.options() != null && !dto.options().isEmpty()) {
                     optionsJson = objectMapper.writeValueAsString(dto.options());
+                    for (JsonNode option : objectMapper.readTree(optionsJson)) {
+                        String text = option.get("text").asText();
+                        String sanitized = MarkdownUtils.stripInvalidFurigana(text);
+                        ((com.fasterxml.jackson.databind.node.ObjectNode) option).put("text", sanitized);
+                    }
                 }
                 if (dto.correctAnswers() != null && !dto.correctAnswers().isEmpty()) {
                     correctAnswersJson = objectMapper.writeValueAsString(dto.correctAnswers());
