@@ -25,6 +25,8 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.jdbc.Sql;
+import org.springframework.test.context.jdbc.SqlConfig;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -40,6 +42,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(classes = com.fu.StartApplication.class)
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@Sql(
+        statements = "TRUNCATE TABLE user_management.class_members, user_management.classes, learning_content.courses, system_admin.curriculum_imports, user_management.user_sessions, user_management.users CASCADE",
+        executionPhase = Sql.ExecutionPhase.BEFORE_TEST_CLASS
+)
+@Sql(
+        statements = "TRUNCATE TABLE user_management.class_members, user_management.classes, learning_content.courses, system_admin.curriculum_imports, user_management.user_sessions, user_management.users CASCADE",
+        executionPhase = Sql.ExecutionPhase.AFTER_TEST_METHOD,
+        config = @SqlConfig(transactionMode = SqlConfig.TransactionMode.ISOLATED)
+)
 @DisplayName("Class Management — Integration Tests (PostgreSQL satori_test)")
 class ClassManagementTest {
 
@@ -142,20 +153,12 @@ class ClassManagementTest {
 
     @BeforeEach
     void setUp() {
-        classMemberRepository.deleteAll();
-        classRepository.deleteAll();
-        courseRepository.deleteAll();
-        sessionRepository.deleteAll();
-        userRepository.deleteAll();
+        // cleanup is handled by @Sql(AFTER_TEST_METHOD) in an isolated transaction
     }
 
     @AfterEach
     void tearDown() {
-        classMemberRepository.deleteAll();
-        classRepository.deleteAll();
-        courseRepository.deleteAll();
-        sessionRepository.deleteAll();
-        userRepository.deleteAll();
+        // cleanup is handled by @Sql(AFTER_TEST_METHOD) in an isolated transaction
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

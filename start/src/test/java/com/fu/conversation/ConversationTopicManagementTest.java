@@ -330,7 +330,6 @@ class ConversationTopicManagementTest {
                     .scenario("You are at a supermarket")
                     .jlptLevel(Course.JlptLevel.N4)
                     .difficultyScore(3)
-                    .isRoleplay(false)
                     .status(Course.ContentStatus.DRAFT)
                     .orderIndex(0)
                     .build());
@@ -348,7 +347,6 @@ class ConversationTopicManagementTest {
                     .andExpect(jsonPath("$.data.scenario").value("You are at a supermarket"))
                     .andExpect(jsonPath("$.data.jlptLevel").value("N4"))
                     .andExpect(jsonPath("$.data.difficultyScore").value(3))
-                    .andExpect(jsonPath("$.data.isRoleplay").value(false))
                     .andExpect(jsonPath("$.data.createdAt").isNotEmpty())
                     .andExpect(jsonPath("$.data.updatedAt").isNotEmpty());
         }
@@ -474,7 +472,6 @@ class ConversationTopicManagementTest {
                       "scenario": "You are at a supermarket",
                       "jlptLevel": "N4",
                       "difficultyScore": 3,
-                      "isRoleplay": true,
                       "category": "shopping",
                       "orderIndex": 1
                     }
@@ -491,7 +488,6 @@ class ConversationTopicManagementTest {
                     .andExpect(jsonPath("$.data.titleJapanese").value("スーパーでの買い物"))
                     .andExpect(jsonPath("$.data.jlptLevel").value("N4"))
                     .andExpect(jsonPath("$.data.difficultyScore").value(3))
-                    .andExpect(jsonPath("$.data.isRoleplay").value(true))
                     .andExpect(jsonPath("$.data.category").value("shopping"))
                     .andExpect(jsonPath("$.data.orderIndex").value(1))
                     .andReturn();
@@ -504,7 +500,6 @@ class ConversationTopicManagementTest {
             assertThat(topic.getTitleJapanese()).isEqualTo("スーパーでの買い物");
             assertThat(topic.getJlptLevel()).isEqualTo(Course.JlptLevel.N4);
             assertThat(topic.getDifficultyScore()).isEqualTo(3);
-            assertThat(topic.getIsRoleplay()).isTrue();
             assertThat(topic.getCategory()).isEqualTo("shopping");
             assertThat(topic.getOrderIndex()).isEqualTo(1);
         }
@@ -782,7 +777,7 @@ class ConversationTopicManagementTest {
 
             // UI always sends title alongside other fields — title is required (@NotBlank)
             // jlptLevel is intentionally omitted — UpdateTopicRequest does not support it
-            String body = "{\"title\":\"Mua sắm\",\"difficultyScore\":5,\"isRoleplay\":true}";
+            String body = "{\"title\":\"Mua sắm\",\"difficultyScore\":5}";
 
             // Act
             mockMvc.perform(put("/api/v1/manager/conversation/topics/{topicId}", topic.getId())
@@ -792,14 +787,11 @@ class ConversationTopicManagementTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.title").value("Mua sắm"))
-                    .andExpect(jsonPath("$.data.difficultyScore").value(5))
-                    .andExpect(jsonPath("$.data.isRoleplay").value(true));
-
+                    .andExpect(jsonPath("$.data.difficultyScore").value(5));
             // Assert DB state
             ConversationTopic updated = topicRepository.findById(topic.getId()).orElseThrow();
             assertThat(updated.getTitle()).isEqualTo("Mua sắm");
             assertThat(updated.getDifficultyScore()).isEqualTo(5);
-            assertThat(updated.getIsRoleplay()).isTrue();
         }
 
         /**

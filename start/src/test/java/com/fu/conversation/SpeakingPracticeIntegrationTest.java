@@ -14,12 +14,12 @@ import com.fu.roleplay.ai.MissionEvaluatorAI;
 import com.fu.roleplay.ai.RoleplayAIService;
 import com.fu.roleplay.ai.SessionEvaluatorAI;
 import com.fu.roleplay.dto.response.SessionEvaluationResponse;
-import com.fu.roleplay.entity.ConversationMessage;
-import com.fu.roleplay.entity.ConversationMission;
-import com.fu.roleplay.entity.ConversationSession;
-import com.fu.roleplay.entity.SessionMission;
+import com.fu.roleplay.dto.entity.ConversationMessage;
+import com.fu.conversation.entity.ConversationMission;
+import com.fu.roleplay.dto.entity.ConversationSession;
+import com.fu.roleplay.dto.entity.SessionMission;
 import com.fu.roleplay.repository.ConversationMessageRepository;
-import com.fu.roleplay.repository.ConversationMissionRepository;
+import com.fu.conversation.repository.ConversationMissionRepository;
 import com.fu.roleplay.repository.ConversationSessionRepository;
 import com.fu.roleplay.repository.MessagePronunciationRepository;
 import com.fu.roleplay.repository.SessionMissionRepository;
@@ -170,7 +170,6 @@ class SpeakingPracticeIntegrationTest {
                 .title(title)
                 .status(status)
                 .orderIndex(orderIndex)
-                .isRoleplay(isRoleplay)
                 .roleplayContext("{\"aiRole\":\"shop clerk\",\"scenario\":\"buying items\"}")
                 .jlptLevel(Course.JlptLevel.N5)
                 .build());
@@ -183,7 +182,6 @@ class SpeakingPracticeIntegrationTest {
                 .title(title)
                 .status(Course.ContentStatus.PUBLISHED)
                 .orderIndex(0)
-                .isRoleplay(true)
                 .build());
         topic.setDeletedAt(LocalDateTime.now());
         topic.setDeletedBy(deletedBy);
