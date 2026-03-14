@@ -19,7 +19,7 @@ import com.fu.conversation.entity.ConversationMission;
 import com.fu.roleplay.entity.ConversationSession;
 import com.fu.roleplay.entity.SessionMission;
 import com.fu.roleplay.repository.ConversationMessageRepository;
-import com.fu.roleplay.repository.ConversationMissionRepository;
+import com.fu.conversation.repository.ConversationMissionRepository;
 import com.fu.roleplay.repository.ConversationSessionRepository;
 import com.fu.roleplay.repository.MessagePronunciationRepository;
 import com.fu.roleplay.repository.SessionMissionRepository;
