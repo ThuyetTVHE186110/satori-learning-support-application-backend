@@ -67,10 +67,45 @@ public class MarkdownUtils {
             });
             String baseText = baseContent.toString().trim();
 
-            // Case 1: Base text and reading are identical (e.g. hiragana only)
-            // Case 2: Base text has no Kanji (protect Hiragana/Katakana from being wrapped)
+            // Case 1: Identical or no Kanji -> strip tag entirely
             if (baseText.equalsIgnoreCase(reading) || !containsKanji(baseText)) {
                 ruby.replaceWith(new org.jsoup.nodes.TextNode(baseText));
+                continue;
+            }
+
+            // Case 2: "Shrink" the ruby tag by extracting common kana prefixes and suffixes
+            // Example: <ruby>行きませんでした<rt>いきませんでした</rt></ruby> -> <ruby>行<rt>い</rt></ruby>きませんでした
+            int prefixLen = 0;
+            while (prefixLen < baseText.length() && prefixLen < reading.length() &&
+                    baseText.charAt(prefixLen) == reading.charAt(prefixLen)) {
+                prefixLen++;
+            }
+
+            int suffixLen = 0;
+            while (suffixLen < (baseText.length() - prefixLen) && suffixLen < (reading.length() - prefixLen) &&
+                    baseText.charAt(baseText.length() - 1 - suffixLen) == reading.charAt(reading.length() - 1 - suffixLen)) {
+                suffixLen++;
+            }
+
+            if (prefixLen > 0 || suffixLen > 0) {
+                String prefix = baseText.substring(0, prefixLen);
+                String suffix = baseText.substring(baseText.length() - suffixLen);
+                String newBase = baseText.substring(prefixLen, baseText.length() - suffixLen);
+                String newReading = reading.substring(prefixLen, reading.length() - suffixLen);
+
+                if (containsKanji(newBase)) {
+                    // Replace with: Prefix + <ruby>NewBase<rt>NewReading</rt></ruby> + Suffix
+                    ruby.before(new org.jsoup.nodes.TextNode(prefix));
+                    Element newRuby = doc.createElement("ruby");
+                    newRuby.text(newBase);
+                    newRuby.appendElement("rt").text(newReading);
+                    ruby.before(newRuby);
+                    ruby.before(new org.jsoup.nodes.TextNode(suffix));
+                    ruby.remove();
+                } else {
+                    // If no Kanji left after shrinking (shouldn't happen due to Case 1, but safe)
+                    ruby.replaceWith(new org.jsoup.nodes.TextNode(baseText));
+                }
             }
         }
         return doc.body().html();

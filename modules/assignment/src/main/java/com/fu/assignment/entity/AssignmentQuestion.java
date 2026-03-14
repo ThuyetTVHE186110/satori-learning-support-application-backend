@@ -44,8 +44,4 @@ public class AssignmentQuestion {
     @Builder.Default
     private Integer orderIndex = 0;
 
-    /** Points awarded for this question in this specific assignment */
-    @Column(name = "points")
-    @Builder.Default
-    private Integer points = 10;
 }

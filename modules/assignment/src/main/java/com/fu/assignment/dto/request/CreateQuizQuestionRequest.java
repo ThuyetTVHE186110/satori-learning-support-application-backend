@@ -18,14 +18,12 @@ public class CreateQuizQuestionRequest {
     @NotBlank(message = "Question text is required")
     private String questionText;
 
-    private String questionJapanese;
-
     @NotBlank(message = "Question type is required")
     private String questionType; // 'multiple_choice', 'fill_blank', 'matching', 'true_false', 'ordering'
 
     /**
      * JSON string for options.
-     * Example: [{"id":"A","text":"食べる","isCorrect":true}, ...]
+     * Example: [{"id":"A","text":"食べる" }, ...]
      */
     private String options;
 
@@ -37,16 +35,12 @@ public class CreateQuizQuestionRequest {
 
     private String explanation;
 
-    private String explanationVi;
-
     private java.util.UUID vocabularyId;
     private java.util.UUID grammarId;
     private java.util.UUID lessonId;
 
     private com.fu.course.entity.Course.JlptLevel jlptLevel;
 
-    @Builder.Default
-    private Integer difficultyScore = 1;
 
     private String[] tags;
 

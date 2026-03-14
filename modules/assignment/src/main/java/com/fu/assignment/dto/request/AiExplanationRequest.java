@@ -18,8 +18,6 @@ public class AiExplanationRequest {
     @NotBlank(message = "Question text is required to generate an explanation")
     private String questionText;
     
-    private String questionJapanese;
-    
     @NotBlank(message = "Question type is required")
     private String questionType;
     

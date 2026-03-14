@@ -40,8 +40,6 @@ public class QuizQuestion extends SoftDeletableEntity {
     @Column(name = "question_text", nullable = false, columnDefinition = "TEXT")
     private String questionText;
 
-    @Column(name = "question_japanese", columnDefinition = "TEXT")
-    private String questionJapanese;
 
     /**
      * Question type: 'multiple_choice', 'fill_blank', 'matching', 'true_false', 'ordering'
@@ -84,11 +82,6 @@ public class QuizQuestion extends SoftDeletableEntity {
     @Column(name = "explanation", columnDefinition = "TEXT")
     private String explanation;
 
-    @Column(name = "explanation_vi", columnDefinition = "TEXT")
-    private String explanationVi;
-
-
-
     // ── Source References ─────────────────────────────────────────────────────
 
     @Column(name = "vocabulary_id")
@@ -114,10 +107,6 @@ public class QuizQuestion extends SoftDeletableEntity {
     @org.hibernate.annotations.ColumnTransformer(write = "CAST(? AS jlpt_level)")
     private Course.JlptLevel jlptLevel;
 
-    @Column(name = "difficulty_score")
-    @Builder.Default
-    private Integer difficultyScore = 1;
-
     @Column(name = "tags", columnDefinition = "TEXT[]")
     private String[] tags;
 
@@ -125,12 +114,5 @@ public class QuizQuestion extends SoftDeletableEntity {
     @Column(name = "image_url", columnDefinition = "TEXT")
     private String imageUrl;
 
-    // ── Status & Audit ────────────────────────────────────────────────────────
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "status", length = 20)
-    @org.hibernate.annotations.ColumnTransformer(write = "CAST(? AS content_status)")
-    @Builder.Default
-    private Course.ContentStatus status = Course.ContentStatus.DRAFT;
 
 }

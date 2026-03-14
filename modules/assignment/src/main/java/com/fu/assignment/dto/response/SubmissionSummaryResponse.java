@@ -24,6 +24,5 @@ public class SubmissionSummaryResponse {
     private SubmissionStatus status;
     private Integer attemptNumber;
     private BigDecimal score;
-    private Boolean passed;
     private LocalDateTime submittedAt;
 }
