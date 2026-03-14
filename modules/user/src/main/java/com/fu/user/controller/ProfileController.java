@@ -1,9 +1,8 @@
 package com.fu.user.controller;
 
 import com.fu.common.response.ApiResponse;
-import com.fu.user.dto.UpdateProfileRequest;
-import com.fu.user.dto.UserResponse;
-import com.fu.user.service.UserService;
+import com.fu.user.dto.*;
+import com.fu.user.service.ProfileService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -15,10 +14,15 @@ import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
 
 /**
- * REST Controller for User Profile management.
- * Allows authenticated users to view and update their own profile.
- * 
- * All endpoints require authentication.
+ * REST Controller for authenticated user's own profile.
+ *
+ * All endpoints require a valid JWT (isAuthenticated()).
+ *
+ * Endpoints:
+ *   GET  /api/v1/profile                          → enriched profile (user info + learning prefs)
+ *   PUT  /api/v1/profile                          → update basic profile fields
+ *   GET  /api/v1/profile/learning-preferences     → learning preferences only
+ *   PUT  /api/v1/profile/learning-preferences     → create / update learning preferences
  */
 @RestController
 @RequestMapping("/api/v1/profile")
@@ -26,44 +30,56 @@ import java.util.UUID;
 @PreAuthorize("isAuthenticated()")
 public class ProfileController {
 
-    private final UserService userService;
+    private final ProfileService profileService;
 
     /**
-     * Get current user's profile.
-     * 
      * GET /api/v1/profile
-     * 
-     * @return Current user's profile
+     * Returns the full profile including learning preferences and enrolled classes.
      */
     @GetMapping
-    public ResponseEntity<ApiResponse<UserResponse>> getMyProfile(
+    public ResponseEntity<ApiResponse<UserProfileResponse>> getMyProfile(
             @AuthenticationPrincipal UserDetails userDetails) {
         UUID userId = extractUserId(userDetails);
-        UserResponse response = userService.getMyProfile(userId);
-        return ResponseEntity.ok(ApiResponse.success(response));
+        return ResponseEntity.ok(ApiResponse.success(profileService.getMyProfile(userId)));
     }
 
     /**
-     * Update current user's profile.
-     * 
      * PUT /api/v1/profile
-     * 
-     * @param request Updated profile information
-     * @return Updated user profile
+     * Update basic profile information (name, avatar, phone, gender, etc.).
      */
     @PutMapping
     public ResponseEntity<ApiResponse<UserResponse>> updateMyProfile(
             @AuthenticationPrincipal UserDetails userDetails,
             @Valid @RequestBody UpdateProfileRequest request) {
         UUID userId = extractUserId(userDetails);
-        UserResponse response = userService.updateMyProfile(userId, request);
+        UserResponse response = profileService.updateMyProfile(userId, request);
         return ResponseEntity.ok(ApiResponse.success("Cập nhật thông tin thành công", response));
     }
 
     /**
-     * Extract UUID from UserDetails.
-     * The username is expected to be the user's UUID string.
+     * GET /api/v1/profile/learning-preferences
+     * Returns learning preferences only (useful for settings screens).
      */
+    @GetMapping("/learning-preferences")
+    public ResponseEntity<ApiResponse<LearningPreferencesResponse>> getLearningPreferences(
+            @AuthenticationPrincipal UserDetails userDetails) {
+        UUID userId = extractUserId(userDetails);
+        return ResponseEntity.ok(ApiResponse.success(profileService.getLearningPreferences(userId)));
+    }
+
+    /**
+     * PUT /api/v1/profile/learning-preferences
+     * Create or update learning preferences. Only non-null fields are applied.
+     */
+    @PutMapping("/learning-preferences")
+    public ResponseEntity<ApiResponse<LearningPreferencesResponse>> updateLearningPreferences(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @Valid @RequestBody UpdateLearningPreferencesRequest request) {
+        UUID userId = extractUserId(userDetails);
+        LearningPreferencesResponse response = profileService.updateLearningPreferences(userId, request);
+        return ResponseEntity.ok(ApiResponse.success("Cập nhật tùy chỉnh học tập thành công", response));
+    }
+
     private UUID extractUserId(UserDetails userDetails) {
         return UUID.fromString(userDetails.getUsername());
     }
