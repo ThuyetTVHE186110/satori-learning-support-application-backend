@@ -5,6 +5,7 @@ import com.fu.curriculumimport.exception.InvalidImportFileException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.io.RandomAccessReadBuffer;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.ImageType;
 import org.apache.pdfbox.rendering.PDFRenderer;
@@ -60,7 +61,7 @@ public class ScannedPdfIngestionService {
     public DocumentParseResult parse(MultipartFile file) {
         log.info("Scanned-PDF ingestion start: {}", file.getOriginalFilename());
 
-        try (PDDocument document = Loader.loadPDF(file.getBytes())) {
+        try (PDDocument document = Loader.loadPDF(new RandomAccessReadBuffer(file.getInputStream()))) {
             int totalPages = document.getNumberOfPages();
             log.info("Rendering {} pages at {} DPI…", totalPages, ocrProps.getRenderDpi());
 
@@ -123,6 +124,9 @@ public class ScannedPdfIngestionService {
                     }
                     batchJpeg.clear();
                     batchPages.clear();
+                    // Hint GC to reclaim flushed BufferedImage and JPEG byte[] from this batch.
+                    // Without this, G1GC may not collect fast enough across 200+ page renders.
+                    System.gc();
                     log.debug("Batch OCR done: pages up to {} of {}", i + 1, totalPages);
                 }
             }
