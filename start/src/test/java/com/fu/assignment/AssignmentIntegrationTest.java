@@ -1035,7 +1035,7 @@ class AssignmentIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_AS_T_DL_002 — Xóa DRAFT có submission → GAP: xóa được, submission thành orphan")
+        @DisplayName("TC_AS_T_DL_002 — Xóa DRAFT có submission → 400 (HAS_SUBMISSIONS)")
         void tc_as_t_dl_002() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
             User learner = saveLearner("learner@test.com");
@@ -1048,14 +1048,12 @@ class AssignmentIntegrationTest {
             startSubmission(a.getId(), learner.getId());
             String token = loginAndGetToken("teacher@test.com");
 
-            // BUG: no guard on hasSubmissions for DRAFT delete
             MvcResult result = mockMvc.perform(delete("/api/v1/teacher/assignments/{id}", a.getId())
                             .header("Authorization", "Bearer " + token))
                     .andReturn();
 
-            assertThat(result.getResponse().getStatus()).isEqualTo(200);
-            assertThat(assignmentRepository.findByIdAndNotDeleted(a.getId())).isEmpty();
-            // Orphaned submission still in DB
+            assertThat(result.getResponse().getStatus()).isEqualTo(400);
+            assertThat(assignmentRepository.findByIdAndNotDeleted(a.getId())).isPresent();
             assertThat(submissionRepository.findByAssignmentIdAndUserIdOrderByAttemptDesc(
                     a.getId(), learner.getId())).isNotEmpty();
         }
