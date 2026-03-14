@@ -17,8 +17,10 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.jdbc.Sql;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -49,6 +51,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(classes = com.fu.StartApplication.class)
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@Transactional
+@Sql(
+        statements = "TRUNCATE TABLE user_management.users, user_management.user_sessions CASCADE",
+        executionPhase = Sql.ExecutionPhase.BEFORE_TEST_CLASS
+)
 @DisplayName("UserController — Integration Tests (PostgreSQL satori_test)")
 class UserControllerIntegrationTest {
 
@@ -92,6 +99,17 @@ class UserControllerIntegrationTest {
     }
 
     private User buildAndSaveDeletedUser(String email, UserRole role) {
+        User deleter = userRepository.save(User.builder()
+                .email("deleter-" + UUID.randomUUID() + "@test.com")
+                .passwordHash(passwordEncoder.encode("ValidPass@1"))
+                .firstName("System")
+                .lastName("Deleter")
+                .role(UserRole.ADMIN)
+                .status(UserStatus.ACTIVE)
+                .authProvider(AuthProvider.LOCAL)
+                .failedLoginAttempts(0)
+                .build());
+
         User u = User.builder()
                 .email(email)
                 .passwordHash(passwordEncoder.encode("ValidPass@1"))
@@ -104,7 +122,7 @@ class UserControllerIntegrationTest {
                 .build();
         u = userRepository.save(u);
         u.setDeletedAt(LocalDateTime.now().minusDays(1));
-        u.setDeletedBy(UUID.randomUUID());
+        u.setDeletedBy(deleter.getId());
         return userRepository.save(u);
     }
 
@@ -128,67 +146,24 @@ class UserControllerIntegrationTest {
     // =========================================================================
 
     @Nested
-    @DisplayName("Section 1 — View User List")
+    @DisplayName("Section 1 — View Account List")
     class ViewUserListTests {
 
         /**
-         * TC_UM_VUL_001 — MANAGER views user list.
-         *
-         * Test Procedure:
-         *   1. Client         → GET /api/v1/users with a valid MANAGER Bearer token.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.getUsers().
-         *   4. UserService    → retrieve the user list by MANAGER scope (TEACHER and LEARNER only).
-         *   5. UserService    → filter out ADMIN, MANAGER, and soft-deleted users.
-         *   6. System         → return the paginated user list response.
-         */
-        @Test
-        @DisplayName("TC_UM_VUL_001 — MANAGER views list → returns only TEACHER and LEARNER, no ADMIN/MANAGER/deleted")
-        void tc_vul_001_managerSeesOnlyLearnerAndTeacher() throws Exception {
-            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
-            buildAndSaveUser("teacher@test.com", UserRole.TEACHER, UserStatus.ACTIVE);
-            buildAndSaveUser("learner@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
-            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
-            buildAndSaveDeletedUser("deleted.learner@test.com", UserRole.LEARNER);
-
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-
-            MvcResult result = mockMvc.perform(get("/api/v1/users")
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andReturn();
-
-            var content = objectMapper.readTree(result.getResponse().getContentAsString())
-                    .path("data").path("content");
-
-            assertThat(content.isArray()).isTrue();
-            assertThat(content.size()).isGreaterThanOrEqualTo(2);
-
-            var emails = new java.util.ArrayList<String>();
-            for (var node : content) {
-                assertThat(node.path("role").asText()).isIn("TEACHER", "LEARNER");
-                assertThat(node.path("email").asText()).isNotEqualTo("deleted.learner@test.com");
-                emails.add(node.path("email").asText());
-            }
-            assertThat(emails).doesNotContain("manager@test.com", "admin@test.com");
-        }
-
-        /**
-         * TC_UM_VUL_002 — ADMIN views user list.
+         * TC_UM_VUL_001 — ADMIN views account list.
          *
          * Test Procedure:
          *   1. Client         → GET /api/v1/users with a valid ADMIN Bearer token.
          *   2. AuthFilter     → parse the token and resolve the user identity.
          *   3. AuthController → call UserService.getUsers().
-         *   4. UserService    → retrieve the user list by ADMIN scope (all roles, including deleted).
-         *   5. System         → return the paginated user list response.
+         *   4. UserService    → retrieve the user list by ADMIN scope (all roles, all statuses).
+         *   5. System         → return the paginated account list response.
          */
         @Test
-        @DisplayName("TC_UM_VUL_002 — ADMIN views list → sees all users including MANAGER, ADMIN, and deleted")
-        void tc_vul_002_adminSeesAllUsers() throws Exception {
+        @DisplayName("TC_UM_VUL_001 — ADMIN views list → sees all roles and deleted")
+        void tc_vul_001_adminSeesAllAccounts() throws Exception {
             buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
-            buildAndSaveUser("manager2@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
+            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
             buildAndSaveUser("teacher@test.com", UserRole.TEACHER, UserStatus.ACTIVE);
             buildAndSaveUser("learner@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
             buildAndSaveDeletedUser("deleted.learner@test.com", UserRole.LEARNER);
@@ -208,29 +183,29 @@ class UserControllerIntegrationTest {
             var roles = new java.util.ArrayList<String>();
             objectMapper.readTree(body).path("data").path("content")
                     .forEach(n -> roles.add(n.path("role").asText()));
-            assertThat(roles).contains("MANAGER", "ADMIN");
+            assertThat(roles).contains("MANAGER", "ADMIN", "TEACHER", "LEARNER");
         }
 
         /**
-         * TC_UM_VUL_003 — MANAGER filters by role.
+         * TC_UM_VUL_002 — ADMIN filters by role.
          *
          * Test Procedure:
-         *   1. Client         → GET /api/v1/users?role=TEACHER with a valid MANAGER Bearer token.
+         *   1. Client         → GET /api/v1/users?role=TEACHER with a valid ADMIN Bearer token.
          *   2. AuthFilter     → parse the token and resolve the user identity.
          *   3. AuthController → call UserService.getUsers() with role filter.
-         *   4. UserService    → retrieve the user list filtered by role=TEACHER within MANAGER scope.
-         *   5. System         → return the filtered paginated user list response.
+         *   4. UserService    → retrieve the user list filtered by role.
+         *   5. System         → return the filtered paginated account list response.
          */
         @Test
-        @DisplayName("TC_UM_VUL_003 — MANAGER filters role=TEACHER → all items are TEACHER, totalElements=2")
-        void tc_vul_003_managerFiltersTeacher() throws Exception {
-            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
+        @DisplayName("TC_UM_VUL_002 — ADMIN filters role=TEACHER → all items are TEACHER, totalElements=2")
+        void tc_vul_002_adminFiltersTeacher() throws Exception {
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             buildAndSaveUser("teacher1@test.com", UserRole.TEACHER, UserStatus.ACTIVE);
             buildAndSaveUser("teacher2@test.com", UserRole.TEACHER, UserStatus.ACTIVE);
             buildAndSaveUser("learner1@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
             buildAndSaveUser("learner2@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
 
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
             MvcResult result = mockMvc.perform(get("/api/v1/users")
                             .param("role", "TEACHER")
@@ -247,19 +222,19 @@ class UserControllerIntegrationTest {
         }
 
         /**
-         * TC_UM_VUL_004 — MANAGER searches by keyword.
+         * TC_UM_VUL_003 — ADMIN searches by keyword.
          *
          * Test Procedure:
-         *   1. Client         → GET /api/v1/users?keyword=nguyen with a valid MANAGER Bearer token.
+         *   1. Client         → GET /api/v1/users?keyword=nguyen with a valid ADMIN Bearer token.
          *   2. AuthFilter     → parse the token and resolve the user identity.
          *   3. AuthController → call UserService.getUsers() with keyword filter.
-         *   4. UserService    → retrieve the user list filtered by keyword within MANAGER scope.
-         *   5. System         → return the filtered paginated user list response.
+         *   4. UserService    → retrieve the user list filtered by keyword.
+         *   5. System         → return the filtered paginated account list response.
          */
         @Test
-        @DisplayName("TC_UM_VUL_004 — MANAGER searches keyword=nguyen → returns matching LEARNER")
-        void tc_vul_004_managerSearchByKeyword() throws Exception {
-            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
+        @DisplayName("TC_UM_VUL_003 — ADMIN searches keyword=nguyen → returns matching LEARNER")
+        void tc_vul_003_adminSearchByKeyword() throws Exception {
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             userRepository.save(User.builder()
                     .email("nguyen@test.com")
                     .passwordHash(passwordEncoder.encode("ValidPass@1"))
@@ -272,7 +247,7 @@ class UserControllerIntegrationTest {
                     .build());
             buildAndSaveUser("other.learner@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
 
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
             MvcResult result = mockMvc.perform(get("/api/v1/users")
                             .param("keyword", "nguyen")
@@ -286,7 +261,6 @@ class UserControllerIntegrationTest {
             boolean found = false;
             for (var node : content) {
                 if ("nguyen@test.com".equals(node.path("email").asText())) found = true;
-                assertThat(node.path("role").asText()).isIn("TEACHER", "LEARNER");
             }
             assertThat(found).as("Expected to find nguyen@test.com in results").isTrue();
         }
@@ -297,27 +271,14 @@ class UserControllerIntegrationTest {
     // =========================================================================
 
     @Nested
-    @DisplayName("Section 2 — Create User")
+    @DisplayName("Section 2 — Create Account")
     class CreateUserTests {
 
-        /**
-         * TC_UM_CU_001 — MANAGER creates LEARNER.
-         *
-         * Test Procedure:
-         *   1. Client         → POST /api/v1/users with a valid MANAGER Bearer token and user data.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.createUser().
-         *   4. UserService    → validate the role permission (MANAGER can create LEARNER/TEACHER).
-         *   5. UserService    → check that the email does not already exist.
-         *   6. UserService    → generate a temporary password and save the new user.
-         *   7. UserService    → send a welcome email via EmailService.
-         *   8. System         → return the created user response.
-         */
         @Test
-        @DisplayName("TC_UM_CU_001 — MANAGER creates LEARNER → 201, status=ACTIVE, email sent once")
-        void tc_cu_001_managerCreatesLearner() throws Exception {
-            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+        @DisplayName("TC_UM_CU_001 — ADMIN creates LEARNER → 201, status=ACTIVE, email sent once")
+        void tc_cu_001_adminCreatesLearner() throws Exception {
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
+            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
             CreateUserRequest req = CreateUserRequest.builder()
                     .email("newlearner@test.com")
@@ -346,19 +307,6 @@ class UserControllerIntegrationTest {
                     .sendWelcomeEmailWithCredentials(eq("newlearner@test.com"), any(), any(), any());
         }
 
-        /**
-         * TC_UM_CU_003 — ADMIN creates MANAGER.
-         *
-         * Test Procedure:
-         *   1. Client         → POST /api/v1/users with a valid ADMIN Bearer token and user data.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.createUser().
-         *   4. UserService    → validate the role permission (only ADMIN can create MANAGER).
-         *   5. UserService    → check that the email does not already exist.
-         *   6. UserService    → generate a temporary password and save the new user.
-         *   7. UserService    → send a welcome email via EmailService.
-         *   8. System         → return the created user response.
-         */
         @Test
         @DisplayName("TC_UM_CU_003 — ADMIN creates MANAGER → 201, status=ACTIVE")
         void tc_cu_003_adminCreatesManager() throws Exception {
@@ -381,23 +329,12 @@ class UserControllerIntegrationTest {
                     .andExpect(jsonPath("$.data.status").value("ACTIVE"));
         }
 
-        /**
-         * TC_UM_CU_004 — Duplicate active email.
-         *
-         * Test Procedure:
-         *   1. Client         → POST /api/v1/users with an email that already belongs to an active user.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.createUser().
-         *   4. UserService    → check that the email does not already exist.
-         *   5. UserService    → detect that the email is already in use by an active account.
-         *   6. System         → return the email exists error response.
-         */
         @Test
         @DisplayName("TC_UM_CU_004 — Duplicate active email → 400 EMAIL_EXISTS")
         void tc_cu_004_duplicateActiveEmail() throws Exception {
-            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             buildAndSaveUser("exists@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
             mockMvc.perform(post("/api/v1/users")
                             .header("Authorization", "Bearer " + token)
@@ -409,23 +346,12 @@ class UserControllerIntegrationTest {
                     .andExpect(jsonPath("$.code").value("EMAIL_EXISTS"));
         }
 
-        /**
-         * TC_UM_CU_005 — Email belongs to a soft-deleted user.
-         *
-         * Test Procedure:
-         *   1. Client         → POST /api/v1/users with an email that belongs to a soft-deleted user.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.createUser().
-         *   4. UserService    → check that the email does not already exist.
-         *   5. UserService    → detect that a deleted account exists with the same email.
-         *   6. System         → return the deleted user conflict response with the existing userId.
-         */
         @Test
         @DisplayName("TC_UM_CU_005 — Email belongs to deleted user → 409 DELETED_USER_EXISTS with userId")
         void tc_cu_005_deletedEmailConflict() throws Exception {
-            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             buildAndSaveDeletedUser("deleted@test.com", UserRole.LEARNER);
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
             mockMvc.perform(post("/api/v1/users")
                             .header("Authorization", "Bearer " + token)
@@ -440,22 +366,11 @@ class UserControllerIntegrationTest {
                     .andExpect(jsonPath("$.data.status").value("DELETED"));
         }
 
-        /**
-         * TC_UM_CU_006 — MANAGER creates MANAGER role (BR-11).
-         *
-         * Test Procedure:
-         *   1. Client         → POST /api/v1/users with role=MANAGER using a MANAGER Bearer token.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.createUser().
-         *   4. UserService    → validate the role permission.
-         *   5. UserService    → detect that MANAGER is not allowed to create MANAGER accounts (BR-11).
-         *   6. System         → return the invalid role error response.
-         */
         @Test
-        @DisplayName("TC_UM_CU_006 — MANAGER creates MANAGER role → 400 INVALID_ROLE (BR-11)")
-        void tc_cu_006_managerCannotCreateManager() throws Exception {
-            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+        @DisplayName("TC_UM_CU_006 — ADMIN creates MANAGER role → 201, status=ACTIVE")
+        void tc_cu_006_adminCreatesManagerRole() throws Exception {
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
+            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
             mockMvc.perform(post("/api/v1/users")
                             .header("Authorization", "Bearer " + token)
@@ -463,25 +378,16 @@ class UserControllerIntegrationTest {
                             .content(objectMapper.writeValueAsString(CreateUserRequest.builder()
                                     .email("mgr@test.com").firstName("New")
                                     .lastName("Mgr").role(UserRole.MANAGER).build())))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("INVALID_ROLE"));
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.data.role").value("MANAGER"))
+                    .andExpect(jsonPath("$.data.status").value("ACTIVE"));
         }
 
-        /**
-         * TC_UM_CU_007 — Blank firstName.
-         *
-         * Test Procedure:
-         *   1. Client         → POST /api/v1/users with firstName = "".
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → validate the request body.
-         *   4. AuthController → detect that firstName is blank.
-         *   5. System         → return the validation error response before reaching UserService.
-         */
         @Test
         @DisplayName("TC_UM_CU_007 — Blank firstName → 400 VALIDATION_ERROR with firstName error")
         void tc_cu_007_blankFirstName() throws Exception {
-            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
+            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
             mockMvc.perform(post("/api/v1/users")
                             .header("Authorization", "Bearer " + token)
@@ -492,21 +398,11 @@ class UserControllerIntegrationTest {
                     .andExpect(jsonPath("$.data.firstName").isNotEmpty());
         }
 
-        /**
-         * TC_UM_CU_008 — Invalid email format.
-         *
-         * Test Procedure:
-         *   1. Client         → POST /api/v1/users with an invalid email format.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → validate the request body.
-         *   4. AuthController → detect that the email format is invalid.
-         *   5. System         → return the validation error response before reaching UserService.
-         */
         @Test
         @DisplayName("TC_UM_CU_008 — Invalid email format → 400 VALIDATION_ERROR with email error")
         void tc_cu_008_invalidEmailFormat() throws Exception {
-            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
+            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
             mockMvc.perform(post("/api/v1/users")
                             .header("Authorization", "Bearer " + token)
@@ -517,15 +413,6 @@ class UserControllerIntegrationTest {
                     .andExpect(jsonPath("$.data.email").value("Invalid email format"));
         }
 
-        /**
-         * TC_UM_CU_009 — Unauthenticated request.
-         *
-         * Test Procedure:
-         *   1. Client         → POST /api/v1/users with no Authorization header.
-         *   2. AuthFilter     → detect that no token is present.
-         *   3. AuthFilter     → reject the request as unauthenticated.
-         *   4. System         → return the unauthorized error response.
-         */
         @Test
         @DisplayName("TC_UM_CU_009 — No Authorization header → 401 Unauthorized")
         void tc_cu_009_unauthenticated() throws Exception {
@@ -541,26 +428,15 @@ class UserControllerIntegrationTest {
     // =========================================================================
 
     @Nested
-    @DisplayName("Section 3 — View User Information")
+    @DisplayName("Section 3 — View Account Information")
     class ViewUserInformationTests {
 
-        /**
-         * TC_UM_VUI_001 — MANAGER views LEARNER detail.
-         *
-         * Test Procedure:
-         *   1. Client         → GET /api/v1/users/{id}/details with a valid MANAGER Bearer token.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.getUserDetail().
-         *   4. UserService    → validate that the target user is within MANAGER scope.
-         *   5. UserService    → retrieve the user profile and enrollment data.
-         *   6. System         → return the user detail response.
-         */
         @Test
-        @DisplayName("TC_UM_VUI_001 — MANAGER views LEARNER detail → 200, profile + enrollment arrays")
-        void tc_vui_001_managerViewsLearnerDetail() throws Exception {
-            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
+        @DisplayName("TC_UM_VUI_001 — ADMIN views LEARNER detail → 200, profile + enrollment arrays")
+        void tc_vui_001_adminViewsLearnerDetail() throws Exception {
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             User learner = buildAndSaveUser("learner@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
             mockMvc.perform(get("/api/v1/users/{id}/details", learner.getId())
                             .header("Authorization", "Bearer " + token))
@@ -573,29 +449,18 @@ class UserControllerIntegrationTest {
                     .andExpect(jsonPath("$.data.classEnrollments").isArray());
         }
 
-        /**
-         * TC_UM_VUI_002 — MANAGER views MANAGER detail (outside scope).
-         *
-         * Test Procedure:
-         *   1. Client         → GET /api/v1/users/{id}/details with a MANAGER token targeting another MANAGER.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.getUserDetail().
-         *   4. UserService    → validate that the target user is within MANAGER scope.
-         *   5. UserService    → detect that MANAGER is outside scope (target is also MANAGER).
-         *   6. System         → return the forbidden error response.
-         */
         @Test
-        @DisplayName("TC_UM_VUI_002 — MANAGER views MANAGER detail → 400 FORBIDDEN (outside scope)")
-        void tc_vui_002_managerViewsManagerDetail_forbidden() throws Exception {
-            buildAndSaveUser("manager1@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
-            User manager2 = buildAndSaveUser("manager2@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
-            String token = loginAndGetToken("manager1@test.com", "ValidPass@1");
+        @DisplayName("TC_UM_VUI_002 — ADMIN views MANAGER detail → 200")
+        void tc_vui_002_adminViewsManagerDetail() throws Exception {
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
+            User manager = buildAndSaveUser("manager2@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
+            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
-            mockMvc.perform(get("/api/v1/users/{id}/details", manager2.getId())
+            mockMvc.perform(get("/api/v1/users/{id}/details", manager.getId())
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.userInfo.role").value("MANAGER"));
         }
     }
 
@@ -604,24 +469,13 @@ class UserControllerIntegrationTest {
     // =========================================================================
 
     @Nested
-    @DisplayName("Section 4 — Update User Information")
+    @DisplayName("Section 4 — Update Account Information")
     class UpdateUserTests {
 
-        /**
-         * TC_UM_UU_001 — MANAGER updates LEARNER's firstName.
-         *
-         * Test Procedure:
-         *   1. Client         → PUT /api/v1/users/{id} with a valid MANAGER Bearer token and updated fields.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.updateUser().
-         *   4. UserService    → validate that the target user is within MANAGER scope.
-         *   5. UserService    → apply the updates and save to the database.
-         *   6. System         → return the updated user response.
-         */
         @Test
-        @DisplayName("TC_UM_UU_001 — MANAGER updates LEARNER firstName → 200, updated in response and DB")
-        void tc_uu_001_managerUpdatesLearnerName() throws Exception {
-            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
+        @DisplayName("TC_UM_UU_001 — ADMIN updates LEARNER firstName → 200, updated in response and DB")
+        void tc_uu_001_adminUpdatesLearnerName() throws Exception {
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             User learner = userRepository.save(User.builder()
                     .email("learner@test.com")
                     .passwordHash(passwordEncoder.encode("ValidPass@1"))
@@ -630,7 +484,7 @@ class UserControllerIntegrationTest {
                     .authProvider(AuthProvider.LOCAL).failedLoginAttempts(0)
                     .build());
 
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
             LocalDateTime beforeUpdate = LocalDateTime.now().minusSeconds(1);
 
             mockMvc.perform(put("/api/v1/users/{id}", learner.getId())
@@ -647,23 +501,12 @@ class UserControllerIntegrationTest {
             assertThat(updated.getUpdatedAt()).isAfter(beforeUpdate);
         }
 
-        /**
-         * TC_UM_UU_002 — Update with status=DELETED (BR-invalid).
-         *
-         * Test Procedure:
-         *   1. Client         → PUT /api/v1/users/{id} with status=DELETED in the request body.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.updateUser().
-         *   4. UserService    → validate that the requested status change is allowed.
-         *   5. UserService    → detect that status=DELETED is not a valid update value.
-         *   6. System         → return the invalid status error response.
-         */
         @Test
         @DisplayName("TC_UM_UU_002 — Update status=DELETED → 400 INVALID_STATUS, DB status unchanged")
         void tc_uu_002_updateDeletedStatus_returns400() throws Exception {
-            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             User learner = buildAndSaveUser("learner@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
             mockMvc.perform(put("/api/v1/users/{id}", learner.getId())
                             .header("Authorization", "Bearer " + token)
@@ -683,26 +526,15 @@ class UserControllerIntegrationTest {
     // =========================================================================
 
     @Nested
-    @DisplayName("Section 5 — Delete User")
+    @DisplayName("Section 5 — Delete Account")
     class DeleteUserTests {
 
-        /**
-         * TC_UM_DU_001 — MANAGER soft-deletes LEARNER.
-         *
-         * Test Procedure:
-         *   1. Client         → DELETE /api/v1/users/{id} with a valid MANAGER Bearer token.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.deleteUser().
-         *   4. UserService    → validate that the target user is within MANAGER scope.
-         *   5. UserService    → set deletedAt and deletedBy on the user account.
-         *   6. System         → return the success response.
-         */
         @Test
-        @DisplayName("TC_UM_DU_001 — MANAGER soft-deletes LEARNER → 200, deletedAt set, not visible in list")
-        void tc_du_001_managerSoftDeletesLearner() throws Exception {
-            User manager = buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
+        @DisplayName("TC_UM_DU_001 — ADMIN soft-deletes LEARNER → 200, deletedAt set, visible in list as DELETED")
+        void tc_du_001_adminSoftDeletesLearner() throws Exception {
+            User admin = buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             User learner = buildAndSaveUser("learner@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
             mockMvc.perform(delete("/api/v1/users/{id}", learner.getId())
                             .header("Authorization", "Bearer " + token))
@@ -713,7 +545,7 @@ class UserControllerIntegrationTest {
 
             User deleted = userRepository.findById(learner.getId()).orElseThrow();
             assertThat(deleted.getDeletedAt()).isNotNull();
-            assertThat(deleted.getDeletedBy()).isEqualTo(manager.getId());
+            assertThat(deleted.getDeletedBy()).isEqualTo(admin.getId());
             assertThat(deleted.getStatus()).isEqualTo(UserStatus.DELETED);
             assertThat(deleted.getEmail()).isEqualTo("learner@test.com");
 
@@ -721,24 +553,17 @@ class UserControllerIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk()).andReturn();
 
-            var emails = new java.util.ArrayList<String>();
-            objectMapper.readTree(listResult.getResponse().getContentAsString())
-                    .path("data").path("content")
-                    .forEach(n -> emails.add(n.path("email").asText()));
-            assertThat(emails).doesNotContain("learner@test.com");
+            boolean foundDeleted = false;
+            for (var node : objectMapper.readTree(listResult.getResponse().getContentAsString())
+                    .path("data").path("content")) {
+                if ("learner@test.com".equals(node.path("email").asText())) {
+                    foundDeleted = true;
+                    assertThat(node.path("status").asText()).isEqualTo("DELETED");
+                }
+            }
+            assertThat(foundDeleted).as("Expected deleted account to remain visible in list").isTrue();
         }
 
-        /**
-         * TC_UM_DU_002 — ADMIN soft-deletes MANAGER.
-         *
-         * Test Procedure:
-         *   1. Client         → DELETE /api/v1/users/{id} with a valid ADMIN Bearer token.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.deleteUser().
-         *   4. UserService    → validate that the target user is within ADMIN scope.
-         *   5. UserService    → set deletedAt and deletedBy on the user account.
-         *   6. System         → return the success response.
-         */
         @Test
         @DisplayName("TC_UM_DU_002 — ADMIN soft-deletes MANAGER → 200, deletedAt set, deletedBy=adminId")
         void tc_du_002_adminSoftDeletesManager() throws Exception {
@@ -756,47 +581,12 @@ class UserControllerIntegrationTest {
             assertThat(deletedManager.getDeletedBy()).isEqualTo(admin.getId());
         }
 
-        /**
-         * TC_UM_DU_003 — MANAGER deletes MANAGER account (BR-33).
-         *
-         * Test Procedure:
-         *   1. Client         → DELETE /api/v1/users/{id} with a MANAGER token targeting another MANAGER.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.deleteUser().
-         *   4. UserService    → validate that the target user is within MANAGER scope.
-         *   5. UserService    → detect that MANAGER cannot delete MANAGER accounts (BR-33).
-         *   6. System         → return the forbidden error response.
-         */
         @Test
-        @DisplayName("TC_UM_DU_003 — MANAGER deletes MANAGER account → 400 FORBIDDEN (BR-33)")
-        void tc_du_003_managerCannotDeleteManager() throws Exception {
-            buildAndSaveUser("manager1@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
-            User manager2 = buildAndSaveUser("manager2@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
-            String token = loginAndGetToken("manager1@test.com", "ValidPass@1");
-
-            mockMvc.perform(delete("/api/v1/users/{id}", manager2.getId())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
-        }
-
-        /**
-         * TC_UM_DU_004 — Delete already-deleted user (BR-34).
-         *
-         * Test Procedure:
-         *   1. Client         → DELETE /api/v1/users/{id} where the target user is already soft-deleted.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.deleteUser().
-         *   4. UserService    → attempt to retrieve the user by id.
-         *   5. UserService    → detect that the user does not exist (soft-deleted treated as not found).
-         *   6. System         → return the not found error response.
-         */
-        @Test
-        @DisplayName("TC_UM_DU_004 — Delete already-deleted user → 404 NOT_FOUND (BR-34)")
-        void tc_du_004_deleteAlreadyDeletedUser() throws Exception {
-            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
+        @DisplayName("TC_UM_DU_003 — Delete already-deleted user → 404 NOT_FOUND (BR-34)")
+        void tc_du_003_deleteAlreadyDeletedUser() throws Exception {
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             User alreadyDeleted = buildAndSaveDeletedUser("already.deleted@test.com", UserRole.LEARNER);
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
             mockMvc.perform(delete("/api/v1/users/{id}", alreadyDeleted.getId())
                             .header("Authorization", "Bearer " + token))
@@ -810,30 +600,16 @@ class UserControllerIntegrationTest {
     // =========================================================================
 
     @Nested
-    @DisplayName("Section 6 — Restore User Account")
+    @DisplayName("Section 6 — Restore Account")
     class RestoreUserTests {
 
-        /**
-         * TC_UM_RU_001 — MANAGER restores deleted LEARNER.
-         *
-         * Test Procedure:
-         *   1. Client         → POST /api/v1/users/restore with a valid MANAGER Bearer token and restore data.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.restoreUser().
-         *   4. UserService    → validate that the target user is within MANAGER scope.
-         *   5. UserService    → validate that the user is currently soft-deleted.
-         *   6. UserService    → clear deletedAt and deletedBy, set status to ACTIVE.
-         *   7. UserService    → generate a new temporary password and save.
-         *   8. UserService    → send a welcome email via EmailService.
-         *   9. System         → return the restored user response.
-         */
         @Test
-        @DisplayName("TC_UM_RU_001 — MANAGER restores deleted LEARNER → 200, ACTIVE, deletedAt=null, email sent")
-        void tc_ru_001_managerRestoresLearner() throws Exception {
-            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
+        @DisplayName("TC_UM_RU_001 — ADMIN restores deleted LEARNER → 200, ACTIVE, deletedAt=null, credentials unchanged")
+        void tc_ru_001_adminRestoresLearner() throws Exception {
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             User deleted = buildAndSaveDeletedUser("restore@test.com", UserRole.LEARNER);
             String oldPasswordHash = deleted.getPasswordHash();
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
             mockMvc.perform(post("/api/v1/users/restore")
                             .header("Authorization", "Bearer " + token)
@@ -850,26 +626,12 @@ class UserControllerIntegrationTest {
             assertThat(restored.getDeletedAt()).isNull();
             assertThat(restored.getDeletedBy()).isNull();
             assertThat(restored.getStatus()).isEqualTo(UserStatus.ACTIVE);
-            assertThat(restored.getPasswordHash()).isNotEqualTo(oldPasswordHash);
+            assertThat(restored.getPasswordHash()).isEqualTo(oldPasswordHash);
 
-            verify(emailService, times(1))
+            verify(emailService, times(0))
                     .sendWelcomeEmailWithCredentials(eq("restore@test.com"), any(), any(), any());
         }
 
-        /**
-         * TC_UM_RU_002 — ADMIN restores deleted MANAGER.
-         *
-         * Test Procedure:
-         *   1. Client         → POST /api/v1/users/restore with a valid ADMIN Bearer token and restore data.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.restoreUser().
-         *   4. UserService    → validate that the target user is within ADMIN scope.
-         *   5. UserService    → validate that the user is currently soft-deleted.
-         *   6. UserService    → clear deletedAt and deletedBy, set status to ACTIVE.
-         *   7. UserService    → generate a new temporary password and save.
-         *   8. UserService    → send a welcome email via EmailService.
-         *   9. System         → return the restored user response.
-         */
         @Test
         @DisplayName("TC_UM_RU_002 — ADMIN restores deleted MANAGER → 200, role=MANAGER, status=ACTIVE")
         void tc_ru_002_adminRestoresManager() throws Exception {
@@ -888,23 +650,12 @@ class UserControllerIntegrationTest {
                     .andExpect(jsonPath("$.data.status").value("ACTIVE"));
         }
 
-        /**
-         * TC_UM_RU_004 — Restore non-deleted user (BR-42).
-         *
-         * Test Procedure:
-         *   1. Client         → POST /api/v1/users/restore with the id of an active (non-deleted) user.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.restoreUser().
-         *   4. UserService    → validate that the user is currently soft-deleted.
-         *   5. UserService    → detect that the user is not deleted (BR-42).
-         *   6. System         → return the user not deleted error response.
-         */
         @Test
         @DisplayName("TC_UM_RU_004 — Restore active (non-deleted) user → 400 USER_NOT_DELETED (BR-42)")
         void tc_ru_004_restoreNonDeletedUser() throws Exception {
-            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             User activeLearner = buildAndSaveUser("active@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
             mockMvc.perform(post("/api/v1/users/restore")
                             .header("Authorization", "Bearer " + token)
@@ -914,34 +665,6 @@ class UserControllerIntegrationTest {
                                     .firstName("Active").lastName("Learner").role(UserRole.LEARNER).build())))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.code").value("USER_NOT_DELETED"));
-        }
-
-        /**
-         * TC_UM_RU_005 — MANAGER restores deleted MANAGER (BR-40).
-         *
-         * Test Procedure:
-         *   1. Client         → POST /api/v1/users/restore with a MANAGER token targeting a deleted MANAGER.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call UserService.restoreUser().
-         *   4. UserService    → validate that the target user is within MANAGER scope.
-         *   5. UserService    → detect that MANAGER cannot restore MANAGER accounts (BR-40).
-         *   6. System         → return the forbidden error response.
-         */
-        @Test
-        @DisplayName("TC_UM_RU_005 — MANAGER restores deleted MANAGER → 400 FORBIDDEN (BR-40)")
-        void tc_ru_005_managerCannotRestoreManager() throws Exception {
-            buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
-            User deletedMgr = buildAndSaveDeletedUser("deletedmgr@test.com", UserRole.MANAGER);
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-
-            mockMvc.perform(post("/api/v1/users/restore")
-                            .header("Authorization", "Bearer " + token)
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(objectMapper.writeValueAsString(RestoreUserRequest.builder()
-                                    .userId(deletedMgr.getId()).email("deletedmgr@test.com")
-                                    .firstName("Mgr").lastName("Test").role(UserRole.MANAGER).build())))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
         }
     }
 }

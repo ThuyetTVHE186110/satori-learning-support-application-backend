@@ -14,10 +14,10 @@ import com.fu.roleplay.ai.MissionEvaluatorAI;
 import com.fu.roleplay.ai.RoleplayAIService;
 import com.fu.roleplay.ai.SessionEvaluatorAI;
 import com.fu.roleplay.dto.response.SessionEvaluationResponse;
-import com.fu.roleplay.entity.ConversationMessage;
+import com.fu.roleplay.dto.entity.ConversationMessage;
 import com.fu.conversation.entity.ConversationMission;
-import com.fu.roleplay.entity.ConversationSession;
-import com.fu.roleplay.entity.SessionMission;
+import com.fu.roleplay.dto.entity.ConversationSession;
+import com.fu.roleplay.dto.entity.SessionMission;
 import com.fu.roleplay.repository.ConversationMessageRepository;
 import com.fu.conversation.repository.ConversationMissionRepository;
 import com.fu.roleplay.repository.ConversationSessionRepository;
@@ -170,7 +170,7 @@ class SpeakingPracticeIntegrationTest {
                 .title(title)
                 .status(status)
                 .orderIndex(orderIndex)
-                .roleplayContext(isRoleplay ? "{\"aiRole\":\"shop clerk\",\"scenario\":\"buying items\"}" : null)
+                .roleplayContext("{\"aiRole\":\"shop clerk\",\"scenario\":\"buying items\"}")
                 .jlptLevel(Course.JlptLevel.N5)
                 .build());
     }
@@ -684,7 +684,6 @@ class SpeakingPracticeIntegrationTest {
         }
 
         @Test
-        @org.junit.jupiter.api.Disabled("isRoleplay property has been removed from ConversationTopic")
         @DisplayName("TC_SP_AI_002 — start session with non-roleplay topic returns 404")
         void tc_sp_ai_002() throws Exception {
             saveLearner("learner@test.com");
