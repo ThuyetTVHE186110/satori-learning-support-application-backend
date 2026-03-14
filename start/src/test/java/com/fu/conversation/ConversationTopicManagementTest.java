@@ -422,7 +422,7 @@ class ConversationTopicManagementTest {
          * MANAGER creates topic with title only → saved with correct defaults.
          */
         @Test
-        @DisplayName("TC_CTP_CT_001 — title only → HTTP 201, defaults: difficultyScore=1, isRoleplay=true, orderIndex=0")
+        @DisplayName("TC_CTP_CT_001 — title only → HTTP 201, defaults: difficultyScore=1, orderIndex=0")
         void tc_ctp_ct_001_titleOnly_returns201_defaultsPersisted() throws Exception {
             // Arrange
             saveManager("manager@test.com");
@@ -752,7 +752,7 @@ class ConversationTopicManagementTest {
 
         /**
          * TC_CTP_UT_002
-         * MANAGER updates optional fields (difficultyScore, isRoleplay) alongside required title.
+         * MANAGER updates optional fields (difficultyScore, roleplayContext) alongside required title.
          * UI always sends title — UpdateTopicRequest requires @NotBlank on title.
          * Expected: HTTP 200, title unchanged (same value re-sent), optional fields persisted.
          *
