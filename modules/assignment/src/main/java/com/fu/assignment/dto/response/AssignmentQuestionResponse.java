@@ -23,15 +23,12 @@ public class AssignmentQuestionResponse {
     // Question fields
     private UUID questionId;
     private String questionText;
-    private String questionJapanese;
     private String questionType;
     private JsonNode options;          // JSON tree
     private String explanation;
-    private String explanationVi;
 
     private String imageUrl;
     private Course.JlptLevel jlptLevel;
-    private Integer difficultyScore;
 
     // NOTE: correctAnswer / correctAnswers are NOT returned to learners
     // They are only included when showCorrectAnswers=true and submission is graded

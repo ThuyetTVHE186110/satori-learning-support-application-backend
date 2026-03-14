@@ -1,5 +1,7 @@
 package com.fu.user.dto;
 
+import com.fu.user.entity.AuthProvider;
+import com.fu.user.entity.Gender;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
 import lombok.AllArgsConstructor;
@@ -23,7 +25,7 @@ public class UserResponse {
 
     private UUID id;
     private String email;
-    
+
     // Profile information
     private String firstName;
     private String lastName;
@@ -32,11 +34,14 @@ public class UserResponse {
     private String avatarUrl;
     private String phoneNumber;
     private LocalDate dateOfBirth;
-    
+    private Gender gender;
+
     // Account info
     private UserRole role;
     private UserStatus status;
-    
+    private AuthProvider authProvider;
+    private boolean emailVerified;
+
     // Timestamps
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

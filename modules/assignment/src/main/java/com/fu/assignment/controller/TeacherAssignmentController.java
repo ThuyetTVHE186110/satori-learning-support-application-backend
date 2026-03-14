@@ -216,8 +216,10 @@ public class TeacherAssignmentController {
      */
     @GetMapping("/{id}")
     @Operation(summary = "Get assignment details")
-    public ApiResponse<AssignmentResponse> getAssignment(@PathVariable UUID id) {
-        return ApiResponse.success(assignmentService.getAssignment(id));
+    public ApiResponse<AssignmentResponse> getAssignment(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ApiResponse.success(assignmentService.getAssignment(id, getUserId(userDetails)));
     }
 
     /**
@@ -245,12 +247,15 @@ public class TeacherAssignmentController {
      */
     @GetMapping
     @Operation(summary = "List all assignments created by current teacher")
-    public PageResponse<AssignmentSummaryResponse> getMyAssignments(
+    public ApiResponse<PageResponse<AssignmentSummaryResponse>> getMyAssignments(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String title,
+            @RequestParam(required = false) com.fu.assignment.entity.AssignmentStatus status,
+            @RequestParam(required = false) AssignmentType type,
             @AuthenticationPrincipal UserDetails userDetails) {
-        Page<AssignmentSummaryResponse> result = assignmentService.getMyAssignments(getUserId(userDetails), PageRequest.of(page - 1, size));
-        return PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages());
+        Page<AssignmentSummaryResponse> result = assignmentService.getMyAssignments(getUserId(userDetails), title, status, type, PageRequest.of(page - 1, size));
+        return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages()));
     }
 
     /**
@@ -263,12 +268,24 @@ public class TeacherAssignmentController {
      */
     @GetMapping("/class/{classId}")
     @Operation(summary = "List all assignments for a specific class")
-    public PageResponse<AssignmentSummaryResponse> getClassAssignments(
+    public ApiResponse<PageResponse<AssignmentSummaryResponse>> getClassAssignments(
             @PathVariable UUID classId,
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "10") int size) {
-        Page<AssignmentSummaryResponse> result = assignmentService.getAssignmentsByClass(classId, PageRequest.of(page - 1, size));
-        return PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages());
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String title,
+            @RequestParam(required = false) com.fu.assignment.entity.AssignmentStatus status,
+            @RequestParam(required = false) AssignmentType type,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        Page<AssignmentSummaryResponse> result = assignmentService.getAssignmentsByClass(classId, title, status, type, PageRequest.of(page - 1, size), getUserId(userDetails));
+        return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages()));
+    }
+
+    @GetMapping("/class/{classId}/statistics")
+    @Operation(summary = "Get assignment and submission statistics for a specific class")
+    public ApiResponse<ClassAssignmentStatisticsResponse> getClassStatistics(
+            @PathVariable UUID classId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ApiResponse.success(assignmentService.getClassAssignmentStatistics(classId, getUserId(userDetails)));
     }
 
 
@@ -314,12 +331,13 @@ public class TeacherAssignmentController {
      */
     @GetMapping("/{id}/submissions")
     @Operation(summary = "List all submissions for an assignment")
-    public PageResponse<SubmissionSummaryResponse> getSubmissions(
+    public ApiResponse<PageResponse<SubmissionSummaryResponse>> getSubmissions(
             @PathVariable UUID id,
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "10") int size) {
-        Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(id, PageRequest.of(page - 1, size));
-        return PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages());
+            @RequestParam(defaultValue = "10") int size,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(id, PageRequest.of(page - 1, size), getUserId(userDetails));
+        return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages()));
     }
 
     /**
@@ -330,8 +348,10 @@ public class TeacherAssignmentController {
      */
     @GetMapping("/submissions/{id}")
     @Operation(summary = "Get submission details (answers, score)")
-    public ApiResponse<SubmissionResponse> getSubmission(@PathVariable UUID id) {
-        return ApiResponse.success(assignmentService.getSubmission(id));
+    public ApiResponse<SubmissionResponse> getSubmission(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ApiResponse.success(assignmentService.getSubmission(id, getUserId(userDetails)));
     }
 
     /**

@@ -56,7 +56,7 @@ public class QuizAiGenerationService {
             FORMATTING RULES (Markdown + Ruby tags):
             ═══════════════════════════════════════════════════════════════
             
-            The fields "questionText", "questionJapanese", and "options" Use MARKDOWN for text formatting, combined with HTML <ruby><rt> tags for furigana only.
+            The fields "questionText", and "options" Use MARKDOWN for text formatting, combined with HTML <ruby><rt> tags for furigana only.
             
             ALLOWED FORMATTING:
             - Markdown: **bold**, *italic*, ____  (four underscores for blank)
@@ -64,7 +64,7 @@ public class QuizAiGenerationService {
             - Do NOT use <b>, <i>, <u>, <span> or any other HTML tags.
             
             1. FURIGANA (reading aid) — use <ruby> tags ONLY for Kanji:
-            - **MANDATORY**: EVERY SINGLE KANJI character in "questionText", "questionJapanese", and "options" MUST have furigana using <ruby> tags.
+            - **MANDATORY**: EVERY SINGLE KANJI character in "questionText", and "options" MUST have furigana using <ruby> tags.
             - **CRITICAL**: ABSOLUTELY DO NOT add furigana to Hiragana, Katakana, or any non-Kanji characters. 
             - WRONG: <ruby>いきます<rt>いきます</rt></ruby> (Hiragana only) -> Just write: いきます
             - WRONG: <ruby>ビール<rt>びーる</rt></ruby> (Katakana only) -> Just write: ビール
@@ -82,17 +82,16 @@ public class QuizAiGenerationService {
                Example: <ruby>昨日<rt>きのう</rt></ruby>、____ を <ruby>食<rt>た</rt></ruby>べました。
             
             5. Option text — options MUST use "text" for the vocabulary kanji/kana (**MANDATORY**: wrap all Kanji in <ruby> tags), and "text_reading" for the furigana interpretation (only provide text_reading if text contains Kanji).
-               Example option: {"text": "<ruby>食<rt>た</rt></ruby>べる", "text_reading": "たべる", "isCorrect": true}
-            6. explanation / explanationVi — MUST be plain text (see below).
-
+               Example option: {"text": "<ruby>食<rt>た</rt></ruby>べる", "text_reading": "たべる"}
+            6. explanation — MUST be plain text (see below).
+            
             EXPLANATION GUIDELINES (High Quality):
             - Keep the explanation concise yet comprehensive (3-5 sentences).
             - Clearly identify the grammar pattern, vocabulary meaning, or situational context used in the question.
             - Explain the logical reasoning behind the correct answer.
             - If applicable, briefly contrast the correct choice with distractors (wrong options) to prevent common student mistakes.
             - Maintain a polite, educational, and encouraging tone.
-            Example questionJapanese (multiple_choice):
-            "<ruby>昨日<rt>きのう</rt></ruby>、<ruby>友達<rt>ともだち</rt></ruby>と <ruby>映画<rt>えいが</rt></ruby>uを （____）。"
+            
             
             Example questionText (fill_blank):
             "Điền vào chỗ trống với dạng **thể て** đúng: ここで <ruby>写真<rt>しゃしん</rt></ruby>を （____） ください。"
@@ -130,10 +129,9 @@ public class QuizAiGenerationService {
             ═══════════════════════════════════════════════════════════════
             EXPLANATION RULES (MANDATORY — PLAIN TEXT ONLY):
             ═══════════════════════════════════════════════════════════════
-            - "explanation": MUST explain why the correct answer is correct. 1-2 sentences. 
+            - "explanation": MUST explain why the correct answer is correct. 1-2 sentences and must be Vietnamese. 
             - **STRICTLY PLAIN TEXT**: Do NOT use **bold**, *italic*, <ruby>, <rt>, or any other Markdown/HTML tags in these fields.
-            - "explanationVi": MUST be the Vietnamese version of the explanation.
-            - If you leave explanation or explanationVi as empty string "" or null, the question is INVALID.
+            - If you leave explanation as empty string "" or null, the question is INVALID.
             """;
 
     @Value("${spring.ai.openai.chat.options.model}")
@@ -342,37 +340,18 @@ public class QuizAiGenerationService {
         for (AiQuizQuestionDto dto : aiDtos) {
             String resolvedCorrectAnswer = resolveCorrectAnswer(dto);
             String explanation = resolveExplanation(dto, resolvedCorrectAnswer);
-            String explanationVi = resolveExplanationVi(dto, resolvedCorrectAnswer);
 
-            String optionsJson = "[]";
-            String correctAnswersJson = null;
-            try {
-                if (dto.options() != null && !dto.options().isEmpty()) {
-                    optionsJson = objectMapper.writeValueAsString(dto.options());
-                    for (JsonNode option : objectMapper.readTree(optionsJson)) {
-                        String text = option.get("text").asText();
-                        String sanitized = MarkdownUtils.stripInvalidFurigana(text);
-                        ((com.fasterxml.jackson.databind.node.ObjectNode) option).put("text", sanitized);
-                    }
-                }
-                if (dto.correctAnswers() != null && !dto.correctAnswers().isEmpty()) {
-                    correctAnswersJson = objectMapper.writeValueAsString(dto.correctAnswers());
-                }
-            } catch (Exception e) {
-                log.warn("Failed to serialize options/correctAnswers for AI output: {}", e.getMessage());
-            }
+            String optionsJson = sanitizeJson(dto.options());
+            String correctAnswersJson = sanitizeJson(dto.correctAnswers());
 
             QuizQuestion q = QuizQuestion.builder()
                     .questionText(MarkdownUtils.stripInvalidFurigana(dto.questionText()))
-                    .questionJapanese(MarkdownUtils.stripInvalidFurigana(dto.questionJapanese()))
                     .questionType(dto.questionType() != null ? dto.questionType() : "multiple_choice")
                     .options(optionsJson)
                     .correctAnswer(MarkdownUtils.stripInvalidFurigana(resolvedCorrectAnswer))
                     .correctAnswers(correctAnswersJson)
                     .explanation(MarkdownUtils.stripInvalidFurigana(explanation))
-                    .explanationVi(MarkdownUtils.stripInvalidFurigana(explanationVi))
                     .questionSubtype("STANDARD")
-                    .difficultyScore(1)
                     .jlptLevel(request.getJlptLevel())
                     .aiGenerated(true)
                     .build();
@@ -398,24 +377,49 @@ public class QuizAiGenerationService {
         }
         // Fallback
         if (correctAnswer != null) {
-            return "The correct answer is \"" + correctAnswer + "\".";
-        }
-        return "See the correct answer marked in options.";
-    }
-
-    /**
-     * Use AI-generated Vietnamese explanation, or build a fallback if empty.
-     */
-    private String resolveExplanationVi(AiQuizQuestionDto dto, String correctAnswer) {
-        if (dto.explanationVi() != null && !dto.explanationVi().isBlank()) {
-            return dto.explanationVi();
-        }
-        // Fallback
-        if (correctAnswer != null) {
             return "Đáp án đúng là \"" + correctAnswer + "\".";
         }
         return "Xem đáp án đúng được đánh dấu trong các lựa chọn.";
     }
+
+    /**
+     * Recursively sanitizes "text" fields in a JSON structure for Furigana.
+     */
+    private String sanitizeJson(Object data) {
+        if (data == null) return null;
+        try {
+            JsonNode tree = objectMapper.valueToTree(data);
+            recursivelySanitize(tree);
+            return objectMapper.writeValueAsString(tree);
+        } catch (Exception e) {
+            log.warn("Failed to sanitize JSON for AI output: {}", e.getMessage());
+            try {
+                return objectMapper.writeValueAsString(data);
+            } catch (Exception ex) {
+                return "{}";
+            }
+        }
+    }
+
+    private void recursivelySanitize(JsonNode node) {
+        if (node.isObject()) {
+            com.fasterxml.jackson.databind.node.ObjectNode obj = (com.fasterxml.jackson.databind.node.ObjectNode) node;
+            java.util.Iterator<java.util.Map.Entry<String, JsonNode>> fields = obj.fields();
+            while (fields.hasNext()) {
+                java.util.Map.Entry<String, JsonNode> field = fields.next();
+                if (field.getKey().equals("text") && field.getValue().isTextual()) {
+                    obj.put("text", MarkdownUtils.stripInvalidFurigana(field.getValue().asText()));
+                } else {
+                    recursivelySanitize(field.getValue());
+                }
+            }
+        } else if (node.isArray()) {
+            for (JsonNode element : node) {
+                recursivelySanitize(element);
+            }
+        }
+    }
+
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONTEXT EXTRACTION & PROMPT BUILDING
@@ -566,8 +570,8 @@ public class QuizAiGenerationService {
             sb.append("Target JLPT level: ").append(request.getJlptLevel()).append("\n");
         }
         sb.append("\nREMINDER:\n");
-        sb.append("- Every question MUST have non-empty 'explanation' and 'explanationVi' fields.\n");
-        sb.append("- 'questionText', 'questionJapanese', option 'text', and 'correctAnswer' MUST use <ruby>漢字<rt>reading</rt></ruby> for ALL kanji.\n");
+        sb.append("- Every question MUST have non-empty 'explanation' fields.\n");
+        sb.append("- 'questionText', option 'text', and 'correctAnswer' MUST use <ruby>漢字<rt>reading</rt></ruby> for ALL kanji.\n");
         sb.append("- Use **bold** (Markdown) for emphasis, ____ (four underscores) for blanks. Do NOT use <b>, <i>, <u> HTML tags.\n");
         return sb.toString();
     }
