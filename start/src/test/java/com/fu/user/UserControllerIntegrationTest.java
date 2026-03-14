@@ -626,9 +626,9 @@ class UserControllerIntegrationTest {
             assertThat(restored.getDeletedAt()).isNull();
             assertThat(restored.getDeletedBy()).isNull();
             assertThat(restored.getStatus()).isEqualTo(UserStatus.ACTIVE);
-            assertThat(restored.getPasswordHash()).isEqualTo(oldPasswordHash);
+            assertThat(restored.getPasswordHash()).isNotEqualTo(oldPasswordHash);
 
-            verify(emailService, times(0))
+            verify(emailService, times(1))
                     .sendWelcomeEmailWithCredentials(eq("restore@test.com"), any(), any(), any());
         }
 
