@@ -30,16 +30,6 @@ public class LearnerAssignmentResponse {
     private Boolean lateSubmissionAllowed;
     private Integer lateSubmissionPenaltyPercent;
 
-    private Integer maxScore;
-    private Integer passingScore;
-
-    private Boolean shuffleQuestions;
-    private Boolean shuffleOptions;
-    private Boolean showCorrectAnswers;
-    private Boolean allowRetry;
-    private Integer maxRetries;
-
-    private UUID lessonId;
     private String audioUrl;
     private Integer questionCount;
     private Long actualQuestionCount;

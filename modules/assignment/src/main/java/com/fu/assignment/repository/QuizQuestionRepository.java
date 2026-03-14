@@ -21,7 +21,6 @@ public interface QuizQuestionRepository extends JpaRepository<QuizQuestion, UUID
     @Query("""
             SELECT q FROM QuizQuestion q
             WHERE q.lessonId = :lessonId
-              AND q.status = com.fu.course.entity.Course.ContentStatus.PUBLISHED
             """)
     List<QuizQuestion> findPublishedByLessonId(@Param("lessonId") UUID lessonId);
 
@@ -42,7 +41,6 @@ public interface QuizQuestionRepository extends JpaRepository<QuizQuestion, UUID
     @Query("""
             SELECT q FROM QuizQuestion q
             WHERE q.jlptLevel = :jlptLevel
-              AND q.status = com.fu.course.entity.Course.ContentStatus.PUBLISHED
             """)
     Page<QuizQuestion> findPublishedByJlptLevel(@Param("jlptLevel") Course.JlptLevel jlptLevel, Pageable pageable);
 

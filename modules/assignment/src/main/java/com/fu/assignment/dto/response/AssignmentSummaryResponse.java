@@ -21,10 +21,9 @@ public class AssignmentSummaryResponse {
     private AssignmentType assignmentType;
     private AssignmentStatus status;
     private LocalDateTime dueDate;
-    private Integer maxScore;
-    private Integer passingScore;
     private Long questionCount;
     private Long submissionCount;
+    private Long ungradedCount;
     private LocalDateTime createdAt;
     private Boolean hasSubmissions;
 }

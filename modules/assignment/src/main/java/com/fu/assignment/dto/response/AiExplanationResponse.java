@@ -15,6 +15,5 @@ import lombok.NoArgsConstructor;
 public class AiExplanationResponse {
     
     private String explanation;
-    private String explanationVi;
-    
+
 }

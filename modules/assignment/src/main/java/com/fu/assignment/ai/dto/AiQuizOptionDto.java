@@ -10,9 +10,5 @@ public record AiQuizOptionDto(
 
         /** The reading of the text if it contains Kanji (e.g., "たべる"). Can be null. */
         @com.fasterxml.jackson.annotation.JsonProperty("text_reading")
-        String textReading,
-
-        /** Whether this option is the correct answer */
-        boolean isCorrect
+        String textReading
 ) {}
-

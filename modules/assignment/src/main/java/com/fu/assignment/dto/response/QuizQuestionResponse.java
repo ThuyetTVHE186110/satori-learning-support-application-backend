@@ -18,22 +18,18 @@ public class QuizQuestionResponse {
 
     private UUID id;
     private String questionText;
-    private String questionJapanese;
     private String questionType;
     private JsonNode options;
     private String correctAnswer;
     private JsonNode correctAnswers;
     private String explanation;
-    private String explanationVi;
 
     private UUID vocabularyId;
     private UUID grammarId;
     private UUID lessonId;
     private Course.JlptLevel jlptLevel;
-    private Integer difficultyScore;
     private String[] tags;
     private String imageUrl;
-    private Course.ContentStatus status;
     private UUID createdBy;
     private LocalDateTime createdAt;
 }

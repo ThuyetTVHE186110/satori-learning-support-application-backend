@@ -39,9 +39,8 @@ public class QuizExplanationService {
             2. JSON Structure:
                {
                  "explanation": "Detailed explanation in Vietnamese",
-                 "explanationVi": "Detailed explanation in Vietnamese"
                }
-            3. OUTPUT LANGUAGE: BOTH the 'explanation' and 'explanationVi' fields MUST be written in VIETNAMESE.
+            3. OUTPUT LANGUAGE:  The 'explanation' field MUST be written in VIETNAMESE.
             
             EXPLANATION GUIDELINES (High Quality):
             - Keep the explanation concise yet comprehensive (3-5 sentences).
@@ -135,7 +134,6 @@ public class QuizExplanationService {
     private String buildPrompt(QuizQuestion question) {
         return buildPromptContent(
                 question.getQuestionText(),
-                question.getQuestionJapanese(),
                 question.getQuestionType(),
                 question.getOptions(),
                 question.getCorrectAnswer(),
@@ -146,7 +144,6 @@ public class QuizExplanationService {
     private String buildPrompt(AiExplanationRequest request) {
         return buildPromptContent(
                 request.getQuestionText(),
-                request.getQuestionJapanese(),
                 request.getQuestionType(),
                 request.getOptions(),
                 request.getCorrectAnswer(),
@@ -154,12 +151,10 @@ public class QuizExplanationService {
         );
     }
 
-    private String buildPromptContent(String text, String jp, String type, String options, String ans, String ansJsonb) {
+    private String buildPromptContent(String text, String type, String options, String ans, String ansJsonb) {
         StringBuilder sb = new StringBuilder();
         sb.append("QUESTION: ").append(text).append("\n");
-        if (jp != null && !jp.isBlank()) {
-            sb.append("JAPANESE: ").append(jp).append("\n");
-        }
+
         sb.append("QUESTION TYPE: ").append(type).append("\n");
 
         if (options != null && !options.equals("[]") && !options.isBlank()) {
@@ -179,7 +174,6 @@ public class QuizExplanationService {
     private void parseAndApply(String rawResponse, QuizQuestion question) {
         AiExplanationResponse response = parseResponse(rawResponse);
         question.setExplanation(response.getExplanation());
-        question.setExplanationVi(response.getExplanationVi());
     }
 
     private AiExplanationResponse parseResponse(String rawResponse) {
@@ -188,7 +182,6 @@ public class QuizExplanationService {
             if (response != null) {
                 // Ensure plain text as per prompt rules
                 response.setExplanation(MarkdownUtils.sanitizePlainExplanation(response.getExplanation()));
-                response.setExplanationVi(MarkdownUtils.sanitizePlainExplanation(response.getExplanationVi()));
             }
             return response;
         } catch (Exception e) {
@@ -200,8 +193,7 @@ public class QuizExplanationService {
                 return new ObjectMapper().readValue(cleaned, AiExplanationResponse.class);
             } catch (Exception ex) {
                 return AiExplanationResponse.builder()
-                        .explanation(rawResponse)
-                        .explanationVi("Lỗi xử lý kết quả từ AI: " + e.getMessage())
+                        .explanation("Lỗi xử lý kết quả từ AI: " + e.getMessage())
                         .build();
             }
         }

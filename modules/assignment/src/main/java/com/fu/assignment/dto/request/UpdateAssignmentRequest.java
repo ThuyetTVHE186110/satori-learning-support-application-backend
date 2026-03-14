@@ -42,27 +42,5 @@ public class UpdateAssignmentRequest {
     @Future(message = "Due date must be in the future")
     private LocalDateTime dueDate;
 
-    private Integer timeLimitMinutes;
-
-    private Boolean lateSubmissionAllowed;
-
-    private Integer lateSubmissionPenaltyPercent;
-
-    private Integer maxScore;
-
-    private Integer passingScore;
-
-    private Boolean shuffleQuestions;
-
-    private Boolean shuffleOptions;
-
-    private Boolean showCorrectAnswers;
-
-    private Boolean allowRetry;
-
-    private Integer maxRetries;
-
-    private UUID lessonId;
-
     private Integer questionCount;
 }
