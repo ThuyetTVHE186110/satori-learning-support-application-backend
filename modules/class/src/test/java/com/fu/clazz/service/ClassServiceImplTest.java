@@ -931,6 +931,40 @@ class ClassServiceImplTest {
             }
 
             @Test
+            @DisplayName("Should demote learner to INACTIVE when removed from last active class")
+            void shouldDemoteLearnerWhenRemovedFromLastClass() {
+                // Given
+                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(classMemberRepository.findByClassIdAndUserId(classId, studentId))
+                        .willReturn(Optional.of(testMember));
+                given(classMemberRepository.countActiveByUserId(studentId)).willReturn(0L);
+                given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
+
+                // When
+                clazzService.removeMember(classId, studentId, managerId);
+
+                // Then
+                verify(userRepository).save(userCaptor.capture());
+                assertThat(userCaptor.getValue().getStatus()).isEqualTo(UserStatus.INACTIVE);
+            }
+
+            @Test
+            @DisplayName("Should NOT demote learner when they still have other active classes")
+            void shouldNotDemoteLearnerWhenStillInOtherClasses() {
+                // Given
+                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+                given(classMemberRepository.findByClassIdAndUserId(classId, studentId))
+                        .willReturn(Optional.of(testMember));
+                given(classMemberRepository.countActiveByUserId(studentId)).willReturn(1L);
+
+                // When
+                clazzService.removeMember(classId, studentId, managerId);
+
+                // Then
+                verify(userRepository, never()).save(any(User.class));
+            }
+
+            @Test
             @DisplayName("Should throw when member not found")
             void shouldThrowWhenMemberNotFound() {
                 // Given
