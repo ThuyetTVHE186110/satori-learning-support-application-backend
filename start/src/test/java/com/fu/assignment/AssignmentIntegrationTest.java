@@ -44,6 +44,8 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import com.fu.infrastructure.cloudinary.CloudinaryService;
+
 /**
  * Integration tests — Practice Task (Assignment) Management.
  * Covers all test cases in ASSIGNMENT_TEST_PROCEDURES.md.
@@ -78,6 +80,7 @@ class AssignmentIntegrationTest {
     // ── Mocked AI services (prevent real HTTP calls) ──────────────────────────
     @MockBean private QuizAiGenerationService quizAiGenerationService;
     @MockBean private QuizExplanationService quizExplanationService;
+    @MockBean private CloudinaryService cloudinaryService;
 
     // ═════════════════════════════════════════════════════════════════════════
     // HELPERS
@@ -798,6 +801,8 @@ class AssignmentIntegrationTest {
                     quizRequestJson(AssignmentStatus.DRAFT, null).getBytes());
             MockMultipartFile audioPart = new MockMultipartFile(
                     "audioFile", "test.mp3", "audio/mpeg", "dummy audio content".getBytes());
+
+            org.mockito.Mockito.when(cloudinaryService.uploadAudio(any(), any())).thenReturn("http://mock-audio-url.com/a.mp3");
 
             mockMvc.perform(multipart("/api/v1/teacher/assignments/class/{classId}/quiz", clazz.getId())
                             .file(dataPart)
@@ -2109,6 +2114,8 @@ class AssignmentIntegrationTest {
                     "{\"writtenAnswer\":\"私の答え\",\"timeSpentSeconds\":120}".getBytes());
             MockMultipartFile imagePart = new MockMultipartFile(
                     "images", "test.png", "image/png", "dummy image".getBytes());
+
+            org.mockito.Mockito.when(cloudinaryService.uploadImage(any(), any())).thenReturn("http://mock-image-url.com/img.png");
 
             mockMvc.perform(multipart("/api/v1/learner/assignments/{id}/submit-writing", a.getId())
                             .file(dataPart)
