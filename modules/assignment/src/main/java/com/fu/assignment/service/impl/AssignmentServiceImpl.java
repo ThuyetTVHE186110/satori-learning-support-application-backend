@@ -984,6 +984,9 @@ public class AssignmentServiceImpl implements AssignmentService {
         int earned = 0;
         try {
             JsonNode answersArray = objectMapper.readTree(answersJson);
+            if (answersArray == null || !answersArray.isArray()) {
+                throw new BusinessException("INVALID_JSON_FORMAT", "Định dạng JSON của câu trả lời không hợp lệ.");
+            }
             for (AssignmentQuestion aq : aqs) {
                 QuizQuestion q = questionRepository.findById(aq.getQuestionId()).orElse(null);
                 if (q == null) continue;
@@ -1002,7 +1005,14 @@ public class AssignmentServiceImpl implements AssignmentService {
                     earned += 1;
                 }
             }
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            log.error("Invalid quiz answers JSON: {}", answersJson);
+            throw new BusinessException("INVALID_JSON_FORMAT", "Định dạng JSON của câu trả lời không hợp lệ.");
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
+            log.error("Unexpected error scoring quiz", e);
+            throw new BusinessException("INTERNAL_ERROR", "Lỗi không xác định khi chấm điểm bài thi.");
         }
         int actualCount = aqs.size();
         points = actualCount > 0 ? (10.0 * earned / actualCount) : 0;
