@@ -1,5 +1,6 @@
 package com.fu.assignment.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.assignment.ai.QuizAiGenerationService;
 import com.fu.assignment.ai.QuizExplanationService;
@@ -694,7 +695,52 @@ class AssignmentServiceImplTest {
     @Nested
     @DisplayName("SubmitQuiz Tests")
     class SubmitQuizTests {
+        @Test
+        @DisplayName("Should throw INVALID_JSON_FORMAT when answers JSON is invalid")
+        void shouldThrowWhenInvalidJson() throws Exception {
+            String invalidJson = "{ invalid json ]";
+            SubmitAssignmentRequest request = SubmitAssignmentRequest.builder()
+                    .submissionId(submissionId)
+                    .answers(invalidJson)
+                    .timeSpentSeconds(60)
+                    .build();
 
+            testSubmission.setStatus(SubmissionStatus.IN_PROGRESS);
+            testSubmission.setUserId(learnerId);
+            given(submissionRepository.findById(submissionId)).willReturn(Optional.of(testSubmission));
+            given(assignmentRepository.findByIdAndNotDeleted(any())).willReturn(Optional.of(testQuizAssignment));
+
+            // Mock ObjectMapper to throw exception
+            given(objectMapper.readTree(invalidJson)).willThrow(new com.fasterxml.jackson.core.JsonParseException(null, "Invalid JSON"));
+
+            assertThatThrownBy(() -> assignmentService.submitQuiz(request, learnerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", "INVALID_JSON_FORMAT");
+        }
+
+        @Test
+        @DisplayName("Should throw INVALID_JSON_FORMAT when answers is not an array")
+        void shouldThrowWhenNotArray() throws Exception {
+            String notArrayJson = "{\"key\":\"value\"}";
+            SubmitAssignmentRequest request = SubmitAssignmentRequest.builder()
+                    .submissionId(submissionId)
+                    .answers(notArrayJson)
+                    .timeSpentSeconds(60)
+                    .build();
+
+            testSubmission.setStatus(SubmissionStatus.IN_PROGRESS);
+            testSubmission.setUserId(learnerId);
+            given(submissionRepository.findById(submissionId)).willReturn(Optional.of(testSubmission));
+            given(assignmentRepository.findByIdAndNotDeleted(any())).willReturn(Optional.of(testQuizAssignment));
+
+            JsonNode mockNode = mock(JsonNode.class);
+            given(mockNode.isArray()).willReturn(false);
+            given(objectMapper.readTree(notArrayJson)).willReturn(mockNode);
+
+            assertThatThrownBy(() -> assignmentService.submitQuiz(request, learnerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", "INVALID_JSON_FORMAT");
+        }
         @Test
         @DisplayName("Should throw when submission does not belong to learner")
         void shouldThrowWhenAccessDenied() {
@@ -917,4 +963,6 @@ class AssignmentServiceImplTest {
             assertThat(r.getLearnerSubmissionId()).isNull();
         }
     }
+
+
 }
