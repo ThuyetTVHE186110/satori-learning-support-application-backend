@@ -50,6 +50,8 @@ public abstract class AssignmentMapper {
 
     public abstract AssignmentSummaryResponse toSummaryResponse(Assignment assignment);
 
+    public abstract LearnerAssignmentSummaryResponse toLearnerSummaryResponse(Assignment assignment);
+
     public abstract AssignmentResponse toResponse(Assignment assignment);
 
     public abstract LearnerAssignmentResponse toLearnerResponse(Assignment assignment);

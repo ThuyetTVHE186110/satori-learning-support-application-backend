@@ -87,6 +87,7 @@ class AssignmentServiceImplTest {
     private Clazz testClazz;
     private AssignmentResponse testAssignmentResponse;
     private AssignmentSummaryResponse testSummaryResponse;
+    private LearnerAssignmentSummaryResponse testLearnerSummaryResponse;
     private SubmissionResponse testSubmissionResponse;
 
     @BeforeEach
@@ -154,6 +155,13 @@ class AssignmentServiceImplTest {
                 .title("Quiz Bài 1")
                 .assignmentType(AssignmentType.QUIZ)
                 .status(AssignmentStatus.DRAFT)
+                .build();
+
+        testLearnerSummaryResponse = LearnerAssignmentSummaryResponse.builder()
+                .id(assignmentId)
+                .title("Quiz Bài 1")
+                .assignmentType(AssignmentType.QUIZ)
+                .status(AssignmentStatus.PUBLISHED)
                 .build();
 
         testSubmissionResponse = SubmissionResponse.builder()
@@ -856,6 +864,57 @@ class AssignmentServiceImplTest {
             assertThat(result.getGradedSubmissions()).isEqualTo(10L);
             assertThat(result.getInProgressSubmissions()).isEqualTo(2L);
             assertThat(result.getOverdueSubmissions()).isEqualTo(1L);
+        }
+    }
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 15. GET LEARNER ASSIGNMENTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("GetLearnerAssignments Tests")
+    class GetLearnerAssignmentsTests {
+
+        @Test
+        @DisplayName("Should return learner's available assignments with submission status")
+        void shouldReturnLearnerAssignments() {
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Assignment> page = new PageImpl<>(List.of(testQuizAssignment), pageable, 1);
+            
+            given(classMemberRepository.findActiveClassIdsByUserId(learnerId)).willReturn(List.of(classId));
+            given(assignmentRepository.findAll(any(Specification.class), eq(pageable))).willReturn(page);
+            given(mapper.toLearnerSummaryResponse(testQuizAssignment)).willReturn(testLearnerSummaryResponse);
+            
+            UUID subId = UUID.randomUUID();
+            List<Object[]> statuses = Collections.singletonList(new Object[]{assignmentId, "SUBMITTED", subId});
+            given(submissionRepository.findLatestStatusByAssignmentIdsAndUserId(anyList(), eq(learnerId))).willReturn(statuses);
+
+            Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(
+                    learnerId, null, null, pageable);
+
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            LearnerAssignmentSummaryResponse r = result.getContent().get(0);
+            assertThat(r.getLearnerSubmissionStatus()).isEqualTo(SubmissionStatus.SUBMITTED);
+            assertThat(r.getLearnerSubmissionId()).isEqualTo(subId);
+        }
+
+        @Test
+        @DisplayName("Should return NOT_STARTED when no submission exists")
+        void shouldReturnNotStartedWhenNoSubmission() {
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Assignment> page = new PageImpl<>(List.of(testQuizAssignment), pageable, 1);
+            
+            given(classMemberRepository.findActiveClassIdsByUserId(learnerId)).willReturn(List.of(classId));
+            given(assignmentRepository.findAll(any(Specification.class), eq(pageable))).willReturn(page);
+            given(mapper.toLearnerSummaryResponse(testQuizAssignment)).willReturn(testLearnerSummaryResponse);
+            given(submissionRepository.findLatestStatusByAssignmentIdsAndUserId(anyList(), eq(learnerId))).willReturn(Collections.emptyList());
+
+            Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(
+                    learnerId, null, null, pageable);
+
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            LearnerAssignmentSummaryResponse r = result.getContent().get(0);
+            assertThat(r.getLearnerSubmissionStatus()).isEqualTo(SubmissionStatus.NOT_STARTED);
+            assertThat(r.getLearnerSubmissionId()).isNull();
         }
     }
 }
