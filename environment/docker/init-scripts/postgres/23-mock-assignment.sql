@@ -17,10 +17,14 @@ DECLARE
     v_writing1_id UUID := 'b0000000-0000-0000-0000-000000000002';
     v_quiz2_id    UUID := 'b0000000-0000-0000-0000-000000000003';
     v_quiz3_id    UUID := 'b0000000-0000-0000-0000-000000000004';
+    v_quiz4_id    UUID := 'b0000000-0000-0000-0000-000000000005';
+    v_writing2_id UUID := 'b0000000-0000-0000-0000-000000000006';
     
     v_q1_id       UUID := 'e0000000-0000-0000-0000-000000000001';
     v_q2_id       UUID := 'e0000000-0000-0000-0000-000000000002';
     v_q3_id       UUID := 'e0000000-0000-0000-0000-000000000003';
+    v_q4_id       UUID := 'e0000000-0000-0000-0000-000000000004';
+    v_q5_id       UUID := 'e0000000-0000-0000-0000-000000000005';
 BEGIN
 
 -- 1. Create Class (if not exists)
@@ -48,7 +52,12 @@ VALUES
  'A', 'Trợ từ "を" dùng để chỉ tân ngữ trực tiếp của động từ べんきょうします.', 'N5', v_teacher_id),
 (v_q3_id, '日本料理（にほんりょうり）は　おいしいですか？', 'true_false',
  '[{"id": "TRUE", "text": "はい"}, {"id": "FALSE", "text": "いいえ"}]'::JSONB,
- 'TRUE', 'Món ăn Nhật thường được coi là ngon.', 'N5', v_teacher_id)
+ 'TRUE', 'Món ăn Nhật thường được coi là ngon.', 'N5', v_teacher_id),
+(v_q4_id, 'Dịch sang tiếng Nhật: "Chào buổi sáng"', 'fill_blank',
+ null, 'おはようございます', 'Lời chào buổi sáng trang trọng.', 'N5', v_teacher_id),
+(v_q5_id, 'Chọn trợ từ đúng: どこ　____　いきますか。', 'multiple_choice',
+ '[{"id": "A", "text": "へ"}, {"id": "B", "text": "を"}, {"id": "C", "text": "が"}]'::JSONB,
+ 'A', 'Trợ từ "へ" chỉ phương hướng di chuyển.', 'N5', v_teacher_id)
 ON CONFLICT (id) DO NOTHING;
 
 -- 4. Create Assignments
@@ -79,6 +88,24 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
 VALUES (v_quiz3_id, 'Kiểm tra đọc hiểu N5 (Đã kết thúc)', 'Bài tập đọc hiểu Hiragana cơ bản.', 'QUIZ', v_class_id, CURRENT_TIMESTAMP - INTERVAL '1 day', 'CLOSED', TRUE, v_teacher_id)
 ON CONFLICT (id) DO NOTHING;
+ 
+-- Assignment 5: New Quiz (PUBLISHED - No Submissions)
+INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
+VALUES (v_quiz4_id, 'Kiểm tra bổ sung: Trợ từ và Chào hỏi', 'Bài tập luyện tập thêm về các trợ từ cơ bản và câu chào hỏi.', 'QUIZ', v_class_id, CURRENT_TIMESTAMP + INTERVAL '14 days', 'PUBLISHED', FALSE, v_teacher_id)
+ON CONFLICT (id) DO NOTHING;
+ 
+INSERT INTO assignment.assignment_questions (assignment_id, question_id, order_index, points)
+VALUES (v_quiz4_id, v_q4_id, 0, 5), (v_quiz4_id, v_q5_id, 1, 5)
+ON CONFLICT (assignment_id, question_id) DO NOTHING;
+ 
+-- Assignment 6: New Writing (PUBLISHED - No Submissions)
+INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
+VALUES (v_writing2_id, 'Kể về gia đình của bạn', 'Hãy viết một đoạn văn ngắn mô tả về gia đình bạn (số lượng thành viên, nghề nghiệp...).', 'WRITING', v_class_id, CURRENT_TIMESTAMP + INTERVAL '12 days', 'PUBLISHED', FALSE, v_teacher_id)
+ON CONFLICT (id) DO NOTHING;
+ 
+INSERT INTO assignment.writing_assignments (assignment_id, prompt)
+VALUES (v_writing2_id, 'Viết về gia đình bạn bằng tiếng Nhật. Sử dụng các từ vựng đã học về gia đình.')
+ON CONFLICT (assignment_id) DO NOTHING;
 
 -- 5. Create Submissions
 -- Learner 1: Graded Quiz
@@ -108,7 +135,9 @@ INSERT INTO assignment.assignment_targets (assignment_id, class_id, assigned_by)
 VALUES (v_quiz1_id, v_class_id, v_teacher_id),
        (v_writing1_id, v_class_id, v_teacher_id),
        (v_quiz2_id, v_class_id, v_teacher_id),
-       (v_quiz3_id, v_class_id, v_teacher_id)
+       (v_quiz3_id, v_class_id, v_teacher_id),
+       (v_quiz4_id, v_class_id, v_teacher_id),
+       (v_writing2_id, v_class_id, v_teacher_id)
 ON CONFLICT DO NOTHING;
 
 RAISE NOTICE 'Mock data for Assignment module seeded successfully.';

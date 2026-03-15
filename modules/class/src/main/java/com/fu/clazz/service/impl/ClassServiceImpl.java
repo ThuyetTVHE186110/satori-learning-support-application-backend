@@ -224,6 +224,19 @@ public class ClassServiceImpl implements ClassService {
         member.remove();
         classMemberRepository.save(member);
         log.info("Xóa thành viên thành công khỏi lớp học: {}", classId);
+
+        // UC-3.1: Check if the user has any remaining active class memberships
+        // If they were removed from their last class, demote role status to INACTIVE
+        long activeCount = classMemberRepository.countActiveByUserId(userId);
+        if (activeCount == 0) {
+            userRepository.findById(userId).ifPresent(user -> {
+                if (user.getRole() == UserRole.LEARNER && user.getStatus() == UserStatus.ACTIVE) {
+                    user.setStatus(UserStatus.INACTIVE);
+                    userRepository.save(user);
+                    log.info("Learner {} demoted to INACTIVE as they have no remaining active class memberships.", userId);
+                }
+            });
+        }
     }
 
     @Override

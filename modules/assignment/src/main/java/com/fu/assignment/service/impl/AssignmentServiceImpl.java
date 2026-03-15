@@ -11,6 +11,7 @@ import com.fu.assignment.exception.AssignmentNotFoundException;
 import com.fu.assignment.mapper.AssignmentMapper;
 import com.fu.assignment.repository.*;
 import com.fu.assignment.service.AssignmentService;
+import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.repository.ClassMemberRepository;
 import com.fu.clazz.repository.ClassRepository;
 import com.fu.assignment.util.MarkdownUtils;
@@ -97,7 +98,8 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         if (assignmentId == null) {
             if (classId != null) {
-                verifyTeacherAccess(classId, teacherId);
+               Clazz clazz = classRepository.findByIdAndNotDeleted(classId).orElseThrow(() -> new ResourceNotFoundException( "Không tìm thấy lớp học"));
+                verifyTeacherAccess(clazz, teacherId);
             }
             assignment = Assignment.builder().assignmentType(AssignmentType.QUIZ).classId(classId).createdBy(teacherId).createdAt(LocalDateTime.now()).hasSubmissions(false).build();
         } else {
@@ -230,7 +232,8 @@ public class AssignmentServiceImpl implements AssignmentService {
         if (assignmentId == null) {
             // -- CREATE NEW --
             if (classId != null) {
-                verifyTeacherAccess(classId, teacherId);
+                Clazz clazz = classRepository.findByIdAndNotDeleted(classId).orElseThrow(() -> new ResourceNotFoundException( "Không tìm thấy lớp học"));
+                verifyTeacherAccess(clazz, teacherId);
             }
 
 
@@ -293,7 +296,6 @@ public class AssignmentServiceImpl implements AssignmentService {
     }
 
 
-
     @Override
     @Transactional
     public void deleteAssignment(UUID assignmentId, UUID teacherId) {
@@ -314,8 +316,9 @@ public class AssignmentServiceImpl implements AssignmentService {
 
     @Override
     public Page<AssignmentSummaryResponse> getAssignmentsByClass(UUID classId, String title, com.fu.assignment.entity.AssignmentStatus status, AssignmentType type, Pageable pageable, UUID teacherId) {
+        Clazz clazz = classRepository.findByIdAndNotDeleted(classId).orElseThrow(() -> new ResourceNotFoundException( "Không tìm thấy lớp học"));
         // Teacher must be in class to see its assignments
-        verifyTeacherAccess(classId, teacherId);
+        verifyTeacherAccess(clazz, teacherId);
 
         Specification<Assignment> spec = Specification.where(AssignmentSpecification.withClassId(classId))
                 .and(AssignmentSpecification.isNotDeleted())
@@ -324,12 +327,14 @@ public class AssignmentServiceImpl implements AssignmentService {
                 .and(AssignmentSpecification.withType(type));
 
         Page<Assignment> assignments = assignmentRepository.findAll(spec, pageable);
-        return populateSummaryResponses(assignments);
+        return populateTeacherSummaryResponses(assignments);
     }
 
     @Override
     public ClassAssignmentStatisticsResponse getClassAssignmentStatistics(UUID classId, UUID teacherId) {
-        verifyTeacherAccess(classId, teacherId);
+        Clazz clazz = classRepository.findByIdAndNotDeleted(classId).orElseThrow(() -> new ResourceNotFoundException( "Không tìm thấy lớp học"));
+
+        verifyTeacherAccess(clazz, teacherId);
 
         List<Object[]> assignmentCounts = assignmentRepository.countByStatusForClass(classId);
         List<Object[]> submissionCounts = submissionRepository.countSubmissionsByStatusForClass(classId);
@@ -380,12 +385,13 @@ public class AssignmentServiceImpl implements AssignmentService {
                 .and(AssignmentSpecification.withType(type));
 
         Page<Assignment> assignments = assignmentRepository.findAll(spec, pageable);
-        return populateSummaryResponses(assignments);
+        return populateTeacherSummaryResponses(assignments);
     }
 
-    private Page<AssignmentSummaryResponse> populateSummaryResponses(Page<Assignment> assignments) {
+    private Page<AssignmentSummaryResponse> populateTeacherSummaryResponses(Page<Assignment> assignments) {
         List<UUID> ids = assignments.getContent().stream().map(Assignment::getId).toList();
         Map<UUID, Long> ungradedCounts = new HashMap<>();
+
         if (!ids.isEmpty()) {
             List<Object[]> counts = submissionRepository.countUngradedByAssignmentIds(ids);
             for (Object[] row : counts) {
@@ -400,6 +406,27 @@ public class AssignmentServiceImpl implements AssignmentService {
         });
     }
 
+    private Page<LearnerAssignmentSummaryResponse> populateLearnerSummaryResponses(Page<Assignment> assignments, UUID learnerId) {
+        List<UUID> ids = assignments.getContent().stream().map(Assignment::getId).toList();
+        Map<UUID, SubmissionStatus> learnerStatuses = new HashMap<>();
+        Map<UUID, UUID> learnerSubmissionIds = new HashMap<>();
+
+        if (!ids.isEmpty()) {
+            List<Object[]> statuses = submissionRepository.findLatestStatusByAssignmentIdsAndUserId(ids, learnerId);
+            for (Object[] row : statuses) {
+                learnerStatuses.put((UUID) row[0], SubmissionStatus.valueOf((String) row[1]));
+                learnerSubmissionIds.put((UUID) row[0], (UUID) row[2]);
+            }
+        }
+
+        return assignments.map(a -> {
+            LearnerAssignmentSummaryResponse r = mapper.toLearnerSummaryResponse(a);
+            r.setLearnerSubmissionStatus(learnerStatuses.getOrDefault(a.getId(), SubmissionStatus.NOT_STARTED));
+            r.setLearnerSubmissionId(learnerSubmissionIds.get(a.getId()));
+            return r;
+        });
+    }
+
 
     // ═══════════════════════════════════════════════════════════════════════════
     // LIFECYCLE (TEACHER)
@@ -409,24 +436,32 @@ public class AssignmentServiceImpl implements AssignmentService {
     @Override
     @Transactional
     public AssignmentResponse cloneAssignment(UUID sourceAssignmentId, CloneAssignmentRequest request, UUID teacherId) {
-        // 1. Load & verify source assignment
+        // 1. Load & verify source assignment access
         Assignment source = findAssignmentOrThrow(sourceAssignmentId);
         verifyAssignmentAccess(source, teacherId);
 
         // 2. Verify target class exists and teacher has access
-        verifyTeacherAccess(request.getTargetClassId(), teacherId);
+        UUID targetClassId = request.getTargetClassId();
+        Clazz targetClazz = classRepository.findByIdAndNotDeleted(targetClassId)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy lớp học đích"));
+        verifyTeacherAccess(targetClazz, teacherId);
 
         // 3. Build cloned assignment (new entity, DRAFT, no submissions)
-        Assignment cloned = Assignment.builder().
-                title(request.getNewTitle() != null ? request.getNewTitle() : source.getTitle())
+        Assignment cloned = Assignment.builder()
+                .title(request.getNewTitle() != null ? request.getNewTitle() : source.getTitle())
                 .description(source.getDescription())
                 .instructions(source.getInstructions())
                 .assignmentType(source.getAssignmentType())
-                .classId(request.getTargetClassId())
+                .classId(targetClassId)
                 .dueDate(request.getNewDueDate())
                 .startDate(null)
                 .questionCount(source.getQuestionCount())
-                .status(AssignmentStatus.DRAFT).hasSubmissions(false).createdBy(teacherId).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+                .status(AssignmentStatus.DRAFT)
+                .hasSubmissions(false)
+                .createdBy(teacherId)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
 
         Assignment savedClone = assignmentRepository.save(cloned);
         UUID clonedId = savedClone.getId();
@@ -527,9 +562,9 @@ public class AssignmentServiceImpl implements AssignmentService {
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Override
-    public Page<AssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, String title, AssignmentType type, Pageable pageable) {
+    public Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, String title, AssignmentType type, Pageable pageable) {
         List<UUID> classIds = classMemberRepository.findActiveClassIdsByUserId(learnerId);
-        
+
         Specification<Assignment> spec = Specification.where(AssignmentSpecification.isAvailableForLearner(learnerId, classIds))
                 .and(AssignmentSpecification.isNotDeleted())
                 .and(AssignmentSpecification.isPublishedOrClosed())
@@ -537,7 +572,7 @@ public class AssignmentServiceImpl implements AssignmentService {
                 .and(AssignmentSpecification.withType(type));
 
         Page<Assignment> assignments = assignmentRepository.findAll(spec, pageable);
-        return populateSummaryResponses(assignments);
+        return populateLearnerSummaryResponses(assignments, learnerId);
     }
 
     @Override
@@ -560,7 +595,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     @Transactional
     public SubmissionResponse startAssignment(UUID assignmentId, UUID learnerId) {
         Assignment assignment = findAssignmentOrThrow(assignmentId);
-        
+
         if (assignment.getStatus() != AssignmentStatus.PUBLISHED) {
             throw new BusinessException("ASSIGNMENT_NOT_PUBLISHED", "Bài tập này hiện không khả dụng.");
         }
@@ -718,8 +753,8 @@ public class AssignmentServiceImpl implements AssignmentService {
     }
 
     private void requireDraft(Assignment assignment) {
-        if (assignment.getStatus() != AssignmentStatus.DRAFT) {
-            throw new BusinessException("INVALID_STATUS", "Thao tác này chỉ được phép với bài tập ở trạng thái DRAFT.");
+        if (assignment.getStatus() != AssignmentStatus.DRAFT && assignment.getHasSubmissions() == Boolean.FALSE) {
+            throw new BusinessException("INVALID_STATUS", "Thao tác này chỉ được phép với bài tập ở trạng thái DRAFT và chưa có bài được nộp.");
         }
     }
 
@@ -729,15 +764,16 @@ public class AssignmentServiceImpl implements AssignmentService {
         }
     }
 
-    private void verifyTeacherAccess(UUID classId, UUID teacherId) {
-        if (classId != null && !classRepository.findByIdAndNotDeleted(classId).get().getTeacherId().equals(teacherId)) {
+    private void verifyTeacherAccess(Clazz clazz, UUID teacherId) {
+        if (clazz != null && !clazz.getTeacherId().equals(teacherId)) {
             throw new BusinessException("ACCESS_DENIED", "Bạn không phải là giáo viên của lớp này.");
         }
     }
 
     private void verifyAssignmentAccess(Assignment assignment, UUID teacherId) {
         if (assignment.getClassId() != null) {
-            verifyTeacherAccess(assignment.getClassId(), teacherId);
+            Clazz clazz = classRepository.findByIdAndNotDeleted(assignment.getClassId()).orElseThrow(() -> new ResourceNotFoundException( "Không tìm thấy lớp học chứa bài tập này."));
+            verifyTeacherAccess(clazz, teacherId);
         } else {
             verifyTeacherOwnership(assignment, teacherId);
         }
@@ -1001,7 +1037,6 @@ public class AssignmentServiceImpl implements AssignmentService {
                 throw new BusinessException("INVALID_DUE_DATE", "Bài tập đã có học viên nộp bài. Chỉ được gia hạn deadline, không được rút ngắn.");
             }
         }
-
 
 
         assignment.setTitle(request.getTitle());
