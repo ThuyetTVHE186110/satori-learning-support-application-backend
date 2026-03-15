@@ -37,7 +37,6 @@ public class SubmissionResponse {
     private Integer correctCount;
     private Integer totalQuestions;
     private String feedback;
-    private Boolean passed;             // computed: score >= assignment.passingScore
 
     private Integer timeSpentSeconds;
 
@@ -50,6 +49,8 @@ public class SubmissionResponse {
 
     // Teacher grading
     private BigDecimal teacherScore;
+    // Detailed feedback for quiz
+    private List<QuizSubmissionDetailResponse> quizDetails;
 
     private LocalDateTime createdAt;
 }

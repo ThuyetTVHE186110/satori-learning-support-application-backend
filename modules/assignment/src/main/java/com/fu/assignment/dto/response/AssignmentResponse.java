@@ -26,23 +26,10 @@ public class AssignmentResponse {
     // Timing
     private LocalDateTime startDate;
     private LocalDateTime dueDate;
-    private Integer timeLimitMinutes;
-    private Boolean lateSubmissionAllowed;
-    private Integer lateSubmissionPenaltyPercent;
 
     // Scoring
-    private Integer maxScore;
-    private Integer passingScore;
-
-    // Quiz settings
-    private Boolean shuffleQuestions;
-    private Boolean shuffleOptions;
-    private Boolean showCorrectAnswers;
-    private Boolean allowRetry;
-    private Integer maxRetries;
 
     // Content
-    private UUID lessonId;
     private String audioUrl;
     private Integer questionCount;
     private Long actualQuestionCount;   // computed from assignment_questions table

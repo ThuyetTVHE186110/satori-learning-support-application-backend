@@ -45,6 +45,7 @@ public interface UserMapper {
      * Map User entity to UserResponse.
      */
     @Mapping(target = "fullName", expression = "java(buildFullName(user))")
+    @Mapping(target = "emailVerified", expression = "java(user.getEmailVerifiedAt() != null)")
     UserResponse toResponse(User user);
 
     List<UserResponse> toResponseList(List<User> users);

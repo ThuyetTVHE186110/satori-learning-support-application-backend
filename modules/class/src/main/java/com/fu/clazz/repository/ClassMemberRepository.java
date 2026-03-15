@@ -54,4 +54,3 @@ public interface ClassMemberRepository extends JpaRepository<ClassMember, UUID> 
     @Query("SELECT m.classId FROM ClassMember m WHERE m.userId = :userId AND m.removedAt IS NULL")
     java.util.List<UUID> findActiveClassIdsByUserId(@Param("userId") UUID userId);
 }
-

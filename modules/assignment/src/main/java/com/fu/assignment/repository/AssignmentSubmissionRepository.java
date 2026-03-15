@@ -76,4 +76,26 @@ public interface AssignmentSubmissionRepository extends JpaRepository<Assignment
               AND s.status = com.fu.assignment.entity.SubmissionStatus.IN_PROGRESS
             """)
     boolean hasActiveSubmission(@Param("assignmentId") UUID assignmentId, @Param("userId") UUID userId);
+
+    /**
+     * Count ungraded submissions (SUBMITTED) for a list of assignment IDs.
+     */
+    @Query(value = "SELECT assignment_id, COUNT(*) FROM assignment.assignment_submissions " +
+            "WHERE assignment_id IN :assignmentIds AND status = 'SUBMITTED' " +
+            "GROUP BY assignment_id",
+            nativeQuery = true)
+    List<Object[]> countUngradedByAssignmentIds(@Param("assignmentIds") List<UUID> assignmentIds);
+
+    /**
+     * Get submission counts by status for all assignments in a class.
+     */
+    @Query(value = """
+            SELECT s.status, COUNT(*) 
+            FROM assignment.assignment_submissions s
+            JOIN assignment.assignments a ON a.id = s.assignment_id
+            JOIN assignment.assignment_targets t ON t.assignment_id = a.id
+            WHERE t.class_id = :classId AND a.deleted_at IS NULL
+            GROUP BY s.status
+            """, nativeQuery = true)
+    List<Object[]> countSubmissionsByStatusForClass(@Param("classId") UUID classId);
 }

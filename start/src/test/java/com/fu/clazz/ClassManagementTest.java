@@ -137,9 +137,22 @@ class ClassManagementTest {
                 .build());
     }
 
+    private Clazz saveDeletedClass(String name, UUID teacherId, UUID courseId,
+                                   boolean isActive, int maxStudents, UUID deletedBy) {
+        Clazz clazz = saveClass(name, teacherId, courseId, isActive, maxStudents);
+        clazz.setDeletedAt(LocalDateTime.now().minusHours(1));
+        clazz.setDeletedBy(deletedBy);
+        return classRepository.save(clazz);
+    }
+
     private ClassMember saveClassMember(UUID classId, UUID userId) {
         return classMemberRepository.save(ClassMember.builder()
                 .classId(classId).userId(userId).build());
+    }
+
+    private ClassMember saveClassMember(UUID classId, UUID userId, LocalDateTime joinedAt) {
+        return classMemberRepository.save(ClassMember.builder()
+                .classId(classId).userId(userId).joinedAt(joinedAt).build());
     }
 
     private ClassMember saveRemovedClassMember(UUID classId, UUID userId) {
@@ -217,6 +230,70 @@ class ClassManagementTest {
                 assertThat(item.path("name").asText()).startsWith("T1 Active");
             });
         }
+
+        @Test
+        @DisplayName("TC_CLM_VL_003 — Manager filters by keyword, teacher, active status, and course")
+        void tc_clm_vl_003() throws Exception {
+            User manager = saveManager("manager@test.com");
+            User t1 = saveTeacher("teacher1@test.com");
+            User t2 = saveTeacher("teacher2@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            Course c1 = saveCourse("Japanese N5", CourseStatus.ACTIVE);
+            Course c2 = saveCourse("Japanese N4", CourseStatus.ACTIVE);
+
+            saveClass("N5 A", t1.getId(), c1.getId(), true, 8);
+            saveClass("N5 B", t1.getId(), c1.getId(), false, 8);
+            saveClass("N5 C", t2.getId(), c1.getId(), true, 8);
+            saveClass("Other", t1.getId(), c1.getId(), true, 8);
+            saveClass("N5 D", t1.getId(), c2.getId(), true, 8);
+            saveDeletedClass("N5 Deleted", t1.getId(), c1.getId(), true, 8, manager.getId());
+
+            mockMvc.perform(get("/api/v1/classes")
+                            .param("keyword", "N5")
+                            .param("teacherId", t1.getId().toString())
+                            .param("courseId", c1.getId().toString())
+                            .param("isActive", "true")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andExpect(jsonPath("$.data.content[0].name").value("N5 A"));
+        }
+
+        @Test
+        @DisplayName("TC_CLM_VL_004 — Teacher filters by keyword and course only")
+        void tc_clm_vl_004() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            String token = loginAndGetToken("teacher@test.com", "ValidPass@1");
+            Course c1 = saveCourse("Japanese N5", CourseStatus.ACTIVE);
+            Course c2 = saveCourse("Japanese N4", CourseStatus.ACTIVE);
+
+            saveClass("Kana Basics", teacher.getId(), c1.getId(), true, 8);
+            saveClass("Kana Review", teacher.getId(), c2.getId(), true, 8);
+            saveClass("Grammar", teacher.getId(), c1.getId(), true, 8);
+            saveClass("Kana Inactive", teacher.getId(), c1.getId(), false, 8);
+
+            mockMvc.perform(get("/api/v1/classes")
+                            .param("keyword", "  Kana  ")
+                            .param("courseId", c1.getId().toString())
+                            .param("isActive", "false")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andExpect(jsonPath("$.data.content[0].name").value("Kana Basics"));
+        }
+
+        @Test
+        @DisplayName("TC_CLM_VL_005 — Empty results show no-classes message")
+        void tc_clm_vl_005() throws Exception {
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+
+            mockMvc.perform(get("/api/v1/classes")
+                            .param("keyword", "NoMatch")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.message").value("Không có lớp học nào."));
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -278,6 +355,19 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
         }
+
+        @Test
+        @DisplayName("TC_CLM_VD_004 — Class not found → 404 NOT_FOUND")
+        void tc_clm_vd_004() throws Exception {
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+
+            mockMvc.perform(get("/api/v1/classes/{classId}", UUID.randomUUID())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value("NOT_FOUND"))
+                    .andExpect(jsonPath("$.message").value("Lớp học không tồn tại."));
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -302,9 +392,10 @@ class ClassManagementTest {
             User l3 = saveLearner("learner3@test.com");
             User removed = saveLearner("removed@test.com");
 
-            saveClassMember(clazz.getId(), l1.getId());
-            saveClassMember(clazz.getId(), l2.getId());
-            saveClassMember(clazz.getId(), l3.getId());
+            LocalDateTime base = LocalDateTime.now();
+            saveClassMember(clazz.getId(), l1.getId(), base.minusDays(3));
+            saveClassMember(clazz.getId(), l2.getId(), base.minusDays(1));
+            saveClassMember(clazz.getId(), l3.getId(), base.minusDays(2));
             saveRemovedClassMember(clazz.getId(), removed.getId());
 
             MvcResult result = mockMvc.perform(get("/api/v1/classes/{classId}/members", clazz.getId())
@@ -317,12 +408,100 @@ class ClassManagementTest {
 
             String body = result.getResponse().getContentAsString(StandardCharsets.UTF_8);
             var content = objectMapper.readTree(body).path("data").path("content");
+            assertThat(content.get(0).path("email").asText()).isEqualTo("learner2@test.com");
+            assertThat(content.get(1).path("email").asText()).isEqualTo("learner3@test.com");
+            assertThat(content.get(2).path("email").asText()).isEqualTo("learner1@test.com");
             content.forEach(item -> {
                 assertThat(item.has("userId")).isTrue();
                 assertThat(item.has("fullName")).isTrue();
                 assertThat(item.has("email")).isTrue();
                 assertThat(item.path("email").asText()).isNotEqualTo("removed@test.com");
             });
+        }
+
+        @Test
+        @DisplayName("TC_CLM_VM_002 — Teacher views members of assigned class")
+        void tc_clm_vm_002() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            String token = loginAndGetToken("teacher@test.com", "ValidPass@1");
+            Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
+            Clazz clazz = saveClass("My Class", teacher.getId(), course.getId(), true, 8);
+
+            saveClassMember(clazz.getId(), saveLearner("l1@test.com").getId());
+            saveClassMember(clazz.getId(), saveLearner("l2@test.com").getId());
+
+            mockMvc.perform(get("/api/v1/classes/{classId}/members", clazz.getId())
+                            .param("page", "0").param("size", "10")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content.length()").value(2));
+        }
+
+        @Test
+        @DisplayName("TC_CLM_VM_003 — Teacher not assigned → 400 ACCESS_DENIED")
+        void tc_clm_vm_003() throws Exception {
+            User t1 = saveTeacher("teacher1@test.com");
+            User t2 = saveTeacher("teacher2@test.com");
+            String token = loginAndGetToken("teacher1@test.com", "ValidPass@1");
+            Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
+            Clazz clazz = saveClass("T2 Class", t2.getId(), course.getId(), true, 8);
+
+            mockMvc.perform(get("/api/v1/classes/{classId}/members", clazz.getId())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
+                    .andExpect(jsonPath("$.message").value("Bạn không có quyền xem thành viên của lớp học này."));
+        }
+
+        @Test
+        @DisplayName("TC_CLM_VM_004 — Class not found → 404 NOT_FOUND")
+        void tc_clm_vm_004() throws Exception {
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+
+            mockMvc.perform(get("/api/v1/classes/{classId}/members", UUID.randomUUID())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value("NOT_FOUND"))
+                    .andExpect(jsonPath("$.message").value("Lớp học không tồn tại."));
+        }
+
+        @Test
+        @DisplayName("TC_CLM_VM_005 — Empty member list shows no-learners message")
+        void tc_clm_vm_005() throws Exception {
+            saveManager("manager@test.com");
+            User teacher = saveTeacher("teacher@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
+            Clazz clazz = saveClass("Empty Class", teacher.getId(), course.getId(), true, 8);
+
+            mockMvc.perform(get("/api/v1/classes/{classId}/members", clazz.getId())
+                            .param("page", "0").param("size", "10")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.message").value("Không có học viên nào trong lớp này."));
+        }
+
+        @Test
+        @DisplayName("TC_CLM_VM_006 — Search members by keyword")
+        void tc_clm_vm_006() throws Exception {
+            saveManager("manager@test.com");
+            User teacher = saveTeacher("teacher@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
+            Clazz clazz = saveClass("Search Class", teacher.getId(), course.getId(), true, 8);
+
+            User l1 = saveLearner("alice@test.com");
+            User l2 = saveLearner("bob@test.com");
+            saveClassMember(clazz.getId(), l1.getId());
+            saveClassMember(clazz.getId(), l2.getId());
+
+            mockMvc.perform(get("/api/v1/classes/{classId}/members", clazz.getId())
+                            .param("keyword", "alice")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andExpect(jsonPath("$.data.content[0].email").value("alice@test.com"));
         }
     }
 

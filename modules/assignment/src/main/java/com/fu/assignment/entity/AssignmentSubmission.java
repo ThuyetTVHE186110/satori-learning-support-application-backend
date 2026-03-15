@@ -73,10 +73,6 @@ public class AssignmentSubmission {
 
     // ── Quiz Scoring (auto) ───────────────────────────────────────────────────
 
-    /** Auto-calculated score for QUIZ type (comparison of answers) */
-    @Column(name = "ai_auto_score", precision = 5, scale = 2)
-    private BigDecimal aiAutoScore;
-
     /** Final score (for QUIZ = aiAutoScore; for Writing/Translation = teacherScore) */
     @Column(name = "score", precision = 5, scale = 2)
     private BigDecimal score;
@@ -146,12 +142,7 @@ public class AssignmentSubmission {
     @Column(name = "updated_by")
     private UUID updatedBy;
 
-    // ── Business Logic Helpers ────────────────────────────────────────────────
 
-    public boolean isPassed(Integer passingScore) {
-        return score != null && passingScore != null
-                && score.compareTo(BigDecimal.valueOf(passingScore)) >= 0;
-    }
 
     public boolean isSubmitted() {
         return status == SubmissionStatus.SUBMITTED || status == SubmissionStatus.GRADED;

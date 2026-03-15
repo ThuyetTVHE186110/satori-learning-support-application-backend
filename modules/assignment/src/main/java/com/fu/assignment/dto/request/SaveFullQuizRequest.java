@@ -37,32 +37,6 @@ public class SaveFullQuizRequest implements AssignmentMetadataRequest {
     @Future(message = "Due date must be in the future")
     private LocalDateTime dueDate;
 
-    private Integer timeLimitMinutes;
-
-    @Builder.Default
-    private Boolean lateSubmissionAllowed = false;
-
-    @Builder.Default
-    private Integer maxScore = 100;
-
-    @Builder.Default
-    private Integer passingScore = 60;
-
-    @Builder.Default
-    private Boolean shuffleQuestions = false;
-
-    @Builder.Default
-    private Boolean shuffleOptions = false;
-
-    @Builder.Default
-    private Boolean showCorrectAnswers = true;
-
-    @Builder.Default
-    private Boolean allowRetry = false;
-
-    @Builder.Default
-    private Integer maxRetries = 1;
-
     /** 
      * Target status for the assignment.
      * Use DRAFT for "Lưu bản nháp", PUBLISHED for "Xác nhận giao bài"

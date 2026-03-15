@@ -40,18 +40,6 @@ public class SaveFullWritingRequest implements AssignmentMetadataRequest {
     @Builder.Default
     private Boolean lateSubmissionAllowed = false;
 
-    @Builder.Default
-    private Integer maxScore = 100;
-
-    @Builder.Default
-    private Integer passingScore = 60;
-
-    @Builder.Default
-    private Boolean allowRetry = false;
-
-    @Builder.Default
-    private Integer maxRetries = 1;
-
     /**
      * Target status. Use DRAFT for "Ủu bản nháp", PUBLISHED for "Xác nhận giao bài", CLOSED to close.
      * When null, existing status is preserved (no transition).
@@ -60,31 +48,18 @@ public class SaveFullWritingRequest implements AssignmentMetadataRequest {
 
     // ── Writing Content ───────────────────────────────────────────────────────
 
-    /** The assignment's main prompt / question (shown to learner) */
+    /**
+     * The assignment's main prompt / question (shown to learner)
+     */
     @NotBlank(message = "Prompt is required")
     @Size(max = 5000)
     private String prompt;
-
-    /** Japanese version of the prompt (optional) */
-    private String promptJapanese;
-
-    /** Sample/model answer (NOT shown to learner before grading) */
-    private String sampleAnswer;
-    private String sampleAnswerJapanese;
-
-    /** Min/max word constraints */
-    private Integer minWords;
-    private Integer maxWords;
-
     // ── Translation-specific ──────────────────────────────────────────────────
 
-    /** Source text to translate (only for TRANSLATION type) */
+    /**
+     * Source text to translate (only for TRANSLATION type)
+     */
     private String sourceText;
 
-    /**
-     * Translation direction (only for TRANSLATION type).
-     * Allowed values: 'JA_TO_VI' or 'VI_TO_JA'
-     */
-    private String translationDirection;
 }
 

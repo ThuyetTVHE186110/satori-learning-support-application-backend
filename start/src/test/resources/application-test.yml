@@ -30,6 +30,8 @@ spring:
             hibernate:
                 dialect: org.hibernate.dialect.PostgreSQLDialect
                 format_sql: false
+                type:
+                    preferred_enum_jdbc_type: NAMED_ENUM
         open-in-view: false
     data:
         redis:
@@ -52,7 +54,6 @@ spring:
             embedding:
                 options:
                     model: text-embedding-3-small
-
 app:
     security:
         jwt:
