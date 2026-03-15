@@ -5,6 +5,7 @@ import com.fu.assignment.dto.request.SubmitAssignmentRequest;
 import com.fu.assignment.dto.request.SubmitWritingRequest;
 import com.fu.assignment.dto.response.*;
 import com.fu.assignment.service.AssignmentService;
+import com.fu.common.exception.BusinessException;
 import com.fu.common.response.ApiResponse;
 import com.fu.common.response.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -47,6 +48,12 @@ public class LearnerAssignmentController {
             @RequestParam(required = false) String title,
             @RequestParam(required = false) com.fu.assignment.entity.AssignmentType type,
             @AuthenticationPrincipal UserDetails userDetails) {
+        if (size <= 0) {
+            throw new BusinessException("INVALID_PAGE_SIZE", "Kích thước trang phải lớn hơn 0.");
+        }
+        if (page <= 0) {
+            throw new BusinessException("INVALID_PAGE_NUMBER", "Số trang phải lớn hơn hoặc bằng 1.");
+        }
         Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(getUserId(userDetails), title, type, PageRequest.of(page - 1, size));
         return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages()));
     }
@@ -97,6 +104,12 @@ public class LearnerAssignmentController {
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int size,
             @AuthenticationPrincipal UserDetails userDetails) {
+        if (size <= 0) {
+            throw new BusinessException("INVALID_PAGE_SIZE", "Kích thước trang phải lớn hơn 0.");
+        }
+        if (page <= 0) {
+            throw new BusinessException("INVALID_PAGE_NUMBER", "Số trang phải lớn hơn hoặc bằng 1.");
+        }
         Page<SubmissionSummaryResponse> result = assignmentService.getMySubmissions(getUserId(userDetails), PageRequest.of(page - 1, size));
         return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages()));
     }
