@@ -41,13 +41,13 @@ public class LearnerAssignmentController {
 
     @GetMapping
     @Operation(summary = "List all published and closed assignments for the learner's active classes")
-    public ApiResponse<PageResponse<AssignmentSummaryResponse>> getAvailableAssignments(
+    public ApiResponse<PageResponse<LearnerAssignmentSummaryResponse>> getAvailableAssignments(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) String title,
             @RequestParam(required = false) com.fu.assignment.entity.AssignmentType type,
             @AuthenticationPrincipal UserDetails userDetails) {
-        Page<AssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(getUserId(userDetails), title, type, PageRequest.of(page - 1, size));
+        Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(getUserId(userDetails), title, type, PageRequest.of(page - 1, size));
         return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages()));
     }
 

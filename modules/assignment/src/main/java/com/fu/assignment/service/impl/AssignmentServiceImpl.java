@@ -327,7 +327,7 @@ public class AssignmentServiceImpl implements AssignmentService {
                 .and(AssignmentSpecification.withType(type));
 
         Page<Assignment> assignments = assignmentRepository.findAll(spec, pageable);
-        return populateSummaryResponses(assignments);
+        return populateTeacherSummaryResponses(assignments);
     }
 
     @Override
@@ -385,12 +385,13 @@ public class AssignmentServiceImpl implements AssignmentService {
                 .and(AssignmentSpecification.withType(type));
 
         Page<Assignment> assignments = assignmentRepository.findAll(spec, pageable);
-        return populateSummaryResponses(assignments);
+        return populateTeacherSummaryResponses(assignments);
     }
 
-    private Page<AssignmentSummaryResponse> populateSummaryResponses(Page<Assignment> assignments) {
+    private Page<AssignmentSummaryResponse> populateTeacherSummaryResponses(Page<Assignment> assignments) {
         List<UUID> ids = assignments.getContent().stream().map(Assignment::getId).toList();
         Map<UUID, Long> ungradedCounts = new HashMap<>();
+
         if (!ids.isEmpty()) {
             List<Object[]> counts = submissionRepository.countUngradedByAssignmentIds(ids);
             for (Object[] row : counts) {
@@ -401,6 +402,27 @@ public class AssignmentServiceImpl implements AssignmentService {
         return assignments.map(a -> {
             AssignmentSummaryResponse r = buildSummaryResponse(a);
             r.setUngradedCount(ungradedCounts.getOrDefault(a.getId(), 0L));
+            return r;
+        });
+    }
+
+    private Page<LearnerAssignmentSummaryResponse> populateLearnerSummaryResponses(Page<Assignment> assignments, UUID learnerId) {
+        List<UUID> ids = assignments.getContent().stream().map(Assignment::getId).toList();
+        Map<UUID, SubmissionStatus> learnerStatuses = new HashMap<>();
+        Map<UUID, UUID> learnerSubmissionIds = new HashMap<>();
+
+        if (!ids.isEmpty()) {
+            List<Object[]> statuses = submissionRepository.findLatestStatusByAssignmentIdsAndUserId(ids, learnerId);
+            for (Object[] row : statuses) {
+                learnerStatuses.put((UUID) row[0], SubmissionStatus.valueOf((String) row[1]));
+                learnerSubmissionIds.put((UUID) row[0], (UUID) row[2]);
+            }
+        }
+
+        return assignments.map(a -> {
+            LearnerAssignmentSummaryResponse r = mapper.toLearnerSummaryResponse(a);
+            r.setLearnerSubmissionStatus(learnerStatuses.getOrDefault(a.getId(), SubmissionStatus.NOT_STARTED));
+            r.setLearnerSubmissionId(learnerSubmissionIds.get(a.getId()));
             return r;
         });
     }
@@ -540,7 +562,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Override
-    public Page<AssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, String title, AssignmentType type, Pageable pageable) {
+    public Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, String title, AssignmentType type, Pageable pageable) {
         List<UUID> classIds = classMemberRepository.findActiveClassIdsByUserId(learnerId);
 
         Specification<Assignment> spec = Specification.where(AssignmentSpecification.isAvailableForLearner(learnerId, classIds))
@@ -550,7 +572,7 @@ public class AssignmentServiceImpl implements AssignmentService {
                 .and(AssignmentSpecification.withType(type));
 
         Page<Assignment> assignments = assignmentRepository.findAll(spec, pageable);
-        return populateSummaryResponses(assignments);
+        return populateLearnerSummaryResponses(assignments, learnerId);
     }
 
     @Override

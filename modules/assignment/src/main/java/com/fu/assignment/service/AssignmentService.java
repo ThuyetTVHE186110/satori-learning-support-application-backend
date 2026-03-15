@@ -87,7 +87,7 @@ public interface AssignmentService {
 
     // ── Submissions — Learner Flow ────────────────────────────────────────────
 
-    Page<AssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, String title, AssignmentType type, Pageable pageable);
+    Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, String title, AssignmentType type, Pageable pageable);
 
     LearnerAssignmentResponse getAssignmentForLearner(UUID assignmentId, UUID learnerId);
 

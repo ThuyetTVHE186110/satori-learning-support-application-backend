@@ -98,4 +98,18 @@ public interface AssignmentSubmissionRepository extends JpaRepository<Assignment
             GROUP BY s.status
             """, nativeQuery = true)
     List<Object[]> countSubmissionsByStatusForClass(@Param("classId") UUID classId);
+
+    /**
+     * Find the latest submission status and ID for a list of assignments for a specific user.
+     * Returns a list of [assignmentId, status, submissionId] arrays.
+     */
+    @Query(value = """
+            SELECT DISTINCT ON (assignment_id) assignment_id, status, id
+            FROM assignment.assignment_submissions
+            WHERE assignment_id IN :assignmentIds AND user_id = :userId
+            ORDER BY assignment_id, attempt_number DESC
+            """, nativeQuery = true)
+    List<Object[]> findLatestStatusByAssignmentIdsAndUserId(
+            @Param("assignmentIds") List<UUID> assignmentIds,
+            @Param("userId") UUID userId);
 }
