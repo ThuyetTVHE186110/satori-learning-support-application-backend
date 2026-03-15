@@ -4,6 +4,7 @@ import com.fu.assignment.dto.request.*;
 import com.fu.assignment.dto.response.*;
 import com.fu.assignment.entity.AssignmentType;
 import com.fu.assignment.service.AssignmentService;
+import com.fu.common.exception.BusinessException;
 import com.fu.common.response.ApiResponse;
 import com.fu.common.response.PageResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -50,7 +51,7 @@ public class TeacherAssignmentController {
      * Returns a <strong>preview</strong> of generated questions — nothing is saved to the database.
      * The teacher reviews and edits on the UI, then confirms via the {@code saveFullQuiz} endpoint.
      *
-     * @param request AI generation parameters (teacherPrompt, questionCount, questionTypes, etc.)
+     * @param request     AI generation parameters (teacherPrompt, questionCount, questionTypes, etc.)
      * @param userDetails the authenticated teacher
      * @return list of AI-generated quiz questions (preview only, not persisted)
      */
@@ -254,6 +255,12 @@ public class TeacherAssignmentController {
             @RequestParam(required = false) com.fu.assignment.entity.AssignmentStatus status,
             @RequestParam(required = false) AssignmentType type,
             @AuthenticationPrincipal UserDetails userDetails) {
+        if (size <= 0) {
+            throw new BusinessException("INVALID_PAGE_SIZE", "Kích thước trang phải lớn hơn 0.");
+        }
+        if (page <= 0) {
+            throw new BusinessException("INVALID_PAGE_NUMBER", "Số trang phải lớn hơn hoặc bằng 1.");
+        }
         Page<AssignmentSummaryResponse> result = assignmentService.getMyAssignments(getUserId(userDetails), title, status, type, PageRequest.of(page - 1, size));
         return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages()));
     }
@@ -276,6 +283,12 @@ public class TeacherAssignmentController {
             @RequestParam(required = false) com.fu.assignment.entity.AssignmentStatus status,
             @RequestParam(required = false) AssignmentType type,
             @AuthenticationPrincipal UserDetails userDetails) {
+        if (size <= 0) {
+            throw new BusinessException("INVALID_PAGE_SIZE", "Kích thước trang phải lớn hơn 0.");
+        }
+        if (page <= 0) {
+            throw new BusinessException("INVALID_PAGE_NUMBER", "Số trang phải lớn hơn hoặc bằng 1.");
+        }
         Page<AssignmentSummaryResponse> result = assignmentService.getAssignmentsByClass(classId, title, status, type, PageRequest.of(page - 1, size), getUserId(userDetails));
         return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages()));
     }
@@ -336,6 +349,12 @@ public class TeacherAssignmentController {
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int size,
             @AuthenticationPrincipal UserDetails userDetails) {
+        if (size <= 0) {
+            throw new BusinessException("INVALID_PAGE_SIZE", "Kích thước trang phải lớn hơn 0.");
+        }
+        if (page <= 0) {
+            throw new BusinessException("INVALID_PAGE_NUMBER", "Số trang phải lớn hơn hoặc bằng 1.");
+        }
         Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(id, PageRequest.of(page - 1, size), getUserId(userDetails));
         return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages()));
     }
