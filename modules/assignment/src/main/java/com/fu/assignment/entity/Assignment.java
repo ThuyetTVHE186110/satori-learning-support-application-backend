@@ -8,6 +8,8 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 import com.fu.infrastructure.persistence.SoftDeletableEntity;
+import org.hibernate.annotations.JdbcType;
+import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 
 /**
  * Assignment entity.
@@ -47,8 +49,8 @@ public class Assignment extends SoftDeletableEntity {
     private String instructions;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "assignment_type", nullable = false, length = 30)
-    @org.hibernate.annotations.ColumnTransformer(write = "CAST(? AS assignment_type)")
+    @JdbcType(PostgreSQLEnumJdbcType.class)
+    @Column(name = "assignment_type")
     private AssignmentType assignmentType;
 
     // ── Target ────────────────────────────────────────────────────────────────
@@ -85,9 +87,8 @@ public class Assignment extends SoftDeletableEntity {
     // ── Status ────────────────────────────────────────────────────────────────
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", length = 20)
-    @org.hibernate.annotations.ColumnTransformer(write = "CAST(? AS assignment_status)")
-    @Builder.Default
+    @JdbcType(PostgreSQLEnumJdbcType.class)
+    @Column(name = "status")
     private AssignmentStatus status = AssignmentStatus.DRAFT;
 
     /**
