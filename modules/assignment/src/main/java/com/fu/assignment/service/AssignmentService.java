@@ -54,15 +54,15 @@ public interface AssignmentService {
     AssignmentResponse saveFullWriting(UUID assignmentId, UUID classId, SaveFullWritingRequest request,
                                        AssignmentType assignmentType, UUID teacherId);
 
-    AssignmentResponse createAssignment(CreateAssignmentRequest request, UUID teacherId, UUID classId);
-
     void deleteAssignment(UUID assignmentId, UUID teacherId);
 
-    AssignmentResponse getAssignment(UUID assignmentId);
+    AssignmentResponse getAssignment(UUID assignmentId, UUID teacherId);
 
-    Page<AssignmentSummaryResponse> getAssignmentsByClass(UUID classId, Pageable pageable);
+    Page<AssignmentSummaryResponse> getAssignmentsByClass(UUID classId, String title, com.fu.assignment.entity.AssignmentStatus status, AssignmentType type, Pageable pageable, UUID teacherId);
 
-    Page<AssignmentSummaryResponse> getMyAssignments(UUID teacherId, Pageable pageable);
+    ClassAssignmentStatisticsResponse getClassAssignmentStatistics(UUID classId, UUID teacherId);
+
+    Page<AssignmentSummaryResponse> getMyAssignments(UUID teacherId, String title, com.fu.assignment.entity.AssignmentStatus status, AssignmentType type, Pageable pageable);
 
 
 
@@ -78,16 +78,16 @@ public interface AssignmentService {
 
     // ── Submissions — Teacher View ────────────────────────────────────────────
 
-    Page<SubmissionSummaryResponse> getSubmissionsByAssignment(UUID assignmentId, Pageable pageable);
+    Page<SubmissionSummaryResponse> getSubmissionsByAssignment(UUID assignmentId, Pageable pageable, UUID teacherId);
 
-    SubmissionResponse getSubmission(UUID submissionId);
+    SubmissionResponse getSubmission(UUID submissionId, UUID teacherId);
 
     /** Grade a WRITING or TRANSLATION submission */
     SubmissionResponse gradeWritingSubmission(UUID submissionId, GradeWritingRequest request, UUID teacherId);
 
     // ── Submissions — Learner Flow ────────────────────────────────────────────
 
-    Page<AssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, Pageable pageable);
+    Page<AssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, String title, AssignmentType type, Pageable pageable);
 
     LearnerAssignmentResponse getAssignmentForLearner(UUID assignmentId, UUID learnerId);
 

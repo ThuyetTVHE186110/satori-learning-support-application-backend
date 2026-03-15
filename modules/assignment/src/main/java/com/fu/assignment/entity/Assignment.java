@@ -8,17 +8,19 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 import com.fu.infrastructure.persistence.SoftDeletableEntity;
+import org.hibernate.annotations.JdbcType;
+import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 
 /**
  * Assignment entity.
  * Maps to assignment.assignments table.
- *
+ * <p>
  * Business: Assignments created by TEACHER for their class.
  * Three types: QUIZ (auto-scored), WRITING and TRANSLATION (teacher-graded).
- *
+ * <p>
  * Update policy:
- *  - hasSubmissions = false → full edit allowed (all fields)
- *  - hasSubmissions = true  → only basic info editable (title, description, instructions, dueDate, ...)
+ * - hasSubmissions = false → full edit allowed (all fields)
+ * - hasSubmissions = true  → only basic info editable (title, description, instructions, dueDate, ...)
  */
 @Entity
 @Table(name = "assignments", schema = "assignment", indexes = {
@@ -47,13 +49,15 @@ public class Assignment extends SoftDeletableEntity {
     private String instructions;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "assignment_type", nullable = false, length = 30)
-    @org.hibernate.annotations.ColumnTransformer(write = "CAST(? AS assignment_type)")
+    @JdbcType(PostgreSQLEnumJdbcType.class)
+    @Column(name = "assignment_type")
     private AssignmentType assignmentType;
 
     // ── Target ────────────────────────────────────────────────────────────────
 
-    /** The class this assignment belongs to. Set by teacher at creation. */
+    /**
+     * The class this assignment belongs to. Set by teacher at creation.
+     */
     @Column(name = "class_id")
     private UUID classId;
 
@@ -65,55 +69,9 @@ public class Assignment extends SoftDeletableEntity {
     @Column(name = "due_date", nullable = false)
     private LocalDateTime dueDate;
 
-    /** NULL = no time limit */
-    @Column(name = "time_limit_minutes")
-    private Integer timeLimitMinutes;
-
-    @Column(name = "late_submission_allowed")
-    @Builder.Default
-    private Boolean lateSubmissionAllowed = false;
-
-    @Column(name = "late_submission_penalty_percent")
-    @Builder.Default
-    private Integer lateSubmissionPenaltyPercent = 0;
-
     // ── Scoring ───────────────────────────────────────────────────────────────
 
-    @Column(name = "max_score")
-    @Builder.Default
-    private Integer maxScore = 100;
-
-    @Column(name = "passing_score")
-    @Builder.Default
-    private Integer passingScore = 60;
-
     // ── Quiz Settings (only for QUIZ type) ───────────────────────────────────
-
-    @Column(name = "shuffle_questions")
-    @Builder.Default
-    private Boolean shuffleQuestions = false;
-
-    @Column(name = "shuffle_options")
-    @Builder.Default
-    private Boolean shuffleOptions = false;
-
-    /** Show correct answers after submission */
-    @Column(name = "show_correct_answers")
-    @Builder.Default
-    private Boolean showCorrectAnswers = true;
-
-    @Column(name = "allow_retry")
-    @Builder.Default
-    private Boolean allowRetry = false;
-
-    @Column(name = "max_retries")
-    @Builder.Default
-    private Integer maxRetries = 1;
-
-    // ── Content Reference ─────────────────────────────────────────────────────
-
-    @Column(name = "lesson_id")
-    private UUID lessonId;
 
     /**
      * Optional background/listening audio for the entire assignment.
@@ -129,9 +87,8 @@ public class Assignment extends SoftDeletableEntity {
     // ── Status ────────────────────────────────────────────────────────────────
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", length = 20)
-    @org.hibernate.annotations.ColumnTransformer(write = "CAST(? AS assignment_status)")
-    @Builder.Default
+    @JdbcType(PostgreSQLEnumJdbcType.class)
+    @Column(name = "status")
     private AssignmentStatus status = AssignmentStatus.DRAFT;
 
     /**

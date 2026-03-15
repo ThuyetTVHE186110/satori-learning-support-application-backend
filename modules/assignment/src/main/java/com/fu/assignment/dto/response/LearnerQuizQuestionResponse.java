@@ -22,10 +22,8 @@ public class LearnerQuizQuestionResponse {
 
     private UUID questionId;
     private String questionText;
-    private String questionJapanese;
     private String questionType;
     private JsonNode options;
     private String imageUrl;
     private Course.JlptLevel jlptLevel;
-    private Integer difficultyScore;
 }

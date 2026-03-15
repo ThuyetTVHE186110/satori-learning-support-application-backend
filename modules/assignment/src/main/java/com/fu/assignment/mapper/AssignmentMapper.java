@@ -56,19 +56,12 @@ public abstract class AssignmentMapper {
 
     // ── QuizQuestion ──────────────────────────────────────────────────────────
 
-    @Mapping(target = "id", ignore = true)
-    @Mapping(target = "status", ignore = true)
-    @Mapping(target = "createdBy", ignore = true)
-    @Mapping(target = "createdAt", ignore = true)
-    @Mapping(target = "updatedAt", ignore = true)
-    public abstract QuizQuestion toEntity(CreateQuizQuestionRequest request);
 
     @Mapping(target = "options", expression = "java(toJsonNode(question.getOptions()))")
     @Mapping(target = "correctAnswers", expression = "java(toJsonNode(question.getCorrectAnswers()))")
     public abstract QuizQuestionResponse toResponse(QuizQuestion question);
 
-    @Mapping(target = "options", expression = "java(toLearnerOptions(question.getOptions()))")
-    public abstract LearnerQuizQuestionResponse toLearnerQuestionResponse(QuizQuestion question);
+
 
     @Mapping(target = "assignmentQuestionId", ignore = true)
     @Mapping(target = "orderIndex", ignore = true)
@@ -82,7 +75,7 @@ public abstract class AssignmentMapper {
     @Mapping(target = "orderIndex", ignore = true)
     @Mapping(target = "points", ignore = true)
     @Mapping(source = "id", target = "questionId")
-    @Mapping(target = "options", expression = "java(toLearnerOptions(question.getOptions()))")
+    @Mapping(target = "options", expression = "java(toJsonNode(question.getOptions()))")
     public abstract LearnerQuizQuestionResponse toLearnerAssignmentQuestionResponse(QuizQuestion question);
 
     // ── AssignmentSubmission ──────────────────────────────────────────────────
@@ -92,9 +85,7 @@ public abstract class AssignmentMapper {
 
     public abstract SubmissionSummaryResponse toSummaryResponse(AssignmentSubmission submission);
 
-    // ── AssignmentTarget ──────────────────────────────────────────────────────
 
-    public abstract AssignmentTargetResponse toResponse(AssignmentTarget target);
 
     // ── WritingAssignment ─────────────────────────────────────────────────────
 
@@ -111,23 +102,5 @@ public abstract class AssignmentMapper {
         }
     }
 
-    /**
-     * Converts options JSON string to JsonNode for learners, stripping the "isCorrect" field.
-     */
-    protected JsonNode toLearnerOptions(String json) {
-        if (json == null || json.isBlank()) return null;
-        try {
-            JsonNode root = objectMapper.readTree(json);
-            if (root.has("options") && root.get("options").isArray()) {
-                for (JsonNode optionNode : root.get("options")) {
-                    if (optionNode instanceof com.fasterxml.jackson.databind.node.ObjectNode obj) {
-                        obj.remove("isCorrect");
-                    }
-                }
-            }
-            return root;
-        } catch (Exception e) {
-            return null;
-        }
-    }
+
 }

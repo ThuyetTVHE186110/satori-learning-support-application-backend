@@ -1,5 +1,6 @@
 package com.fu.assignment.controller;
 
+import com.cloudinary.Api;
 import com.fu.assignment.dto.request.SubmitAssignmentRequest;
 import com.fu.assignment.dto.request.SubmitWritingRequest;
 import com.fu.assignment.dto.response.*;
@@ -39,13 +40,15 @@ public class LearnerAssignmentController {
     // ═══════════════════════════════════════════════════════════════════════════
 
     @GetMapping
-    @Operation(summary = "List all published assignments for the learner's active classes")
-    public PageResponse<AssignmentSummaryResponse> getAvailableAssignments(
+    @Operation(summary = "List all published and closed assignments for the learner's active classes")
+    public ApiResponse<PageResponse<AssignmentSummaryResponse>> getAvailableAssignments(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String title,
+            @RequestParam(required = false) com.fu.assignment.entity.AssignmentType type,
             @AuthenticationPrincipal UserDetails userDetails) {
-        Page<AssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(getUserId(userDetails), PageRequest.of(page - 1, size));
-        return PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages());
+        Page<AssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(getUserId(userDetails), title, type, PageRequest.of(page - 1, size));
+        return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages()));
     }
 
     @GetMapping("/{id}")
@@ -81,7 +84,7 @@ public class LearnerAssignmentController {
             @RequestPart(value = "data") SubmitWritingRequest request,
             @RequestPart(value = "images", required = false) MultipartFile[] images,
             @AuthenticationPrincipal UserDetails userDetails) {
-        return ApiResponse.success(assignmentService.submitWriting(id,request, images, getUserId(userDetails)));
+        return ApiResponse.success(assignmentService.submitWriting(id, request, images, getUserId(userDetails)));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -90,12 +93,12 @@ public class LearnerAssignmentController {
 
     @GetMapping("/submissions")
     @Operation(summary = "List all submissions made by the learner")
-    public PageResponse<SubmissionSummaryResponse> getMySubmissions(
+    public ApiResponse<PageResponse<SubmissionSummaryResponse>> getMySubmissions(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int size,
             @AuthenticationPrincipal UserDetails userDetails) {
         Page<SubmissionSummaryResponse> result = assignmentService.getMySubmissions(getUserId(userDetails), PageRequest.of(page - 1, size));
-        return PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages());
+        return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages()));
     }
 
     @GetMapping("/submissions/{id}")

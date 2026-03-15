@@ -18,7 +18,7 @@ import java.util.UUID;
 @AllArgsConstructor
 public class QuizQuestionDraftDto {
 
-    /** 
+    /**
      * If null, this is a newly created question on the form.
      * If set, this is an existing question being updated/kept.
      */
@@ -26,8 +26,6 @@ public class QuizQuestionDraftDto {
 
     @NotBlank(message = "Question text is required")
     private String questionText;
-
-    private String questionJapanese;
 
     @NotBlank(message = "Question type is required")
     private String questionType;
@@ -44,14 +42,10 @@ public class QuizQuestionDraftDto {
 
 
     private String explanation;
-    private String explanationVi;
-
     private String imageUrl;
 
     private Course.JlptLevel jlptLevel;
-    
-    @Builder.Default
-    private Integer difficultyScore = 1;
+
 
     // ── Mapping fields for the Assignment ──────────────────────
 

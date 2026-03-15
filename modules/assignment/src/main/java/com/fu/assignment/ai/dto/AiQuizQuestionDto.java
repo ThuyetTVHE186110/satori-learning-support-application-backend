@@ -17,8 +17,6 @@ public record AiQuizQuestionDto(
         /** Question text in Vietnamese or English */
         String questionText,
 
-        /** Question text in Japanese (null if not applicable) */
-        String questionJapanese,
 
         /** Question type: "multiple_choice", "fill_blank", "true_false", "matching", "ordering" */
         String questionType,
@@ -37,9 +35,8 @@ public record AiQuizQuestionDto(
         /** Correct answers JSON object for matching/multi-select — e.g., {"pairs": [{"left": "1", "right": "A"}]} */
         Map<String, Object> correctAnswers,
 
-        /** Brief explanation of the correct answer (1-2 sentences, English/Japanese) */
-        String explanation,
+        /** Brief explanation of the correct answer (1-2 sentences, Vietnamese) */
+        String explanation
 
-        /** Brief explanation in Vietnamese */
-        String explanationVi
+
 ) {}

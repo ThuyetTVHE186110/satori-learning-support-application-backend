@@ -58,8 +58,35 @@ class MarkdownUtilsTest {
     void stripInvalidFurigana_Valid() {
         String input = "<ruby>学校<rt>がっこう</rt></ruby>";
         String result = MarkdownUtils.sanitizeAndValidate(input);
-        
+
         assertThat(result).isEqualTo("<ruby>学校<rt>がっこう</rt></ruby>");
+    }
+
+    @Test
+    @DisplayName("should shrink ruby tag from the end")
+    void stripInvalidFurigana_ShrinkEnd() {
+        String input = "<ruby>行きませんでした<rt>いきませんでした</rt></ruby>";
+        String result = MarkdownUtils.sanitizeAndValidate(input);
+
+        assertThat(result).isEqualTo("<ruby>行<rt>い</rt></ruby>きませんでした");
+    }
+
+    @Test
+    @DisplayName("should shrink ruby tag from the beginning")
+    void stripInvalidFurigana_ShrinkStart() {
+        String input = "<ruby>お弁当<rt>おべんとう</rt></ruby>";
+        String result = MarkdownUtils.sanitizeAndValidate(input);
+
+        assertThat(result).isEqualTo("お<ruby>弁当<rt>べんとう</rt></ruby>");
+    }
+
+    @Test
+    @DisplayName("should shrink ruby tag from both ends")
+    void stripInvalidFurigana_ShrinkBoth() {
+        String input = "<ruby>ご飯を食べる<rt>ごはんをたべる</rt></ruby>";
+        String result = MarkdownUtils.sanitizeAndValidate(input);
+
+        assertThat(result).isEqualTo("ご<ruby>飯を食<rt>はんをた</rt></ruby>べる");
     }
 
     @Test

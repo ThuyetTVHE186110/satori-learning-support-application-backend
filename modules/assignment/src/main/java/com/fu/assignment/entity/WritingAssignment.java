@@ -40,30 +40,8 @@ public class WritingAssignment {
     @Column(name = "prompt", nullable = false, columnDefinition = "TEXT")
     private String prompt;
 
-    /** Đề bài tiếng Nhật (nếu muốn hiển thị song ngữ) */
-    @Column(name = "prompt_japanese", columnDefinition = "TEXT")
-    private String promptJapanese;
-
-    // ── Sample Answer (hidden from learner) ───────────────────────────────────
-
-    @Column(name = "sample_answer", columnDefinition = "TEXT")
-    private String sampleAnswer;
-
-    @Column(name = "sample_answer_japanese", columnDefinition = "TEXT")
-    private String sampleAnswerJapanese;
-
-    // ── Word / Length Constraints ─────────────────────────────────────────────
-
-    /** Số từ tối thiểu */
-    @Column(name = "min_words")
-    private Integer minWords;
-
-    /** Số từ tối đa */
-    @Column(name = "max_words")
-    private Integer maxWords;
 
     // ── Translation-specific (only for TRANSLATION type) ──────────────────────
-
     /**
      * Đoạn văn cần dịch (chỉ dùng cho TRANSLATION).
      * Learner đọc đoạn này và dịch sang chiều translation_direction.
@@ -71,15 +49,8 @@ public class WritingAssignment {
     @Column(name = "source_text", columnDefinition = "TEXT")
     private String sourceText;
 
-    /**
-     * Chiều dịch: JA_TO_VI (Nhật → Việt) hoặc VI_TO_JA (Việt → Nhật).
-     * Chỉ 2 giá trị hợp lệ, được validate ở service layer.
-     */
-    @Column(name = "translation_direction", length = 10)
-    private String translationDirection;
 
     // ── Audit ─────────────────────────────────────────────────────────────────
-
     @Column(name = "created_at", updatable = false)
     @Builder.Default
     private LocalDateTime createdAt = LocalDateTime.now();

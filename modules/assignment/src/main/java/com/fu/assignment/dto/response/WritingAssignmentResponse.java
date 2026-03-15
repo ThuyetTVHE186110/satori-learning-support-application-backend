@@ -18,12 +18,6 @@ public class WritingAssignmentResponse {
     private UUID id;
     private UUID assignmentId;
     private String prompt;
-    private String promptJapanese;
-    private String sampleAnswer;          // Hidden from learner before grading
-    private String sampleAnswerJapanese;
-    private Integer minWords;
-    private Integer maxWords;
     private String sourceText;            // For TRANSLATION: the passage to translate
-    private String translationDirection;  // 'JA_TO_VI' or 'VI_TO_JA'
     private LocalDateTime createdAt;
 }

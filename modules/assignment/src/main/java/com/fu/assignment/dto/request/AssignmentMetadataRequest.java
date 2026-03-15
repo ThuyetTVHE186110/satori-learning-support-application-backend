@@ -20,18 +20,6 @@ public interface AssignmentMetadataRequest {
 
     LocalDateTime getDueDate();
 
-    Integer getTimeLimitMinutes();
-
-    Boolean getLateSubmissionAllowed();
-
-    Integer getMaxScore();
-
-    Integer getPassingScore();
-
-    Boolean getAllowRetry();
-
-    Integer getMaxRetries();
-
     /**
      * Target status. Returns null when the field is not set (status unchanged).
      */
