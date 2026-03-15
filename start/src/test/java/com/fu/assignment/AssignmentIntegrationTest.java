@@ -1127,6 +1127,33 @@ class AssignmentIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.title").value("Updated Translation"));
         }
+
+        @Test
+        @DisplayName("TC_AS_T_UP_011 — Update writing prompt khi có submissions → 400 HAS_SUBMISSIONS")
+        void tc_as_t_up_011() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            Assignment a = savePublishedWriting(teacher, clazz);
+            enrollLearner(clazz.getId(), learner.getId());
+            startSubmission(a.getId(), learner.getId());
+            String token = loginAndGetToken("teacher@test.com");
+
+            String body = """
+                {
+                  "title": "Published Writing",
+                  "dueDate": "%s",
+                  "status": "PUBLISHED",
+                  "prompt": "Completely new prompt that is different."
+                }
+                """.formatted(LocalDateTime.now().plusDays(7));
+
+            mockMvc.perform(put("/api/v1/teacher/assignments/{id}/writing", a.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1566,6 +1593,91 @@ class AssignmentIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest());
         }
+
+        @Test
+        @DisplayName("TC_AS_T_GR_003 — Grade submission IN_PROGRESS → 400 INVALID_STATUS")
+        void tc_as_t_gr_003() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedWriting(teacher, clazz);
+            AssignmentSubmission sub = startSubmission(a.getId(), learner.getId()); // IN_PROGRESS
+            String token = loginAndGetToken("teacher@test.com");
+
+            String body = """
+                    { "teacherScore": 80.0, "feedback": "Good." }
+                    """;
+
+            mockMvc.perform(post("/api/v1/teacher/assignments/submissions/{id}/grade-writing", sub.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_GR_004 — Grade submission đã GRADED → 400 INVALID_STATUS")
+        void tc_as_t_gr_004() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedWriting(teacher, clazz);
+            AssignmentSubmission sub = submissionRepository.save(AssignmentSubmission.builder()
+                    .assignmentId(a.getId()).userId(learner.getId())
+                    .status(SubmissionStatus.GRADED).attemptNumber(1)
+                    .score(BigDecimal.valueOf(80))
+                    .writtenAnswer("Answer.")
+                    .startedAt(LocalDateTime.now().minusMinutes(10))
+                    .submittedAt(LocalDateTime.now().minusMinutes(5))
+                    .gradedAt(LocalDateTime.now().minusMinutes(1))
+                    .correctCount(0).totalQuestions(1).timeSpentSeconds(600)
+                    .answers("[]").createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
+                    .build());
+            String token = loginAndGetToken("teacher@test.com");
+
+            String body = """
+                    { "teacherScore": 90.0, "feedback": "Better." }
+                    """;
+
+            mockMvc.perform(post("/api/v1/teacher/assignments/submissions/{id}/grade-writing", sub.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_GR_005 — Teacher B chấm bài class Teacher A → 400 ACCESS_DENIED")
+        void tc_as_t_gr_005() throws Exception {
+            User teacherA = saveTeacher("teacherA@test.com");
+            saveTeacher("teacherB@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacherA, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedWriting(teacherA, clazz);
+            AssignmentSubmission sub = submissionRepository.save(AssignmentSubmission.builder()
+                    .assignmentId(a.getId()).userId(learner.getId())
+                    .status(SubmissionStatus.SUBMITTED).attemptNumber(1)
+                    .writtenAnswer("test answer")
+                    .startedAt(LocalDateTime.now().minusMinutes(10))
+                    .submittedAt(LocalDateTime.now().minusMinutes(1))
+                    .correctCount(0).totalQuestions(1).timeSpentSeconds(600)
+                    .answers("[]").createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
+                    .build());
+            String tokenB = loginAndGetToken("teacherB@test.com");
+
+            String body = """
+                    { "teacherScore": 70, "feedback": "OK." }
+                    """;
+
+            mockMvc.perform(post("/api/v1/teacher/assignments/submissions/{id}/grade-writing", sub.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + tokenB))
+                    .andExpect(status().isBadRequest());
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1622,6 +1734,68 @@ class AssignmentIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.title").value("Cloned Quiz"))
                     .andExpect(jsonPath("$.data.status").value("DRAFT"));
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_CL_002 — Clone sang class không tồn tại → 404")
+        void tc_as_t_cl_002() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            Assignment a = savePublishedQuiz(teacher, clazz);
+            String token = loginAndGetToken("teacher@test.com");
+
+            String body = """
+                { "targetClassId": "%s", "newDueDate": "%s" }
+                """.formatted(UUID.randomUUID(), LocalDateTime.now().plusDays(10));
+
+            mockMvc.perform(post("/api/v1/teacher/assignments/{id}/clone", a.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_CL_003 — Clone WRITING assignment → thành công, status DRAFT")
+        void tc_as_t_cl_003() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz sourceClass = saveClass(teacher, saveCourse());
+            Clazz destClass = saveClass(teacher, saveCourse());
+            Assignment a = savePublishedWriting(teacher, sourceClass);
+            String token = loginAndGetToken("teacher@test.com");
+
+            String body = """
+                { "targetClassId": "%s", "newDueDate": "%s", "newTitle": "Cloned Writing" }
+                """.formatted(destClass.getId(), LocalDateTime.now().plusDays(10));
+
+            mockMvc.perform(post("/api/v1/teacher/assignments/{id}/clone", a.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.title").value("Cloned Writing"))
+                    .andExpect(jsonPath("$.data.assignmentType").value("WRITING"))
+                    .andExpect(jsonPath("$.data.status").value("DRAFT"));
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_CL_004 — Teacher B clone assignment Teacher A → 400 ACCESS_DENIED")
+        void tc_as_t_cl_004() throws Exception {
+            User teacherA = saveTeacher("teacherA@test.com");
+            saveTeacher("teacherB@test.com");
+            Clazz clazz = saveClass(teacherA, saveCourse());
+            Assignment a = savePublishedQuiz(teacherA, clazz);
+            String tokenB = loginAndGetToken("teacherB@test.com");
+
+            String body = """
+                { "targetClassId": "%s", "newDueDate": "%s" }
+                """.formatted(clazz.getId(), LocalDateTime.now().plusDays(10));
+
+            mockMvc.perform(post("/api/v1/teacher/assignments/{id}/clone", a.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + tokenB))
+                    .andExpect(status().isBadRequest());
         }
     }
 
@@ -2068,6 +2242,23 @@ class AssignmentIntegrationTest {
         }
 
         @Test
+        @DisplayName("TC_AS_L_DO_018 — Start assignment quá due date → 400 PAST_DUE")
+        void tc_as_l_do_018() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedQuiz(teacher, clazz);
+            a.setDueDate(LocalDateTime.now().minusHours(1));
+            assignmentRepository.save(a);
+            String token = loginAndGetToken("learner@test.com");
+
+            mockMvc.perform(post("/api/v1/learner/assignments/{id}/start", a.getId())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
         @DisplayName("TC_AS_L_DO_014 — Submit assignment khi đang CLOSED → vẫn chấm GRADED")
         void tc_as_l_do_014() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
@@ -2361,6 +2552,36 @@ class AssignmentIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest());
         }
+
+        @Test
+        @DisplayName("TC_AS_L_VI_003 — Learner xem DRAFT assignment → 400 ASSIGNMENT_NOT_AVAILABLE")
+        void tc_as_l_vi_003() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = saveQuizDraft(teacher, clazz);
+            String token = loginAndGetToken("learner@test.com");
+
+            mockMvc.perform(get("/api/v1/learner/assignments/{id}", a.getId())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("TC_AS_L_VI_004 — Learner không thuộc class → 400 ACCESS_DENIED")
+        void tc_as_l_vi_004() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            // KHÔNG enroll learner
+            Assignment a = savePublishedQuiz(teacher, clazz);
+            String token = loginAndGetToken("learner@test.com");
+
+            mockMvc.perform(get("/api/v1/learner/assignments/{id}", a.getId())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -2557,5 +2778,167 @@ class AssignmentIntegrationTest {
                         .content(body)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isInternalServerError());
+    }
+
+    @Test
+    @DisplayName("TC_AS_AI_010 — AI generate: service throw BusinessException → 400")
+    void tc_as_ai_010() throws Exception {
+        User teacher = saveTeacher("teacher@test.com");
+        Clazz clazz = saveClass(teacher, saveCourse());
+        String token = loginAndGetToken("teacher@test.com");
+
+        when(quizAiGenerationService.generateQuestions(any(AiQuizGenerationRequest.class)))
+                .thenThrow(new com.fu.common.exception.BusinessException(
+                        "AI_PARSE_ERROR", "Failed to parse AI response."));
+
+        String body = objectMapper.writeValueAsString(AiQuizGenerationRequest.builder()
+                .teacherPrompt("N5 vocab")
+                .classId(clazz.getId())
+                .questionCount(1)
+                .questionTypes(List.of("multiple_choice"))
+                .build());
+
+        mockMvc.perform(post("/api/v1/teacher/assignments/questions/ai-generate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("TC_AS_AI_011 — AI generate trả về empty list → 200 với data rỗng")
+    void tc_as_ai_011() throws Exception {
+        User teacher = saveTeacher("teacher@test.com");
+        Clazz clazz = saveClass(teacher, saveCourse());
+        String token = loginAndGetToken("teacher@test.com");
+
+        when(quizAiGenerationService.generateQuestions(any(AiQuizGenerationRequest.class)))
+                .thenReturn(List.of());
+
+        String body = objectMapper.writeValueAsString(AiQuizGenerationRequest.builder()
+                .teacherPrompt("N5 vocab")
+                .classId(clazz.getId())
+                .questionCount(1)
+                .questionTypes(List.of("multiple_choice"))
+                .build());
+
+        mockMvc.perform(post("/api/v1/teacher/assignments/questions/ai-generate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(0));
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // 4. CLOUDINARY INTEGRATION (MOCKED)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("4. Cloudinary Integration (Mocked)")
+    class CloudinaryIntegrationTests {
+
+        @Test
+        @DisplayName("TC_AS_CLOUD_001 — Cloudinary upload audio fail → trả lỗi hệ thống")
+        void tc_as_cloud_001() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            String token = loginAndGetToken("teacher@test.com");
+
+            MockMultipartFile dataPart = new MockMultipartFile(
+                    "data", "", "application/json",
+                    quizRequestJson(AssignmentStatus.DRAFT, null).getBytes());
+            MockMultipartFile audioPart = new MockMultipartFile(
+                    "audioFile", "test.mp3", "audio/mpeg", "dummy audio".getBytes());
+
+            when(cloudinaryService.uploadAudio(any(), any()))
+                    .thenThrow(new RuntimeException("Cloudinary connection timeout"));
+
+            mockMvc.perform(multipart("/api/v1/teacher/assignments/class/{classId}/quiz", clazz.getId())
+                            .file(dataPart)
+                            .file(audioPart)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isInternalServerError());
+        }
+
+        @Test
+        @DisplayName("TC_AS_CLOUD_002 — Cloudinary upload image fail khi submit writing → lỗi UPLOAD_FAILED")
+        void tc_as_cloud_002() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedWriting(teacher, clazz);
+            startSubmission(a.getId(), learner.getId());
+            String token = loginAndGetToken("learner@test.com");
+
+            MockMultipartFile dataPart = new MockMultipartFile(
+                    "data", "", "application/json",
+                    "{\"writtenAnswer\":\"テスト\",\"timeSpentSeconds\":60}".getBytes());
+            MockMultipartFile imagePart = new MockMultipartFile(
+                    "images", "test.png", "image/png", "dummy image".getBytes());
+
+            when(cloudinaryService.uploadImage(any(), any()))
+                    .thenThrow(new RuntimeException("Cloudinary upload failed"));
+
+            mockMvc.perform(multipart("/api/v1/learner/assignments/{id}/submit-writing", a.getId())
+                            .file(dataPart)
+                            .file(imagePart)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest()); // BusinessException UPLOAD_FAILED
+        }
+
+        @Test
+        @DisplayName("TC_AS_CLOUD_003 — Submit writing quá 10 ảnh → 400 TOO_MANY_IMAGES")
+        void tc_as_cloud_003() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedWriting(teacher, clazz);
+            startSubmission(a.getId(), learner.getId());
+            String token = loginAndGetToken("learner@test.com");
+
+            MockMultipartFile dataPart = new MockMultipartFile(
+                    "data", "", "application/json",
+                    "{\"writtenAnswer\":\"テスト\",\"timeSpentSeconds\":60}".getBytes());
+
+            var builder = multipart("/api/v1/learner/assignments/{id}/submit-writing", a.getId())
+                    .file(dataPart);
+
+            // Add 11 images → exceeds MAX_SUBMISSION_IMAGES (10)
+            for (int i = 0; i < 11; i++) {
+                builder.file(new MockMultipartFile(
+                        "images", "img" + i + ".png", "image/png", "dummy".getBytes()));
+            }
+
+            mockMvc.perform(builder.header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("TC_AS_CLOUD_004 — Update audio khi assignment đã có submissions → 400 HAS_SUBMISSIONS")
+        void tc_as_cloud_004() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            Assignment a = savePublishedQuiz(teacher, clazz);
+            enrollLearner(clazz.getId(), learner.getId());
+            startSubmission(a.getId(), learner.getId());
+            String token = loginAndGetToken("teacher@test.com");
+
+            MockMultipartFile dataPart = new MockMultipartFile(
+                    "data", "", "application/json",
+                    quizRequestJson(AssignmentStatus.PUBLISHED, null).getBytes());
+            MockMultipartFile audioPart = new MockMultipartFile(
+                    "audioFile", "new.mp3", "audio/mpeg", "new audio".getBytes());
+
+            mockMvc.perform(multipart(org.springframework.http.HttpMethod.PUT,
+                            "/api/v1/teacher/assignments/{id}/quiz", a.getId())
+                            .file(dataPart)
+                            .file(audioPart)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
     }
 }
