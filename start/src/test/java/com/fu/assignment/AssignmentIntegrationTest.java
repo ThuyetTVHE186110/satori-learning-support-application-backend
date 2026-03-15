@@ -362,6 +362,153 @@ class AssignmentIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isForbidden());
         }
+
+        @Test
+        @DisplayName("TC_AS_T_VL_006 — Get My Assignments (tất cả class) thành công")
+        void tc_as_t_vl_006() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz1 = saveClass(teacher, saveCourse());
+            Clazz clazz2 = saveClass(teacher, saveCourse());
+            savePublishedQuiz(teacher, clazz1);
+            savePublishedWriting(teacher, clazz2);
+            String token = loginAndGetToken("teacher@test.com");
+
+            mockMvc.perform(get("/api/v1/teacher/assignments")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content.length()").value(2));
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_VL_007 — Filter by title")
+        void tc_as_t_vl_007() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            Assignment a = savePublishedQuiz(teacher, clazz);
+            savePublishedWriting(teacher, clazz); // another one
+            String token = loginAndGetToken("teacher@test.com");
+
+            mockMvc.perform(get("/api/v1/teacher/assignments/class/{classId}", clazz.getId())
+                            .param("title", "Published Quiz")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andExpect(jsonPath("$.data.content[0].id").value(a.getId().toString()));
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_VL_007b — Filter by type")
+        void tc_as_t_vl_007b() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            savePublishedQuiz(teacher, clazz);
+            Assignment a = savePublishedWriting(teacher, clazz);
+            String token = loginAndGetToken("teacher@test.com");
+
+            mockMvc.perform(get("/api/v1/teacher/assignments/class/{classId}", clazz.getId())
+                            .param("type", "WRITING")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andExpect(jsonPath("$.data.content[0].id").value(a.getId().toString()));
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_VL_007c — Filter by status")
+        void tc_as_t_vl_007c() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            Assignment a = saveQuizDraft(teacher, clazz); // DRAFT
+            savePublishedQuiz(teacher, clazz); // PUBLISHED
+            String token = loginAndGetToken("teacher@test.com");
+
+            mockMvc.perform(get("/api/v1/teacher/assignments/class/{classId}", clazz.getId())
+                            .param("status", "DRAFT")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andExpect(jsonPath("$.data.content[0].id").value(a.getId().toString()));
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_VL_007d — Pagination test (page/size)")
+        void tc_as_t_vl_007d() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            savePublishedQuiz(teacher, clazz);
+            savePublishedWriting(teacher, clazz);
+            String token = loginAndGetToken("teacher@test.com");
+
+            mockMvc.perform(get("/api/v1/teacher/assignments/class/{classId}", clazz.getId())
+                            .param("page", "1")
+                            .param("size", "1")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andExpect(jsonPath("$.data.pageNumber").value(1))
+                    .andExpect(jsonPath("$.data.pageSize").value(1))
+                    .andExpect(jsonPath("$.data.totalElements").value(2));
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_VL_008 — Lỗi TypeMismatch khi truyền UUID sai format")
+        void tc_as_t_vl_008() throws Exception {
+            saveTeacher("teacher@test.com");
+            String token = loginAndGetToken("teacher@test.com");
+
+            mockMvc.perform(get("/api/v1/teacher/assignments/class/{classId}", "invalid-uuid")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_VL_009 — Lỗi ConstraintViolation khi page = -1")
+        void tc_as_t_vl_009() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            String token = loginAndGetToken("teacher@test.com");
+
+            mockMvc.perform(get("/api/v1/teacher/assignments/class/{classId}", clazz.getId())
+                            .param("page", "-1")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_VL_010 — Lỗi ConstraintViolation khi size = 0")
+        void tc_as_t_vl_010() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            String token = loginAndGetToken("teacher@test.com");
+
+            mockMvc.perform(get("/api/v1/teacher/assignments/class/{classId}", clazz.getId())
+                            .param("size", "0")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_VL_011 — Lỗi MethodArgumentTypeMismatch khi type sai Enum")
+        void tc_as_t_vl_011() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            String token = loginAndGetToken("teacher@test.com");
+
+            mockMvc.perform(get("/api/v1/teacher/assignments/class/{classId}", clazz.getId())
+                            .param("type", "UNKNOWN_TYPE")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_VL_012 — Lỗi 401 Unauthorized do không truyền Header Authorization")
+        void tc_as_t_vl_012() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+
+            mockMvc.perform(get("/api/v1/teacher/assignments/class/{classId}", clazz.getId()))
+                    .andExpect(status().isUnauthorized());
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -428,6 +575,17 @@ class AssignmentIntegrationTest {
             mockMvc.perform(get("/api/v1/teacher/assignments/{id}", a.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_VI_006 — Lỗi TypeMismatch khi truyền UUID sai format")
+        void tc_as_t_vi_006() throws Exception {
+            saveTeacher("teacher@test.com");
+            String token = loginAndGetToken("teacher@test.com");
+
+            mockMvc.perform(get("/api/v1/teacher/assignments/{id}", "invalid-uuid")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
         }
     }
 
@@ -623,6 +781,72 @@ class AssignmentIntegrationTest {
                             multipart("/api/v1/teacher/assignments/class/{classId}/quiz", clazzA.getId())
                                     .file(dataPart)
                                     .header("Authorization", "Bearer " + tokenB))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_CR_009 — Tạo QUIZ thành công đính kèm audio file")
+        void tc_as_t_cr_009() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            String token = loginAndGetToken("teacher@test.com");
+
+            MockMultipartFile dataPart = new MockMultipartFile(
+                    "data", "", "application/json",
+                    quizRequestJson(AssignmentStatus.DRAFT, null).getBytes());
+            MockMultipartFile audioPart = new MockMultipartFile(
+                    "audioFile", "test.mp3", "audio/mpeg", "dummy audio content".getBytes());
+
+            mockMvc.perform(multipart("/api/v1/teacher/assignments/class/{classId}/quiz", clazz.getId())
+                            .file(dataPart)
+                            .file(audioPart)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.assignmentType").value("QUIZ"));
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_CR_010 — Tạo WRITING thiếu title → validation error")
+        void tc_as_t_cr_010() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            String token = loginAndGetToken("teacher@test.com");
+
+            String body = """
+                {
+                  "dueDate": "%s",
+                  "status": "DRAFT",
+                  "prompt": "Translate this sentence."
+                }
+                """.formatted(LocalDateTime.now().plusDays(7));
+
+            mockMvc.perform(post("/api/v1/teacher/assignments/class/{classId}/writing", clazz.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_CR_011 — Lỗi HttpMessageNotReadable do dueDate parse fail")
+        void tc_as_t_cr_011() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            String token = loginAndGetToken("teacher@test.com");
+
+            String body = """
+                {
+                  "title": "Bad Date Quiz",
+                  "dueDate": "abc",
+                  "status": "DRAFT",
+                  "prompt": "Translate this sentence."
+                }
+                """;
+
+            mockMvc.perform(post("/api/v1/teacher/assignments/class/{classId}/writing", clazz.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest());
         }
     }
@@ -844,6 +1068,59 @@ class AssignmentIntegrationTest {
                             .file(dataPart)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_UP_009 — Update WRITING thành công")
+        void tc_as_t_up_009() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            Assignment a = savePublishedWriting(teacher, clazz);
+            String token = loginAndGetToken("teacher@test.com");
+
+            String body = """
+                {
+                  "title": "Updated Writing",
+                  "dueDate": "%s",
+                  "status": "PUBLISHED",
+                  "prompt": "Updated prompt."
+                }
+                """.formatted(LocalDateTime.now().plusDays(10));
+
+            mockMvc.perform(put("/api/v1/teacher/assignments/{id}/writing", a.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.title").value("Updated Writing"));
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_UP_010 — Update TRANSLATION thành công")
+        void tc_as_t_up_010() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            Assignment a = savePublishedWriting(teacher, clazz);
+            a.setAssignmentType(AssignmentType.TRANSLATION);
+            assignmentRepository.save(a);
+            String token = loginAndGetToken("teacher@test.com");
+
+            String body = """
+                {
+                  "title": "Updated Translation",
+                  "dueDate": "%s",
+                  "status": "PUBLISHED",
+                  "prompt": "Updated translation prompt.",
+                  "sourceText": "Translate this."
+                }
+                """.formatted(LocalDateTime.now().plusDays(10));
+
+            mockMvc.perform(put("/api/v1/teacher/assignments/{id}/translation", a.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.title").value("Updated Translation"));
         }
     }
 
@@ -1188,6 +1465,25 @@ class AssignmentIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isForbidden());
         }
+
+        @Test
+        @DisplayName("TC_AS_T_VS_007 — Xem list submissions có phân trang")
+        void tc_as_t_vs_007() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            Assignment a = savePublishedQuiz(teacher, clazz);
+            enrollLearner(clazz.getId(), learner.getId());
+            startSubmission(a.getId(), learner.getId());
+            String token = loginAndGetToken("teacher@test.com");
+
+            mockMvc.perform(get("/api/v1/teacher/assignments/{id}/submissions", a.getId())
+                            .param("page", "1")
+                            .param("size", "10")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content.length()").value(1));
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1264,6 +1560,63 @@ class AssignmentIntegrationTest {
                             .content(body)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest());
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 1.9 Class Statistics (Teacher)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("1.9 Class Statistics (Teacher)")
+    class ClassStatisticsTeacher {
+        
+        @Test
+        @DisplayName("TC_AS_T_STAT_001 — Get statistics thành công")
+        void tc_as_t_stat_001() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            String token = loginAndGetToken("teacher@test.com");
+
+            mockMvc.perform(get("/api/v1/teacher/assignments/class/{classId}/statistics", clazz.getId())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.totalAssignments").exists());
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 1.10 Clone Practice Task (Teacher)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("1.10 Clone Practice Task")
+    class ClonePracticeTask {
+
+        @Test
+        @DisplayName("TC_AS_T_CL_001 — Clone assignment sang class khác thành công")
+        void tc_as_t_cl_001() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz sourceClass = saveClass(teacher, saveCourse());
+            Clazz destClass = saveClass(teacher, saveCourse());
+            Assignment a = savePublishedQuiz(teacher, sourceClass);
+            String token = loginAndGetToken("teacher@test.com");
+
+            String body = """
+                {
+                  "targetClassId": "%s",
+                  "newDueDate": "%s",
+                  "newTitle": "Cloned Quiz"
+                }
+                """.formatted(destClass.getId(), LocalDateTime.now().plusDays(10));
+
+            mockMvc.perform(post("/api/v1/teacher/assignments/{id}/clone", a.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.title").value("Cloned Quiz"))
+                    .andExpect(jsonPath("$.data.status").value("DRAFT"));
         }
     }
 
@@ -1352,6 +1705,66 @@ class AssignmentIntegrationTest {
             mockMvc.perform(get("/api/v1/learner/assignments")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("TC_AS_L_VL_006 — Filter by title")
+        void tc_as_l_vl_006() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedQuiz(teacher, clazz);
+            savePublishedWriting(teacher, clazz); // another one
+            String token = loginAndGetToken("learner@test.com");
+
+            mockMvc.perform(get("/api/v1/learner/assignments")
+                            .param("title", "Published Quiz")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andExpect(jsonPath("$.data.content[0].id").value(a.getId().toString()));
+        }
+
+        @Test
+        @DisplayName("TC_AS_L_VL_006b — Filter by type")
+        void tc_as_l_vl_006b() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            savePublishedQuiz(teacher, clazz);
+            Assignment a = savePublishedWriting(teacher, clazz);
+            String token = loginAndGetToken("learner@test.com");
+
+            mockMvc.perform(get("/api/v1/learner/assignments")
+                            .param("type", "WRITING")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andExpect(jsonPath("$.data.content[0].id").value(a.getId().toString()));
+        }
+
+        @Test
+        @DisplayName("TC_AS_L_VL_006c — Pagination test (page/size)")
+        void tc_as_l_vl_006c() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            savePublishedQuiz(teacher, clazz);
+            savePublishedWriting(teacher, clazz);
+            String token = loginAndGetToken("learner@test.com");
+
+            mockMvc.perform(get("/api/v1/learner/assignments")
+                            .param("page", "1")
+                            .param("size", "1")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andExpect(jsonPath("$.data.pageNumber").value(1))
+                    .andExpect(jsonPath("$.data.pageSize").value(1))
+                    .andExpect(jsonPath("$.data.totalElements").value(2));
         }
     }
 
@@ -1678,6 +2091,77 @@ class AssignmentIntegrationTest {
                     .andExpect(jsonPath("$.data.status").value("GRADED"))
                     .andExpect(jsonPath("$.data.score").value(10.00));
         }
+
+        @Test
+        @DisplayName("TC_AS_L_DO_015 — Submit WRITING assignment đính kèm ảnh → SUBMITTED")
+        void tc_as_l_do_015() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedWriting(teacher, clazz);
+            startSubmission(a.getId(), learner.getId());
+            String token = loginAndGetToken("learner@test.com");
+
+            MockMultipartFile dataPart = new MockMultipartFile(
+                    "data", "", "application/json",
+                    "{\"writtenAnswer\":\"私の答え\",\"timeSpentSeconds\":120}".getBytes());
+            MockMultipartFile imagePart = new MockMultipartFile(
+                    "images", "test.png", "image/png", "dummy image".getBytes());
+
+            mockMvc.perform(multipart("/api/v1/learner/assignments/{id}/submit-writing", a.getId())
+                            .file(dataPart)
+                            .file(imagePart)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.status").value("SUBMITTED"));
+        }
+
+        @Test
+        @DisplayName("TC_AS_L_DO_016 — Submit QUIZ answers bị lỗi JSON format → 400")
+        void tc_as_l_do_016() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedQuiz(teacher, clazz);
+            AssignmentSubmission sub = startSubmission(a.getId(), learner.getId());
+            String token = loginAndGetToken("learner@test.com");
+
+            String body = objectMapper.writeValueAsString(java.util.Map.of(
+                    "submissionId", sub.getId().toString(),
+                    "answers", "invalid-json-array",
+                    "timeSpentSeconds", 60));
+
+            mockMvc.perform(post("/api/v1/learner/assignments/submit")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("TC_AS_L_DO_017 — Learner submits quiz for WRITING assignment → 400")
+        void tc_as_l_do_017() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedWriting(teacher, clazz);
+            AssignmentSubmission sub = startSubmission(a.getId(), learner.getId());
+            String token = loginAndGetToken("learner@test.com");
+
+            String body = objectMapper.writeValueAsString(java.util.Map.of(
+                    "submissionId", sub.getId().toString(),
+                    "answers", "[]",
+                    "timeSpentSeconds", 60));
+
+            mockMvc.perform(post("/api/v1/learner/assignments/submit")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1813,6 +2297,62 @@ class AssignmentIntegrationTest {
                     .andExpect(jsonPath("$.data.status").value("GRADED"))
                     .andExpect(jsonPath("$.data.score").value(95.5))
                     .andExpect(jsonPath("$.data.feedback").value("よくできました！"));
+        }
+
+        @Test
+        @DisplayName("TC_AS_L_VS_007 — Get My Submissions History thành công")
+        void tc_as_l_vs_007() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedQuiz(teacher, clazz);
+            startSubmission(a.getId(), learner.getId());
+            String token = loginAndGetToken("learner@test.com");
+
+            mockMvc.perform(get("/api/v1/learner/assignments/submissions")
+                            .param("page", "1")
+                            .param("size", "10")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content.length()").value(1));
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 2.4 View Practice Task Info (Learner)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("2.4 View Practice Task Info (Learner)")
+    class LearnerViewAssignmentInfo {
+
+        @Test
+        @DisplayName("TC_AS_L_VI_001 — Get Assignment Details thành công")
+        void tc_as_l_vi_001() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedQuiz(teacher, clazz);
+            String token = loginAndGetToken("learner@test.com");
+
+            mockMvc.perform(get("/api/v1/learner/assignments/{id}", a.getId())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.id").value(a.getId().toString()))
+                    .andExpect(jsonPath("$.data.questions[0].correctAnswer").doesNotExist());
+        }
+
+        @Test
+        @DisplayName("TC_AS_L_VI_002 — UUID sai định dạng → 400")
+        void tc_as_l_vi_002() throws Exception {
+            saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+
+            mockMvc.perform(get("/api/v1/learner/assignments/{id}", "invalid-uuid")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
         }
     }
 
@@ -1961,5 +2501,54 @@ class AssignmentIntegrationTest {
 
         QuizQuestion updated = quizQuestionRepository.findById(q.getId()).orElseThrow();
         assertThat(updated.getExplanation()).isNotBlank();
+    }
+
+    @Test
+    @DisplayName("TC_AS_AI_008 — AI explain draft")
+    void tc_as_ai_008() throws Exception {
+        saveTeacher("teacher@test.com");
+        String token = loginAndGetToken("teacher@test.com");
+        
+        when(quizExplanationService.generateExplanationFromDraft(any()))
+                .thenReturn(new com.fu.assignment.dto.response.AiExplanationResponse("Draft explanation text..."));
+
+        String body = """
+            {
+              "questionText": "テスト",
+              "options": "A, B",
+              "correctAnswer": "A"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/teacher/assignments/questions/ai-explain-draft")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.explanation").value("Draft explanation text..."));
+    }
+
+    @Test
+    @DisplayName("TC_AS_AI_009 — AI provider throws RuntimeException trả về lỗi hệ thống")
+    void tc_as_ai_009() throws Exception {
+        saveTeacher("teacher@test.com");
+        String token = loginAndGetToken("teacher@test.com");
+        
+        when(quizExplanationService.generateExplanationFromDraft(any()))
+                .thenThrow(new RuntimeException("AI Provider Timeout"));
+
+        String body = """
+            {
+              "questionText": "テスト",
+              "options": "A, B",
+              "correctAnswer": "A"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/teacher/assignments/questions/ai-explain-draft")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isInternalServerError());
     }
 }
