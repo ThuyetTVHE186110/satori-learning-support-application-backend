@@ -323,9 +323,7 @@ class AssignmentIntegrationTest {
 
             mockMvc.perform(get("/api/v1/teacher/assignments/class/{classId}", UUID.randomUUID())
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content").isArray())
-                    .andExpect(jsonPath("$.data.content.length()").value(0));
+                    .andExpect(status().isNotFound());
         }
 
         @Test
@@ -1583,6 +1581,7 @@ class AssignmentIntegrationTest {
             Clazz clazz = saveClass(teacher, saveCourse());
             enrollLearner(clazz.getId(), learner.getId());
             Assignment a = savePublishedWriting(teacher, clazz);
+            startSubmission(a.getId(), learner.getId());
             // Simulate assignment overdue
             a.setDueDate(LocalDateTime.now().minusHours(1));
             assignmentRepository.save(a);
