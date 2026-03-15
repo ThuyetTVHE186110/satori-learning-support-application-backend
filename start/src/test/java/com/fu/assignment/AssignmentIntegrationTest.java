@@ -15,6 +15,7 @@ import com.fu.course.entity.Course;
 import com.fu.course.entity.Course.CourseStatus;
 import com.fu.course.entity.Course.JlptLevel;
 import com.fu.course.repository.CourseRepository;
+import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.user.entity.*;
 import com.fu.user.repository.UserRepository;
 import com.fu.user.repository.UserSessionRepository;
@@ -38,6 +39,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -1783,6 +1785,36 @@ class AssignmentIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isNotFound());
         }
+
+        @Test
+        @DisplayName("TC_AS_L_VS_006 — Submission GRADED (đã chấm) → status=GRADED, có score & feedback")
+        void tc_as_l_vs_006() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedWriting(teacher, clazz);
+            AssignmentSubmission sub = submissionRepository.save(AssignmentSubmission.builder()
+                    .assignmentId(a.getId()).userId(learner.getId())
+                    .status(SubmissionStatus.GRADED).attemptNumber(1)
+                    .writtenAnswer("私の答えです。")
+                    .startedAt(LocalDateTime.now().minusDays(2))
+                    .submittedAt(LocalDateTime.now().minusDays(1))
+                    .gradedAt(LocalDateTime.now())
+                    .score(BigDecimal.valueOf(95.5))
+                    .feedback("よくできました！")
+                    .correctCount(0).totalQuestions(1).timeSpentSeconds(300)
+                    .answers("[]").createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
+                    .build());
+            String token = loginAndGetToken("learner@test.com");
+
+            mockMvc.perform(get("/api/v1/learner/assignments/submissions/{id}", sub.getId())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.status").value("GRADED"))
+                    .andExpect(jsonPath("$.data.score").value(95.5))
+                    .andExpect(jsonPath("$.data.feedback").value("よくできました！"));
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -1876,5 +1908,59 @@ class AssignmentIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest());
         }
+
+        @Test
+        @DisplayName("TC_AS_AI_005 — Không có token → 401")
+        void tc_as_ai_005() throws Exception {
+            mockMvc.perform(post("/api/v1/teacher/assignments/questions/ai-generate")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        @DisplayName("TC_AS_AI_006 — Explain question không tồn tại → 404")
+        void tc_as_ai_006() throws Exception {
+            saveTeacher("teacher@test.com");
+            String token = loginAndGetToken("teacher@test.com");
+
+            // Mock the service to throw ResourceNotFoundException, simulating the real service behavior
+            when(quizExplanationService.generateExplanation(any(UUID.class), any(UUID.class)))
+                    .thenThrow(new ResourceNotFoundException("Quiz question not found"));
+
+            mockMvc.perform(post("/api/v1/teacher/assignments/questions/{id}/ai-explain",
+                            UUID.randomUUID())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isNotFound());
+        }
+    }
+    @Test
+    @DisplayName("TC_AS_AI_007 — ai-explain lưu explanation vào DB")
+    void tc_as_ai_007() throws Exception {
+        saveTeacher("teacher@test.com");
+        String token = loginAndGetToken("teacher@test.com");
+
+        QuizQuestion q = quizQuestionRepository.save(QuizQuestion.builder()
+                .questionText("テスト問題")
+                .questionType("multiple_choice")
+                .options("[{\"id\":\"A\",\"text\":\"はい\",\"isCorrect\":true}]")
+                .correctAnswer("A")
+                .explanation(null)
+                .aiGenerated(false)
+                .build());
+
+        when(quizExplanationService.generateExplanation(eq(q.getId()), any(UUID.class)))
+                .thenAnswer(invocation -> {
+                    q.setExplanation("Đáp án đúng là A vì...");
+                    return quizQuestionRepository.save(q);
+                });
+
+        mockMvc.perform(post("/api/v1/teacher/assignments/questions/{id}/ai-explain", q.getId())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.explanation").isNotEmpty());
+
+        QuizQuestion updated = quizQuestionRepository.findById(q.getId()).orElseThrow();
+        assertThat(updated.getExplanation()).isNotBlank();
     }
 }
