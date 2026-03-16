@@ -3,8 +3,10 @@ package com.fu.conversation;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.conversation.entity.ConversationTheme;
 import com.fu.conversation.entity.ConversationTopic;
+import com.fu.conversation.entity.ConversationMission;
 import com.fu.conversation.repository.ConversationThemeRepository;
 import com.fu.conversation.repository.ConversationTopicRepository;
+import com.fu.conversation.repository.ConversationMissionRepository;
 import com.fu.course.entity.Course;
 import com.fu.infrastructure.email.EmailService;
 import com.fu.user.entity.AuthProvider;
@@ -60,6 +62,7 @@ class ConversationTopicManagementTest {
 
     @Autowired private ConversationThemeRepository themeRepository;
     @Autowired private ConversationTopicRepository topicRepository;
+    @Autowired private ConversationMissionRepository missionRepository;
     @Autowired private UserRepository userRepository;
     @Autowired private UserSessionRepository sessionRepository;
     @Autowired private PasswordEncoder passwordEncoder;
@@ -156,10 +159,30 @@ class ConversationTopicManagementTest {
         return topicRepository.save(topic);
     }
 
+    private ConversationMission saveActiveMission(String title, UUID topicId) {
+        return missionRepository.save(ConversationMission.builder()
+                .title(title)
+                .topicId(topicId)
+                .missionType(ConversationMission.MissionType.CUSTOM)
+                .successCriteria("{}")
+                .requiredVocabulary("[]")
+                .requiredGrammar("[]")
+                .orderIndex(0)
+                .build());
+    }
+
+    private ConversationMission saveSoftDeletedMission(String title, UUID topicId, UUID deletedBy) {
+        ConversationMission mission = saveActiveMission(title, topicId);
+        mission.setDeletedAt(LocalDateTime.now().minusHours(1));
+        mission.setDeletedBy(deletedBy);
+        return missionRepository.save(mission);
+    }
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     @AfterEach
     void tearDown() {
+        missionRepository.deleteAll();
         topicRepository.deleteAll();
         themeRepository.deleteAll();
         sessionRepository.deleteAll();
@@ -1150,6 +1173,232 @@ class ConversationTopicManagementTest {
                             .content(body))
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.success").value(false));
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // 7. MANAGER MISSIONS — /api/v1/manager/roleplay/missions
+    // ═════════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("7. MANAGER MISSIONS — /api/v1/manager/roleplay/missions [P2 Standard]")
+    class ManagerMissionTests {
+
+        @Test
+        @DisplayName("TC_CMM_CM_001 — Create mission valid data → HTTP 201 Created")
+        void createMission_ValidData_Returns201() throws Exception {
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            ConversationTheme theme = saveTheme("Theme");
+            ConversationTopic topic = saveActiveTopic("Topic", theme.getId());
+
+            String body = String.format("{\"topicId\":\"%s\",\"title\":\"New Mission\",\"description\":\"Desc\"}", topic.getId());
+
+            mockMvc.perform(post("/api/v1/manager/roleplay/missions")
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.title").value("New Mission"))
+                    .andExpect(jsonPath("$.data.topicId").value(topic.getId().toString()));
+        }
+
+        @Test
+        @DisplayName("TC_CMM_CM_002 — Create mission empty title → HTTP 400 Validation Error")
+        void createMission_EmptyTitle_Returns400() throws Exception {
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            ConversationTheme theme = saveTheme("Theme");
+            ConversationTopic topic = saveActiveTopic("Topic", theme.getId());
+
+            String body = String.format("{\"topicId\":\"%s\",\"title\":\"\"}", topic.getId());
+
+            mockMvc.perform(post("/api/v1/manager/roleplay/missions")
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+        }
+
+        @Test
+        @DisplayName("TC_CMM_CM_003 — Create mission learner token → HTTP 403 Forbidden")
+        void createMission_LearnerToken_Returns403() throws Exception {
+            saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com", "ValidPass@1");
+            
+            String body = String.format("{\"topicId\":\"%s\",\"title\":\"Title\"}", UUID.randomUUID());
+
+            mockMvc.perform(post("/api/v1/manager/roleplay/missions")
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.success").value(false));
+        }
+
+        @Test
+        @DisplayName("TC_CMM_CM_004 — Create mission invalid json criteria → HTTP 400 Validation Error")
+        void createMission_InvalidJsonCriteria_Returns400() throws Exception {
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            ConversationTheme theme = saveTheme("Theme");
+            ConversationTopic topic = saveActiveTopic("Topic", theme.getId());
+
+            String body = String.format("{\"topicId\":\"%s\",\"title\":\"Mission\",\"successCriteria\":\"invalid-json\"}", topic.getId());
+
+            mockMvc.perform(post("/api/v1/manager/roleplay/missions")
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+        }
+
+        @Test
+        @DisplayName("TC_CMM_GM_001 — Get missions by topicId → HTTP 200")
+        void getMissionsByTopic_ReturnsList() throws Exception {
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            ConversationTheme theme = saveTheme("Theme");
+            ConversationTopic topic = saveActiveTopic("Topic", theme.getId());
+
+            saveActiveMission("Mission 1", topic.getId());
+            saveActiveMission("Mission 2", topic.getId());
+            saveSoftDeletedMission("Deleted Mission", topic.getId(), null);
+
+            mockMvc.perform(get("/api/v1/manager/roleplay/missions")
+                            .param("topicId", topic.getId().toString())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.length()").value(2));
+        }
+
+        @Test
+        @DisplayName("TC_CMM_GM_002 — Get missions missing topicId param → HTTP 400 Bad Request")
+        void getMissionsByTopic_MissingParam_Returns400() throws Exception {
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+
+            mockMvc.perform(get("/api/v1/manager/roleplay/missions")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false));
+        }
+
+        @Test
+        @DisplayName("TC_CMM_GD_001 — Get mission detail by ID → HTTP 200")
+        void getMissionDetail_ValidId_Returns200() throws Exception {
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            ConversationTheme theme = saveTheme("Theme");
+            ConversationTopic topic = saveActiveTopic("Topic", theme.getId());
+            ConversationMission mission = saveActiveMission("Detail Mission", topic.getId());
+
+            mockMvc.perform(get("/api/v1/manager/roleplay/missions/{id}", mission.getId())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.title").value("Detail Mission"));
+        }
+        
+        @Test
+        @DisplayName("TC_CMM_GD_002 — Get mission detail non-existent ID → HTTP 404")
+        void getMissionDetail_NotFound_Returns404() throws Exception {
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+
+            mockMvc.perform(get("/api/v1/manager/roleplay/missions/{id}", UUID.randomUUID())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.success").value(false));
+        }
+
+        @Test
+        @DisplayName("TC_CMM_UM_001 — Update mission valid data → HTTP 200")
+        void updateMission_ValidData_Returns200() throws Exception {
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            ConversationTheme theme = saveTheme("Theme");
+            ConversationTopic topic = saveActiveTopic("Topic", theme.getId());
+            ConversationMission mission = saveActiveMission("Old Mission", topic.getId());
+
+            String body = "{\"title\":\"Updated Mission\",\"description\":\"New desc\"}";
+
+            mockMvc.perform(put("/api/v1/manager/roleplay/missions/{id}", mission.getId())
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.title").value("Updated Mission"))
+                    .andExpect(jsonPath("$.data.description").value("New desc"));
+        }
+
+        @Test
+        @DisplayName("TC_CMM_UM_002 — Update mission non-existent ID → HTTP 404")
+        void updateMission_NotFound_Returns404() throws Exception {
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+
+            String body = "{\"title\":\"Updated Mission\"}";
+
+            mockMvc.perform(put("/api/v1/manager/roleplay/missions/{id}", UUID.randomUUID())
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.success").value(false));
+        }
+
+        @Test
+        @DisplayName("TC_CMM_DM_001 — Delete mission valid ID → HTTP 200")
+        void deleteMission_ValidId_Returns200() throws Exception {
+            User manager = saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            ConversationTheme theme = saveTheme("Theme");
+            ConversationTopic topic = saveActiveTopic("Topic", theme.getId());
+            ConversationMission mission = saveActiveMission("ToDelete", topic.getId());
+
+            mockMvc.perform(delete("/api/v1/manager/roleplay/missions/{id}", mission.getId())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true));
+
+            ConversationMission deleted = missionRepository.findById(mission.getId()).orElseThrow();
+            assertThat(deleted.getDeletedAt()).isNotNull();
+            assertThat(deleted.getDeletedBy()).isEqualTo(manager.getId());
+        }
+
+        @Test
+        @DisplayName("TC_CMM_DM_002 — Delete mission soft-deleted ID → HTTP 404")
+        void deleteMission_AlreadyDeleted_Returns404() throws Exception {
+            User manager = saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            ConversationTheme theme = saveTheme("Theme");
+            ConversationTopic topic = saveActiveTopic("Topic", theme.getId());
+            ConversationMission mission = saveSoftDeletedMission("AlreadyDeleted", topic.getId(), manager.getId());
+
+            mockMvc.perform(delete("/api/v1/manager/roleplay/missions/{id}", mission.getId())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.success").value(false));
+        }
+
+        @Test
+        @DisplayName("TC_CMM_AUTH_001 — Unauthenticated requests → HTTP 401")
+        void managerMission_Unauthenticated_Returns401() throws Exception {
+            // GET
+            mockMvc.perform(get("/api/v1/manager/roleplay/missions").param("topicId", UUID.randomUUID().toString()))
+                    .andExpect(status().isUnauthorized());
+            
+            // GET Detail
+            mockMvc.perform(get("/api/v1/manager/roleplay/missions/{id}", UUID.randomUUID()))
+                    .andExpect(status().isUnauthorized());
         }
     }
 }

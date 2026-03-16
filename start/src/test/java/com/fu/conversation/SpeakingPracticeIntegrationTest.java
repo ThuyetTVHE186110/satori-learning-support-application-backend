@@ -1256,6 +1256,178 @@ class SpeakingPracticeIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest());
         }
+
+        // ── Cross-user session isolation (Security) ───────────────────────────
+
+        @Test
+        @DisplayName("TC_SP_AI_026 — send message to another user's session returns 404")
+        void tc_sp_ai_026() throws Exception {
+            User ownerLearner = saveLearner("owner@test.com");
+            saveLearner("attacker@test.com");
+            String attackerToken = loginAndGetToken("attacker@test.com");
+
+            ConversationSession session = saveSession(ownerLearner.getId(), null);
+
+            String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
+
+            mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", session.getId())
+                            .file(new org.springframework.mock.web.MockMultipartFile(
+                                    "message", "message", "application/json", messageJson.getBytes()))
+                            .header("Authorization", "Bearer " + attackerToken))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("TC_SP_AI_027 — complete another user's session returns 404")
+        void tc_sp_ai_027() throws Exception {
+            User ownerLearner = saveLearner("owner@test.com");
+            saveLearner("attacker@test.com");
+            String attackerToken = loginAndGetToken("attacker@test.com");
+
+            ConversationSession session = saveSession(ownerLearner.getId(), null);
+
+            mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{sessionId}/complete", session.getId())
+                            .header("Authorization", "Bearer " + attackerToken))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("TC_SP_AI_028 — abandon another user's session returns 404")
+        void tc_sp_ai_028() throws Exception {
+            User ownerLearner = saveLearner("owner@test.com");
+            saveLearner("attacker@test.com");
+            String attackerToken = loginAndGetToken("attacker@test.com");
+
+            ConversationSession session = saveSession(ownerLearner.getId(), null);
+
+            mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{sessionId}/abandon", session.getId())
+                            .header("Authorization", "Bearer " + attackerToken))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("TC_SP_AI_029 — get another user's session returns 404")
+        void tc_sp_ai_029() throws Exception {
+            User ownerLearner = saveLearner("owner@test.com");
+            saveLearner("attacker@test.com");
+            String attackerToken = loginAndGetToken("attacker@test.com");
+
+            ConversationSession session = saveSession(ownerLearner.getId(), null);
+
+            mockMvc.perform(get("/api/v1/learner/roleplay/sessions/{sessionId}", session.getId())
+                            .header("Authorization", "Bearer " + attackerToken))
+                    .andExpect(status().isNotFound());
+        }
+
+        // ── Manager authorization ─────────────────────────────────────────────
+
+        @Test
+        @DisplayName("TC_SP_AI_030 — manager start roleplay session returns 403")
+        void tc_sp_ai_030() throws Exception {
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com");
+
+            ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
+            ConversationTopic topic = saveTopic(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
+
+            String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
+
+            mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isForbidden());
+        }
+
+        // ── Business logic edge cases ─────────────────────────────────────────
+
+        @Test
+        @DisplayName("TC_SP_AI_031 — complete non-existent session returns 404")
+        void tc_sp_ai_031() throws Exception {
+            saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+
+            mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{sessionId}/complete", UUID.randomUUID())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("TC_SP_AI_032 — start session when topic has no missions")
+        void tc_sp_ai_032() throws Exception {
+            saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+
+            ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
+            ConversationTopic topic = saveTopic(theme.getId(), "No Mission Topic", Course.ContentStatus.PUBLISHED, 1, true);
+            // No missions saved for this topic
+
+            when(roleplayAIService.buildSystemPrompt(any(), anyString(), anyString(), anyList()))
+                    .thenReturn("prompt");
+            when(roleplayAIService.generateOpeningMessage(anyString()))
+                    .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"Hello\",\"translation\":\"Hello\",\"romaji\":\"\"}]");
+
+            String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
+
+            mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.data.missions.length()").value(0))
+                    .andExpect(jsonPath("$.data.messages.length()").value(1));
+        }
+
+        @Test
+        @DisplayName("TC_SP_AI_033 — send message with hintRequest=true")
+        void tc_sp_ai_033() throws Exception {
+            User learner = saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+
+            ConversationSession session = saveSession(learner.getId(), null);
+
+            when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("prompt");
+            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
+                    .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"Hint reply\",\"translation\":\"Hint reply\",\"romaji\":\"\",\"corrections\":[]}]");
+            when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
+                    .thenReturn(List.of());
+            when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
+
+            String messageJson = "{\"content\":\"I need help\",\"hintRequest\":true}";
+
+            mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", session.getId())
+                            .file(new org.springframework.mock.web.MockMultipartFile(
+                                    "message", "message", "application/json", messageJson.getBytes()))
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.messages.length()").value(1));
+
+            // Verify the hint flag was persisted
+            List<ConversationMessage> msgs = messageRepository.findBySessionIdOrderBySequenceNumberAsc(session.getId());
+            ConversationMessage userMsg = msgs.stream()
+                    .filter(m -> m.getRole() == ConversationMessage.MessageRole.USER)
+                    .findFirst().orElseThrow();
+            assertThat(userMsg.isHintRequest()).isTrue();
+        }
+
+        @Test
+        @DisplayName("TC_SP_AI_034 — free-talk session limit reached returns 400")
+        void tc_sp_ai_034() throws Exception {
+            User learner = saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+
+            saveSession(learner.getId(), null);
+            saveSession(learner.getId(), null);
+            saveSession(learner.getId(), null);
+
+            String body = "{\"jlptLevel\":\"N5\",\"language\":\"vi\"}";
+
+            mockMvc.perform(post("/api/v1/learner/roleplay/free-talk/sessions")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -1538,6 +1710,102 @@ class SpeakingPracticeIntegrationTest {
 
             UserConversationTopic stored = userTopicRepository.findById(topic.getId()).orElseThrow();
             assertThat(stored.getAiGeneratedContext()).contains("vocabularyHints");
+        }
+
+        // ── Cross-user custom topic isolation (Security) ──────────────────────
+
+        @Test
+        @DisplayName("TC_SP_CT_015 — update another user's topic returns 404")
+        void tc_sp_ct_015() throws Exception {
+            User owner = saveLearner("owner@test.com");
+            saveLearner("attacker@test.com");
+            String attackerToken = loginAndGetToken("attacker@test.com");
+
+            UserConversationTopic topic = userTopicRepository.save(UserConversationTopic.builder()
+                    .userId(owner.getId())
+                    .title("Owner Topic")
+                    .scenario("Owner scenario")
+                    .status(Course.ContentStatus.DRAFT)
+                    .build());
+
+            String body = "{\"title\":\"Hacked\",\"scenario\":\"Hacked scenario\"}";
+
+            mockMvc.perform(put("/api/v1/learner/conversation/my-topics/{id}", topic.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + attackerToken))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("TC_SP_CT_016 — delete another user's topic returns 404")
+        void tc_sp_ct_016() throws Exception {
+            User owner = saveLearner("owner@test.com");
+            saveLearner("attacker@test.com");
+            String attackerToken = loginAndGetToken("attacker@test.com");
+
+            UserConversationTopic topic = userTopicRepository.save(UserConversationTopic.builder()
+                    .userId(owner.getId())
+                    .title("Owner Topic")
+                    .scenario("Owner scenario")
+                    .status(Course.ContentStatus.DRAFT)
+                    .build());
+
+            mockMvc.perform(delete("/api/v1/learner/conversation/my-topics/{id}", topic.getId())
+                            .header("Authorization", "Bearer " + attackerToken))
+                    .andExpect(status().isNotFound());
+
+            // Verify topic was NOT deleted
+            assertThat(userTopicRepository.findById(topic.getId())).isPresent();
+        }
+
+        @Test
+        @DisplayName("TC_SP_CT_017 — generate context for another user's topic returns 404")
+        void tc_sp_ct_017() throws Exception {
+            User owner = saveLearner("owner@test.com");
+            saveLearner("attacker@test.com");
+            String attackerToken = loginAndGetToken("attacker@test.com");
+
+            UserConversationTopic topic = userTopicRepository.save(UserConversationTopic.builder()
+                    .userId(owner.getId())
+                    .title("Owner Topic")
+                    .scenario("Owner scenario")
+                    .status(Course.ContentStatus.DRAFT)
+                    .build());
+
+            mockMvc.perform(post("/api/v1/learner/conversation/my-topics/{id}/generate-context", topic.getId())
+                            .header("Authorization", "Bearer " + attackerToken))
+                    .andExpect(status().isNotFound());
+        }
+
+        // ── Manager authorization ─────────────────────────────────────────────
+
+        @Test
+        @DisplayName("TC_SP_CT_018 — manager create personal topic returns 403")
+        void tc_sp_ct_018() throws Exception {
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com");
+
+            String body = "{\"title\":\"My Topic\",\"scenario\":\"Practice shopping\"}";
+
+            mockMvc.perform(post("/api/v1/learner/conversation/my-topics")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isForbidden());
+        }
+
+        // ── Edge case ─────────────────────────────────────────────────────────
+
+        @Test
+        @DisplayName("TC_SP_CT_019 — free-talk no token returns 401")
+        void tc_sp_ct_019() throws Exception {
+            String body = "{\"jlptLevel\":\"N5\",\"language\":\"vi\"}";
+
+            mockMvc.perform(post("/api/v1/learner/roleplay/free-talk/sessions")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isUnauthorized());
         }
     }
 }
