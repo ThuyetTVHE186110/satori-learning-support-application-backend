@@ -90,7 +90,7 @@ class QuizAiGenerationServiceTest {
                     .questionTypes(List.of("multiple_choice"))
                     .build();
 
-            String rawJson = "{\"questions\": [{\"questionText\": \"Q1\", \"questionType\": \"multiple_choice\", \"explanation\": \"Ex1\"}]}";
+            String rawJson = "{\"questions\": [{\"questionText\": \"[日本]{にほん} ++đẹp++\", \"questionType\": \"multiple_choice\", \"explanation\": \"Ex1\"}]}";
 
             ChatResponse chatResponse = mock(ChatResponse.class, RETURNS_DEEP_STUBS);
             AssistantMessage assistantMessage = mock(AssistantMessage.class);
@@ -105,7 +105,7 @@ class QuizAiGenerationServiceTest {
             given(generation.getOutput()).willReturn(assistantMessage);
             given(assistantMessage.getText()).willReturn(rawJson);
 
-            AiQuizQuestionDto dto = new AiQuizQuestionDto("Q1", "multiple_choice", null, "A", null, "Ex1");
+            AiQuizQuestionDto dto = new AiQuizQuestionDto("[日本]{にほん} ++đẹp++", "multiple_choice", null, "A", null, "Ex1");
             AiQuizResponseWrapper wrapper = new AiQuizResponseWrapper(List.of(dto));
 
             given(outputConverter.convert(anyString())).willReturn(wrapper);

@@ -56,58 +56,59 @@ ON CONFLICT (class_id, user_id) DO NOTHING;
 -- 3. Create Quiz Questions
 INSERT INTO assignment.quiz_questions (id, question_text, question_type, options, correct_answer, explanation, jlpt_level, created_by)
 VALUES 
-(v_q1_id, '「食べる」の読み方は何ですか？', 'multiple_choice', 
- '[{"id": "A", "text": "たべる"}, {"id": "B", "text": "のめる"}, {"id": "C", "text": "ねる"}]'::JSONB, 
- 'A', '「食べる」 là động từ nhóm 2, đọc là たべる (Taberu).', 'N5', v_teacher_id),
-(v_q2_id, 'Khoảng trống: わたしは　にほんご　_____　べんきょうします。', 'multiple_choice',
+(v_q1_id, '「[食]{た}べる」の[読]{よ}み[方]{かた}は[何]{なん}ですか？', 'multiple_choice', 
+ '[{"id": "A", "text": "[食]{た}べる"}, {"id": "B", "text": "[飲]{の}める"}, {"id": "C", "text": "[寝]{ね}る"}]'::JSONB, 
+ 'A', '「[食]{た}べる」 là động từ nhóm 2, đọc là たべる (Taberu).', 'N5', v_teacher_id),
+(v_q2_id, 'Khoảng trống: わたしは ++[日本語]{にほんご}++ _____ [勉強]{べんきょう}します。', 'multiple_choice',
  '[{"id": "A", "text": "を"}, {"id": "B", "text": "に"}, {"id": "C", "text": "で"}]'::JSONB,
  'A', 'Trợ từ "を" dùng để chỉ tân ngữ trực tiếp của động từ べんきょうします.', 'N5', v_teacher_id),
-(v_q3_id, '日本料理（にほんりょうり）は　おいしいですか？', 'true_false',
- '[{"id": "TRUE", "text": "はい"}, {"id": "FALSE", "text": "いいえ"}]'::JSONB,
- 'TRUE', 'Món ăn Nhật thường được coi là ngon.', 'N5', v_teacher_id),
-(v_q4_id, 'Dịch sang tiếng Nhật: "Chào buổi sáng"', 'fill_blank',
- null, 'おはようございます', 'Lời chào buổi sáng trang trọng.', 'N5', v_teacher_id),
-(v_q5_id, 'Chọn trợ từ đúng: どこ　____　いきますか。', 'multiple_choice',
+(v_q3_id, '++[日本料理]{にほんりょうり}++ là gì?', 'multiple_choice',
+ '[{"id": "A", "text": "Món ăn Nhật"}, {"id": "B", "text": "Món ăn Trung"}, {"id": "C", "text": "Món ăn Hàn"}]'::JSONB,
+ 'A', '日本料理 (Nihon ryouri) là món ăn Nhật Bản.', 'N5', v_teacher_id),
+(v_q4_id, 'Chọn câu chào ++"Chào buổi sáng"++ đúng:', 'multiple_choice',
+ '[{"id": "A", "text": "おはようございます"}, {"id": "B", "text": "こんにちは"}, {"id": "C", "text": "こんばんは"}]'::JSONB,
+ 'A', 'おはようございます (Ohayou gozaimasu) là lời chào buổi sáng.', 'N5', v_teacher_id),
+(v_q5_id, 'Chọn trợ từ đúng: どこ ____ [行]{い}きますか。', 'multiple_choice',
  '[{"id": "A", "text": "へ"}, {"id": "B", "text": "を"}, {"id": "C", "text": "が"}]'::JSONB,
  'A', 'Trợ từ "へ" chỉ phương hướng di chuyển.', 'N5', v_teacher_id),
 -- New Questions for QUIZ 5 (Adjectives)
-(v_q6_id, 'Tính từ 「赤い」 có nghĩa là gì?', 'multiple_choice', 
+(v_q6_id, '[性癖]{せいへき}「[赤]{あか}い」 có nghĩa là gì?', 'multiple_choice', 
  '[{"id": "A", "text": "Màu đỏ"}, {"id": "B", "text": "Màu xanh"}, {"id": "C", "text": "Màu trắng"}]'::JSONB, 
- 'A', '赤い (Akai) có nghĩa là màu đỏ.', 'N5', v_teacher_id),
-(v_q7_id, 'Ngược nghĩa với 「大きい」(To) là gì?', 'multiple_choice', 
- '[{"id": "A", "text": "小さい"}, {"id": "B", "text": "高い"}, {"id": "C", "text": "近い"}]'::JSONB, 
- 'A', '大きい (Ookii) là to lớn, ngược lại là 小さい (Chiisai) là nhỏ.', 'N5', v_teacher_id),
-(v_q8_id, '「楽しい」 nghĩa là gì?', 'multiple_choice', 
+ 'A', '[赤]{あか}い (Akai) có nghĩa là màu đỏ.', 'N5', v_teacher_id),
+(v_q7_id, 'Ngược nghĩa với 「[大]{おお}きい」(To) là gì?', 'multiple_choice', 
+ '[{"id": "A", "text": "[小]{ちい}さい"}, {"id": "B", "text": "[高]{たか}い"}, {"id": "C", "text": "[近]{ちか}い"}]'::JSONB, 
+ 'A', '[大]{おお}きい (Ookii) là to lớn, ngược lại là [小]{ちい}さい (Chiisai) là nhỏ.', 'N5', v_teacher_id),
+(v_q8_id, '「[楽]{たの}しい」 nghĩa là gì?', 'multiple_choice', 
  '[{"id": "A", "text": "Vui vẻ"}, {"id": "B", "text": "Buồn bã"}, {"id": "C", "text": "Đáng sợ"}]'::JSONB, 
- 'A', '楽しい (Tanoshii) nghĩa là vui vẻ, hào hứng.', 'N5', v_teacher_id),
-(v_q9_id, '「忙しい」 nghĩa là gì?', 'multiple_choice', 
+ 'A', '[楽]{たの}しい (Tanoshii) nghĩa là vui vẻ, hào hứng.', 'N5', v_teacher_id),
+(v_q9_id, '「[忙]{いそが}しい」 nghĩa là gì?', 'multiple_choice', 
  '[{"id": "A", "text": "Bận rộn"}, {"id": "B", "text": "Rảnh rỗi"}, {"id": "C", "text": "Mệt mỏi"}]'::JSONB, 
- 'A', '忙しい (Isogashii) nghĩa là bận rộn.', 'N5', v_teacher_id),
-(v_q10_id, '「難しい」 nghĩa là gì?', 'multiple_choice', 
+ 'A', '[忙]{いそ가}しい (Isogashii) nghĩa là bận rộn.', 'N5', v_teacher_id),
+(v_q10_id, '「[難]{むずか}しい」 nghĩa là gì?', 'multiple_choice', 
  '[{"id": "A", "text": "Khó"}, {"id": "B", "text": "Dễ"}, {"id": "C", "text": "Thú vị"}]'::JSONB, 
- 'A', '難しい (Muzukashii) nghĩa là khó khăn.', 'N5', v_teacher_id),
+ 'A', '[難]{むずか}しい (Muzukashii) nghĩa là khó khăn.', 'N5', v_teacher_id),
 -- New Questions for QUIZ 6 (Kanji)
-(v_q11_id, 'Hán tự của "Mặt trời/Ngày" là gì?', 'multiple_choice', 
- '[{"id": "A", "text": "日"}, {"id": "B", "text": "月"}, {"id": "C", "text": "火"}]'::JSONB, 
- 'A', '日 (Nichi/Hi) biểu thị mặt trời hoặc ngày.', 'N5', v_teacher_id),
-(v_q12_id, 'Hán tự của "Mặt trăng/Tháng" là gì?', 'multiple_choice', 
- '[{"id": "A", "text": "月"}, {"id": "B", "text": "日"}, {"id": "C", "text": "水"}]'::JSONB, 
- 'A', '月 (Getsu/Tsuki) biểu thị mặt trăng hoặc tháng.', 'N5', v_teacher_id),
-(v_q13_id, 'Hán tự của "Cây" là gì?', 'multiple_choice', 
- '[{"id": "A", "text": "木"}, {"id": "B", "text": "本"}, {"id": "C", "text": "休"}]'::JSONB, 
- 'A', '木 (Moku/Ki) biểu thị cái cây.', 'N5', v_teacher_id),
-(v_q14_id, 'Hán tự của "Núi" là gì?', 'multiple_choice', 
- '[{"id": "A", "text": "山"}, {"id": "B", "text": "川"}, {"id": "C", "text": "田"}]'::JSONB, 
- 'A', '山 (San/Yama) biểu thị ngọn núi.', 'N5', v_teacher_id),
-(v_q15_id, 'Hán tự của "Nước" là gì?', 'multiple_choice', 
- '[{"id": "A", "text": "水"}, {"id": "B", "text": "金"}, {"id": "C", "text": "土"}]'::JSONB, 
- 'A', '水 (Sui/Mizu) biểu thị nước.', 'N5', v_teacher_id)
+(v_q11_id, 'Hán tự của ++"Mặt trời/Ngày"++ là gì?', 'multiple_choice', 
+ '[{"id": "A", "text": "[日]{ひ}"}, {"id": "B", "text": "[月]{つき}"}, {"id": "C", "text": "[火]{ひ}"}]'::JSONB, 
+ 'A', '[日]{ひ} (Nichi/Hi) biểu thị mặt trời hoặc ngày.', 'N5', v_teacher_id),
+(v_q12_id, 'Hán tự của ++"Mặt trăng/Tháng"++ là gì?', 'multiple_choice', 
+ '[{"id": "A", "text": "[月]{つき}"}, {"id": "B", "text": "[日]{ひ}"}, {"id": "C", "text": "[水]{みず}"}]'::JSONB, 
+ 'A', '[月]{つき} (Getsu/Tsuki) biểu thị mặt trăng hoặc tháng.', 'N5', v_teacher_id),
+(v_q13_id, 'Hán tự của ++"Cây"++ là gì?', 'multiple_choice', 
+ '[{"id": "A", "text": "[木]{き}"}, {"id": "B", "text": "[本]{ほん}"}, {"id": "C", "text": "[休]{やす}み"}]'::JSONB, 
+ 'A', '[木]{き} (Moku/Ki) biểu thị cái cây.', 'N5', v_teacher_id),
+(v_q14_id, 'Hán tự của ++"Núi"++ là gì?', 'multiple_choice', 
+ '[{"id": "A", "text": "[山]{やま}"}, {"id": "B", "text": "[川]{かわ}"}, {"id": "C", "text": "[田]{だ}"}]'::JSONB, 
+ 'A', '[山]{やま} (San/Yama) biểu thị ngọn núi.', 'N5', v_teacher_id),
+(v_q15_id, 'Hán tự của ++"Nước"++ là gì?', 'multiple_choice', 
+ '[{"id": "A", "text": "[水]{みず}"}, {"id": "B", "text": "[金]{かね}"}, {"id": "C", "text": "[土]{つち}"}]'::JSONB, 
+ 'A', '[水]{みず} (Sui/Mizu) biểu thị nước.', 'N5', v_teacher_id)
 ON CONFLICT (id) DO NOTHING;
 
 -- 4. Create Assignments
 -- Assignment 1: Quiz (PUBLISHED)
 INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
-VALUES (v_quiz1_id, 'Kiểm tra Từ vựng & Ngữ pháp Bài 1', 'Bài kiểm tra nhanh về kiến thức cơ bản đã học trong tuần đầu tiên.', 'QUIZ', v_class_id, CURRENT_TIMESTAMP + INTERVAL '7 days', 'PUBLISHED', TRUE, v_teacher_id)
+VALUES (v_quiz1_id, '++Kiểm tra++ [語彙]{ごい} & [文法]{ぶんぽう} [第一課]{だいいっか}', 'Bài kiểm tra nhanh về kiến thức cơ bản đã học trong tuần đầu tiên.', 'QUIZ', v_class_id, CURRENT_TIMESTAMP + INTERVAL '7 days', 'PUBLISHED', TRUE, v_teacher_id)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO assignment.assignment_questions (assignment_id, question_id, order_index, points)
@@ -120,7 +121,7 @@ VALUES (v_writing1_id, 'Giới thiệu bản thân (自己紹介)', 'Hãy viết
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO assignment.writing_assignments (assignment_id, prompt)
-VALUES (v_writing1_id, 'Viết đoạn văn giới thiệu bản thân bao gồm: Tên, quốc tịch, công việc/trường học và sở thích.')
+VALUES (v_writing1_id, 'Viết đoạn văn ++[自己紹介]{じこしょうかい}++ bao gồm: [名前]{なまえ}, [国]{くに}, [仕事]{しごと}/[学校]{がっこう} và [趣味]{しゅみ}.')
 ON CONFLICT (assignment_id) DO NOTHING;
 
 -- Assignment 3: Quiz (DRAFT)
@@ -153,7 +154,7 @@ ON CONFLICT (assignment_id, question_id) DO NOTHING;
 
 -- Assignment 8: Quiz Kanji (PUBLISHED)
 INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
-VALUES (v_quiz6_id, 'Hán tự cơ bản: Thiên nhiên', 'Nhận diện các chữ Hán cơ bản về chủ đề thiên nhiên.', 'QUIZ', v_class_id, CURRENT_TIMESTAMP + INTERVAL '12 days', 'PUBLISHED', FALSE, v_teacher_id)
+VALUES (v_quiz6_id, '++[漢字]{かんじ}++ cơ bản: [自然]{しぜん}', 'Nhận diện các chữ Hán cơ bản về chủ đề thiên nhiên.', 'QUIZ', v_class_id, CURRENT_TIMESTAMP + INTERVAL '12 days', 'PUBLISHED', FALSE, v_teacher_id)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO assignment.assignment_questions (assignment_id, question_id, order_index, points)
@@ -173,7 +174,7 @@ ON CONFLICT (assignment_id) DO NOTHING;
 -- Learner 1: Graded Quiz
 INSERT INTO assignment.assignment_submissions (id, assignment_id, user_id, status, started_at, submitted_at, score, correct_count, total_questions, time_spent_seconds, answers, graded_by, graded_at)
 VALUES (uuid_generate_v4(), v_quiz1_id, v_learner1_id, 'GRADED', CURRENT_TIMESTAMP - INTERVAL '2 days', CURRENT_TIMESTAMP - INTERVAL '2 days 1 hour', 10.0, 3, 3, 600, 
-    format('[{"questionId": "%s", "selectedAnswer": "A", "isCorrect": true}, {"questionId": "%s", "selectedAnswer": "A", "isCorrect": true}, {"questionId": "%s", "selectedAnswer": "TRUE", "isCorrect": true}]', v_q1_id, v_q2_id, v_q3_id)::JSONB,
+    format('[{"questionId": "%s", "selectedAnswer": "A", "isCorrect": true}, {"questionId": "%s", "selectedAnswer": "A", "isCorrect": true}, {"questionId": "%s", "selectedAnswer": "A", "isCorrect": true}]', v_q1_id, v_q2_id, v_q3_id)::JSONB,
     v_teacher_id, CURRENT_TIMESTAMP - INTERVAL '1 day')
 ON CONFLICT DO NOTHING;
 
