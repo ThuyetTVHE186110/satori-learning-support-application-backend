@@ -19,12 +19,24 @@ DECLARE
     v_quiz3_id    UUID := 'b0000000-0000-0000-0000-000000000004';
     v_quiz4_id    UUID := 'b0000000-0000-0000-0000-000000000005';
     v_writing2_id UUID := 'b0000000-0000-0000-0000-000000000006';
+    v_quiz5_id    UUID := 'b0000000-0000-0000-0000-000000000007';
+    v_quiz6_id    UUID := 'b0000000-0000-0000-0000-000000000008';
     
     v_q1_id       UUID := 'e0000000-0000-0000-0000-000000000001';
     v_q2_id       UUID := 'e0000000-0000-0000-0000-000000000002';
     v_q3_id       UUID := 'e0000000-0000-0000-0000-000000000003';
     v_q4_id       UUID := 'e0000000-0000-0000-0000-000000000004';
     v_q5_id       UUID := 'e0000000-0000-0000-0000-000000000005';
+    v_q6_id       UUID := 'e0000000-0000-0000-0000-000000000006';
+    v_q7_id       UUID := 'e0000000-0000-0000-0000-000000000007';
+    v_q8_id       UUID := 'e0000000-0000-0000-0000-000000000008';
+    v_q9_id       UUID := 'e0000000-0000-0000-0000-000000000009';
+    v_q10_id      UUID := 'e0000000-0000-0000-0000-000000000010';
+    v_q11_id      UUID := 'e0000000-0000-0000-0000-000000000011';
+    v_q12_id      UUID := 'e0000000-0000-0000-0000-000000000012';
+    v_q13_id      UUID := 'e0000000-0000-0000-0000-000000000013';
+    v_q14_id      UUID := 'e0000000-0000-0000-0000-000000000014';
+    v_q15_id      UUID := 'e0000000-0000-0000-0000-000000000015';
 BEGIN
 
 -- 1. Create Class (if not exists)
@@ -57,7 +69,39 @@ VALUES
  null, 'おはようございます', 'Lời chào buổi sáng trang trọng.', 'N5', v_teacher_id),
 (v_q5_id, 'Chọn trợ từ đúng: どこ　____　いきますか。', 'multiple_choice',
  '[{"id": "A", "text": "へ"}, {"id": "B", "text": "を"}, {"id": "C", "text": "が"}]'::JSONB,
- 'A', 'Trợ từ "へ" chỉ phương hướng di chuyển.', 'N5', v_teacher_id)
+ 'A', 'Trợ từ "へ" chỉ phương hướng di chuyển.', 'N5', v_teacher_id),
+-- New Questions for QUIZ 5 (Adjectives)
+(v_q6_id, 'Tính từ 「赤い」 có nghĩa là gì?', 'multiple_choice', 
+ '[{"id": "A", "text": "Màu đỏ"}, {"id": "B", "text": "Màu xanh"}, {"id": "C", "text": "Màu trắng"}]'::JSONB, 
+ 'A', '赤い (Akai) có nghĩa là màu đỏ.', 'N5', v_teacher_id),
+(v_q7_id, 'Ngược nghĩa với 「大きい」(To) là gì?', 'multiple_choice', 
+ '[{"id": "A", "text": "小さい"}, {"id": "B", "text": "高い"}, {"id": "C", "text": "近い"}]'::JSONB, 
+ 'A', '大きい (Ookii) là to lớn, ngược lại là 小さい (Chiisai) là nhỏ.', 'N5', v_teacher_id),
+(v_q8_id, '「楽しい」 nghĩa là gì?', 'multiple_choice', 
+ '[{"id": "A", "text": "Vui vẻ"}, {"id": "B", "text": "Buồn bã"}, {"id": "C", "text": "Đáng sợ"}]'::JSONB, 
+ 'A', '楽しい (Tanoshii) nghĩa là vui vẻ, hào hứng.', 'N5', v_teacher_id),
+(v_q9_id, '「忙しい」 nghĩa là gì?', 'multiple_choice', 
+ '[{"id": "A", "text": "Bận rộn"}, {"id": "B", "text": "Rảnh rỗi"}, {"id": "C", "text": "Mệt mỏi"}]'::JSONB, 
+ 'A', '忙しい (Isogashii) nghĩa là bận rộn.', 'N5', v_teacher_id),
+(v_q10_id, '「難しい」 nghĩa là gì?', 'multiple_choice', 
+ '[{"id": "A", "text": "Khó"}, {"id": "B", "text": "Dễ"}, {"id": "C", "text": "Thú vị"}]'::JSONB, 
+ 'A', '難しい (Muzukashii) nghĩa là khó khăn.', 'N5', v_teacher_id),
+-- New Questions for QUIZ 6 (Kanji)
+(v_q11_id, 'Hán tự của "Mặt trời/Ngày" là gì?', 'multiple_choice', 
+ '[{"id": "A", "text": "日"}, {"id": "B", "text": "月"}, {"id": "C", "text": "火"}]'::JSONB, 
+ 'A', '日 (Nichi/Hi) biểu thị mặt trời hoặc ngày.', 'N5', v_teacher_id),
+(v_q12_id, 'Hán tự của "Mặt trăng/Tháng" là gì?', 'multiple_choice', 
+ '[{"id": "A", "text": "月"}, {"id": "B", "text": "日"}, {"id": "C", "text": "水"}]'::JSONB, 
+ 'A', '月 (Getsu/Tsuki) biểu thị mặt trăng hoặc tháng.', 'N5', v_teacher_id),
+(v_q13_id, 'Hán tự của "Cây" là gì?', 'multiple_choice', 
+ '[{"id": "A", "text": "木"}, {"id": "B", "text": "本"}, {"id": "C", "text": "休"}]'::JSONB, 
+ 'A', '木 (Moku/Ki) biểu thị cái cây.', 'N5', v_teacher_id),
+(v_q14_id, 'Hán tự của "Núi" là gì?', 'multiple_choice', 
+ '[{"id": "A", "text": "山"}, {"id": "B", "text": "川"}, {"id": "C", "text": "田"}]'::JSONB, 
+ 'A', '山 (San/Yama) biểu thị ngọn núi.', 'N5', v_teacher_id),
+(v_q15_id, 'Hán tự của "Nước" là gì?', 'multiple_choice', 
+ '[{"id": "A", "text": "水"}, {"id": "B", "text": "金"}, {"id": "C", "text": "土"}]'::JSONB, 
+ 'A', '水 (Sui/Mizu) biểu thị nước.', 'N5', v_teacher_id)
 ON CONFLICT (id) DO NOTHING;
 
 -- 4. Create Assignments
@@ -97,7 +141,25 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO assignment.assignment_questions (assignment_id, question_id, order_index, points)
 VALUES (v_quiz4_id, v_q4_id, 0, 5), (v_quiz4_id, v_q5_id, 1, 5)
 ON CONFLICT (assignment_id, question_id) DO NOTHING;
- 
+
+-- Assignment 7: Quiz Adjectives (PUBLISHED)
+INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
+VALUES (v_quiz5_id, 'Luyện tập Tính từ N5', 'Kiểm tra ý nghĩa các tính từ đuôi -i thông dụng trong N5.', 'QUIZ', v_class_id, CURRENT_TIMESTAMP + INTERVAL '10 days', 'PUBLISHED', FALSE, v_teacher_id)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO assignment.assignment_questions (assignment_id, question_id, order_index, points)
+VALUES (v_quiz5_id, v_q6_id, 0, 2), (v_quiz5_id, v_q7_id, 1, 2), (v_quiz5_id, v_q8_id, 2, 2), (v_quiz5_id, v_q9_id, 3, 2), (v_quiz5_id, v_q10_id, 4, 2)
+ON CONFLICT (assignment_id, question_id) DO NOTHING;
+
+-- Assignment 8: Quiz Kanji (PUBLISHED)
+INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
+VALUES (v_quiz6_id, 'Hán tự cơ bản: Thiên nhiên', 'Nhận diện các chữ Hán cơ bản về chủ đề thiên nhiên.', 'QUIZ', v_class_id, CURRENT_TIMESTAMP + INTERVAL '12 days', 'PUBLISHED', FALSE, v_teacher_id)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO assignment.assignment_questions (assignment_id, question_id, order_index, points)
+VALUES (v_quiz6_id, v_q11_id, 0, 2), (v_quiz6_id, v_q12_id, 1, 2), (v_quiz6_id, v_q13_id, 2, 2), (v_quiz6_id, v_q14_id, 3, 2), (v_quiz6_id, v_q15_id, 4, 2)
+ON CONFLICT (assignment_id, question_id) DO NOTHING;
+
 -- Assignment 6: New Writing (PUBLISHED - No Submissions)
 INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
 VALUES (v_writing2_id, 'Kể về gia đình của bạn', 'Hãy viết một đoạn văn ngắn mô tả về gia đình bạn (số lượng thành viên, nghề nghiệp...).', 'WRITING', v_class_id, CURRENT_TIMESTAMP + INTERVAL '12 days', 'PUBLISHED', FALSE, v_teacher_id)
@@ -137,6 +199,8 @@ VALUES (v_quiz1_id, v_class_id, v_teacher_id),
        (v_quiz2_id, v_class_id, v_teacher_id),
        (v_quiz3_id, v_class_id, v_teacher_id),
        (v_quiz4_id, v_class_id, v_teacher_id),
+       (v_quiz5_id, v_class_id, v_teacher_id),
+       (v_quiz6_id, v_class_id, v_teacher_id),
        (v_writing2_id, v_class_id, v_teacher_id)
 ON CONFLICT DO NOTHING;
 
