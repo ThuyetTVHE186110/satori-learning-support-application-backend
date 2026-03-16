@@ -74,17 +74,17 @@ class QuizExplanationServiceTest {
 
             given(questionRepository.findById(questionId)).willReturn(Optional.of(question));
             given(chatClient.prompt().system(anyString()).user(anyString()).options(any()).call().content())
-                    .willReturn("{\"explanation\": \"Học tiếng Nhật rất vui.\"}");
+                    .willReturn("{\"explanation\": \"[日本語]{にほんご} ++rất vui++.\"}");
 
             AiExplanationResponse response = AiExplanationResponse.builder()
-                    .explanation("Học tiếng Nhật rất vui.")
+                    .explanation("[日本語]{にほんご} ++rất vui++.")
                     .build();
             given(outputConverter.convert(anyString())).willReturn(response);
             given(questionRepository.save(any())).willAnswer(I -> I.getArgument(0));
 
             QuizQuestion result = quizExplanationService.generateExplanation(questionId, teacherId);
 
-            assertThat(result.getExplanation()).contains("Học tiếng Nhật");
+            assertThat(result.getExplanation()).isEqualTo("日本語 rất vui.");
             verify(questionRepository).save(question);
         }
 
@@ -112,16 +112,16 @@ class QuizExplanationServiceTest {
                     .build();
 
             given(chatClient.prompt().system(anyString()).user(anyString()).options(any()).call().content())
-                    .willReturn("{\"explanation\": \"Giải thích mẫu.\"}");
+                    .willReturn("{\"explanation\": \"[日本語]{にほんご} ++rất vui++.\"}");
 
             AiExplanationResponse response = AiExplanationResponse.builder()
-                    .explanation("Giải thích mẫu.")
+                    .explanation("[日本語]{にほんご} ++rất vui++.")
                     .build();
             given(outputConverter.convert(anyString())).willReturn(response);
 
             AiExplanationResponse result = quizExplanationService.generateExplanationFromDraft(request);
 
-            assertThat(result.getExplanation()).isEqualTo("Giải thích mẫu.");
+            assertThat(result.getExplanation()).isEqualTo("日本語 rất vui.");
         }
 
         @Test

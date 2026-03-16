@@ -91,6 +91,7 @@ class AssignmentServiceImplTest {
     private LearnerAssignmentResponse testLearnerAssignmentResponse;
     private LearnerAssignmentSummaryResponse testLearnerSummaryResponse;
     private SubmissionResponse testSubmissionResponse;
+    private QuizQuestion testQuestion;
 
     @BeforeEach
     void setUp() {
@@ -108,8 +109,8 @@ class AssignmentServiceImplTest {
         ReflectionTestUtils.setField(testClazz, "id", classId);
 
         testQuizAssignment = Assignment.builder()
-                .title("Quiz Bài 1")
-                .description("Quiz cho bài 1")
+                .title("Japanese Quiz")
+                .description("A quiz about [日本語]{にほんご}")
                 .assignmentType(AssignmentType.QUIZ)
                 .classId(classId)
                 .dueDate(LocalDateTime.now().plusDays(7))
@@ -176,6 +177,15 @@ class AssignmentServiceImplTest {
                 .assignmentId(assignmentId)
                 .userId(learnerId)
                 .status(SubmissionStatus.IN_PROGRESS)
+                .build();
+
+        testQuestion = QuizQuestion.builder()
+                .id(questionId)
+                .questionText("What is ++this++?")
+                .questionType("multiple_choice")
+                .options("{\"options\":[{\"id\":\"A\",\"text\":\"[本]{ほん}\"}]}")
+                .correctAnswer("A")
+                .explanation("This is [本]{ほん}.")
                 .build();
     }
 

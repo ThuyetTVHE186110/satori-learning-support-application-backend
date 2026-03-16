@@ -4,98 +4,64 @@ import com.fu.common.exception.BusinessException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class MarkdownUtilsTest {
 
     @Test
-    @DisplayName("should strip malicious script, iframe, structural tags (head, body), and non-standard tags (window)")
-    void sanitizeAndValidate_XSSAndBalancing() {
-        String input = "<script>alert('xss')</script><window>test</window><html><head></head><body><iframe src='test'></iframe>" +
-                "<img src=x onerror=alert(1)><b>Hello <ruby>Kanji<rt>Reading</ruby></body></html>";
+    @DisplayName("should strip all HTML tags including basic formatting")
+    void sanitizeAndValidate_ZeroHTML() {
+        String input = "<script>alert('xss')</script><b>Hello</b> [日本]{にほん} ++underline++<br>";
         String result = MarkdownUtils.sanitizeAndValidate(input);
         
         assertThat(result).doesNotContain("<script>");
-        assertThat(result).doesNotContain("<window>");
-        assertThat(result).doesNotContain("<html>");
-        assertThat(result).doesNotContain("<head>");
-        assertThat(result).doesNotContain("<body>");
-        assertThat(result).doesNotContain("<iframe>");
-        assertThat(result).doesNotContain("<img>");
-        assertThat(result).doesNotContain("onerror");
-        assertThat(result).contains("<b>Hello <ruby>Kanji<rt>Reading</rt></ruby></b>");
+        assertThat(result).doesNotContain("<b>");
+        assertThat(result).doesNotContain("<br>");
+        assertThat(result).contains("Hello [日本]{にほん} ++underline++");
     }
 
     @Test
-    @DisplayName("should throw error for orphaned rt tag")
-    void sanitizeAndValidate_OrphanedRt() {
-        String input = "Kanji<rt>Reading</rt>";
-        assertThatThrownBy(() -> MarkdownUtils.sanitizeAndValidate(input))
-                .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("Thẻ <rt> phải nằm trong thẻ <ruby>");
+    @DisplayName("should convert legacy ruby tags to custom syntax")
+    void stripInvalidFurigana_LegacyConversion() {
+        String input = "I want to eat <ruby>寿司<rt>すし</rt></ruby>";
+        String result = MarkdownUtils.stripInvalidFurigana(input);
+        
+        assertThat(result).isEqualTo("I want to eat [寿司]{すし}");
     }
 
     @Test
-    @DisplayName("should strip redundant furigana (reading == text)")
+    @DisplayName("should strip redundant custom furigana (reading == base)")
     void stripInvalidFurigana_Identical() {
-        String input = "<ruby>いき<rt>いき</rt></ruby>ます";
-        String result = MarkdownUtils.sanitizeAndValidate(input);
+        String input = "[いき]{いき}ます";
+        String result = MarkdownUtils.stripInvalidFurigana(input);
         
         assertThat(result).isEqualTo("いきます");
     }
 
     @Test
-    @DisplayName("should strip furigana with no kanji")
+    @DisplayName("should strip custom furigana with no kanji")
     void stripInvalidFurigana_NoKanji() {
-        String input = "<ruby>test<rt>reading</rt></ruby>";
-        String result = MarkdownUtils.sanitizeAndValidate(input);
+        String input = "[test]{reading}";
+        String result = MarkdownUtils.stripInvalidFurigana(input);
         
         assertThat(result).isEqualTo("test");
     }
 
     @Test
-    @DisplayName("should keep valid kanji furigana")
+    @DisplayName("should keep valid custom kanji furigana")
     void stripInvalidFurigana_Valid() {
-        String input = "<ruby>学校<rt>がっこう</rt></ruby>";
-        String result = MarkdownUtils.sanitizeAndValidate(input);
+        String input = "[学校]{がっこう}";
+        String result = MarkdownUtils.stripInvalidFurigana(input);
 
-        assertThat(result).isEqualTo("<ruby>学校<rt>がっこう</rt></ruby>");
+        assertThat(result).isEqualTo("[学校]{がっこう}");
     }
 
     @Test
-    @DisplayName("should shrink ruby tag from the end")
-    void stripInvalidFurigana_ShrinkEnd() {
-        String input = "<ruby>行きませんでした<rt>いきませんでした</rt></ruby>";
-        String result = MarkdownUtils.sanitizeAndValidate(input);
-
-        assertThat(result).isEqualTo("<ruby>行<rt>い</rt></ruby>きませんでした");
-    }
-
-    @Test
-    @DisplayName("should shrink ruby tag from the beginning")
-    void stripInvalidFurigana_ShrinkStart() {
-        String input = "<ruby>お弁当<rt>おべんとう</rt></ruby>";
-        String result = MarkdownUtils.sanitizeAndValidate(input);
-
-        assertThat(result).isEqualTo("お<ruby>弁当<rt>べんとう</rt></ruby>");
-    }
-
-    @Test
-    @DisplayName("should shrink ruby tag from both ends")
-    void stripInvalidFurigana_ShrinkBoth() {
-        String input = "<ruby>ご飯を食べる<rt>ごはんをたべる</rt></ruby>";
-        String result = MarkdownUtils.sanitizeAndValidate(input);
-
-        assertThat(result).isEqualTo("ご<ruby>飯を食<rt>はんをた</rt></ruby>べる");
-    }
-
-    @Test
-    @DisplayName("should enforce plain text for explanations")
+    @DisplayName("should enforce plain text for explanations by stripping custom syntax")
     void sanitizePlainExplanation_Stripping() {
-        String input = "**Bold** and *Italic* with <ruby>Kanji<rt>Reading</rt></ruby>";
+        String input = "**Bold** and [漢字]{かんじ} with ++underline++";
         String result = MarkdownUtils.sanitizePlainExplanation(input);
         
-        assertThat(result).isEqualTo("Bold and Italic with KanjiReading");
+        assertThat(result).isEqualTo("Bold and 漢字 with underline");
     }
 
     @Test
