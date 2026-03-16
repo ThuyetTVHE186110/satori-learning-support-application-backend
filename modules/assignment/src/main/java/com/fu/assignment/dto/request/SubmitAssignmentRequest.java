@@ -17,9 +17,6 @@ import java.util.UUID;
 @AllArgsConstructor
 public class SubmitAssignmentRequest {
 
-    @NotNull(message = "Submission ID is required")
-    private UUID submissionId;
-
     /**
      * Answers as JSON string.
      * Structure: [{"questionId":"uuid","selectedAnswer":"A","timeSpent":15}, ...]

@@ -112,4 +112,12 @@ public interface AssignmentSubmissionRepository extends JpaRepository<Assignment
     List<Object[]> findLatestStatusByAssignmentIdsAndUserId(
             @Param("assignmentIds") List<UUID> assignmentIds,
             @Param("userId") UUID userId);
+
+    @Query("""
+            SELECT s FROM AssignmentSubmission s
+            WHERE s.assignmentId = :assignmentId
+              AND s.userId = :userId
+              AND s.status = com.fu.assignment.entity.SubmissionStatus.IN_PROGRESS
+            """)
+    Optional<AssignmentSubmission> findActiveByAssignmentIdAndUserId(@Param("assignmentId") UUID assignmentId, @Param("userId") UUID userId);
 }

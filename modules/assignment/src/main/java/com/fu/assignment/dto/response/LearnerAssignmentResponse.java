@@ -1,6 +1,5 @@
 package com.fu.assignment.dto.response;
 
-import com.fu.assignment.entity.AssignmentStatus;
 import com.fu.assignment.entity.AssignmentType;
 import lombok.*;
 
@@ -26,21 +25,9 @@ public class LearnerAssignmentResponse {
 
     private LocalDateTime startDate;
     private LocalDateTime dueDate;
-    private Integer timeLimitMinutes;
-    private Boolean lateSubmissionAllowed;
-    private Integer lateSubmissionPenaltyPercent;
-
     private String audioUrl;
-    private Integer questionCount;
     private Long actualQuestionCount;
-
-    private AssignmentStatus status;
-    private UUID createdBy;
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
-    private Boolean hasSubmissions;
 
     private List<LearnerQuizQuestionResponse> questions;
     private WritingAssignmentResponse writingContent;
-    private Long submissionCount;
 }

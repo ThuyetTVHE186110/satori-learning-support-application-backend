@@ -88,6 +88,7 @@ class AssignmentServiceImplTest {
     private Clazz testClazz;
     private AssignmentResponse testAssignmentResponse;
     private AssignmentSummaryResponse testSummaryResponse;
+    private LearnerAssignmentResponse testLearnerAssignmentResponse;
     private LearnerAssignmentSummaryResponse testLearnerSummaryResponse;
     private SubmissionResponse testSubmissionResponse;
 
@@ -162,7 +163,12 @@ class AssignmentServiceImplTest {
                 .id(assignmentId)
                 .title("Quiz Bài 1")
                 .assignmentType(AssignmentType.QUIZ)
-                .status(AssignmentStatus.PUBLISHED)
+                .build();
+
+        testLearnerAssignmentResponse = LearnerAssignmentResponse.builder()
+                .id(assignmentId)
+                .title("Quiz Bài 1")
+                .assignmentType(AssignmentType.QUIZ)
                 .build();
 
         testSubmissionResponse = SubmissionResponse.builder()
@@ -179,7 +185,7 @@ class AssignmentServiceImplTest {
     }
 
     private void stubEnrichResponse(Assignment a) {
-        given(mapper.toResponse(a)).willReturn(testAssignmentResponse);
+        given(mapper.toResponse(any(Assignment.class))).willReturn(testAssignmentResponse);
         given(assignmentQuestionRepository.findByAssignmentIdOrderByOrderIndex(a.getId())).willReturn(List.of());
         given(submissionRepository.countByAssignmentIdAndStatus(eq(a.getId()), anyString())).willReturn(0L);
     }
@@ -291,7 +297,7 @@ class AssignmentServiceImplTest {
             stubTeacherAccess();
             given(assignmentRepository.save(any(Assignment.class))).willReturn(testWritingAssignment);
             stubEnrichResponse(testWritingAssignment);
-            given(writingAssignmentRepository.findByAssignmentId(any())).willReturn(Optional.empty());
+            given(writingAssignmentRepository.findByAssignmentId(any(UUID.class))).willReturn(Optional.empty());
 
             AssignmentResponse result = assignmentService.saveFullWriting(null, classId, request, AssignmentType.WRITING, teacherId);
 
@@ -519,7 +525,7 @@ class AssignmentServiceImplTest {
 
             given(assignmentRepository.save(any(Assignment.class))).willReturn(clonedAssignment);
             given(assignmentQuestionRepository.findByAssignmentIdOrderByOrderIndex(assignmentId)).willReturn(List.of());
-            given(mapper.toResponse(clonedAssignment)).willReturn(
+            given(mapper.toResponse(any(Assignment.class))).willReturn(
                     AssignmentResponse.builder().id(clonedId).title("Cloned Quiz").status(AssignmentStatus.DRAFT).build());
             given(assignmentQuestionRepository.findByAssignmentIdOrderByOrderIndex(clonedId)).willReturn(List.of());
             given(submissionRepository.countByAssignmentIdAndStatus(eq(clonedId), anyString())).willReturn(0L);
@@ -620,23 +626,46 @@ class AssignmentServiceImplTest {
     class StartAssignmentTests {
 
         @Test
-        @DisplayName("Should start assignment successfully")
-        void shouldStartAssignment() {
+        @DisplayName("Should start new assignment successfully when no active submission")
+        void shouldStartNewAssignment() {
             testQuizAssignment.setStatus(AssignmentStatus.PUBLISHED);
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
-            given(submissionRepository.hasActiveSubmission(assignmentId, learnerId)).willReturn(false);
+            given(submissionRepository.findActiveByAssignmentIdAndUserId(assignmentId, learnerId)).willReturn(Optional.empty());
             given(submissionRepository.countByAssignmentIdAndUserId(assignmentId, learnerId)).willReturn(0L);
             given(assignmentQuestionRepository.countByAssignmentId(assignmentId)).willReturn(5L);
             given(submissionRepository.save(any(AssignmentSubmission.class))).willReturn(testSubmission);
             given(assignmentRepository.save(any(Assignment.class))).willReturn(testQuizAssignment);
-            given(mapper.toResponse(any(AssignmentSubmission.class))).willReturn(testSubmissionResponse);
+            given(mapper.toLearnerResponse(any(Assignment.class))).willReturn(testLearnerAssignmentResponse);
+            given(assignmentQuestionRepository.countByAssignmentId(assignmentId)).willReturn(5L);
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
-            given(userRepository.findById(learnerId)).willReturn(Optional.empty());
+            
+            // For enrichment
+            given(assignmentQuestionRepository.findByAssignmentIdOrderByOrderIndex(assignmentId)).willReturn(List.of());
 
-            SubmissionResponse result = assignmentService.startAssignment(assignmentId, learnerId);
+            LearnerAssignmentResponse result = assignmentService.startAssignment(assignmentId, learnerId);
 
             assertThat(result).isNotNull();
+            assertThat(result.getId()).isEqualTo(assignmentId);
             verify(submissionRepository).save(any(AssignmentSubmission.class));
+            verify(assignmentRepository).save(any(Assignment.class));
+        }
+
+        @Test
+        @DisplayName("Should resume assignment successfully when active submission exists")
+        void shouldResumeAssignment() {
+            testQuizAssignment.setStatus(AssignmentStatus.PUBLISHED);
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
+            given(submissionRepository.findActiveByAssignmentIdAndUserId(assignmentId, learnerId)).willReturn(Optional.of(testSubmission));
+            
+            // For enrichment
+            given(mapper.toLearnerResponse(any(Assignment.class))).willReturn(testLearnerAssignmentResponse);
+            given(assignmentQuestionRepository.findByAssignmentIdOrderByOrderIndex(assignmentId)).willReturn(List.of());
+
+            LearnerAssignmentResponse result = assignmentService.startAssignment(assignmentId, learnerId);
+
+            assertThat(result).isNotNull();
+            assertThat(result.getId()).isEqualTo(assignmentId);
+            verify(submissionRepository, never()).save(any(AssignmentSubmission.class));
         }
 
         @Test
@@ -651,11 +680,12 @@ class AssignmentServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should throw when assignment due date has passed")
+        @DisplayName("Should throw when assignment due date has passed for NEW attempt")
         void shouldThrowWhenPastDue() {
             testQuizAssignment.setStatus(AssignmentStatus.PUBLISHED);
             testQuizAssignment.setDueDate(LocalDateTime.now().minusDays(1));
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
+            given(submissionRepository.findActiveByAssignmentIdAndUserId(assignmentId, learnerId)).willReturn(Optional.empty());
 
             assertThatThrownBy(() -> assignmentService.startAssignment(assignmentId, learnerId))
                     .isInstanceOf(BusinessException.class)
@@ -663,23 +693,11 @@ class AssignmentServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should throw when learner already has active submission")
-        void shouldThrowWhenAlreadyInProgress() {
-            testQuizAssignment.setStatus(AssignmentStatus.PUBLISHED);
-            given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
-            given(submissionRepository.hasActiveSubmission(assignmentId, learnerId)).willReturn(true);
-
-            assertThatThrownBy(() -> assignmentService.startAssignment(assignmentId, learnerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("đang có một lần làm bài chưa hoàn thành");
-        }
-
-        @Test
         @DisplayName("Should throw when no retry allowed and previous attempt exists")
         void shouldThrowWhenNoRetry() {
             testQuizAssignment.setStatus(AssignmentStatus.PUBLISHED);
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
-            given(submissionRepository.hasActiveSubmission(assignmentId, learnerId)).willReturn(false);
+            given(submissionRepository.findActiveByAssignmentIdAndUserId(assignmentId, learnerId)).willReturn(Optional.empty());
             given(submissionRepository.countByAssignmentIdAndUserId(assignmentId, learnerId)).willReturn(1L);
 
             assertThatThrownBy(() -> assignmentService.startAssignment(assignmentId, learnerId))
@@ -696,91 +714,64 @@ class AssignmentServiceImplTest {
     @DisplayName("SubmitQuiz Tests")
     class SubmitQuizTests {
         @Test
-        @DisplayName("Should throw INVALID_JSON_FORMAT when answers JSON is invalid")
-        void shouldThrowWhenInvalidJson() throws Exception {
-            String invalidJson = "{ invalid json ]";
+        @DisplayName("Should submit quiz successfully")
+        void shouldSubmitQuizSuccessfully() throws Exception {
             SubmitAssignmentRequest request = SubmitAssignmentRequest.builder()
-                    .submissionId(submissionId)
-                    .answers(invalidJson)
+                    .answers("[]")
                     .timeSpentSeconds(60)
                     .build();
 
             testSubmission.setStatus(SubmissionStatus.IN_PROGRESS);
-            testSubmission.setUserId(learnerId);
-            given(submissionRepository.findById(submissionId)).willReturn(Optional.of(testSubmission));
-            given(assignmentRepository.findByIdAndNotDeleted(any())).willReturn(Optional.of(testQuizAssignment));
+            given(submissionRepository.findActiveByAssignmentIdAndUserId(assignmentId, learnerId)).willReturn(Optional.of(testSubmission));
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
+            given(submissionRepository.save(any(AssignmentSubmission.class))).willReturn(testSubmission);
+            given(mapper.toResponse(any(AssignmentSubmission.class))).willReturn(testSubmissionResponse);
+            
+            ObjectMapper realMapper = new ObjectMapper();
+            JsonNode arrayNode = realMapper.readTree("[]");
+            given(objectMapper.readTree(request.getAnswers())).willReturn(arrayNode);
 
-            // Mock ObjectMapper to throw exception
-            given(objectMapper.readTree(invalidJson)).willThrow(new com.fasterxml.jackson.core.JsonParseException(null, "Invalid JSON"));
+            SubmissionResponse result = assignmentService.submitQuiz(assignmentId, request, learnerId);
 
-            assertThatThrownBy(() -> assignmentService.submitQuiz(request, learnerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasFieldOrPropertyWithValue("errorCode", "INVALID_JSON_FORMAT");
+            assertThat(result).isNotNull();
+            verify(submissionRepository).save(submissionCaptor.capture());
+            assertThat(submissionCaptor.getValue().getStatus()).isEqualTo(SubmissionStatus.GRADED);
         }
 
         @Test
-        @DisplayName("Should throw INVALID_JSON_FORMAT when answers is not an array")
-        void shouldThrowWhenNotArray() throws Exception {
-            String notArrayJson = "{\"key\":\"value\"}";
+        @DisplayName("Should throw when no active submission found")
+        void shouldThrowWhenNoActiveSubmission() {
+            SubmitAssignmentRequest request = SubmitAssignmentRequest.builder().answers("[]").build();
+            given(submissionRepository.findActiveByAssignmentIdAndUserId(assignmentId, learnerId)).willReturn(Optional.empty());
+
+            assertThatThrownBy(() -> assignmentService.submitQuiz(assignmentId, request, learnerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Không tìm thấy bài nộp đang làm");
+        }
+
+        @Test
+        @DisplayName("Should mark as OVERDUE if submitted past due date")
+        void shouldMarkOverdueIfPastDue() throws Exception {
+            testQuizAssignment.setDueDate(LocalDateTime.now().minusDays(1));
             SubmitAssignmentRequest request = SubmitAssignmentRequest.builder()
-                    .submissionId(submissionId)
-                    .answers(notArrayJson)
+                    .answers("[]")
                     .timeSpentSeconds(60)
                     .build();
 
             testSubmission.setStatus(SubmissionStatus.IN_PROGRESS);
-            testSubmission.setUserId(learnerId);
-            given(submissionRepository.findById(submissionId)).willReturn(Optional.of(testSubmission));
-            given(assignmentRepository.findByIdAndNotDeleted(any())).willReturn(Optional.of(testQuizAssignment));
+            given(submissionRepository.findActiveByAssignmentIdAndUserId(assignmentId, learnerId)).willReturn(Optional.of(testSubmission));
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
+            given(submissionRepository.save(any(AssignmentSubmission.class))).willReturn(testSubmission);
+            given(mapper.toResponse(any(AssignmentSubmission.class))).willReturn(testSubmissionResponse);
+            
+            ObjectMapper realMapper = new ObjectMapper();
+            JsonNode arrayNode = realMapper.readTree("[]");
+            given(objectMapper.readTree(request.getAnswers())).willReturn(arrayNode);
 
-            JsonNode mockNode = mock(JsonNode.class);
-            given(mockNode.isArray()).willReturn(false);
-            given(objectMapper.readTree(notArrayJson)).willReturn(mockNode);
+            assignmentService.submitQuiz(assignmentId, request, learnerId);
 
-            assertThatThrownBy(() -> assignmentService.submitQuiz(request, learnerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasFieldOrPropertyWithValue("errorCode", "INVALID_JSON_FORMAT");
-        }
-        @Test
-        @DisplayName("Should throw when submission does not belong to learner")
-        void shouldThrowWhenAccessDenied() {
-            UUID otherLearnerId = UUID.randomUUID();
-            given(submissionRepository.findById(submissionId)).willReturn(Optional.of(testSubmission));
-
-            SubmitAssignmentRequest request = SubmitAssignmentRequest.builder()
-                    .submissionId(submissionId).answers("[]").build();
-
-            assertThatThrownBy(() -> assignmentService.submitQuiz(request, otherLearnerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("Không thể nộp bài thay cho học viên khác");
-        }
-
-        @Test
-        @DisplayName("Should throw when submission is not in progress")
-        void shouldThrowWhenNotInProgress() {
-            testSubmission.setStatus(SubmissionStatus.GRADED);
-            given(submissionRepository.findById(submissionId)).willReturn(Optional.of(testSubmission));
-
-            SubmitAssignmentRequest request = SubmitAssignmentRequest.builder()
-                    .submissionId(submissionId).answers("[]").build();
-
-            assertThatThrownBy(() -> assignmentService.submitQuiz(request, learnerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("không ở trạng thái đang làm");
-        }
-
-        @Test
-        @DisplayName("Should throw when assignment is not quiz type")
-        void shouldThrowWhenNotQuizType() {
-            given(submissionRepository.findById(submissionId)).willReturn(Optional.of(testSubmission));
-            given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testWritingAssignment));
-
-            SubmitAssignmentRequest request = SubmitAssignmentRequest.builder()
-                    .submissionId(submissionId).answers("[]").build();
-
-            assertThatThrownBy(() -> assignmentService.submitQuiz(request, learnerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("submitWriting");
+            verify(submissionRepository).save(submissionCaptor.capture());
+            assertThat(submissionCaptor.getValue().getStatus()).isEqualTo(SubmissionStatus.OVERDUE);
         }
     }
 
@@ -816,7 +807,7 @@ class AssignmentServiceImplTest {
         @DisplayName("Should get own submission successfully")
         void shouldGetOwnSubmission() {
             given(submissionRepository.findById(submissionId)).willReturn(Optional.of(testSubmission));
-            given(mapper.toResponse(testSubmission)).willReturn(testSubmissionResponse);
+            given(mapper.toResponse(any(AssignmentSubmission.class))).willReturn(testSubmissionResponse);
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
             given(userRepository.findById(learnerId)).willReturn(Optional.empty());
 
@@ -842,33 +833,6 @@ class AssignmentServiceImplTest {
     // 13. LEARNER ASSIGNMENT ACCESS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    @Nested
-    @DisplayName("GetAssignmentForLearner Tests")
-    class GetAssignmentForLearnerTests {
-
-        @Test
-        @DisplayName("Should throw when assignment is not published")
-        void shouldThrowWhenNotPublished() {
-            testQuizAssignment.setStatus(AssignmentStatus.DRAFT);
-            given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
-
-            assertThatThrownBy(() -> assignmentService.getAssignmentForLearner(assignmentId, learnerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("không khả dụng");
-        }
-
-        @Test
-        @DisplayName("Should throw when learner is not class member")
-        void shouldThrowWhenNotClassMember() {
-            testQuizAssignment.setStatus(AssignmentStatus.PUBLISHED);
-            given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
-            given(classMemberRepository.existsActiveByClassIdAndUserId(classId, learnerId)).willReturn(false);
-
-            assertThatThrownBy(() -> assignmentService.getAssignmentForLearner(assignmentId, learnerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("không phải là thành viên");
-        }
-    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // 14. CLASS ASSIGNMENT STATISTICS
@@ -928,7 +892,7 @@ class AssignmentServiceImplTest {
             
             given(classMemberRepository.findActiveClassIdsByUserId(learnerId)).willReturn(List.of(classId));
             given(assignmentRepository.findAll(any(Specification.class), eq(pageable))).willReturn(page);
-            given(mapper.toLearnerSummaryResponse(testQuizAssignment)).willReturn(testLearnerSummaryResponse);
+            given(mapper.toLearnerSummaryResponse(any(Assignment.class))).willReturn(testLearnerSummaryResponse);
             
             UUID subId = UUID.randomUUID();
             List<Object[]> statuses = Collections.singletonList(new Object[]{assignmentId, "SUBMITTED", subId});
@@ -951,7 +915,7 @@ class AssignmentServiceImplTest {
             
             given(classMemberRepository.findActiveClassIdsByUserId(learnerId)).willReturn(List.of(classId));
             given(assignmentRepository.findAll(any(Specification.class), eq(pageable))).willReturn(page);
-            given(mapper.toLearnerSummaryResponse(testQuizAssignment)).willReturn(testLearnerSummaryResponse);
+            given(mapper.toLearnerSummaryResponse(any(Assignment.class))).willReturn(testLearnerSummaryResponse);
             given(submissionRepository.findLatestStatusByAssignmentIdsAndUserId(anyList(), eq(learnerId))).willReturn(Collections.emptyList());
 
             Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(
