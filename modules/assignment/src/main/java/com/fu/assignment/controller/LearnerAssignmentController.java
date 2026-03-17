@@ -58,40 +58,35 @@ public class LearnerAssignmentController {
         return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages()));
     }
 
-    @GetMapping("/{id}")
-    @Operation(summary = "Get assignment details and quiz questions (without correct answers)")
-    public ApiResponse<LearnerAssignmentResponse> getAssignmentDetails(@PathVariable UUID id,
-                                                                       @AuthenticationPrincipal UserDetails userDetails) {
-        return ApiResponse.success(assignmentService.getAssignmentForLearner(id, getUserId(userDetails)));
-    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // TAKE ASSIGNMENT
     // ═══════════════════════════════════════════════════════════════════════════
 
-    @PostMapping("/{id}/start")
-    @Operation(summary = "Start an assignment attempt")
-    public ApiResponse<SubmissionResponse> startAssignment(@PathVariable UUID id,
-                                                           @AuthenticationPrincipal UserDetails userDetails) {
-        return ApiResponse.success(assignmentService.startAssignment(id, getUserId(userDetails)));
+    @PostMapping("/{assignmentId}/start")
+    @Operation(summary = "Start or resume an assignment attempt (returns current session/submission)")
+    public ApiResponse<LearnerAssignmentResponse> startAssignment(@PathVariable UUID assignmentId,
+                                                                  @AuthenticationPrincipal UserDetails userDetails) {
+        return ApiResponse.success(assignmentService.startAssignment(assignmentId, getUserId(userDetails)));
     }
 
-    @PostMapping("/submit")
+    @PostMapping("/{assignmentId}/submit-quiz")
     @Operation(summary = "Submit answers for a QUIZ assignment (auto-scored)")
     public ApiResponse<SubmissionResponse> submitQuizAssignment(
+            @PathVariable UUID assignmentId,
             @Valid @RequestBody SubmitAssignmentRequest request,
             @AuthenticationPrincipal UserDetails userDetails) {
-        return ApiResponse.success(assignmentService.submitQuiz(request, getUserId(userDetails)));
+        return ApiResponse.success(assignmentService.submitQuiz(assignmentId, request, getUserId(userDetails)));
     }
 
-    @PostMapping(value = "/{id}/submit-writing", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/{assignmentId}/submit-writing", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Submit answers for a WRITING or TRANSLATION assignment (supports image uploads)")
     public ApiResponse<SubmissionResponse> submitWritingAssignment(
-            @PathVariable UUID id,
+            @PathVariable UUID assignmentId,
             @RequestPart(value = "data") SubmitWritingRequest request,
             @RequestPart(value = "images", required = false) MultipartFile[] images,
             @AuthenticationPrincipal UserDetails userDetails) {
-        return ApiResponse.success(assignmentService.submitWriting(id, request, images, getUserId(userDetails)));
+        return ApiResponse.success(assignmentService.submitWriting(assignmentId, request, images, getUserId(userDetails)));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

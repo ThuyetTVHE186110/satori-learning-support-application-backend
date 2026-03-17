@@ -89,13 +89,12 @@ public interface AssignmentService {
 
     Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, String title, AssignmentType type, Pageable pageable);
 
-    LearnerAssignmentResponse getAssignmentForLearner(UUID assignmentId, UUID learnerId);
 
-    /** Start assignment → creates IN_PROGRESS submission */
-    SubmissionResponse startAssignment(UUID assignmentId, UUID learnerId);
+    /** Start or Resume assignment → returns full assignment details + current session */
+    LearnerAssignmentResponse startAssignment(UUID assignmentId, UUID learnerId);
 
-    /** Submit Quiz (auto-scored) */
-    SubmissionResponse submitQuiz(SubmitAssignmentRequest request, UUID learnerId);
+    /** Submit Quiz (auto-scored) using assignmentId to resolve session */
+    SubmissionResponse submitQuiz(UUID assignmentId, SubmitAssignmentRequest request, UUID learnerId);
 
     /** Submit Writing or Translation (pending teacher grading). Supports optional image uploads. */
     SubmissionResponse submitWriting(UUID assignmentId, SubmitWritingRequest request, MultipartFile[] images, UUID learnerId);

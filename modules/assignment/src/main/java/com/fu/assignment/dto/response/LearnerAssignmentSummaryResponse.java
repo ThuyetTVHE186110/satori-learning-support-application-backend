@@ -20,7 +20,6 @@ public class LearnerAssignmentSummaryResponse {
     private UUID id;
     private String title;
     private AssignmentType assignmentType;
-    private AssignmentStatus status;
     private LocalDateTime dueDate;
     private Long questionCount;
     private LocalDateTime createdAt;
