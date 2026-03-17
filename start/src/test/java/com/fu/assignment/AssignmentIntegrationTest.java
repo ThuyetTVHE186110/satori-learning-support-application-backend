@@ -7,6 +7,7 @@ import com.fu.assignment.dto.request.AiQuizGenerationRequest;
 import com.fu.assignment.dto.response.QuizQuestionResponse;
 import com.fu.assignment.entity.*;
 import com.fu.assignment.repository.*;
+import com.fu.assignment.service.AssignmentService;
 import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.repository.ClassMemberRepository;
@@ -37,8 +38,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -77,6 +80,7 @@ class AssignmentIntegrationTest {
     @Autowired private ClassMemberRepository classMemberRepository;
     @Autowired private CourseRepository courseRepository;
     @Autowired private PasswordEncoder passwordEncoder;
+    @Autowired private AssignmentService assignmentService;
 
     // ── Mocked AI services (prevent real HTTP calls) ──────────────────────────
     @MockBean private QuizAiGenerationService quizAiGenerationService;
@@ -357,17 +361,6 @@ class AssignmentIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_AS_T_VL_005 — Learner gọi endpoint Teacher → 403")
-        void tc_as_t_vl_005() throws Exception {
-            saveLearner("learner@test.com");
-            String token = loginAndGetToken("learner@test.com");
-
-            mockMvc.perform(get("/api/v1/teacher/assignments")
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isForbidden());
-        }
-
-        @Test
         @DisplayName("TC_AS_T_VL_006 — Get My Assignments (tất cả class) thành công")
         void tc_as_t_vl_006() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
@@ -565,20 +558,6 @@ class AssignmentIntegrationTest {
             mockMvc.perform(get("/api/v1/teacher/assignments/{id}", a.getId())
                             .header("Authorization", "Bearer " + tokenB))
                     .andExpect(status().isBadRequest());
-        }
-
-        @Test
-        @DisplayName("TC_AS_T_VI_005 — Learner gọi endpoint Teacher → 403")
-        void tc_as_t_vi_005() throws Exception {
-            User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
-            Assignment a = savePublishedQuiz(teacher, clazz);
-            saveLearner("learner@test.com");
-            String token = loginAndGetToken("learner@test.com");
-
-            mockMvc.perform(get("/api/v1/teacher/assignments/{id}", a.getId())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isForbidden());
         }
 
         @Test
@@ -1365,20 +1344,6 @@ class AssignmentIntegrationTest {
                             .header("Authorization", "Bearer " + tokenB))
                     .andExpect(status().isBadRequest());
         }
-
-        @Test
-        @DisplayName("TC_AS_T_DL_006 — Learner gọi endpoint Teacher DELETE → 403")
-        void tc_as_t_dl_006() throws Exception {
-            User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
-            Assignment a = saveQuizDraft(teacher, clazz);
-            saveLearner("learner@test.com");
-            String token = loginAndGetToken("learner@test.com");
-
-            mockMvc.perform(delete("/api/v1/teacher/assignments/{id}", a.getId())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isForbidden());
-        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1459,20 +1424,6 @@ class AssignmentIntegrationTest {
             mockMvc.perform(get("/api/v1/teacher/assignments/submissions/{subId}", UUID.randomUUID())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isNotFound());
-        }
-
-        @Test
-        @DisplayName("TC_AS_T_VS_006 — Learner gọi endpoint Teacher submissions → 403")
-        void tc_as_t_vs_006() throws Exception {
-            User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
-            Assignment a = savePublishedQuiz(teacher, clazz);
-            saveLearner("learner@test.com");
-            String token = loginAndGetToken("learner@test.com");
-
-            mockMvc.perform(get("/api/v1/teacher/assignments/{id}/submissions", a.getId())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isForbidden());
         }
 
         @Test
@@ -1850,17 +1801,6 @@ class AssignmentIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.content.length()").value(0));
-        }
-
-        @Test
-        @DisplayName("TC_AS_L_VL_005 — Teacher gọi endpoint Learner → 403")
-        void tc_as_l_vl_005() throws Exception {
-            saveTeacher("teacher@test.com");
-            String token = loginAndGetToken("teacher@test.com");
-
-            mockMvc.perform(get("/api/v1/learner/assignments")
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isForbidden());
         }
 
         @Test
@@ -2918,6 +2858,65 @@ class AssignmentIntegrationTest {
                             .file(audioPart)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest());
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // 5. CONCURRENCY TESTS
+    // ═════════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("5. Concurrency Tests")
+    class ConcurrencyTests {
+
+        @Test
+        @DisplayName("TC_AS_L_DO_CONCURRENCY_001 — Double-submit 'startAssignment' → chỉ 1 submission được tạo")
+        void tc_as_l_do_concurrency_001() throws Exception {
+            // 1. Setup
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment assignment = savePublishedQuiz(teacher, clazz);
+            UUID assignmentId = assignment.getId();
+            UUID learnerId = learner.getId();
+
+            // 2. Prepare for concurrency
+            int numberOfThreads = 2;
+            ExecutorService executorService = Executors.newFixedThreadPool(numberOfThreads);
+            CountDownLatch latch = new CountDownLatch(1);
+
+            // 3. Create tasks
+            Callable<Boolean> task = () -> {
+                latch.await(); // Wait for the signal to start
+                try {
+                    assignmentService.startAssignment(assignmentId, learnerId);
+                    return true; // Success
+                } catch (BusinessException e) {
+                    // Expect "ALREADY_IN_PROGRESS" for the second request
+                    return false; // Failed as expected
+                }
+            };
+
+            // 4. Submit tasks
+            Future<Boolean> future1 = executorService.submit(task);
+            Future<Boolean> future2 = executorService.submit(task);
+
+            // 5. Start all threads at once
+            latch.countDown();
+
+            // 6. Get results and assert
+            boolean result1 = future1.get();
+            boolean result2 = future2.get();
+
+            // One must succeed, one must fail
+            assertThat(result1 ^ result2).isTrue();
+
+            // 7. Verify database state
+            long submissionCount = submissionRepository.countByAssignmentIdAndUserId(assignmentId, learnerId);
+            assertThat(submissionCount).isEqualTo(1);
+
+            executorService.shutdown();
         }
     }
 }

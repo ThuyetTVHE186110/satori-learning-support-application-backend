@@ -1407,7 +1407,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationMessage userMsg = msgs.stream()
                     .filter(m -> m.getRole() == ConversationMessage.MessageRole.USER)
                     .findFirst().orElseThrow();
-            assertThat(userMsg.isHintRequest()).isTrue();
+            assertThat(userMsg.getIsHintRequest()).isTrue();
         }
 
         @Test
