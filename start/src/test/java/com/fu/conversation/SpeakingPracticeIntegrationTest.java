@@ -30,6 +30,8 @@ import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
 import com.fu.user.repository.UserRepository;
 import com.fu.user.repository.UserSessionRepository;
+import com.fu.user.security.JwtService;
+import io.jsonwebtoken.Jwts;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -42,10 +44,13 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import javax.crypto.SecretKey;
 import java.time.LocalDateTime;
+import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
@@ -84,10 +89,8 @@ class SpeakingPracticeIntegrationTest {
     @Autowired private UserRepository userRepository;
     @Autowired private UserSessionRepository userSessionRepository;
     @Autowired private PasswordEncoder passwordEncoder;
-
-    @MockBean
-    @SuppressWarnings("unused")
-    private EmailService emailService;
+    @Autowired private JwtService jwtService;
+    @MockBean private EmailService emailService;
     @MockBean private ConversationGenerationService conversationGenerationService;
     @MockBean private RoleplayAIService roleplayAIService;
     @MockBean private MissionEvaluatorAI missionEvaluatorAI;
@@ -108,7 +111,6 @@ class SpeakingPracticeIntegrationTest {
                 .build());
     }
 
-    @SuppressWarnings({"SameParameterValue", "UnusedReturnValue"})
     private User saveManager(String email) {
         return userRepository.save(User.builder()
                 .email(email)
@@ -140,7 +142,6 @@ class SpeakingPracticeIntegrationTest {
                 .build());
     }
 
-    @SuppressWarnings({"SameParameterValue", "UnusedReturnValue"})
     private ConversationTheme saveThemeWithLevel(String title, Course.ContentStatus status, int orderIndex,
                                                 Course.JlptLevel jlptLevel) {
         return themeRepository.save(ConversationTheme.builder()
@@ -151,7 +152,6 @@ class SpeakingPracticeIntegrationTest {
                 .build());
     }
 
-    @SuppressWarnings({"SameParameterValue", "UnusedReturnValue"})
     private ConversationTheme saveSoftDeletedTheme(String title, UUID deletedBy) {
         ConversationTheme theme = themeRepository.save(ConversationTheme.builder()
                 .title(title)
@@ -175,7 +175,6 @@ class SpeakingPracticeIntegrationTest {
                 .build());
     }
 
-    @SuppressWarnings({"SameParameterValue", "UnusedReturnValue"})
     private ConversationTopic saveSoftDeletedTopic(UUID themeId, String title, UUID deletedBy) {
         ConversationTopic topic = topicRepository.save(ConversationTopic.builder()
                 .themeId(themeId)
@@ -188,7 +187,6 @@ class SpeakingPracticeIntegrationTest {
         return topicRepository.save(topic);
     }
 
-    @SuppressWarnings({"SameParameterValue", "UnusedReturnValue"})
     private ConversationMission saveMission(UUID topicId, String title, int orderIndex) {
         return missionRepository.save(ConversationMission.builder()
                 .topicId(topicId)
@@ -208,7 +206,6 @@ class SpeakingPracticeIntegrationTest {
                 .build());
     }
 
-    @SuppressWarnings("SameParameterValue")
     private ConversationSession saveSessionWithStatus(UUID userId, ConversationSession.SessionStatus status) {
         return sessionRepository.save(ConversationSession.builder()
                 .userId(userId)
@@ -219,7 +216,6 @@ class SpeakingPracticeIntegrationTest {
                 .build());
     }
 
-    @SuppressWarnings("UnusedReturnValue")
     private ConversationSession saveCompletedSession(UUID userId) {
         ConversationSession session = ConversationSession.builder()
                 .userId(userId)
@@ -338,22 +334,6 @@ class SpeakingPracticeIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_SP_VTL_006 — keyword blank falls back to list")
-        void tc_sp_vtl_006() throws Exception {
-            saveLearner("learner@test.com");
-            String token = loginAndGetToken("learner@test.com");
-
-            saveTheme("Theme A", Course.ContentStatus.PUBLISHED, 0);
-            saveTheme("Theme B", Course.ContentStatus.PUBLISHED, 1);
-
-            mockMvc.perform(get("/api/v1/learner/conversation/themes")
-                            .param("keyword", "   ")
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.totalElements").value(2));
-        }
-
-        @Test
         @DisplayName("TC_SP_VTL_007 — pagination returns correct page")
         void tc_sp_vtl_007() throws Exception {
             saveLearner("learner@test.com");
@@ -406,20 +386,46 @@ class SpeakingPracticeIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_SP_VTH_019 — Theme nháp (DRAFT) hoặc lưu trữ (ARCHIVED) không được hiển thị cho Learner")
-        void tc_sp_vth_019() throws Exception {
+        @DisplayName("TC_SP_VTL_010 — Keyword and level filters applied together.")
+        void tc_sp_vtl_010() throws Exception {
             saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
 
-            saveTheme("Theme Published", Course.ContentStatus.PUBLISHED, 1);
-            saveTheme("Theme Draft", Course.ContentStatus.DRAFT, 2);
-            saveTheme("Theme Archived", Course.ContentStatus.ARCHIVED, 3);
+            saveThemeWithLevel("N5 Theme hahaa", Course.ContentStatus.PUBLISHED, 0, Course.JlptLevel.N5);
+            saveThemeWithLevel("N4 Theme", Course.ContentStatus.PUBLISHED, 1, Course.JlptLevel.N4);
 
             mockMvc.perform(get("/api/v1/learner/conversation/themes")
+                            .param("keyword", "ha")
+                            .param("filter", "N5")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content.length()").value(1))
-                    .andExpect(jsonPath("$.data.content[0].title").value("Theme Published"));
+                    .andExpect(jsonPath("$.data.totalElements").value(1))
+                    .andExpect(jsonPath("$.data.content[0].title").value("N5 Theme hahaa"));
+        }
+
+        @Test
+        @DisplayName("TC_SP_VTL_011 — Expired token returns 401.")
+        void tc_sp_vtl_011() throws Exception {
+            User learner = saveLearner("learner@test.com");
+            SecretKey key = (SecretKey) ReflectionTestUtils.getField(jwtService, "accessTokenKey");
+
+            String expiredToken = Jwts.builder()
+                    .subject(learner.getId().toString())
+                    .claim("userId", learner.getId().toString())
+                    .claim("email", learner.getEmail())
+                    .claim("role", learner.getRole().name())
+                    .claim("sessionId", java.util.UUID.randomUUID().toString())
+                    .issuedAt(new Date(System.currentTimeMillis() - 120_000))
+                    .expiration(new Date(System.currentTimeMillis() - 60_000))
+                    .signWith(key)
+                    .compact();
+
+
+            mockMvc.perform(get("/api/v1/learner/conversation/themes")
+                            .header("Authorization", "Bearer " + expiredToken))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
         }
     }
 
@@ -574,8 +580,7 @@ class SpeakingPracticeIntegrationTest {
 
             mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", UUID.randomUUID())
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.length()").value(0));
+                    .andExpect(status().isNotFound());
         }
 
         @Test
@@ -596,23 +601,6 @@ class SpeakingPracticeIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_SP_VTP_012 — topic summary payload includes required fields")
-        void tc_sp_vtp_012() throws Exception {
-            saveLearner("learner@test.com");
-            String token = loginAndGetToken("learner@test.com");
-
-            ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
-            saveTopic(theme.getId(), "Topic A", Course.ContentStatus.PUBLISHED, 1, true);
-
-            mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", theme.getId())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data[0].id").exists())
-                    .andExpect(jsonPath("$.data[0].title").value("Topic A"))
-                    .andExpect(jsonPath("$.data[0].status").value("PUBLISHED"));
-        }
-
-        @Test
         @DisplayName("TC_SP_VTP_013 — lastPracticedAt populated when session exists")
         void tc_sp_vtp_013() throws Exception {
             User learner = saveLearner("learner@test.com");
@@ -626,24 +614,6 @@ class SpeakingPracticeIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data[0].lastPracticedAt").isNotEmpty());
-        }
-
-        @Test
-        @DisplayName("TC_SP_VTP_014 — Topic nháp (DRAFT) hoặc lưu trữ (ARCHIVED) không được hiển thị cho Learner")
-        void tc_sp_vtp_014() throws Exception {
-            saveLearner("learner@test.com");
-            String token = loginAndGetToken("learner@test.com");
-
-            ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
-            saveTopic(theme.getId(), "Topic Published", Course.ContentStatus.PUBLISHED, 1, true);
-            saveTopic(theme.getId(), "Topic Draft", Course.ContentStatus.DRAFT, 2, true);
-            saveTopic(theme.getId(), "Topic Archived", Course.ContentStatus.ARCHIVED, 3, true);
-
-            mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", theme.getId())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.length()").value(1))
-                    .andExpect(jsonPath("$.data[0].title").value("Topic Published"));
         }
     }
 

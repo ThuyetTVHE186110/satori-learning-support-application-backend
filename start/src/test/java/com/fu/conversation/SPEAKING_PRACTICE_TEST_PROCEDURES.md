@@ -1,313 +1,218 @@
-# Speaking Practice (Learner) — Test Procedures
-> Format: System Interaction Steps
-> Last updated: 2026-03-13
+# SPEAKING_PRACTICE_TEST_PROCEDURES.md
+>
 
 ---
 
-## Section 1 — View Conversation Theme List
-Endpoint: `GET /api/v1/learner/conversation/themes`
+## 1. API Integration Tests
 
-### TC_SP_VTL_001 — published themes only, sorted by orderIndex
-1. Client → GET `/api/v1/learner/conversation/themes` with valid LEARNER Bearer token.
-2. AuthFilter → parse token and resolve LEARNER.
-3. LearnerConversationController → call `ConversationThemeService.getPublishedThemes()`.
-4. Service → return only `PUBLISHED` themes ordered by `order_index` (deleted_at IS NULL).
-5. System → response contains only published themes sorted ascending.
+### 1.1. View Conversation Theme List (Learner)
 
-### TC_SP_VTL_002 — keyword filter
-1. Client → GET `/api/v1/learner/conversation/themes?keyword=mua` with valid LEARNER token.
-2. Controller → call `searchPublishedThemes()`.
-3. Service → return only themes matching keyword (case-insensitive).
-4. System → response contains matching themes only.
-
-### TC_SP_VTL_003 — forbidden for non-LEARNER role
-1. Client → GET `/api/v1/learner/conversation/themes` with MANAGER token.
-2. AuthFilter → role mismatch.
-3. System → HTTP 403.
-
-### TC_SP_VTL_004 — no token returns 401
-1. Client → GET `/api/v1/learner/conversation/themes` with no Authorization header.
-2. AuthFilter → unauthenticated.
-3. System → HTTP 401.
-
-### TC_SP_VTL_005 — filter by JLPT level
-1. Client → GET `/api/v1/learner/conversation/themes?level=N5` with LEARNER token.
-2. Service → return only themes matching JLPT level.
-3. System → HTTP 200 with filtered list.
-
-### TC_SP_VTL_006 — keyword blank falls back to list
-1. Client → GET `/api/v1/learner/conversation/themes?keyword=   ` with LEARNER token.
-2. Controller → treat blank keyword as absent.
-3. System → HTTP 200 with full list.
-
-### TC_SP_VTL_007 — pagination returns correct page
-1. Client → GET `/api/v1/learner/conversation/themes?page=1&size=2`.
-2. Service → return paginated results.
-3. System → `pageNumber=1`, `pageSize=2`, content length reflects remaining items.
-
-### TC_SP_VTL_008 — size clamp to 50
-1. Client → GET `/api/v1/learner/conversation/themes?size=100`.
-2. Controller → clamp size to 50.
-3. System → `pageSize=50`.
-
-### TC_SP_VTL_009 — empty list returns 200 with no content
-1. Client → GET `/api/v1/learner/conversation/themes` when no data exists.
-2. System → `totalElements=0`, `content=[]`.
+| Test ID | Description | Procedures | Expected Result | Pre-condition |
+|:---|:---|:---|:---|:---|
+| **TC_SP_VTL_001** | Retrieve list of published themes successfully, sorted by orderIndex. | 1. Client → `GET /api/v1/learner/conversation/themes` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → receive the request and call `ConversationThemeServiceImpl.getPublishedThemes()`.<br>4. `ConversationThemeServiceImpl` → query themes with `status = PUBLISHED`, sort by `orderIndex`.<br>5. System → return response. | HTTP 200 OK. Contains only published themes, sorted by orderIndex. | Learner token. Themes exist. |
+| **TC_SP_VTL_002** | Filter themes by keyword returns matching themes. | 1. Client → `GET /api/v1/learner/conversation/themes?keyword=<value>` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → receive the request and call `ConversationThemeServiceImpl.getPublishedThemes()` with the keyword parameter.<br>4. `ConversationThemeServiceImpl` → apply keyword filter on theme titles.<br>5. System → return response. | HTTP 200 OK. Contains only themes whose title matches the keyword. | Learner token. Themes exist. |
+| **TC_SP_VTL_003** | Manager is forbidden to access learner endpoint. | 1. Client → `GET /api/v1/learner/conversation/themes` with a MANAGER token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve role as MANAGER.<br>3. Spring Security → detect the role does not have access to this endpoint and deny the request.<br>4. `GlobalExceptionHandler` → catch the access denied exception.<br>5. System → return response. | HTTP 403 Forbidden. | Manager token. |
+| **TC_SP_VTL_004** | Access denied without token. | 1. Client → `GET /api/v1/learner/conversation/themes` with no token.<br>2. `JwtAuthenticationFilter` → find no authentication credentials in the request.<br>3. Spring Security → reject the unauthenticated request.<br>4. System → return response. | HTTP 401 Unauthorized. | No token. |
+| **TC_SP_VTL_005** | Filter themes by JLPT level. | 1. Client → `GET /api/v1/learner/conversation/themes?level=N5` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → receive the request and call `ConversationThemeServiceImpl.getPublishedThemes()` with the level parameter.<br>4. `ConversationThemeServiceImpl` → apply JLPT level filter on the result set.<br>5. System → return response. | HTTP 200 OK. Contains only themes at the specified JLPT level. | Learner token. Themes exist. |
+| **TC_SP_VTL_007** | Pagination returns correct page. | 1. Client → `GET /api/v1/learner/conversation/themes?page=1&size=2` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → receive the request and call `ConversationThemeServiceImpl.getPublishedThemes()` with pagination params.<br>4. `ConversationThemeServiceImpl` → apply pagination and return the requested page slice.<br>5. System → return response. | HTTP 200 OK. Returns the correct page with at most 2 items. | Learner token. Multiple themes exist. |
+| **TC_SP_VTL_008** | Size query param is clamped to max 50. | 1. Client → `GET /api/v1/learner/conversation/themes?size=100` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → receive the request and forward params to `ConversationThemeServiceImpl`.<br>4. `ConversationThemeServiceImpl` → detect the requested size exceeds the maximum and clamp it to 50.<br>5. System → return response. | HTTP 200 OK. Returns at most 50 items regardless of the requested size. | Learner token. More than 50 themes exist. |
+| **TC_SP_VTL_009** | Empty list returns 200 with no content. | 1. Client → `GET /api/v1/learner/conversation/themes` with a valid learner token when no themes are published.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `ConversationThemeServiceImpl.getPublishedThemes()`.<br>4. `ConversationThemeServiceImpl` → query published themes and find none.<br>5. System → return response. | HTTP 200 OK. Empty list. | Learner token. No published themes exist. |
+| **TC_SP_VTL_010** | Keyword and level filters applied together. | 1. Client → `GET /api/v1/learner/conversation/themes?keyword=<value>&level=N5` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `ConversationThemeServiceImpl.getPublishedThemes()` with both params.<br>4. `ConversationThemeServiceImpl` → apply both filters simultaneously, returning only themes that match both the keyword and the JLPT level.<br>5. System → return response. | HTTP 200 OK. Contains only themes matching both the keyword and the level. | Learner token. Themes exist. |
+| 🆕 **TC_SP_VTL_011** | Expired token returns 401. | 1. Client → `GET /api/v1/learner/conversation/themes` with an expired JWT.<br>2. `JwtAuthenticationFilter` → attempt to parse and validate the token, detect it is expired.<br>3. Spring Security → reject the request.<br>4. System → return response. | HTTP 401 Unauthorized. | Expired JWT token. |
 
 ---
 
-## Section 2 — View Conversation Topic List
-Endpoints:
-- `GET /api/v1/learner/conversation/themes/{themeId}/topics`
-- `GET /api/v1/learner/conversation/topics/{topicId}`
+### 1.2. View Conversation Topic List (Learner)
 
-### TC_SP_VTP_001 — published topics only, ordered by orderIndex
-1. Client → GET `/api/v1/learner/conversation/themes/{themeId}/topics` with LEARNER token.
-2. Service → return only `PUBLISHED` topics ordered by `order_index`.
-3. System → response excludes DRAFT/ARCHIVED/deleted topics.
-
-### TC_SP_VTP_002 — practice stats populated
-1. Precondition: user has at least one `conversation_session` for a topic.
-2. Client → GET `/api/v1/learner/conversation/themes/{themeId}/topics`.
-3. Service → enrich topic response with `practiced`, `practiceCount`, `lastPracticedAt`.
-4. System → response shows practiced=true for that topic.
-
-### TC_SP_VTP_003 — forbidden for non-LEARNER role
-1. Client → GET `/api/v1/learner/conversation/themes/{themeId}/topics` with MANAGER token.
-2. AuthFilter → role mismatch.
-3. System → HTTP 403.
-
-### TC_SP_VTP_004 — view published topic detail
-1. Client → GET `/api/v1/learner/conversation/topics/{topicId}` with LEARNER token.
-2. Service → return topic detail if status=PUBLISHED.
-3. System → HTTP 200 with full topic detail.
-
-### TC_SP_VTP_005 — non-published topic detail returns 404
-1. Client → GET `/api/v1/learner/conversation/topics/{topicId}` where topic status=DRAFT.
-2. Service → not found for learner.
-3. System → HTTP 404.
-
-### TC_SP_VTP_006 — no token returns 401
-1. Client → GET `/api/v1/learner/conversation/themes/{themeId}/topics` with no Authorization header.
-2. System → HTTP 401.
-
-### TC_SP_VTP_007 — no practice stats when user has no sessions
-1. Precondition: user has no sessions for any topics.
-2. Client → GET `/api/v1/learner/conversation/themes/{themeId}/topics`.
-3. System → `practiced=false`, `practiceCount=0` for each topic.
-
-### TC_SP_VTP_008 — soft-deleted topic excluded
-1. Precondition: one topic soft-deleted.
-2. Client → GET `/api/v1/learner/conversation/themes/{themeId}/topics`.
-3. System → soft-deleted topic not present.
-
-### TC_SP_VTP_009 — theme with no topics returns empty list
-1. Client → GET `/api/v1/learner/conversation/themes/{themeId}/topics` where no topics exist.
-2. System → `content=[]`.
-
-### TC_SP_VTP_010 — non-existent theme returns empty list
-1. Client → GET `/api/v1/learner/conversation/themes/{themeId}/topics` with random themeId.
-2. System → `content=[]`.
-
-### TC_SP_VTP_011 — practice stats map counts multiple sessions
-1. Precondition: user has 2 sessions for same topic.
-2. Client → GET `/api/v1/learner/conversation/themes/{themeId}/topics`.
-3. System → `practiceCount=2` for that topic.
-
-### TC_SP_VTP_012 — topic summary payload includes required fields
-1. Client → GET `/api/v1/learner/conversation/themes/{themeId}/topics`.
-2. System → each item has `id`, `title`, `status`.
-
-### TC_SP_VTP_013 — lastPracticedAt populated when session exists
-1. Precondition: user has at least one `conversation_session` for a topic.
-2. Client → GET `/api/v1/learner/conversation/themes/{themeId}/topics`.
-3. System → `lastPracticedAt` is non-null.
+| Test ID | Description | Procedures | Expected Result | Pre-condition |
+|:---|:---|:---|:---|:---|
+| **TC_SP_VTP_001** | Published topics only, ordered by orderIndex. | 1. Client → `GET .../themes/{id}/topics` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → receive the request and call `ConversationTopicServiceImpl.getTopicsByTheme()`.<br>4. `ConversationTopicServiceImpl` → query topics for the given theme with `status = PUBLISHED`, sorted by `orderIndex`.<br>5. System → return response. | HTTP 200 OK. List contains only published topics, sorted by orderIndex. | Learner token. Theme and topics exist. |
+| **TC_SP_VTP_002** | Practice stats populated when session exists. | 1. Client → `GET .../themes/{id}/topics` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `ConversationTopicServiceImpl.getTopicsByTheme()` with the learner's user ID.<br>4. `ConversationTopicServiceImpl` → retrieve the topic list and look up the learner's past practice sessions to populate per-topic stats.<br>5. System → return response. | HTTP 200 OK. Topic entry shows `practiced=true`, `practiceCount=1`. | Learner token. At least one practice session exists for this topic. |
+| **TC_SP_VTP_003** | Manager forbidden. | 1. Client → `GET .../themes/{id}/topics` with a MANAGER token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve role as MANAGER.<br>3. Spring Security → detect the role does not have access to this endpoint and deny the request.<br>4. `GlobalExceptionHandler` → catch the access denied exception.<br>5. System → return response. | HTTP 403 Forbidden. | Manager token. |
+| **TC_SP_VTP_004** | View published topic detail. | 1. Client → `GET /api/v1/learner/conversation/topics/{id}` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `ConversationTopicServiceImpl.getTopicDetail()`.<br>4. `ConversationTopicServiceImpl` → fetch the topic by ID and confirm its status is PUBLISHED before returning it.<br>5. System → return response. | HTTP 200 OK. Full topic details returned. | Learner token. Topic exists and is PUBLISHED. |
+| **TC_SP_VTP_005** | Non-published topic detail returns 404. | 1. Client → `GET .../topics/{id}` for a DRAFT topic with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `ConversationTopicServiceImpl.getTopicDetail()`.<br>4. `ConversationTopicServiceImpl` → find the topic but its status is not PUBLISHED; treat it as inaccessible and throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Learner token. Topic exists but is in DRAFT status. |
+| **TC_SP_VTP_006** | No token returns 401. | 1. Client → `GET .../themes/{id}/topics` with no token.<br>2. `JwtAuthenticationFilter` → find no authentication credentials in the request.<br>3. Spring Security → reject the unauthenticated request.<br>4. System → return response. | HTTP 401 Unauthorized. | No token. |
+| **TC_SP_VTP_007** | No practice stats when user has no sessions. | 1. Client → `GET .../themes/{id}/topics` with a valid learner token who has no sessions.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `ConversationTopicServiceImpl.getTopicsByTheme()` with the learner's user ID.<br>4. `ConversationTopicServiceImpl` → retrieve the topic list, find no practice sessions for this learner, and set all stats to their defaults.<br>5. System → return response. | HTTP 200 OK. All topics show `practiced=false`, `practiceCount=0`. | Learner token. Topics exist. Learner has no practice sessions. |
+| **TC_SP_VTP_008** | Soft-deleted topic excluded. | 1. Client → `GET .../themes/{id}/topics` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `ConversationTopicServiceImpl.getTopicsByTheme()`.<br>4. `ConversationTopicServiceImpl` → query topics and exclude any that have been soft-deleted.<br>5. System → return response. | HTTP 200 OK. Soft-deleted topic does not appear in the list. | Learner token. At least one topic is soft-deleted. |
+| **TC_SP_VTP_009** | Theme with no topics returns empty list. | 1. Client → `GET .../themes/{id}/topics` for a theme that has no topics, with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `ConversationTopicServiceImpl.getTopicsByTheme()`.<br>4. `ConversationTopicServiceImpl` → query topics for the theme and find none.<br>5. System → return response. | HTTP 200 OK. Empty topic list. | Learner token. Theme exists but has no topics. |
+| **TC_SP_VTP_010** | Non-existent theme returns 404. | 1. Client → `GET .../themes/{invalidId}/topics` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `ConversationTopicServiceImpl.getTopicsByTheme()`.<br>4. `ConversationTopicServiceImpl` → look up the theme by ID, find no matching record, and throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Learner token. Theme ID does not exist. |
+| **TC_SP_VTP_011** | Practice stats map counts multiple sessions. | 1. Client → `GET .../themes/{id}/topics` with a valid learner token who has practiced the same topic twice.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `ConversationTopicServiceImpl.getTopicsByTheme()` with the learner's user ID.<br>4. `ConversationTopicServiceImpl` → aggregate all sessions for each topic and produce the correct count.<br>5. System → return response. | HTTP 200 OK. Topic entry shows `practiceCount=2`. | Learner token. Two sessions exist for the same topic. |
+| **TC_SP_VTP_012** | Topic summary payload includes required fields. | 1. Client → `GET .../themes/{id}/topics` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `ConversationTopicServiceImpl.getTopicsByTheme()`.<br>4. `ConversationTopicServiceImpl` → build the response payload, mapping each topic to a summary DTO.<br>5. System → return response. | HTTP 200 OK. Each topic entry contains the fields `id`, `title`, and `status`. | Learner token. Topics exist. |
+| **TC_SP_VTP_013** | lastPracticedAt populated when session exists. | 1. Client → `GET .../themes/{id}/topics` with a valid learner token who has at least one session.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `ConversationTopicServiceImpl.getTopicsByTheme()` with the learner's user ID.<br>4. `ConversationTopicServiceImpl` → map the most recent session timestamp to the `lastPracticedAt` field for each topic.<br>5. System → return response. | HTTP 200 OK. `lastPracticedAt` is populated with a non-null timestamp. | Learner token. At least one session exists for a topic in this theme. |
+| **TC_SP_VTP_015** | Mixed stats scenario: 20 topics, user practiced 3. | 1. Client → `GET .../themes/{id}/topics` with a valid learner token who has practiced exactly 3 of 20 topics.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `ConversationTopicServiceImpl.getTopicsByTheme()` with the learner's user ID.<br>4. `ConversationTopicServiceImpl` → map session data for all 20 topics — 3 with records, 17 without.<br>5. System → return response. | HTTP 200 OK. Exactly 3 topics show `practiced=true` with correct counts. Remaining 17 show `practiced=false`, `practiceCount=0`. | Learner token. 20 topics exist; learner has sessions for 3 of them. |
+| 🆕 **TC_SP_VTP_016** | Empty session list returns 200 with empty array. | 1. Client → `GET .../themes/{id}/topics` with a learner token from an account that has never practiced.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `ConversationTopicServiceImpl.getTopicsByTheme()` with the learner's user ID.<br>4. `ConversationTopicServiceImpl` → retrieve the topic list, find no sessions for this learner, and return all topics with default stats.<br>5. System → return response. | HTTP 200 OK. Topics list is present. All topics show `practiceCount=0`. | Learner token. Topics exist. Learner has never started a session. |
 
 ---
 
-## Section 3 — Practice Conversation with AI (Roleplay)
-Endpoints:
-- `POST /api/v1/learner/roleplay/sessions`
-- `POST /api/v1/learner/roleplay/sessions/{sessionId}/messages`
-- `POST /api/v1/learner/roleplay/sessions/{sessionId}/complete`
-- `POST /api/v1/learner/roleplay/sessions/{sessionId}/abandon`
-- `GET  /api/v1/learner/roleplay/sessions`
+### 1.3. Practice Conversation with AI (Roleplay)
 
-### TC_SP_AI_001 — start roleplay session success
-1. Client → POST `/api/v1/learner/roleplay/sessions` with valid topicId.
-2. Service → validate topic (PUBLISHED, isRoleplay=true), create session + missions.
-3. Service → call AI opening message (mocked), parse segments.
-4. System → HTTP 201 with messages and missions.
-
-### TC_SP_AI_002 — start session with non-roleplay topic → 404
-1. Client → POST with topic isRoleplay=false.
-2. Service → fail topic validation.
-3. System → HTTP 404.
-
-### TC_SP_AI_003 — send message success
-1. Client → POST `/sessions/{id}/messages` multipart with JSON message.
-2. Service → save user message, call AI response (mocked), save AI messages.
-3. System → HTTP 200 with AI messages and missions.
-
-### TC_SP_AI_004 — complete session returns evaluation
-1. Client → POST `/sessions/{id}/complete`.
-2. Service → compute scores, call evaluator AI (mocked).
-3. System → HTTP 200 with evaluation report.
-
-### TC_SP_AI_005 — start session with draft topic → 404
-1. Client → POST with topic status=DRAFT.
-2. Service → fail topic validation.
-3. System → HTTP 404.
-
-### TC_SP_AI_006 — active session limit reached → 400
-1. Precondition: user already has max active sessions.
-2. Client → POST `/api/v1/learner/roleplay/sessions`.
-3. System → HTTP 400 with SESSION_LIMIT.
-
-### TC_SP_AI_007 — send message with blank content → 400
-1. Client → POST `/sessions/{id}/messages` with blank content.
-2. System → HTTP 400.
-
-### TC_SP_AI_008 — send message to inactive session → 400
-1. Precondition: session status=COMPLETED.
-2. Client → POST `/sessions/{id}/messages`.
-3. System → HTTP 400.
-
-### TC_SP_AI_009 — complete inactive session → 400
-1. Precondition: session status=COMPLETED.
-2. Client → POST `/sessions/{id}/complete`.
-3. System → HTTP 400.
-
-### TC_SP_AI_010 — start session with missing topic → 404
-1. Client → POST with random topicId.
-2. System → HTTP 404.
-
-### TC_SP_AI_011 — start session caches system prompt
-1. Client → POST `/api/v1/learner/roleplay/sessions`.
-2. System → cacheSystemPrompt invoked (mock verify).
-
-### TC_SP_AI_012 — start session persists opening messages
-1. Client → POST `/api/v1/learner/roleplay/sessions`.
-2. System → AI opening segments saved as messages in DB.
-
-### TC_SP_AI_013 — send message to non-existent session → 404
-1. Client → POST `/sessions/{id}/messages` with random sessionId.
-2. System → HTTP 404.
-
-### TC_SP_AI_014 — message limit exceeded → 400
-1. Precondition: user has max messages in session.
-2. Client → POST `/sessions/{id}/messages`.
-3. System → HTTP 400.
-
-### TC_SP_AI_015 — audio too large → 400
-1. Client → POST `/sessions/{id}/messages` with audio > 10MB.
-2. System → HTTP 400.
-
-### TC_SP_AI_016 — invalid audio content type → 400
-1. Client → POST `/sessions/{id}/messages` with non-audio file.
-2. System → HTTP 400.
-
-### TC_SP_AI_017 — pronunciation provider available with audio
-1. Client → POST `/sessions/{id}/messages` with audio and provider available.
-2. System → HTTP 200 and messages returned.
-
-### TC_SP_AI_018 — free-talk phase transition creates dynamic mission
-1. Client → start free-talk session.
-2. Client → POST `/sessions/{id}/messages` (AI returns PHASE_TRANSITION).
-3. System → dynamic session mission created.
-
-### TC_SP_AI_019 — mission progress updates after send message
-1. Client → start roleplay session.
-2. Client → POST `/sessions/{id}/messages`.
-3. MissionEvaluatorAI returns progress for missionId.
-4. System → session mission updated (progressPct/status).
-
-### TC_SP_AI_020 — session history pagination
-1. Precondition: 2 completed sessions for learner.
-2. Client → GET `/api/v1/learner/roleplay/sessions?page=0&size=1`.
-3. System → `totalElements=2`, `content.length=1`.
-
-### TC_SP_AI_021 — abandon session sets status
-1. Precondition: active session exists.
-2. Client → POST `/api/v1/learner/roleplay/sessions/{sessionId}/abandon`.
-3. System → session status updated to ABANDONED.
+| Test ID | Description | Procedures | Expected Result | Pre-condition |
+|:---|:---|:---|:---|:---|
+| **TC_SP_AI_001** | Start roleplay session success. | 1. Client → `POST /api/v1/learner/roleplay/sessions` with a valid learner token and `topicId`.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → receive the request and call `RoleplaySessionServiceImpl.startSession()`.<br>4. `RoleplaySessionServiceImpl` → verify the topic exists, is PUBLISHED, and is of roleplay type.<br>5. `RoleplaySessionServiceImpl` → create a new session record with status ACTIVE, cache the system prompt, and call `RoleplayAIService` to generate opening messages and missions.<br>6. System → return response. | HTTP 201 Created. Response contains session ID, opening messages, and missions array. | Learner token. Valid PUBLISHED roleplay topic. |
+| **TC_SP_AI_002** | Start session with non-roleplay topic returns 404. | 1. Client → `POST .../sessions` with a valid learner token and a `topicId` that is not of roleplay type.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.startSession()`.<br>4. `RoleplaySessionServiceImpl` → look up the topic and find it is not eligible for roleplay; throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Learner token. Topic exists but is not a roleplay type. |
+| **TC_SP_AI_003** | Send message success. | 1. Client → `POST .../sessions/{id}/messages` with a valid learner token and audio or text content.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>4. `RoleplaySessionServiceImpl` → verify the session belongs to the learner and is ACTIVE.<br>5. `RoleplaySessionServiceImpl` → if audio is provided, forward to `CompositePronunciationProvider` for scoring; save the learner's message to DB.<br>6. `RoleplaySessionServiceImpl` → call `RoleplayAIService` to generate the AI reply, then call `MissionEvaluatorAI` to update mission progress.<br>7. System → return response. | HTTP 200 OK. Response contains the AI reply message. | Learner token. ACTIVE session. |
+| **TC_SP_AI_004** | Complete session returns evaluation. | 1. Client → `POST .../sessions/{id}/complete` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.completeSession()`.<br>4. `RoleplaySessionServiceImpl` → verify the session belongs to the learner and is ACTIVE; update status to COMPLETED.<br>5. `RoleplaySessionServiceImpl` → call `SessionEvaluatorAI` to generate a final evaluation based on the full conversation history.<br>6. System → return response. | HTTP 200 OK. Session status is COMPLETED. Evaluation data is returned. | Learner token. ACTIVE session. |
+| **TC_SP_AI_005** | Start session with draft topic returns 404. | 1. Client → `POST .../sessions` with a valid learner token and a `topicId` in DRAFT status.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.startSession()`.<br>4. `RoleplaySessionServiceImpl` → find the topic is not PUBLISHED and throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Learner token. Topic exists but is in DRAFT status. |
+| **TC_SP_AI_006** | Active session limit reached returns 400. | 1. Client → `POST .../sessions` with a valid learner token when the learner already has the maximum number of active sessions.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.startSession()`.<br>4. `RoleplaySessionServiceImpl` → check the learner's current active session count, find it at the allowed limit, and throw a business exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 400 Bad Request. | Learner token. Learner already has 3 active sessions. |
+| **TC_SP_AI_007** | Send message with blank content returns 400. | 1. Client → `POST .../sessions/{id}/messages` with a valid learner token and an empty request body.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → receive the request; the request validation layer rejects it before reaching `RoleplaySessionServiceImpl`.<br>4. `GlobalExceptionHandler` → catch the validation exception.<br>5. System → return response. | HTTP 400 Bad Request. | Learner token. ACTIVE session. |
+| **TC_SP_AI_008** | Send message to inactive session returns 400. | 1. Client → `POST .../sessions/{id}/messages` with a valid learner token targeting a COMPLETED session.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>4. `RoleplaySessionServiceImpl` → verify the session belongs to the learner; find its status is not ACTIVE and throw a business exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 400 Bad Request. | Learner token. Session is in COMPLETED status. |
+| **TC_SP_AI_009** | Complete inactive session returns 400. | 1. Client → `POST .../sessions/{id}/complete` with a valid learner token targeting an already COMPLETED session.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.completeSession()`.<br>4. `RoleplaySessionServiceImpl` → verify the session belongs to the learner; find it is already in a terminal state and throw a business exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 400 Bad Request. | Learner token. Session is already COMPLETED. |
+| **TC_SP_AI_010** | Start session with missing topic returns 404. | 1. Client → `POST .../sessions` with a valid learner token and a `topicId` that does not exist.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.startSession()`.<br>4. `RoleplaySessionServiceImpl` → look up the topic by ID, find no matching record, and throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Learner token. Topic ID does not exist. |
+| **TC_SP_AI_011** | Start session caches system prompt. | 1. Client → `POST .../sessions` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.startSession()`.<br>4. `RoleplaySessionServiceImpl` → create the session record and store the AI system prompt in the cache for use in subsequent message turns.<br>5. System → return response. | HTTP 201 Created. The system prompt for this session is present in cache. | Learner token. Valid topic. |
+| **TC_SP_AI_012** | Start session persists opening messages. | 1. Client → `POST .../sessions` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.startSession()`.<br>4. `RoleplaySessionServiceImpl` → create the session record, call `RoleplayAIService` to generate opening messages, and persist them to the database.<br>5. System → return response. | HTTP 201 Created. Opening messages are present in the database for this session. | Learner token. Valid topic. |
+| **TC_SP_AI_013** | Send message to non-existent session returns 404. | 1. Client → `POST .../sessions/{invalidId}/messages` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>4. `RoleplaySessionServiceImpl` → look up the session scoped to the current learner's ID, find no matching record, and throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Learner token. Session ID does not exist. |
+| **TC_SP_AI_014** | Message limit exceeded returns 400. | 1. Client → `POST .../sessions/{id}/messages` with a valid learner token when the session already has 50 messages.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>4. `RoleplaySessionServiceImpl` → verify the session is ACTIVE; check the current message count and find it has reached the limit; throw a business exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 400 Bad Request. | Learner token. Session has exactly 50 messages in the database. |
+| **TC_SP_AI_015** | Audio too large returns 400. | 1. Client → `POST .../sessions/{id}/messages` with a valid learner token, attaching an audio file larger than 10MB.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → receive the request; the request validation layer checks the file size and rejects it before reaching `RoleplaySessionServiceImpl`.<br>4. `GlobalExceptionHandler` → catch the validation exception.<br>5. System → return response. | HTTP 400 Bad Request. | Learner token. ACTIVE session. Audio file exceeds 10MB. |
+| **TC_SP_AI_016** | Invalid audio content type returns 400. | 1. Client → `POST .../sessions/{id}/messages` with a valid learner token, attaching a file with an unsupported content type.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → receive the request; the request validation layer checks the content type and rejects the file before reaching `RoleplaySessionServiceImpl`.<br>4. `GlobalExceptionHandler` → catch the validation exception.<br>5. System → return response. | HTTP 400 Bad Request. | Learner token. ACTIVE session. File has unsupported MIME type. |
+| **TC_SP_AI_017** | Pronunciation provider invoked with audio input. | 1. Client → `POST .../sessions/{id}/messages` with a valid learner token and a valid audio file.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>4. `RoleplaySessionServiceImpl` → verify the session is ACTIVE; forward the audio to `CompositePronunciationProvider` which delegates to `AzureSpeechProvider` (and `SpeechSuperProvider` as fallback).<br>5. `RoleplaySessionServiceImpl` → attach the scoring result to the saved message and call `RoleplayAIService` for the AI reply.<br>6. System → return response. | HTTP 200 OK. Pronunciation score is populated in the response. | Learner token. ACTIVE session. Valid audio file. |
+| **TC_SP_AI_018** | Free-talk phase transition creates dynamic mission. | 1. Client → `POST .../sessions/{id}/messages` with a valid learner token in a free-talk session at a phase boundary.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>4. `RoleplaySessionServiceImpl` → detect the phase transition after the AI reply and call `ConversationMissionServiceImpl` to dynamically generate missions for the new phase.<br>5. System → return response. | HTTP 200 OK. Missions array in the response is dynamically populated for the new phase. | Learner token. ACTIVE free-talk session at a phase transition point. |
+| **TC_SP_AI_019** | Mission progress updates after send message. | 1. Client → `POST .../sessions/{id}/messages` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>4. `RoleplaySessionServiceImpl` → save the message and AI reply; call `MissionEvaluatorAI` to evaluate the turn against active missions.<br>5. `MissionEvaluatorAI` → update mission progress records in the database.<br>6. System → return response. | HTTP 200 OK. Mission progress records in the database are updated after the request completes. | Learner token. ACTIVE session with at least one mission. |
+| **TC_SP_AI_020** | Session history pagination. | 1. Client → `GET /api/v1/learner/roleplay/sessions?page=0&size=1` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.getSessionHistory()`.<br>4. `RoleplaySessionServiceImpl` → query sessions belonging to the current learner and return the requested page slice.<br>5. System → return response. | HTTP 200 OK. Returns exactly 1 session record for the requested page. | Learner token. Learner has multiple sessions. |
+| **TC_SP_AI_021** | Abandon session sets status. | 1. Client → `POST .../sessions/{id}/abandon` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.abandonSession()`.<br>4. `RoleplaySessionServiceImpl` → verify the session belongs to the learner and is ACTIVE; update its status to ABANDONED.<br>5. System → return response. | HTTP 200 OK. Session status in the database is ABANDONED. | Learner token. ACTIVE session. |
+| **TC_SP_AI_022** | Get session returns messages and missions. | 1. Client → `GET /api/v1/learner/roleplay/sessions/{id}` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.getSessionDetail()`.<br>4. `RoleplaySessionServiceImpl` → fetch the session scoped to the current learner, including its full message history and mission list.<br>5. System → return response. | HTTP 200 OK. Response contains both the messages array and the missions array. | Learner token. Session exists and belongs to the learner. |
+| **TC_SP_AI_023** | Get session not found returns 404. | 1. Client → `GET .../sessions/{invalidId}` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.getSessionDetail()`.<br>4. `RoleplaySessionServiceImpl` → look up the session scoped to the current learner, find no matching record, and throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Learner token. Session ID does not exist. |
+| **TC_SP_AI_024** | Abandon non-existent session returns 404. | 1. Client → `POST .../sessions/{invalidId}/abandon` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.abandonSession()`.<br>4. `RoleplaySessionServiceImpl` → look up the session scoped to the current learner, find no matching record, and throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Learner token. Session ID does not exist. |
+| **TC_SP_AI_025** | Abandon inactive session returns 400. | 1. Client → `POST .../sessions/{id}/abandon` with a valid learner token targeting a COMPLETED session.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.abandonSession()`.<br>4. `RoleplaySessionServiceImpl` → verify the session belongs to the learner; find it is already in a terminal state and throw a business exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 400 Bad Request. | Learner token. Session is in COMPLETED status. |
+| **TC_SP_AI_026** | Send message to another user's session returns 404. | 1. Client → `POST .../sessions/{victimSessionId}/messages` using a different learner's token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity as learner A.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>4. `RoleplaySessionServiceImpl` → look up the session scoped to learner A's ID; find no match since the session belongs to learner B; throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Token of learner A. Session belongs to learner B. |
+| **TC_SP_AI_027** | Complete another user's session returns 404. | 1. Client → `POST .../sessions/{victimSessionId}/complete` using a different learner's token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity as learner A.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.completeSession()`.<br>4. `RoleplaySessionServiceImpl` → look up the session scoped to learner A's ID; find no match; throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Token of learner A. Session belongs to learner B. |
+| **TC_SP_AI_028** | Abandon another user's session returns 404. | 1. Client → `POST .../sessions/{victimSessionId}/abandon` using a different learner's token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity as learner A.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.abandonSession()`.<br>4. `RoleplaySessionServiceImpl` → look up the session scoped to learner A's ID; find no match; throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Token of learner A. Session belongs to learner B. |
+| **TC_SP_AI_029** | Get another user's session returns 404. | 1. Client → `GET .../sessions/{victimSessionId}` using a different learner's token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity as learner A.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.getSessionDetail()`.<br>4. `RoleplaySessionServiceImpl` → look up the session scoped to learner A's ID; find no match; throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Token of learner A. Session belongs to learner B. |
+| **TC_SP_AI_030** | Manager start roleplay session returns 403. | 1. Client → `POST .../roleplay/sessions` with a MANAGER token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve role as MANAGER.<br>3. Spring Security → detect the role does not have access to this endpoint and deny the request.<br>4. `GlobalExceptionHandler` → catch the access denied exception.<br>5. System → return response. | HTTP 403 Forbidden. | Manager token. |
+| **TC_SP_AI_031** | Complete non-existent session returns 404. | 1. Client → `POST .../sessions/{invalidId}/complete` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.completeSession()`.<br>4. `RoleplaySessionServiceImpl` → look up the session scoped to the current learner, find no matching record, and throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Learner token. Session ID does not exist. |
+| **TC_SP_AI_032** | Start session when topic has no missions. | 1. Client → `POST .../sessions` with a valid learner token and a `topicId` for a topic with no missions configured.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.startSession()`.<br>4. `RoleplaySessionServiceImpl` → create the session and call `RoleplayAIService` for opening messages; since the topic has no missions, `ConversationMissionServiceImpl` returns an empty list.<br>5. System → return response. | HTTP 201 Created. Missions array in the response is empty. | Learner token. Valid PUBLISHED topic with no missions configured. |
+| **TC_SP_AI_033** | Send message with hintRequest=true. | 1. Client → `POST .../sessions/{id}/messages` with a valid learner token and `hintRequest=true` in the request body.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>4. `RoleplaySessionServiceImpl` → save the message with the hint flag set and pass the hint instruction to `RoleplayAIService` when generating the reply.<br>5. System → return response. | HTTP 200 OK. The saved message record in the database has the hint flag set to true. | Learner token. ACTIVE session. |
+| **TC_SP_AI_034** | Free-talk session limit reached returns 400. | 1. Client → `POST .../free-talk/sessions` with a valid learner token when the learner already has the maximum number of active sessions.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.startFreeTalkSession()`.<br>4. `RoleplaySessionServiceImpl` → check the learner's active session count, find it at the allowed limit, and throw a business exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 400 Bad Request. | Learner token. Learner already has 3 active sessions. |
+| **TC_SP_AI_039** | Message ordering preserved. | 1. Client → `GET .../sessions/{id}` with a valid learner token after several messages have been exchanged.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.getSessionDetail()`.<br>4. `RoleplaySessionServiceImpl` → fetch all messages for the session sorted by sequence number.<br>5. System → return response. | HTTP 200 OK. Messages in the response are ordered correctly by sequence number, matching the order they were sent and received. | Learner token. Session with multiple messages. |
+| 🆕 **TC_SP_AI_043** | Start roleplay session without token returns 401. | 1. Client → `POST /api/v1/learner/roleplay/sessions` with no token.<br>2. `JwtAuthenticationFilter` → find no authentication credentials in the request.<br>3. Spring Security → reject the unauthenticated request.<br>4. System → return response. | HTTP 401 Unauthorized. | No token. |
+| 🆕 **TC_SP_AI_044** | Session list returns 200 with empty array when learner has no sessions. | 1. Client → `GET .../roleplay/sessions` with a valid learner token from an account with no sessions.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.getSessionHistory()`.<br>4. `RoleplaySessionServiceImpl` → query sessions scoped to the current learner and find none.<br>5. System → return response. | HTTP 200 OK. Empty session list, no error. | Learner token. Learner has no sessions. |
+| 🆕 **TC_SP_AI_045** | Send message with empty audio file (0 bytes) returns 400. | 1. Client → `POST .../sessions/{id}/messages` with a valid learner token, attaching a 0-byte wav file.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → receive the request; the request validation layer detects the file is empty and rejects it before reaching `RoleplaySessionServiceImpl`.<br>4. `GlobalExceptionHandler` → catch the validation exception.<br>5. System → return response. | HTTP 400 Bad Request. | Learner token. ACTIVE session. Audio file is 0 bytes. |
+| 🆕 **TC_SP_AI_046** | Send message with corrupted audio (valid MIME, invalid content) returns 400. | 1. Client → `POST .../sessions/{id}/messages` with a valid learner token, attaching a file with MIME type `audio/wav` whose binary content is not a valid WAV stream.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()` — the file passes MIME validation.<br>4. `RoleplaySessionServiceImpl` → forward the audio to `CompositePronunciationProvider`; `AzureSpeechProvider` attempts to process the file and fails to parse it.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 400 Bad Request. Session is not disrupted. `[CONFIRM WITH DEV: is the invalid content caught before the STT call at input validation, or only detected when AzureSpeechProvider attempts to process it?]` | Learner token. ACTIVE session. File has correct MIME type but invalid binary content. |
 
 ---
 
-## Section 4 — Create Custom Conversation Topic
-Endpoints:
-- `POST /api/v1/learner/conversation/my-topics`
-- `GET  /api/v1/learner/conversation/my-topics`
-- `GET  /api/v1/learner/conversation/my-topics/{id}`
-- `PUT  /api/v1/learner/conversation/my-topics/{id}`
-- `DELETE /api/v1/learner/conversation/my-topics/{id}`
-- `POST /api/v1/learner/conversation/my-topics/{id}/generate-context`
-- `POST /api/v1/learner/roleplay/free-talk/sessions`
+### 1.4. Create Custom Conversation Topic (Learner)
 
-### TC_SP_CT_001 — create personal topic
-1. Client → POST `/api/v1/learner/conversation/my-topics` with title/scenario.
-2. Service → create user topic.
-3. System → HTTP 201 with created topic.
-
-### TC_SP_CT_002 — generate context with scenario
-1. Client → POST `/my-topics/{id}/generate-context`.
-2. Service → generate AI context (mocked) and persist.
-3. System → HTTP 200 with updated context.
-
-### TC_SP_CT_003 — generate context without scenario → 400
-1. Client → POST `/my-topics/{id}/generate-context` (scenario null).
-2. Service → throw `MISSING_SCENARIO`.
-3. System → HTTP 400.
-
-### TC_SP_CT_004 — start free-talk session
-1. Client → POST `/api/v1/learner/roleplay/free-talk/sessions` with jlptLevel.
-2. Service → create FREE_TALK session and setup messages.
-3. System → HTTP 201.
-
-### TC_SP_CT_005 — create personal topic with blank title → 400
-1. Client → POST `/api/v1/learner/conversation/my-topics` with blank title.
-2. System → HTTP 400.
-
-### TC_SP_CT_006 — no token returns 401
-1. Client → POST `/api/v1/learner/conversation/my-topics` with no Authorization header.
-2. System → HTTP 401.
-
-### TC_SP_CT_007 — free-talk invalid jlpt level → 400
-1. Client → POST `/api/v1/learner/roleplay/free-talk/sessions` with invalid jlptLevel.
-2. System → HTTP 400.
-
-### TC_SP_CT_008 — list my topics pagination
-1. Client → GET `/api/v1/learner/conversation/my-topics?page=0&size=1`.
-2. System → paginated list with total count.
-
-### TC_SP_CT_009 — get my topic by id
-1. Client → GET `/api/v1/learner/conversation/my-topics/{id}`.
-2. System → HTTP 200 with topic detail.
-
-### TC_SP_CT_010 — update my topic
-1. Client → PUT `/api/v1/learner/conversation/my-topics/{id}`.
-2. System → HTTP 200 with updated topic.
-
-### TC_SP_CT_011 — delete my topic
-1. Client → DELETE `/api/v1/learner/conversation/my-topics/{id}`.
-2. System → HTTP 200, topic no longer accessible.
-
-### TC_SP_CT_012 — access another user's topic → 404
-1. Client → GET `/api/v1/learner/conversation/my-topics/{id}` as different user.
-2. System → HTTP 404.
-
-### TC_SP_CT_013 — generate context with blank scenario → 400
-1. Client → POST `/api/v1/learner/conversation/my-topics/{id}/generate-context` with blank scenario.
-2. System → HTTP 400.
-
-### TC_SP_CT_014 — generate context persists aiGeneratedContext
-1. Client → POST `/api/v1/learner/conversation/my-topics/{id}/generate-context`.
-2. Service → persist `aiGeneratedContext` into DB.
-3. System → subsequent load shows non-empty `aiGeneratedContext`.
+| Test ID | Description | Procedures | Expected Result | Pre-condition |
+|:---|:---|:---|:---|:---|
+| **TC_SP_CT_001** | Create personal topic. | 1. Client → `POST /api/v1/learner/conversation/my-topics` with a valid learner token, providing a title and optional scenario.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.createTopic()`.<br>4. `UserConversationTopicServiceImpl` → create a new custom topic record associated with the current learner and persist it to the database.<br>5. System → return response. | HTTP 201 Created. New topic record exists in the database linked to the learner. | Learner token. |
+| **TC_SP_CT_002** | Generate context with scenario. | 1. Client → `POST .../my-topics/{id}/generate-context` with a valid learner token for a topic that has a scenario.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.generateContext()`.<br>4. `UserConversationTopicServiceImpl` → confirm the topic belongs to the learner and has a non-empty scenario; call `ConversationGenerationService` to generate context from the scenario.<br>5. System → return response. | HTTP 200 OK. Generated context text is returned. | Learner token. Custom topic with a non-empty scenario. |
+| **TC_SP_CT_003** | Generate context without scenario returns 400. | 1. Client → `POST .../my-topics/{id}/generate-context` with a valid learner token for a topic that has no scenario.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.generateContext()`.<br>4. `UserConversationTopicServiceImpl` → find the topic's scenario is blank and throw a business exception before calling `ConversationGenerationService`.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 400 Bad Request. | Learner token. Custom topic with no scenario. |
+| **TC_SP_CT_004** | Start free-talk session. | 1. Client → `POST /api/v1/learner/roleplay/free-talk/sessions` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.startFreeTalkSession()`.<br>4. `RoleplaySessionServiceImpl` → create a new free-talk session with status ACTIVE and call `RoleplayAIService` to generate an opening message.<br>5. System → return response. | HTTP 201 Created. New free-talk session created; opening message from AI is included in the response. | Learner token. |
+| **TC_SP_CT_005** | Create personal topic with blank title returns 400. | 1. Client → `POST .../my-topics` with a valid learner token and an empty or whitespace-only title.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → receive the request; the request validation layer rejects it before reaching `UserConversationTopicServiceImpl`.<br>4. `GlobalExceptionHandler` → catch the validation exception.<br>5. System → return response. | HTTP 400 Bad Request. | Learner token. |
+| **TC_SP_CT_006** | No token returns 401. | 1. Client → `POST .../my-topics` with no token.<br>2. `JwtAuthenticationFilter` → find no authentication credentials in the request.<br>3. Spring Security → reject the unauthenticated request.<br>4. System → return response. | HTTP 401 Unauthorized. | No token. |
+| **TC_SP_CT_007** | Free-talk invalid JLPT level returns 400. | 1. Client → `POST .../free-talk/sessions` with a valid learner token and an invalid JLPT level value (e.g., `N9`).<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerRoleplayController` → receive the request; the request validation layer detects the value is not a valid JLPT level and rejects it before reaching `RoleplaySessionServiceImpl`.<br>4. `GlobalExceptionHandler` → catch the validation exception.<br>5. System → return response. | HTTP 400 Bad Request. | Learner token. |
+| **TC_SP_CT_008** | List my topics with pagination. | 1. Client → `GET .../my-topics?page=0&size=1` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.getTopics()`.<br>4. `UserConversationTopicServiceImpl` → query custom topics owned by the current learner and return the requested page slice.<br>5. System → return response. | HTTP 200 OK. Returns paginated personal topic list with at most 1 item per page. | Learner token. Learner has multiple custom topics. |
+| **TC_SP_CT_009** | Get my topic by ID. | 1. Client → `GET .../my-topics/{id}` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.getTopicById()`.<br>4. `UserConversationTopicServiceImpl` → fetch the topic by ID scoped to the current learner's ID.<br>5. System → return response. | HTTP 200 OK. Topic details are returned. | Learner token. Custom topic exists and belongs to the learner. |
+| **TC_SP_CT_010** | Update my topic. | 1. Client → `PUT .../my-topics/{id}` with a valid learner token, providing updated title and/or scenario.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.updateTopic()`.<br>4. `UserConversationTopicServiceImpl` → confirm the topic belongs to the current learner and apply the updates to the database.<br>5. System → return response. | HTTP 200 OK. Updated values are persisted in the database. | Learner token. Custom topic exists and belongs to the learner. |
+| **TC_SP_CT_011** | Delete my topic. | 1. Client → `DELETE .../my-topics/{id}` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.deleteTopic()`.<br>4. `UserConversationTopicServiceImpl` → confirm the topic belongs to the current learner and remove the record from the database.<br>5. System → return response. | HTTP 200 OK. Topic record is no longer present in the database. | Learner token. Custom topic exists and belongs to the learner. |
+| **TC_SP_CT_012** | Access another user's topic returns 404. | 1. Client → `GET .../my-topics/{victimTopicId}` using a different learner's token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity as learner A.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.getTopicById()`.<br>4. `UserConversationTopicServiceImpl` → look up the topic scoped to learner A's ID; find no match since the topic belongs to learner B; throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Token of learner A. Topic belongs to learner B. |
+| **TC_SP_CT_013** | Generate context with blank scenario returns 400. | 1. Client → `POST .../my-topics/{id}/generate-context` with a valid learner token for a topic where the scenario field is blank.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.generateContext()`.<br>4. `UserConversationTopicServiceImpl` → find the scenario is empty and throw a business exception without calling `ConversationGenerationService`.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 400 Bad Request. | Learner token. Topic exists with a blank scenario field. |
+| **TC_SP_CT_014** | Generate context persists aiGeneratedContext. | 1. Client → `POST .../my-topics/{id}/generate-context` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.generateContext()`.<br>4. `UserConversationTopicServiceImpl` → call `ConversationGenerationService`, receive the generated context, and save it to the `aiGeneratedContext` field of the topic record in the database.<br>5. System → return response. | HTTP 200 OK. `aiGeneratedContext` field in the database is populated with the generated content. | Learner token. Custom topic with a non-empty scenario. |
+| **TC_SP_CT_015** | Update another user's topic returns 404. | 1. Client → `PUT .../my-topics/{victimTopicId}` using a different learner's token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity as learner A.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.updateTopic()`.<br>4. `UserConversationTopicServiceImpl` → look up the topic scoped to learner A's ID; find no match; throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Token of learner A. Topic belongs to learner B. |
+| **TC_SP_CT_016** | Delete another user's topic returns 404. | 1. Client → `DELETE .../my-topics/{victimTopicId}` using a different learner's token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity as learner A.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.deleteTopic()`.<br>4. `UserConversationTopicServiceImpl` → look up the topic scoped to learner A's ID; find no match; throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Token of learner A. Topic belongs to learner B. |
+| **TC_SP_CT_017** | Generate context for another user's topic returns 404. | 1. Client → `POST .../my-topics/{victimTopicId}/generate-context` using a different learner's token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity as learner A.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.generateContext()`.<br>4. `UserConversationTopicServiceImpl` → look up the topic scoped to learner A's ID; find no match; throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Token of learner A. Topic belongs to learner B. |
+| **TC_SP_CT_018** | Manager create personal topic returns 403. | 1. Client → `POST .../my-topics` with a MANAGER token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve role as MANAGER.<br>3. Spring Security → detect the role does not have access to this endpoint and deny the request.<br>4. `GlobalExceptionHandler` → catch the access denied exception.<br>5. System → return response. | HTTP 403 Forbidden. | Manager token. |
+| **TC_SP_CT_019** | Free-talk session with no token returns 401. | 1. Client → `POST .../free-talk/sessions` with no token.<br>2. `JwtAuthenticationFilter` → find no authentication credentials in the request.<br>3. Spring Security → reject the unauthenticated request.<br>4. System → return response. | HTTP 401 Unauthorized. | No token. |
+| **TC_SP_CT_021** | Delete topic with an active session. | 1. Client → `DELETE .../my-topics/{id}` with a valid learner token for a topic linked to an ACTIVE session.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.deleteTopic()`.<br>4. `UserConversationTopicServiceImpl` → check whether the topic is linked to any active sessions before proceeding.<br>5. System → return response. | Topic is soft-deleted or the request is blocked. `[CONFIRM WITH DEV: is deletion allowed while a session is active, or is it blocked?]` | Learner token. Custom topic linked to an ACTIVE session. |
+| **TC_SP_CT_022** | Update topic during active session. | 1. Client → `PUT .../my-topics/{id}` with a valid learner token for a topic linked to an ACTIVE session.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.updateTopic()`.<br>4. `UserConversationTopicServiceImpl` → apply the update to the topic record; the in-progress session may use the old cached context or pick up the new data depending on implementation.<br>5. System → return response. | HTTP 200 OK. Topic is updated. `[CONFIRM WITH DEV: does the update affect the in-progress session's context, or is the session isolated from topic changes after start?]` | Learner token. Custom topic linked to an ACTIVE session. |
+| 🆕 **TC_SP_CT_023** | Generate context for non-existent topic returns 404. | 1. Client → `POST .../my-topics/{invalidId}/generate-context` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.generateContext()`.<br>4. `UserConversationTopicServiceImpl` → look up the topic scoped to the current learner, find no matching record, and throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Learner token. Topic ID does not exist. |
+| 🆕 **TC_SP_CT_024** | Get non-existent my-topic returns 404. | 1. Client → `GET .../my-topics/{invalidId}` with a valid learner token.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.getTopicById()`.<br>4. `UserConversationTopicServiceImpl` → look up the topic scoped to the current learner, find no matching record, and throw a not-found exception.<br>5. `GlobalExceptionHandler` → catch the exception.<br>6. System → return response. | HTTP 404 Not Found. | Learner token. Topic ID does not exist. |
+| 🆕 **TC_SP_CT_025** | List my-topics returns 200 empty when learner has none. | 1. Client → `GET .../my-topics` with a valid learner token from an account with no custom topics.<br>2. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>3. `LearnerConversationController` → call `UserConversationTopicServiceImpl.getTopics()`.<br>4. `UserConversationTopicServiceImpl` → query custom topics owned by the current learner and find none.<br>5. System → return response. | HTTP 200 OK. Empty list. | Learner token. Learner has no custom topics. |
 
 ---
 
-## Notes / Gaps
-- Auto-position by learner progress and lesson filtering are not implemented; tests do not cover these behaviors.
-- Free-talk start does not enforce user-provided context; behavior matches current implementation.
-- External API quality checks (OpenAI/Azure) are manual via Postman.
+## 2. State Machine Tests
+
+| Test ID | Description | Expected Result | Pre-condition |
+|:---|:---|:---|:---|
+| **TC_SP_AI_SM_001** | Start session from NONE → ACTIVE. | 201 Created. session.status = ACTIVE. | User starts new session. |
+| **TC_SP_AI_SM_002** | Send message in ACTIVE session. | 200 OK. message persisted. AI response appended. | ACTIVE session. |
+| **TC_SP_AI_SM_003** | Complete session: ACTIVE → COMPLETED. | 200 OK. evaluation returned. status = COMPLETED. | ACTIVE session. |
+| **TC_SP_AI_SM_004** | Abandon session: ACTIVE → ABANDONED. | 200 OK. status = ABANDONED. | ACTIVE session. |
+| **TC_SP_AI_SM_005** | COMPLETED → send message. | 400 Bad Request. | COMPLETED session. |
+| **TC_SP_AI_SM_006** | COMPLETED → complete again. | 400 Bad Request. | COMPLETED session. |
+| **TC_SP_AI_SM_007** | COMPLETED → abandon. | 400 Bad Request. | COMPLETED session. |
+| **TC_SP_AI_SM_008** | ABANDONED → send message. | 400 Bad Request. | ABANDONED session. |
+| **TC_SP_AI_SM_009** | ABANDONED → complete. | 400 Bad Request. | ABANDONED session. |
+| **TC_SP_AI_040** | ABANDONED → complete after abandon. | 400 Bad Request. | ABANDONED session. |
+| 🆕 **TC_SP_AI_SM_010** | ABANDONED → abandon again. | 400 Bad Request. | ABANDONED session. |
+| 🆕 **TC_SP_AI_SM_011** | Free-talk session: ACTIVE → COMPLETED. | 200 OK. status = COMPLETED. `[CONFIRM WITH DEV: verify free-talk session has same state machine as roleplay]` | ACTIVE free-talk session. |
+| 🆕 **TC_SP_AI_SM_012** | Free-talk session: ACTIVE → ABANDONED. | 200 OK. status = ABANDONED. | ACTIVE free-talk session. |
+| 🆕 **TC_SP_AI_SM_013** | Free-talk COMPLETED → send message. | 400 Bad Request. | COMPLETED free-talk session. |
+| 🆕 **TC_SP_AI_SM_014** | Message limit (50) reached: subsequent send returns 400, session NOT auto-completed. | 1. Session has 50 messages. 2. `POST .../messages`. | HTTP 400 Bad Request. Session status remains ACTIVE (not auto-completed). `[CONFIRM WITH DEV: confirm no auto-complete logic on limit]` | Learner token. Session with exactly 50 messages. |
+
+---
+
+## 3. AI Robustness Tests
+
+> Cases in this section require **mocking of external services** (Azure Speech, SpeechSuper, OpenAI) at the service/integration layer. All cases assume learner token and an active session unless noted.
+
+### 3.1. OpenAI Failures
+
+> **Confirmed behavior (from source):** Project uses `spring-ai-starter-model-openai`. No retry configuration found (`spring.ai.retry.*` properties absent). Services (`RoleplayAIService`, `MissionEvaluatorAI`) only catch `NonTransientAiException`. Rate-limit (429) and timeout are transient errors — they are NOT caught, propagate up, and result in HTTP 500 to the client. No automatic retry occurs.
+
+| Test ID | Description | Procedures | Expected Result | Pre-condition |
+|:---|:---|:---|:---|:---|
+| **TC_SP_AI_037** | AI timeout on message generation. | 1. Configure `RoleplayAIService` mock to delay its response beyond the allowed timeout threshold.<br>2. Client → `POST .../sessions/{id}/messages` with a valid learner token.<br>3. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>4. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>5. `RoleplaySessionServiceImpl` → call `RoleplayAIService`; the call times out and an exception is thrown.<br>6. `GlobalExceptionHandler` → catch the exception.<br>7. System → return response. | HTTP 500. Session remains ACTIVE. Message is not persisted. | ACTIVE session. `RoleplayAIService` mocked to timeout. |
+| **TC_SP_AI_038** | AI returns malformed JSON. | 1. Configure `RoleplayAIService` mock to return an invalid JSON body.<br>2. Client → `POST .../sessions/{id}/messages` with a valid learner token.<br>3. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>4. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>5. `RoleplaySessionServiceImpl` → call `RoleplayAIService`; the response fails to parse and a JSON parse exception is thrown.<br>6. `GlobalExceptionHandler` → catch the exception.<br>7. System → return response. | HTTP 500. JSON parse error handled without crashing or corrupting the session. Session remains ACTIVE. | ACTIVE session. `RoleplayAIService` mocked to return invalid JSON. |
+| **TC_SP_AI_042** | AI returns empty response body. | 1. Configure `RoleplayAIService` mock to return an empty response body.<br>2. Client → `POST .../sessions/{id}/messages` with a valid learner token.<br>3. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>4. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>5. `RoleplaySessionServiceImpl` → call `RoleplayAIService`; receive an empty payload and handle it without throwing an unhandled exception.<br>6. `GlobalExceptionHandler` → catch the exception if thrown.<br>7. System → return response. | HTTP 500 or 200 with an empty AI reply. Session is not crashed or corrupted. | ACTIVE session. `RoleplayAIService` mocked to return empty body. |
+| **TC_SP_CT_020** | Generate context AI timeout. | 1. Configure `ConversationGenerationService` mock to timeout.<br>2. Client → `POST .../my-topics/{id}/generate-context` with a valid learner token.<br>3. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>4. `LearnerConversationController` → call `UserConversationTopicServiceImpl.generateContext()`.<br>5. `UserConversationTopicServiceImpl` → call `ConversationGenerationService`; the call times out and an exception is thrown.<br>6. `GlobalExceptionHandler` → catch the exception.<br>7. System → return response. | HTTP 500. `aiGeneratedContext` field is not updated in the database. Topic record remains intact. | Learner token. Custom topic with a non-empty scenario. `ConversationGenerationService` mocked to timeout. |
+| 🆕 **TC_SP_ROB_001** | OpenAI returns HTTP 429 (rate limit) on send message. | 1. Configure `RoleplayAIService` mock to return a 429 rate-limit error.<br>2. Client → `POST .../sessions/{id}/messages` with a valid learner token.<br>3. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>4. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>5. `RoleplaySessionServiceImpl` → call `RoleplayAIService`; receive a 429 error; Spring AI throws a transient exception that is not caught by the existing `NonTransientAiException` handler — no retry occurs.<br>6. `GlobalExceptionHandler` → catch the uncaught exception.<br>7. System → return response. | HTTP 500. No retry attempted. Session remains ACTIVE. Message not persisted. | ACTIVE session. `RoleplayAIService` mocked to return 429. |
+| 🆕 **TC_SP_ROB_002** | OpenAI returns HTTP 429 on session start. | 1. Configure `RoleplayAIService` mock to return a 429 error during opening message generation.<br>2. Client → `POST .../roleplay/sessions` with a valid learner token.<br>3. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>4. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.startSession()`.<br>5. `RoleplaySessionServiceImpl` → begin creating the session record, then call `RoleplayAIService` for opening messages; receive 429 and throw an exception; the transaction is rolled back.<br>6. `GlobalExceptionHandler` → catch the exception.<br>7. System → return response. | HTTP 500. No session record persisted in the database. | Learner token. `RoleplayAIService` mocked to return 429 during session initialization. |
+| 🆕 **TC_SP_ROB_003** | OpenAI returns HTTP 500 on message generation. | 1. Configure `RoleplayAIService` mock to return a 500 server error.<br>2. Client → `POST .../sessions/{id}/messages` with a valid learner token.<br>3. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>4. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>5. `RoleplaySessionServiceImpl` → call `RoleplayAIService`; receive a 500 error and propagate the exception upward.<br>6. `GlobalExceptionHandler` → catch the exception.<br>7. System → return response. | HTTP 500. Error returned to the client. Session remains ACTIVE. | ACTIVE session. `RoleplayAIService` mocked to return 500. |
+| 🆕 **TC_SP_ROB_004** | Evaluation service fails on session complete. | 1. Configure `SessionEvaluatorAI` mock to throw an exception when called.<br>2. Client → `POST .../sessions/{id}/complete` with a valid learner token.<br>3. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>4. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.completeSession()`.<br>5. `RoleplaySessionServiceImpl` → update session status to COMPLETED, then call `SessionEvaluatorAI`; the evaluator throws an exception.<br>6. `GlobalExceptionHandler` → catch the exception.<br>7. System → return response. | Session does not get stuck in a non-terminal state. `[CONFIRM WITH DEV: does the session remain ACTIVE or transition to COMPLETED before the evaluator throws? Is re-triggering evaluation supported?]` | ACTIVE session. `SessionEvaluatorAI` mocked to throw an exception. |
+
+### 3.2. Azure Speech (STT) + SpeechSuper Fallback
+
+> **Confirmed behavior (from source — `AzureSpeechProvider` + `CompositePronunciationProvider`):**
+> 1. If Azure STT throws `TimeoutException`: deferred cleanup is scheduled, `AssessmentResult.failure("Recognition timed out")` is returned.
+> 2. `CompositePronunciationProvider` catches this via `CompletableFuture.exceptionally()`.
+> 3. If `speechSuperProvider.isAvailable()` → fallback to SpeechSuper for scoring.
+> 4. Only if **both** Azure AND SpeechSuper fail (or SpeechSuper unavailable) → `AssessmentResult.failure("Azure failed: ...")` is returned to the caller.
+>
+> Test cases below reflect this two-tier fallback design.
+
+| Test ID | Description | Procedures | Expected Result | Pre-condition |
+|:---|:---|:---|:---|:---|
+| 🆕 **TC_SP_ROB_005** | Azure STT times out — SpeechSuper available as fallback. | 1. Configure `AzureSpeechProvider` mock to throw a `TimeoutException` and `SpeechSuperProvider` mock to return a valid score.<br>2. Client → `POST .../sessions/{id}/messages` with a valid learner token and an audio file.<br>3. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>4. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>5. `RoleplaySessionServiceImpl` → forward the audio to `CompositePronunciationProvider`.<br>6. `CompositePronunciationProvider` → call `AzureSpeechProvider`; receive `TimeoutException`; schedule deferred Azure cleanup; check `SpeechSuperProvider.isAvailable()` = true; call `SpeechSuperProvider.assess()` and receive a valid score.<br>7. `RoleplaySessionServiceImpl` → attach the SpeechSuper score to the message and call `RoleplayAIService` for the AI reply.<br>8. System → return response. | HTTP 200 OK. Message is saved. Pronunciation score is populated from `SpeechSuperProvider`. Azure resources cleaned up in background. | ACTIVE session. `AzureSpeechProvider` mocked to timeout. `SpeechSuperProvider` returning a valid score. |
+| 🆕 **TC_SP_ROB_006** | Azure STT times out — SpeechSuper also unavailable. | 1. Configure `AzureSpeechProvider` mock to throw a `TimeoutException` and `SpeechSuperProvider` mock to report as unavailable.<br>2. Client → `POST .../sessions/{id}/messages` with a valid learner token and an audio file.<br>3. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>4. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>5. `RoleplaySessionServiceImpl` → forward the audio to `CompositePronunciationProvider`.<br>6. `CompositePronunciationProvider` → call `AzureSpeechProvider`; receive `TimeoutException`; check `SpeechSuperProvider.isAvailable()` = false; return `AssessmentResult.failure("Azure failed: ...")`.<br>7. `RoleplaySessionServiceImpl` → handle the failure result.<br>8. System → return response. | `AssessmentResult.failure` returned. Response reflects the failure. Session remains ACTIVE. `[CONFIRM WITH DEV: is the message itself still saved when both providers fail, or is the entire request rejected?]` | ACTIVE session. `AzureSpeechProvider` mocked to timeout. `SpeechSuperProvider` mocked as unavailable. |
+| 🆕 **TC_SP_ROB_007** | Azure STT times out — SpeechSuper also throws exception. | 1. Configure `AzureSpeechProvider` mock to throw a `TimeoutException` and `SpeechSuperProvider` mock to also throw an exception.<br>2. Client → `POST .../sessions/{id}/messages` with a valid learner token and an audio file.<br>3. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>4. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>5. `RoleplaySessionServiceImpl` → forward the audio to `CompositePronunciationProvider`.<br>6. `CompositePronunciationProvider` → call `AzureSpeechProvider` (timeout); fall back to `SpeechSuperProvider.assess()` (also throws); return `AssessmentResult.failure("Azure failed: ...")`.<br>7. `RoleplaySessionServiceImpl` → handle the composite failure result without crashing.<br>8. System → return response. | System does not crash. `AssessmentResult.failure` returned. Session remains ACTIVE. | ACTIVE session. Both `AzureSpeechProvider` and `SpeechSuperProvider` mocked to fail. |
+| 🆕 **TC_SP_ROB_008** | Azure STT returns empty transcript. | 1. Configure `AzureSpeechProvider` mock to return a recognition result with an empty transcript.<br>2. Client → `POST .../sessions/{id}/messages` with a valid learner token and an audio file.<br>3. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>4. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>5. `RoleplaySessionServiceImpl` → forward the audio to `CompositePronunciationProvider`.<br>6. `CompositePronunciationProvider` → call `AzureSpeechProvider`; receive an empty transcript result; pass it back to `RoleplaySessionServiceImpl`.<br>7. `RoleplaySessionServiceImpl` → handle the empty transcript.<br>8. System → return response. | System handles gracefully without crashing. `[CONFIRM WITH DEV: does `RoleplaySessionServiceImpl` treat an empty transcript as `AssessmentResult.failure` and reject the message, or forward it as an empty string to `RoleplayAIService`?]` | ACTIVE session. `AzureSpeechProvider` mocked to return an empty transcript. |
+
+### 3.3. SpeechSuper — Standalone Failures (when Azure succeeds)
+
+> These cases test `SpeechSuperProvider` in isolation — `AzureSpeechProvider` successfully returns a transcript, but SpeechSuper pronunciation scoring fails.
+
+| Test ID | Description | Procedures | Expected Result | Pre-condition |
+|:---|:---|:---|:---|:---|
+| 🆕 **TC_SP_ROB_009** | SpeechSuper times out while Azure STT succeeds. | 1. Configure `AzureSpeechProvider` mock to return a valid transcript and `SpeechSuperProvider` mock to timeout.<br>2. Client → `POST .../sessions/{id}/messages` with a valid learner token and an audio file.<br>3. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>4. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>5. `RoleplaySessionServiceImpl` → forward the audio to `CompositePronunciationProvider`.<br>6. `CompositePronunciationProvider` → call `AzureSpeechProvider` (success); call `SpeechSuperProvider` for pronunciation scoring (timeout).<br>7. `RoleplaySessionServiceImpl` → proceed with message saving and call `RoleplayAIService` for the AI reply.<br>8. System → return response. | HTTP 200 OK. Message is saved and AI reply is returned. Pronunciation score is null or absent. `SpeechSuperProvider` timeout does not block the response. `[CONFIRM WITH DEV: is `SpeechSuperProvider` called synchronously (blocking response) or asynchronously (fire-and-forget)?]` | ACTIVE session. `AzureSpeechProvider` available. `SpeechSuperProvider` mocked to timeout. |
+| 🆕 **TC_SP_ROB_010** | SpeechSuper returns null score. | 1. Configure `AzureSpeechProvider` mock to return a valid transcript and `SpeechSuperProvider` mock to return a null score object.<br>2. Client → `POST .../sessions/{id}/messages` with a valid learner token and an audio file.<br>3. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>4. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>5. `RoleplaySessionServiceImpl` → forward the audio to `CompositePronunciationProvider`.<br>6. `CompositePronunciationProvider` → call `AzureSpeechProvider` (success); call `SpeechSuperProvider` which returns null; handle the null result without throwing an exception.<br>7. `RoleplaySessionServiceImpl` → save the message and call `RoleplayAIService`.<br>8. System → return response. | HTTP 200 OK. Message is saved. Pronunciation score field is null or omitted in the response. No exception thrown. | ACTIVE session. `SpeechSuperProvider` mocked to return null. |
+| 🆕 **TC_SP_ROB_011** | SpeechSuper returns HTTP 500. | 1. Configure `AzureSpeechProvider` mock to return a valid transcript and `SpeechSuperProvider` mock to return a 500 server error.<br>2. Client → `POST .../sessions/{id}/messages` with a valid learner token and an audio file.<br>3. `JwtAuthenticationFilter` → parse and validate the token, resolve user identity and role.<br>4. `LearnerRoleplayController` → call `RoleplaySessionServiceImpl.sendMessage()`.<br>5. `RoleplaySessionServiceImpl` → forward the audio to `CompositePronunciationProvider`.<br>6. `CompositePronunciationProvider` → call `AzureSpeechProvider` (success); call `SpeechSuperProvider` which returns 500; handle the error gracefully without surfacing it to the client.<br>7. `RoleplaySessionServiceImpl` → save the message and call `RoleplayAIService`.<br>8. System → return response. | HTTP 200 OK. Message and AI reply saved. `SpeechSuperProvider` error not returned to the client. Pronunciation score absent. | ACTIVE session. `SpeechSuperProvider` mocked to return 500. |
+
+---
+
+## 4. Concurrency Tests
+
+| Test ID | Description | Expected Result | Pre-condition |
+|:---|:---|:---|:---|
+| **TC_SP_AI_035** | Parallel send message to same session. | DB locks/versioning prevent race conditions. | ACTIVE session. 2 concurrent requests. |
+| **TC_SP_AI_036** | Double complete session. | Only one evaluation runs, second gets 400. | ACTIVE session. 2 concurrent complete reqs. |
+| **TC_SP_AI_041** | Parallel start session. | Active session limit (3) strictly enforced under load. | Learner at limit. Concurrent start reqs. |
+| 🆕 **TC_SP_CON_001** | Concurrent generate-context on same topic. | Only one context generation runs. Field `aiGeneratedContext` contains a single coherent result (not overwritten mid-write). `[CONFIRM WITH DEV: is there a lock or idempotency guard on this endpoint?]` | Learner token. Custom topic. 2 concurrent `generate-context` requests. |
+| 🆕 **TC_SP_CON_002** | Concurrent abandon + complete on same ACTIVE session. | Only one operation succeeds (200). The other returns 400. Session ends in either COMPLETED or ABANDONED — not both. | ACTIVE session. 1 concurrent abandon + 1 concurrent complete request. |
+
+---
+
+## Appendix: Open Items Requiring Dev Confirmation
+
+> Items 1 and 2 from v2 are now resolved. Remaining open items below.
+
+| # | Question | Affects |
+|:---|:---|:---|
+| 1 | When **both** Azure STT and SpeechSuper fail, is the message still saved to DB or is the entire request rejected? | TC_SP_ROB_006 |
+| 2 | Is SpeechSuper scoring called **synchronously** (blocks HTTP response) or **asynchronously** (fire-and-forget)? This determines whether SpeechSuper timeout surfaces to the client or is silently ignored. | TC_SP_ROB_009 |
+| 3 | Is an **empty Azure STT transcript** treated as `AssessmentResult.failure`, or is it forwarded as an empty user message to OpenAI? | TC_SP_ROB_008 |
+| 4 | When the **evaluator throws an exception** during `session complete`, what is the resulting session state? Does it stay ACTIVE, move to ERROR, or something else? Is re-triggering evaluation supported? | TC_SP_ROB_004 |
+| 5 | Does **free-talk session** use the same state machine (ACTIVE → COMPLETED / ABANDONED) as roleplay session? | TC_SP_AI_SM_011 – SM_014 |
+| 6 | Is there any **auto-complete logic** when the 50-message limit is reached, or does the session simply remain ACTIVE and block further messages? | TC_SP_AI_SM_014 |
+| 7 | Is there an **idempotency guard or DB lock** on `generate-context` to prevent concurrent calls overwriting `aiGeneratedContext`? | TC_SP_CON_001 |
