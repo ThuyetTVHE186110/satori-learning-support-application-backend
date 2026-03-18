@@ -301,7 +301,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     public void deleteAssignment(UUID assignmentId, UUID teacherId) {
         Assignment assignment = findAssignmentOrThrow(assignmentId);
         verifyAssignmentAccess(assignment, teacherId);
-        requireDraft(assignment);
+        requireDraftOrNoSubmission(assignment);
         assignment.softDelete(teacherId);
         assignmentRepository.save(assignment);
         log.info("Assignment {} soft-deleted by teacher {}", assignmentId, teacherId);
@@ -767,10 +767,9 @@ public class AssignmentServiceImpl implements AssignmentService {
     private AssignmentSubmission findSubmissionOrThrow(UUID id) {
         return submissionRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy bài nộp."));
     }
-
-    private void requireDraft(Assignment assignment) {
-        if (assignment.getStatus() != AssignmentStatus.DRAFT && assignment.getHasSubmissions() == Boolean.FALSE) {
-            throw new BusinessException("INVALID_STATUS", "Thao tác này chỉ được phép với bài tập ở trạng thái DRAFT và chưa có bài được nộp.");
+    private void requireDraftOrNoSubmission(Assignment assignment) {
+        if (assignment.getStatus() != AssignmentStatus.DRAFT && assignment.getHasSubmissions() == Boolean.TRUE) {
+            throw new BusinessException("INVALID_STATUS", "Thao tác này chỉ được phép với bài tập ở trạng thái nháp hoặc chưa có bài được nộp.");
         }
     }
 
