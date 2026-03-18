@@ -89,6 +89,13 @@ public class LearnerAssignmentController {
         return ApiResponse.success(assignmentService.submitWriting(assignmentId, request, images, getUserId(userDetails)));
     }
 
+    @PostMapping("/{assignmentId}/cancel")
+    @Operation(summary = "Cancel a SUBMITTED assignment to return it to IN_PROGRESS for editing")
+    public ApiResponse<SubmissionResponse> cancelSubmission(
+            @PathVariable UUID assignmentId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ApiResponse.success(assignmentService.cancelSubmission(assignmentId, getUserId(userDetails)));
+    }
     // ═══════════════════════════════════════════════════════════════════════════
     // SUBMISSION HISTORY
     // ═══════════════════════════════════════════════════════════════════════════
