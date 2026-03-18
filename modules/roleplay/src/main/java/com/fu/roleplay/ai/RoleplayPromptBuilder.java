@@ -205,7 +205,10 @@ public class RoleplayPromptBuilder {
                     "translation": "(Tóm tắt kịch bản đã thống nhất bằng tiếng Việt)",
                     "romaji": "",
                     "topicSummary": "(brief topic title in English, max 40 chars)",
-                    "missionSummary": "(brief mission description in Vietnamese, max 100 chars)"
+                    "missionSummary": "(brief mission description in Vietnamese, max 100 chars)",
+                    "aiRole": "(the character the AI will play, e.g. 'a Japanese shopkeeper')",
+                    "userRole": "(the learner's role in the scenario, e.g. 'a customer')",
+                    "scenario": "(1-2 sentence description of the roleplay setting in English)"
                   },
                   {
                     "type": "SCENE_INTRO",

@@ -152,6 +152,58 @@ public class RoleplayAIService {
         }
     }
 
+    /**
+     * Generates a context-aware hint sentence the learner could say next.
+     * Called when the client fires a hint request (e.g. after user silence).
+     * Returns a single HINT-type segment JSON array.
+     */
+    public String generateHintResponse(UUID sessionId, String systemPrompt,
+                                        List<ConversationMessage> history,
+                                        List<SessionMission> missions) {
+        try {
+            List<ConversationMessage> recentHistory = PromptUtils.slidingTail(history, MAX_CONTEXT_MESSAGES);
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("<conversation_history>\n");
+            for (ConversationMessage msg : recentHistory) {
+                String role = msg.getRole() == ConversationMessage.MessageRole.USER ? "Learner" : "AI";
+                sb.append(role).append(": ").append(sanitizeUserInput(msg.getContent())).append("\n");
+            }
+            sb.append("</conversation_history>\n\n");
+
+            sb.append("PENDING MISSIONS:\n");
+            missions.stream()
+                    .filter(m -> m.getStatus() == SessionMission.MissionStatus.PENDING
+                            || m.getStatus() == SessionMission.MissionStatus.IN_PROGRESS)
+                    .forEach(m -> sb.append("- ").append(m.getTitle()).append("\n"));
+
+            sb.append("\nThe learner has been silent. Suggest ONE natural Japanese sentence they could say next ")
+              .append("to advance the conversation toward their pending missions. ")
+              .append("Return ONLY a JSON array with a single HINT object: ")
+              .append("[{\"type\":\"HINT\",\"japanese_content\":\"...\",\"translation\":\"... (tiếng Việt)\",\"romaji\":\"...\"}]");
+
+            String rawResponse = chatClient.prompt()
+                    .options(OpenAiChatOptions.builder().model(ROLEPLAY_MODEL).build())
+                    .system(systemPrompt)
+                    .user(sb.toString())
+                    .call()
+                    .content();
+
+            return cleanJson(rawResponse);
+        } catch (NonTransientAiException e) {
+            log.warn("AI unavailable for hint (session {}): {}", sessionId, e.getMessage());
+            return defaultHintResponse();
+        } catch (Exception e) {
+            log.error("Failed to generate hint for session {}: {}", sessionId, e.getMessage());
+            return defaultHintResponse();
+        }
+    }
+
+    private String defaultHintResponse() {
+        return "[{\"type\":\"HINT\",\"japanese_content\":\"何か言ってみましょう。\","
+                + "\"translation\":\"Hãy thử nói điều gì đó.\",\"romaji\":\"Nanika itte mimashou.\"}]";
+    }
+
     public void clearSessionCache(UUID sessionId) {
         try {
             String systemKey = REDIS_KEY_PREFIX + sessionId + ":system";

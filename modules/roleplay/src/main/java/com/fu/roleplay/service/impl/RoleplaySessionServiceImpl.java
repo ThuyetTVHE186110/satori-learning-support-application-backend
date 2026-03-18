@@ -3,6 +3,7 @@ package com.fu.roleplay.service.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.conversation.entity.ConversationMission;
@@ -139,6 +140,12 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 .build();
         session = sessionRepository.save(session);
 
+        // Race-condition guard: re-count inside transaction to catch concurrent session creation
+        long activeAfterSave = sessionRepository.countByUserIdAndStatus(userId, ConversationSession.SessionStatus.ACTIVE.name());
+        if (activeAfterSave > properties.getMaxActiveSessions()) {
+            throw new BusinessException("SESSION_LIMIT", "Maximum active sessions reached (" + properties.getMaxActiveSessions() + ")");
+        }
+
         // 5. Create session missions (snapshot) — copy Vi fields
         List<SessionMission> sessionMissions = new ArrayList<>();
         for (ConversationMission m : missions) {
@@ -201,8 +208,14 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         String jlptLevel = request.getJlptLevel() != null ? request.getJlptLevel() : "N5";
 
         // 3. Create session (no topicId, SETUP phase)
-        String contextJson = "{\"jlptLevel\":\"" + jlptLevel + "\","
-                + "\"language\":\"" + (request.getLanguage() != null ? request.getLanguage() : "vi") + "\"}";
+        String contextJson;
+        try {
+            contextJson = objectMapper.writeValueAsString(Map.of(
+                    "jlptLevel", jlptLevel,
+                    "language", request.getLanguage() != null ? request.getLanguage() : "vi"));
+        } catch (Exception e) {
+            contextJson = "{\"jlptLevel\":\"" + jlptLevel + "\",\"language\":\"vi\"}";
+        }
 
         ConversationSession session = ConversationSession.builder()
                 .userId(userId)
@@ -226,6 +239,12 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         session.setMessageCount(openingMessages.size());
         sessionRepository.save(session);
 
+        // Race-condition guard: re-count inside transaction to catch concurrent session creation
+        long activeAfterSave = sessionRepository.countByUserIdAndStatus(userId, ConversationSession.SessionStatus.ACTIVE.name());
+        if (activeAfterSave > properties.getMaxActiveSessions()) {
+            throw new BusinessException("SESSION_LIMIT", "Maximum active sessions reached (" + properties.getMaxActiveSessions() + ")");
+        }
+
         // 7. Build response (no missions yet during SETUP)
         SessionResponse response = sessionMapper.toResponse(session);
         response.setMessages(openingMessages.stream()
@@ -246,6 +265,16 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         if (session.getStatus() != ConversationSession.SessionStatus.ACTIVE) {
             throw new BusinessException("SESSION_INACTIVE", "Session is not active");
+        }
+
+        // Hint path: triggered by client after user silence — no user message saved, no slot consumed
+        if (request.isHintRequest()) {
+            return handleHintRequest(session, sessionId);
+        }
+
+        // Content required for all regular (non-hint) messages
+        if (request.getContent() == null || request.getContent().isBlank()) {
+            throw new BusinessException("CONTENT_REQUIRED", "Message content is required");
         }
 
         long currentMessages = messageRepository.countBySessionIdAndRole(sessionId, ConversationMessage.MessageRole.USER.name());
@@ -282,14 +311,20 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 .sequenceNumber(nextSeq)
                 .build();
         userMessage = messageRepository.save(userMessage);
+        boolean limitReached = (currentMessages + 1) >= properties.getMaxMessages();
 
         // 3. Load conversation history and missions
         List<ConversationMessage> history = messageRepository.findBySessionIdOrderBySequenceNumberAsc(sessionId);
         List<SessionMission> sessionMissions = sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
         String systemPrompt = roleplayAIService.getCachedSystemPrompt(sessionId);
         if (systemPrompt == null) {
-            // Rebuild a minimal fallback prompt
-            systemPrompt = "You are a helpful Japanese conversation partner. Respond with a JSON array of DIALOGUE segments.";
+            // Redis TTL expired — rebuild from DB to preserve full roleplay context
+            systemPrompt = rebuildSystemPrompt(session, sessionMissions);
+            if (systemPrompt != null) {
+                roleplayAIService.cacheSystemPrompt(sessionId, systemPrompt);
+            } else {
+                systemPrompt = "You are a helpful Japanese conversation partner. Respond with a JSON array of DIALOGUE segments.";
+            }
         }
 
         final String cachedPrompt = systemPrompt;
@@ -363,6 +398,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         if (hasPhaseTransition && isSetupPhase) {
             session.setConversationPhase("CONVERSATION");
+            updateSessionContextFromTransition(session, aiResponseJson);
             createDynamicMissionFromTransition(aiResponseJson, sessionId);
 
             // Rebuild system prompt for roleplay mode and re-cache
@@ -391,6 +427,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         // 9. Load fresh missions for response
         List<SessionMission> freshMissions = sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+        boolean allMissionsCompleted = !freshMissions.isEmpty() &&
+                freshMissions.stream().allMatch(m -> m.getStatus() == SessionMission.MissionStatus.COMPLETED);
 
         // 10. Build SendMessageResponse
         List<MessageResponse> messageResponses = aiMessages.stream()
@@ -403,17 +441,26 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         return SendMessageResponse.builder()
                 .messages(messageResponses)
                 .missions(missionResponses)
+                .limitReached(limitReached)
+                .allMissionsCompleted(allMissionsCompleted)
                 .build();
     }
 
     @Override
     @Transactional
     public SessionEvaluationResponse completeSession(UUID sessionId, UUID userId) {
-        ConversationSession session = sessionRepository.findByIdAndUserId(sessionId, userId)
+        ConversationSession session = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("ConversationSession", "id", sessionId.toString()));
 
         if (session.getStatus() != ConversationSession.SessionStatus.ACTIVE) {
             throw new BusinessException("SESSION_INACTIVE", "Session is not active");
+        }
+
+        // Guard: require at least one user message before evaluating
+        long userMsgCount = messageRepository.countBySessionIdAndRole(
+                sessionId, ConversationMessage.MessageRole.USER.name());
+        if (userMsgCount == 0) {
+            throw new BusinessException("SESSION_EMPTY", "Cannot complete a session with no messages");
         }
 
         // 1. Load all data
@@ -555,11 +602,22 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     @Override
     @Transactional
     public void abandonSession(UUID sessionId, UUID userId) {
-        ConversationSession session = sessionRepository.findByIdAndUserId(sessionId, userId)
+        ConversationSession session = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("ConversationSession", "id", sessionId.toString()));
 
         if (session.getStatus() != ConversationSession.SessionStatus.ACTIVE) {
             throw new BusinessException("SESSION_INACTIVE", "Session is not active");
+        }
+
+        // Mark any pending/in-progress missions as FAILED
+        List<SessionMission> missions = sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+        List<SessionMission> toFail = missions.stream()
+                .filter(m -> m.getStatus() == SessionMission.MissionStatus.PENDING
+                        || m.getStatus() == SessionMission.MissionStatus.IN_PROGRESS)
+                .collect(Collectors.toList());
+        if (!toFail.isEmpty()) {
+            toFail.forEach(m -> m.setStatus(SessionMission.MissionStatus.FAILED));
+            sessionMissionRepository.saveAll(toFail);
         }
 
         session.setStatus(ConversationSession.SessionStatus.ABANDONED);
@@ -741,6 +799,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     .filter(sm -> sm.getId().toString().equals(progress.getMissionId()))
                     .findFirst()
                     .ifPresent(sm -> {
+                        // Do not downgrade terminal statuses (COMPLETED/FAILED are irreversible)
+                        if (sm.getStatus() == SessionMission.MissionStatus.COMPLETED
+                                || sm.getStatus() == SessionMission.MissionStatus.FAILED) {
+                            return;
+                        }
                         try {
                             SessionMission.MissionStatus newStatus =
                                     SessionMission.MissionStatus.valueOf(progress.getStatus());
@@ -749,7 +812,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                             log.warn("Invalid mission status '{}' from AI for mission {}: {}",
                                     progress.getStatus(), sm.getId(), e.getMessage());
                         }
-                        sm.setProgressPct(progress.getProgressPct());
+                        sm.setProgressPct(Math.max(0, Math.min(100, progress.getProgressPct())));
                         sm.setAiReasoning(progress.getReasoning());
                         updatedMissions.add(sm);
                     });
@@ -847,5 +910,107 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             case "audio/mp4", "audio/m4a" -> "m4a";
             default -> "wav";
         };
+    }
+
+    /**
+     * Generates a contextual hint without saving a user message or consuming a message slot.
+     * Called when the client fires a hint request (e.g., after user silence).
+     */
+    private SendMessageResponse handleHintRequest(ConversationSession session, UUID sessionId) {
+        List<ConversationMessage> history =
+                messageRepository.findBySessionIdOrderBySequenceNumberAsc(sessionId);
+        List<SessionMission> sessionMissions =
+                sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+
+        String systemPrompt = roleplayAIService.getCachedSystemPrompt(sessionId);
+        if (systemPrompt == null) {
+            systemPrompt = rebuildSystemPrompt(session, sessionMissions);
+            if (systemPrompt == null) {
+                systemPrompt = "You are a helpful Japanese conversation partner.";
+            }
+        }
+
+        String hintJson = roleplayAIService.generateHintResponse(sessionId, systemPrompt, history, sessionMissions);
+        int nextSeq = messageRepository.findMaxSequenceNumberBySessionId(sessionId).orElse(0) + 1;
+        List<ConversationMessage> hintMessages = parseAndSaveAIMessages(sessionId, hintJson, nextSeq);
+
+        // Update total message count (hint messages are stored) but not userMessageCount
+        session.setMessageCount(session.getMessageCount() + hintMessages.size());
+        sessionRepository.save(session);
+
+        List<MessageResponse> hintResponses = hintMessages.stream()
+                .map(messageMapper::toResponse)
+                .collect(Collectors.toList());
+        List<SessionMissionResponse> missionResponses =
+                sessionMissions.stream()
+                        .map(missionMapper::toSessionMissionResponse)
+                        .collect(Collectors.toList());
+
+        return SendMessageResponse.builder()
+                .messages(hintResponses)
+                .missions(missionResponses)
+                .build();
+    }
+
+    /**
+     * Rebuilds the system prompt from DB when the Redis cache has expired.
+     * For ROLEPLAY sessions: loads ConversationTopic to recover aiRole, learnerRole, scenario.
+     * For FREE_TALK CONVERSATION sessions: reads roles/scenario from session context JSON
+     * (populated during PHASE_TRANSITION).
+     * Returns null if no rebuild is possible (caller should use generic fallback).
+     */
+    private String rebuildSystemPrompt(ConversationSession session, List<SessionMission> missions) {
+        if (session.getTopicId() != null) {
+            return topicRepository.findById(session.getTopicId())
+                    .filter(t -> t.getDeletedAt() == null)
+                    .map(topic -> {
+                        String jlptLevel = topic.getJlptLevel() != null ? topic.getJlptLevel().name() : "N5";
+                        return roleplayAIService.buildSystemPrompt(session,
+                                topic.getAiRole(), topic.getLearnerRole(), topic.getScenario(),
+                                jlptLevel, missions);
+                    })
+                    .orElse(null);
+        }
+        if ("CONVERSATION".equals(session.getConversationPhase())) {
+            return roleplayAIService.buildSystemPrompt(session,
+                    extractStringFromContext(session.getContext(), "aiRole"),
+                    extractStringFromContext(session.getContext(), "userRole"),
+                    extractStringFromContext(session.getContext(), "scenario"),
+                    extractJlptFromContext(session.getContext()),
+                    missions);
+        }
+        return null;
+    }
+
+    /**
+     * Parses the PHASE_TRANSITION segment from the AI response and merges
+     * aiRole, userRole, and scenario into the session's context JSON.
+     * This ensures the context survives Redis TTL expiry for later prompt rebuilds.
+     */
+    private void updateSessionContextFromTransition(ConversationSession session, String aiResponseJson) {
+        try {
+            JsonNode array = objectMapper.readTree(aiResponseJson);
+            if (!array.isArray()) return;
+            for (JsonNode node : array) {
+                if (!"PHASE_TRANSITION".equals(node.path("type").asText())) continue;
+
+                JsonNode existingCtx = objectMapper.readTree(session.getContext());
+                ObjectNode newCtx = objectMapper.createObjectNode();
+                existingCtx.fields().forEachRemaining(e -> newCtx.set(e.getKey(), e.getValue()));
+
+                String aiRole  = node.path("aiRole").asText(null);
+                String userRole = node.path("userRole").asText(null);
+                String scenario = node.path("scenario").asText(null);
+                if (aiRole  != null && !aiRole.isBlank())  newCtx.put("aiRole",   aiRole);
+                if (userRole != null && !userRole.isBlank()) newCtx.put("userRole", userRole);
+                if (scenario != null && !scenario.isBlank()) newCtx.put("scenario", scenario);
+
+                session.setContext(objectMapper.writeValueAsString(newCtx));
+                break;
+            }
+        } catch (Exception e) {
+            log.warn("Failed to update session context from PHASE_TRANSITION for session {}: {}",
+                    session.getId(), e.getMessage());
+        }
     }
 }
