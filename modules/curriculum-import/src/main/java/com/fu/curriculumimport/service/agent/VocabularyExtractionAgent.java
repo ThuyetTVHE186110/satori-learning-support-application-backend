@@ -8,6 +8,7 @@ import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.service.ingestion.MnNTableParser;
 import com.fu.curriculumimport.service.ingestion.OcrTextPreprocessor;
+import com.fu.curriculumimport.service.vision.VisionPageExtractor;
 import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -45,10 +46,13 @@ public class VocabularyExtractionAgent {
 
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
+    private final VisionPageExtractor visionPageExtractor;
 
-    public VocabularyExtractionAgent(OpenAiChatModel chatModel, ObjectMapper objectMapper) {
+    public VocabularyExtractionAgent(OpenAiChatModel chatModel, ObjectMapper objectMapper,
+                                      VisionPageExtractor visionPageExtractor) {
         this.chatClient = ChatClient.builder(chatModel).build();
         this.objectMapper = objectMapper;
+        this.visionPageExtractor = visionPageExtractor;
     }
 
     // ── Public API ───────────────────────────────────────────────────────────
@@ -65,7 +69,7 @@ public class VocabularyExtractionAgent {
                                                RagContext ragContext) {
         long t0 = System.currentTimeMillis();
 
-        // ── Fast path: structured table rows from OCR ─────────────────────────
+        // ── Fast path 1: structured table rows from OCR ────────────────────────
         if (chunk.getStructuredTableRows() != null && !chunk.getStructuredTableRows().isEmpty()) {
             List<ExtractionResult.ExtractedVocabulary> tableVocab =
                     MnNTableParser.parse(chunk.getStructuredTableRows(), jlptLevel);
@@ -82,10 +86,28 @@ public class VocabularyExtractionAgent {
                         .grammarPoints(Collections.emptyList())
                         .build();
             }
-            log.debug("Chunk {}: table parse failed (low rate), falling back to LLM", chunk.getChunkIndex());
+            log.debug("Chunk {}: table parse failed (low rate), trying vision", chunk.getChunkIndex());
         }
 
-        // ── LLM path ──────────────────────────────────────────────────────────
+        // ── Fast path 2: vision-first extraction (Tier 2) ─────────────────────
+        // Available when ScannedPdfIngestionService propagated page images to this chunk.
+        if (chunk.getPageImages() != null && !chunk.getPageImages().isEmpty()) {
+            String lessonTopic = chunk.getLessonTitle() != null ? chunk.getLessonTitle()
+                    : chunk.getContent().substring(0, Math.min(80, chunk.getContent().length()));
+            ExtractionResult visionResult = visionPageExtractor.extractVocabulary(
+                    chunk.getPageImages(), jlptLevel, lessonTopic, chunk.getChunkIndex());
+            if (visionResult.getConfidence() >= VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD) {
+                log.info("Chunk {}: vision extracted {} vocab items (confidence={})",
+                        chunk.getChunkIndex(), visionResult.getVocabulary().size(),
+                        visionResult.getConfidence());
+                return visionResult;
+            }
+            log.info("Chunk {}: vision confidence {} below threshold {}, falling back to text LLM",
+                    chunk.getChunkIndex(), visionResult.getConfidence(),
+                    VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD);
+        }
+
+        // ── LLM path (text-based fallback) ────────────────────────────────────
 
         if (OcrTextPreprocessor.isTrivial(chunk.getContent())) {
             log.info("Chunk {}: trivial content — skipping vocabulary LLM extraction",

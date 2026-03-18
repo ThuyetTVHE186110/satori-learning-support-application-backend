@@ -28,6 +28,10 @@ public class RoleplayPromptBuilder {
 
     private final ObjectMapper objectMapper;
 
+    private static final String DEFAULT_AI_ROLE = "a Japanese conversation partner";
+    private static final String DEFAULT_LEARNER_ROLE = "the learner";
+    private static final String DEFAULT_SCENARIO = "A general Japanese conversation practice session.";
+
     /**
      * Build the system prompt for a structured roleplay session.
      *
@@ -40,24 +44,24 @@ public class RoleplayPromptBuilder {
      *   <li>SCENE_INTRO is 3rd-person narration, not in-character dialogue.</li>
      * </ul>
      *
-     * @param topicContext JSON string with aiRole, userRole, scenario fields
+     * @param aiRole      identity of the AI character (e.g. "a Japanese shopkeeper")
+     * @param learnerRole identity of the learner in the scenario (e.g. "a customer")
+     * @param scenario    narrative description of the roleplay setting
      * @param jlptLevel   target JLPT level (defaults to "N5" if null)
      * @param missions    list of session missions the learner must accomplish
      * @return complete system prompt string
      */
-    public String buildSystemPrompt(String topicContext, String jlptLevel, List<SessionMission> missions) {
-        String aiRole = "a Japanese conversation partner";
-        String learnerRole = "the learner";
-        String scenario = "A general Japanese conversation practice session.";
+    public String buildSystemPrompt(String aiRole, String learnerRole, String scenario,
+                                    String jlptLevel, List<SessionMission> missions) {
+        String resolvedAiRole      = aiRole      != null && !aiRole.isBlank()      ? aiRole      : DEFAULT_AI_ROLE;
+        String resolvedLearnerRole = learnerRole != null && !learnerRole.isBlank()  ? learnerRole : DEFAULT_LEARNER_ROLE;
+        String resolvedScenario    = scenario    != null && !scenario.isBlank()     ? scenario    : DEFAULT_SCENARIO;
+        String level               = jlptLevel   != null                            ? jlptLevel   : "N5";
 
-        try {
-            JsonNode ctx = objectMapper.readTree(topicContext);
-            if (!ctx.path("aiRole").isMissingNode())   aiRole      = ctx.path("aiRole").asText(aiRole);
-            if (!ctx.path("userRole").isMissingNode()) learnerRole = ctx.path("userRole").asText(learnerRole);
-            if (!ctx.path("scenario").isMissingNode()) scenario    = ctx.path("scenario").asText(scenario);
-        } catch (Exception ignored) {}
-
-        String level = jlptLevel != null ? jlptLevel : "N5";
+        // Use resolved values throughout
+        aiRole      = resolvedAiRole;
+        learnerRole = resolvedLearnerRole;
+        scenario    = resolvedScenario;
 
         StringBuilder sb = new StringBuilder();
         sb.append("<system_instructions>\n\n");

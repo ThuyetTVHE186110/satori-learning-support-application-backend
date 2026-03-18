@@ -62,4 +62,17 @@ public class DocumentChunk {
      * can convert these directly into ExtractedVocabulary items without an LLM call.
      */
     private java.util.List<String> structuredTableRows;
+
+    /**
+     * JPEG-encoded page images for the pages covered by this chunk.
+     *
+     * <p>Only populated for {@code SCANNED} chunks whose section type is
+     * {@code VOCABULARY}, {@code GRAMMAR_PATTERN}, or {@code GRAMMAR_EXPLANATION}.
+     * The vision-first extraction path (Tier 2) sends these images directly to
+     * GPT-4o instead of relying on OCR text, preserving the original table layout
+     * and furigana positions.
+     *
+     * <p>Null for text-based chunks and sections that don't benefit from vision.
+     */
+    private java.util.List<byte[]> pageImages;
 }

@@ -161,7 +161,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // 6. Build and cache system prompt
         String jlptLevel = topic.getJlptLevel() != null ? topic.getJlptLevel().name() : "N5";
         String systemPrompt = roleplayAIService.buildSystemPrompt(session,
-                topic.getRoleplayContext() != null ? topic.getRoleplayContext() : "{}",
+                topic.getAiRole(), topic.getLearnerRole(), topic.getScenario(),
                 jlptLevel, sessionMissions);
         roleplayAIService.cacheSystemPrompt(session.getId(), systemPrompt);
 
@@ -367,7 +367,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
             // Rebuild system prompt for roleplay mode and re-cache
             String newSystemPrompt = roleplayAIService.buildSystemPrompt(
-                    session, session.getContext(), extractJlptFromContext(session.getContext()),
+                    session,
+                    extractStringFromContext(session.getContext(), "aiRole"),
+                    extractStringFromContext(session.getContext(), "userRole"),
+                    extractStringFromContext(session.getContext(), "scenario"),
+                    extractJlptFromContext(session.getContext()),
                     sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId));
             roleplayAIService.cacheSystemPrompt(sessionId, newSystemPrompt);
             sessionRepository.save(session);
@@ -711,6 +715,21 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             return ctx.path("jlptLevel").asText("N5");
         } catch (Exception e) {
             return "N5";
+        }
+    }
+
+    /**
+     * Extracts a named string field from the session context JSON.
+     * Returns null when the field is missing or the JSON is unparseable
+     * (callers fall back to prompt-builder defaults).
+     */
+    private String extractStringFromContext(String contextJson, String field) {
+        try {
+            JsonNode ctx = objectMapper.readTree(contextJson);
+            String value = ctx.path(field).asText(null);
+            return (value == null || value.isBlank()) ? null : value;
+        } catch (Exception e) {
+            return null;
         }
     }
 

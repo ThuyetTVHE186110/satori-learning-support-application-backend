@@ -41,11 +41,18 @@ public class RoleplayAIService {
 
     /**
      * Builds the system prompt for a structured roleplay session.
+     *
+     * @param session     current conversation session (unused here but kept for call-site clarity)
+     * @param aiRole      identity of the AI character (e.g. "a Japanese shopkeeper")
+     * @param learnerRole identity of the learner in the scenario (e.g. "a customer")
+     * @param scenario    narrative description of the roleplay setting
+     * @param jlptLevel   target JLPT level
+     * @param missions    session missions the learner must accomplish
      * @see RoleplayPromptBuilder#buildSystemPrompt
      */
-    public String buildSystemPrompt(ConversationSession session, String topicContext,
-                                     String jlptLevel, List<SessionMission> missions) {
-        return promptBuilder.buildSystemPrompt(topicContext, jlptLevel, missions);
+    public String buildSystemPrompt(ConversationSession session, String aiRole, String learnerRole,
+                                    String scenario, String jlptLevel, List<SessionMission> missions) {
+        return promptBuilder.buildSystemPrompt(aiRole, learnerRole, scenario, jlptLevel, missions);
     }
 
     /**
