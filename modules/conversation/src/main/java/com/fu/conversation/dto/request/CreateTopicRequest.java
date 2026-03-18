@@ -50,6 +50,10 @@ public class CreateTopicRequest {
     @Builder.Default
     private Integer difficultyScore = 1;
 
+    private String aiRole;
+
+    private String learnerRole;
+
     private String roleplayContext;
 
     private String thumbnailUrl;

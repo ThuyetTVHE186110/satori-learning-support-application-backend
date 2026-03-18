@@ -84,6 +84,20 @@ public class ConversationTopic extends SoftDeletableEntity {
     @Builder.Default
     private Integer difficultyScore = 1;
 
+    /**
+     * Role of the AI character in this roleplay scenario.
+     * E.g. "a Japanese shopkeeper", "a hotel receptionist".
+     */
+    @Column(name = "ai_role", columnDefinition = "TEXT")
+    private String aiRole;
+
+    /**
+     * Role of the learner in this roleplay scenario.
+     * E.g. "a customer", "a hotel guest".
+     */
+    @Column(name = "learner_role", columnDefinition = "TEXT")
+    private String learnerRole;
+
     @Column(name = "roleplay_context", columnDefinition = "jsonb")
     @ColumnTransformer(write = "CAST(? AS jsonb)")
     private String roleplayContext;

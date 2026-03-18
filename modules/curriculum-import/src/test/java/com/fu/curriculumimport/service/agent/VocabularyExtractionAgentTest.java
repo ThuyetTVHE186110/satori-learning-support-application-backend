@@ -3,6 +3,7 @@ package com.fu.curriculumimport.service.agent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
+import com.fu.curriculumimport.service.vision.VisionPageExtractor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -53,6 +54,9 @@ class VocabularyExtractionAgentTest {
     @Mock
     private OpenAiChatModel chatModel;
 
+    @Mock
+    private VisionPageExtractor visionPageExtractor;
+
     @Spy
     ObjectMapper objectMapper = new ObjectMapper();
 
@@ -60,7 +64,7 @@ class VocabularyExtractionAgentTest {
 
     @BeforeEach
     void setUp() {
-        agent = new VocabularyExtractionAgent(chatModel, objectMapper);
+        agent = new VocabularyExtractionAgent(chatModel, objectMapper, visionPageExtractor);
     }
 
     // -------------------------------------------------------------------------

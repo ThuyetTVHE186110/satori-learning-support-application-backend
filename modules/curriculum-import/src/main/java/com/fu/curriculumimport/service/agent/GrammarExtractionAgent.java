@@ -7,6 +7,7 @@ import com.fu.curriculumimport.service.agent.prompt.GrammarPromptBuilder;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.service.ingestion.OcrTextPreprocessor;
+import com.fu.curriculumimport.service.vision.VisionPageExtractor;
 import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -42,10 +43,13 @@ public class GrammarExtractionAgent {
 
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
+    private final VisionPageExtractor visionPageExtractor;
 
-    public GrammarExtractionAgent(OpenAiChatModel chatModel, ObjectMapper objectMapper) {
+    public GrammarExtractionAgent(OpenAiChatModel chatModel, ObjectMapper objectMapper,
+                                   VisionPageExtractor visionPageExtractor) {
         this.chatClient = ChatClient.builder(chatModel).build();
         this.objectMapper = objectMapper;
+        this.visionPageExtractor = visionPageExtractor;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -55,6 +59,26 @@ public class GrammarExtractionAgent {
      */
     public ExtractionResult extractGrammar(DocumentChunk chunk, String jlptLevel, RagContext ragContext) {
         long startTime = System.currentTimeMillis();
+
+        // ── Vision-first path (Tier 2) ─────────────────────────────────────────
+        // Available when ScannedPdfIngestionService propagated page images to this chunk.
+        if (chunk.getPageImages() != null && !chunk.getPageImages().isEmpty()) {
+            String lessonTopic = chunk.getLessonTitle() != null ? chunk.getLessonTitle()
+                    : chunk.getContent().substring(0, Math.min(80, chunk.getContent().length()));
+            ExtractionResult visionResult = visionPageExtractor.extractGrammar(
+                    chunk.getPageImages(), jlptLevel, lessonTopic, chunk.getChunkIndex());
+            if (visionResult.getConfidence() >= VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD) {
+                log.info("Chunk {}: vision extracted {} grammar items (confidence={})",
+                        chunk.getChunkIndex(), visionResult.getGrammarPoints().size(),
+                        visionResult.getConfidence());
+                return visionResult;
+            }
+            log.info("Chunk {}: vision confidence {} below threshold {}, falling back to text LLM",
+                    chunk.getChunkIndex(), visionResult.getConfidence(),
+                    VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD);
+        }
+
+        // ── Text-based LLM path ────────────────────────────────────────────────
 
         if (OcrTextPreprocessor.isTrivial(chunk.getContent())) {
             log.info("Chunk {}: trivial content — skipping grammar LLM extraction",
