@@ -22,10 +22,9 @@ public class AssessmentResult {
     private boolean success;
     private String errorMessage;
 
-    // Japanese-specific scores (from custom pitch accent / mora timing service)
+    // Japanese pitch accent / mora timing — always 0, kept for API/DB compatibility
     private double pitchAccentScore;
     private double moraTimingScore;
-    private String detailedPronunciationFeedback; // JSON string
 
     // Azure-specific fields (null when using SpeechSuper)
     private double completenessScore;

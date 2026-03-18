@@ -11,44 +11,179 @@ import java.util.regex.Pattern;
  * Parses structured vocabulary table rows produced by the OCR service.
  *
  * <h3>Background</h3>
- * <p>Minna no Nihongo vocabulary lists are laid out as a 4-5 column table:
- * <pre>
- *  No. │ Japanese word  │ Reading    │ Vietnamese meaning      │ Example
- *  ────┼────────────────┼────────────┼─────────────────────────┼─────────
- *   1  │ 行きます       │ いきます   │ (đt nhóm I) đi          │ どこへ…
- *   2  │ 来ます         │ きます     │ (đt nhóm III) đến       │
- * </pre>
+ * <p>Japanese-language textbooks commonly present vocabulary as multi-column tables.
+ * When the OCR service returns these rows as tab-separated strings via
+ * {@link DocumentChunk#getStructuredTableRows()}, this parser converts them directly
+ * into {@link ExtractionResult.ExtractedVocabulary} objects — <b>no LLM call required</b>.
  *
- * <p>When the OCR service (or PDFBox text extraction) returns these rows as
- * tab-separated strings via {@link DocumentChunk#getStructuredTableRows()},
- * this parser converts them directly into {@link ExtractionResult.ExtractedVocabulary}
- * objects — <b>no LLM call required</b>.
+ * <h3>Dynamic column detection</h3>
+ * <p>Rather than assuming a fixed column order, this parser <b>profiles every column</b>
+ * across all rows and assigns roles based on content analysis:
+ * <ul>
+ *   <li><b>WORD</b>  — column with highest CJK/kana content rate</li>
+ *   <li><b>READING</b> — column with highest pure-kana rate (among remaining)</li>
+ *   <li><b>MEANING</b> — column with highest non-Japanese letter rate (Vietnamese/English)</li>
+ *   <li><b>ROMAJI</b>  — column with highest ASCII-letter-only rate (among remaining)</li>
+ * </ul>
  *
- * <h3>Column detection heuristic</h3>
- * <ol>
- *   <li>Col 0: serial number (digits only) — skip</li>
- *   <li>Col 1: Japanese word (contains CJK/kana)</li>
- *   <li>Col 2: reading (pure hiragana/katakana) or romaji</li>
- *   <li>Col 3: meaning (Vietnamese/English — may contain POS tag in parentheses)</li>
- *   <li>Col 4+: example sentence (Japanese) — optional</li>
- * </ol>
- *
- * <p>If the column count or content does not match expectations, the row is
- * skipped and the caller falls back to LLM extraction for the whole chunk.
+ * <p>If no meaning column is detected (e.g. country-language reference tables,
+ * surname ranking tables), the parser returns empty and the caller falls back
+ * to LLM extraction. This makes the parser <b>curriculum-agnostic</b> — it works
+ * for any textbook, not just Minna no Nihongo.
  */
 @Slf4j
 public final class MnNTableParser {
 
-    private static final Pattern DIGITS_ONLY   = Pattern.compile("^\\d+\\.?$");
-    private static final Pattern CJK_OR_KANA   = Pattern.compile("[\\u3040-\\u9FFF]");
-    private static final Pattern PURE_KANA     = Pattern.compile("^[\\u3040-\\u30FF\\u30A0-\\u30FFー・ \\t]+$");
-    private static final Pattern ROMAJI        = Pattern.compile("^[a-zA-Z\\s\\-']+$");
-    private static final Pattern POS_TAG       = Pattern.compile("^\\(([^)]{1,30})\\)(.*)$");
+    private static final Pattern DIGITS_ONLY = Pattern.compile("^\\d+\\.?$");
+    private static final Pattern CJK_OR_KANA = Pattern.compile("[\\u3040-\\u9FFF]");
+    private static final Pattern PURE_KANA   = Pattern.compile("^[\\u3040-\\u30FF\\u30A0-\\u30FFー・ \\t]+$");
+    private static final Pattern ROMAJI      = Pattern.compile("^[a-zA-Z\\s\\-']+$");
+    private static final Pattern POS_TAG     = Pattern.compile("^\\(([^)]{1,30})\\)(.*)$");
+
+    /**
+     * Detects Japanese text (CJK ideographs or kana) that should NOT appear in
+     * a Vietnamese/English meaning field. Used as a per-row safety guard.
+     */
+    private static final Pattern JAPANESE_IN_MEANING = Pattern.compile("[\\u3040-\\u30FF\\u4E00-\\u9FFF]");
 
     private MnNTableParser() {}
 
+    // ── Column role detection ─────────────────────────────────────────────────
+
+    /**
+     * Maps detected column indices for each semantic role.
+     * A value of {@code -1} means the role was not detected.
+     */
+    private record ColumnMapping(int wordCol, int readingCol, int meaningCol, int romajiCol) {}
+
+    /**
+     * Profile every column across all rows and assign semantic roles.
+     *
+     * <p>For each column, counts how many non-blank cells fall into each category:
+     * digits-only, CJK-mixed, pure-kana, romaji, or non-Japanese letters (Vietnamese).
+     * Then assigns roles by highest rate, with minimum thresholds to avoid false positives.
+     *
+     * @return column mapping; any field may be {@code -1} if the role was not found
+     */
+    private static ColumnMapping detectColumns(List<String> rows) {
+        int maxCols = 0;
+        int rowCount = 0;
+        for (String row : rows) {
+            if (row == null || row.isBlank()) continue;
+            maxCols = Math.max(maxCols, row.split("\t", -1).length);
+            rowCount++;
+        }
+
+        if (maxCols < 2 || rowCount == 0) {
+            return new ColumnMapping(-1, -1, -1, -1);
+        }
+
+        // Per-column content profile counters
+        int[] digitCount    = new int[maxCols];
+        int[] cjkMixCount   = new int[maxCols]; // contains CJK/kana but NOT pure-kana
+        int[] pureKanaCount = new int[maxCols];
+        int[] romajiCount   = new int[maxCols];
+        int[] viCount       = new int[maxCols]; // non-Japanese letters (Vietnamese/English/Latin)
+        int[] nonBlank      = new int[maxCols];
+
+        for (String row : rows) {
+            if (row == null || row.isBlank()) continue;
+            String[] cells = row.split("\t", -1);
+            for (int i = 0; i < cells.length; i++) {
+                String c = cells[i].trim();
+                if (c.isBlank()) continue;
+                nonBlank[i]++;
+
+                if (DIGITS_ONLY.matcher(c).matches()) {
+                    digitCount[i]++;
+                } else if (PURE_KANA.matcher(c).matches()) {
+                    pureKanaCount[i]++;
+                } else if (ROMAJI.matcher(c).matches()) {
+                    romajiCount[i]++;
+                } else if (CJK_OR_KANA.matcher(c).find()) {
+                    // Contains CJK/kana but is mixed (kanji + kana, or CJK + Vietnamese inline)
+                    cjkMixCount[i]++;
+                } else if (hasAnyLetter(c)) {
+                    // Contains letters but NO CJK/kana → Vietnamese/English/Latin text
+                    viCount[i]++;
+                }
+            }
+        }
+
+        // ── Step 1: MEANING column — highest non-Japanese letter rate (≥30%) ──
+        int meaningCol = -1;
+        double bestViRate = 0.3;
+        for (int i = 0; i < maxCols; i++) {
+            if (nonBlank[i] == 0) continue;
+            double r = viCount[i] * 1.0 / nonBlank[i];
+            if (r > bestViRate) {
+                bestViRate = r;
+                meaningCol = i;
+            }
+        }
+
+        // ── Step 2: WORD column — highest CJK content rate (among remaining) ──
+        int wordCol = -1;
+        double bestWordRate = 0;
+        for (int i = 0; i < maxCols; i++) {
+            if (i == meaningCol || nonBlank[i] == 0) continue;
+            double r = (cjkMixCount[i] + pureKanaCount[i]) * 1.0 / nonBlank[i];
+            // Prefer columns with actual kanji over pure-kana
+            if (cjkMixCount[i] > 0) r += 0.05;
+            if (r > bestWordRate) {
+                bestWordRate = r;
+                wordCol = i;
+            }
+        }
+
+        // ── Step 3: READING column — highest pure-kana rate (≥30%, among remaining) ──
+        int readingCol = -1;
+        double bestKanaRate = 0.3;
+        for (int i = 0; i < maxCols; i++) {
+            if (i == meaningCol || i == wordCol || nonBlank[i] == 0) continue;
+            double r = pureKanaCount[i] * 1.0 / nonBlank[i];
+            if (r > bestKanaRate) {
+                bestKanaRate = r;
+                readingCol = i;
+            }
+        }
+
+        // ── Step 4: ROMAJI column — highest romaji rate (≥30%, among remaining) ──
+        int romajiCol = -1;
+        double bestRomajiRate = 0.3;
+        for (int i = 0; i < maxCols; i++) {
+            if (i == meaningCol || i == wordCol || i == readingCol || nonBlank[i] == 0) continue;
+            double r = romajiCount[i] * 1.0 / nonBlank[i];
+            if (r > bestRomajiRate) {
+                bestRomajiRate = r;
+                romajiCol = i;
+            }
+        }
+
+        log.debug("MnNTableParser: detected columns — word={}, reading={}, meaning={}, romaji={} (from {} cols, {} rows)",
+                wordCol, readingCol, meaningCol, romajiCol, maxCols, rowCount);
+        return new ColumnMapping(wordCol, readingCol, meaningCol, romajiCol);
+    }
+
+    /**
+     * Returns true if the string contains at least one Unicode letter character.
+     */
+    private static boolean hasAnyLetter(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            if (Character.isLetter(text.charAt(i))) return true;
+        }
+        return false;
+    }
+
+    // ── Public API ────────────────────────────────────────────────────────────
+
     /**
      * Attempt to parse structured table rows into vocabulary items.
+     *
+     * <p>The parser dynamically detects which column contains the Japanese word,
+     * reading, and Vietnamese meaning. If no meaning column is found (e.g. the
+     * table is a country-language reference, surname ranking, or other non-vocabulary
+     * layout), it returns empty so the caller falls back to LLM extraction.
      *
      * @param rows       tab-separated table rows from OCR structured output
      * @param jlptLevel  JLPT level to tag each item with (e.g. "N5")
@@ -59,22 +194,22 @@ public final class MnNTableParser {
 
         if (rows == null || rows.isEmpty()) return List.of();
 
-        // ── Fast path: country-language reference table ───────────────────────
-        // Minna no Nihongo has a special 4-column table in the countries chapter:
-        //   Col 0: country name  | Col 1: nationality (〜人) | Col 2: empty | Col 3: language (〜語)
-        //   アメリカ ( Mý )      |                           |              | 英語 ( tiêng Anh )
-        //   かんこく             | かんこくじん              |              | かんこく ご
-        // Each row yields 2–3 separate vocabulary items, not 1.
-        if (isCountryLanguageTable(rows)) {
-            List<ExtractionResult.ExtractedVocabulary> ctResult = parseCountryLanguageTable(rows, jlptLevel);
-            if (!ctResult.isEmpty()) {
-                log.info("MnNTableParser: country-language table detected — extracted {} items from {} rows",
-                        ctResult.size(), rows.size());
-                return ctResult;
-            }
+        // ── Dynamic column detection ────────────────────────────────────────
+        ColumnMapping mapping = detectColumns(rows);
+
+        if (mapping.wordCol < 0) {
+            log.info("MnNTableParser: no Japanese word column detected ({} rows) — using LLM fallback",
+                    rows.size());
+            return List.of();
         }
 
-        // ── Standard vocabulary table ─────────────────────────────────────────
+        if (mapping.meaningCol < 0) {
+            log.info("MnNTableParser: no Vietnamese meaning column detected ({} rows) — using LLM fallback",
+                    rows.size());
+            return List.of();
+        }
+
+        // ── Parse each row using detected column positions ──────────────────
         List<ExtractionResult.ExtractedVocabulary> result = new ArrayList<>();
         int skipped = 0;
 
@@ -82,12 +217,8 @@ public final class MnNTableParser {
             if (row == null || row.isBlank()) continue;
 
             String[] cells = row.split("\t", -1);
-            if (cells.length < 3) {
-                skipped++;
-                continue;
-            }
 
-            ExtractionResult.ExtractedVocabulary vocab = parseRow(cells, jlptLevel);
+            ExtractionResult.ExtractedVocabulary vocab = parseRow(cells, jlptLevel, mapping);
             if (vocab != null) {
                 result.add(vocab);
             } else {
@@ -113,41 +244,46 @@ public final class MnNTableParser {
 
     // ── Row parsing ──────────────────────────────────────────────────────────
 
-    private static ExtractionResult.ExtractedVocabulary parseRow(String[] cells, String jlptLevel) {
-        int colOffset = 0;
+    private static ExtractionResult.ExtractedVocabulary parseRow(
+            String[] cells, String jlptLevel, ColumnMapping mapping) {
 
-        // Skip leading serial-number column
-        if (DIGITS_ONLY.matcher(cells[0].trim()).matches()) {
-            colOffset = 1;
-        }
-
-        if (cells.length <= colOffset) return null;
-
-        // Column 1: Japanese word
-        // Strip any inline meaning attached to the word: 行きます（đi） → word=行きます, meaning=đi
-        String rawJapanese = cells[colOffset].trim();
+        // ── Word column ─────────────────────────────────────────────────────
+        if (mapping.wordCol >= cells.length) return null;
+        String rawJapanese = cells[mapping.wordCol].trim();
         if (rawJapanese.isBlank() || !CJK_OR_KANA.matcher(rawJapanese).find()) return null;
 
+        // Skip serial-number cells that ended up in the word column
+        if (DIGITS_ONLY.matcher(rawJapanese).matches()) return null;
+
+        // Strip inline meaning: 行きます（đi）→ word=行きます, meaning=đi
         FuriganaNormalizer.InlineMeaning inlineResult = FuriganaNormalizer.extractInlineMeaning(rawJapanese);
-        String japanese         = inlineResult.found() ? inlineResult.word() : rawJapanese;
+        String japanese          = inlineResult.found() ? inlineResult.word() : rawJapanese;
         String col1InlineMeaning = inlineResult.found() ? inlineResult.meaning() : null;
 
-        // Re-validate: stripped word must still contain CJK/kana
         if (japanese.isBlank() || !CJK_OR_KANA.matcher(japanese).find()) return null;
 
-        // Column 2: reading (hiragana/katakana) or romaji
-        String reading = cells.length > colOffset + 1 ? cells[colOffset + 1].trim() : "";
-        String romaji  = "";
-        if (!reading.isBlank() && ROMAJI.matcher(reading).matches()) {
-            romaji  = reading;
-            reading = ""; // no hiragana provided in this column
+        // ── Reading column ──────────────────────────────────────────────────
+        String reading = "";
+        if (mapping.readingCol >= 0 && mapping.readingCol < cells.length) {
+            reading = cells[mapping.readingCol].trim();
         }
 
-        // Column 3: meaning (may start with POS tag in parentheses)
-        String meaningRaw   = cells.length > colOffset + 2 ? cells[colOffset + 2].trim() : "";
+        // ── Romaji column ───────────────────────────────────────────────────
+        String romaji = "";
+        if (mapping.romajiCol >= 0 && mapping.romajiCol < cells.length) {
+            romaji = cells[mapping.romajiCol].trim();
+        }
+
+        // If reading column actually has romaji, swap
+        if (!reading.isBlank() && ROMAJI.matcher(reading).matches()) {
+            if (romaji.isBlank()) romaji = reading;
+            reading = "";
+        }
+
+        // ── Meaning column ──────────────────────────────────────────────────
+        String meaningRaw   = mapping.meaningCol < cells.length ? cells[mapping.meaningCol].trim() : "";
         String partOfSpeech = "";
         String meaningVi    = meaningRaw;
-        String meaningEn    = "";
 
         if (!meaningRaw.isBlank()) {
             var m = POS_TAG.matcher(meaningRaw);
@@ -157,9 +293,8 @@ public final class MnNTableParser {
             }
         }
 
-        // Fallback: if column 3 is blank, use the inline meaning extracted from column 1
+        // Fallback: if meaning column is blank, use inline meaning from word cell
         if (meaningVi.isBlank() && col1InlineMeaning != null) {
-            // Inline meanings may also carry a POS tag: "(đt nhóm I) đi"
             var inlineM = POS_TAG.matcher(col1InlineMeaning);
             if (inlineM.matches()) {
                 partOfSpeech = normalizePOS(inlineM.group(1).trim());
@@ -169,20 +304,30 @@ public final class MnNTableParser {
             }
         }
 
-        // Column 4 (optional): example sentence in Japanese
+        if (japanese.isBlank() || meaningVi.isBlank()) return null;
+
+        // Guard: reject if meaningVi still contains Japanese characters.
+        // This catches edge cases where column detection was correct overall but
+        // a specific row has Japanese text in the meaning slot.
+        if (JAPANESE_IN_MEANING.matcher(meaningVi).find()) {
+            log.debug("MnNTableParser: meaningVi '{}' contains Japanese text — rejecting row for word '{}'",
+                    meaningVi, japanese);
+            return null;
+        }
+
+        // ── Example column — any remaining CJK column ──────────────────────
         List<java.util.Map<String, String>> examples = new ArrayList<>();
-        if (cells.length > colOffset + 3) {
-            String exJp = cells[colOffset + 3].trim();
-            if (!exJp.isBlank() && CJK_OR_KANA.matcher(exJp).find()) {
-                examples.add(java.util.Map.of("jp", exJp, "vi", "", "en", ""));
+        for (int i = 0; i < cells.length; i++) {
+            if (i == mapping.wordCol || i == mapping.readingCol
+                    || i == mapping.meaningCol || i == mapping.romajiCol) continue;
+            String cell = cells[i].trim();
+            if (!cell.isBlank() && CJK_OR_KANA.matcher(cell).find()
+                    && !DIGITS_ONLY.matcher(cell).matches()) {
+                examples.add(java.util.Map.of("jp", cell, "vi", "", "en", ""));
+                break; // only take the first example column
             }
         }
 
-        if (japanese.isBlank() || meaningVi.isBlank()) return null;
-
-        // SOURCE_INLINE: meaning came from （）brackets on the japanese word cell (still source-derived,
-        // but worth a secondary manager review since POS detection is heuristic).
-        // SOURCE: meaning came from a dedicated meaning column (col 3) — higher confidence.
         String meaningSource = (meaningRaw.isBlank() && col1InlineMeaning != null)
                 ? "SOURCE_INLINE"
                 : "SOURCE";
@@ -193,7 +338,7 @@ public final class MnNTableParser {
                 .reading(PURE_KANA.matcher(reading).matches() ? reading : "")
                 .romaji(romaji)
                 .meaningVi(meaningVi)
-                .meaningEn(meaningEn.isBlank() ? null : meaningEn)
+                .meaningEn(null)
                 .partOfSpeech(partOfSpeech.isBlank() ? "noun" : partOfSpeech)
                 .jlptLevel(jlptLevel != null ? jlptLevel : "N5")
                 .exampleSentences(examples)
@@ -202,138 +347,11 @@ public final class MnNTableParser {
                 .build();
     }
 
-    // ── Country-language table support ───────────────────────────────────────
-
-    /**
-     * Detect whether the row list is a country-language reference table rather than
-     * a standard vocabulary table.
-     *
-     * Heuristic: ≥50 % of rows have ≥4 columns where col 0 is CJK/kana, col 2 is
-     * blank, and col 3 is CJK/kana (the language name).
-     */
-    private static boolean isCountryLanguageTable(List<String> rows) {
-        int total = 0;
-        int matched = 0;
-        for (String row : rows) {
-            if (row == null || row.isBlank()) continue;
-            String[] cells = row.split("\t", -1);
-            total++;
-            if (cells.length < 4) continue;
-            int offset = DIGITS_ONLY.matcher(cells[0].trim()).matches() ? 1 : 0;
-            if (cells.length <= offset + 3) continue;
-            String col0 = cells[offset].trim();
-            String col2 = cells[offset + 2].trim();
-            String col3 = cells[offset + 3].trim();
-            if (CJK_OR_KANA.matcher(col0).find()
-                    && col2.isBlank()
-                    && CJK_OR_KANA.matcher(col3).find()
-                    && col3.length() < 60) {
-                matched++;
-            }
-        }
-        return total >= 3 && (matched * 1.0 / total) >= 0.5;
-    }
-
-    /**
-     * Parse a country-language reference table.
-     * Each row yields up to 3 vocabulary items:
-     * (1) country name from col 0,
-     * (2) nationality person form from col 1 (if non-empty),
-     * (3) language name from col 3.
-     */
-    private static List<ExtractionResult.ExtractedVocabulary> parseCountryLanguageTable(
-            List<String> rows, String jlptLevel) {
-        List<ExtractionResult.ExtractedVocabulary> result = new ArrayList<>();
-        for (String row : rows) {
-            if (row == null || row.isBlank()) continue;
-            String[] cells = row.split("\t", -1);
-            if (cells.length < 2) continue;
-            int offset = DIGITS_ONLY.matcher(cells[0].trim()).matches() ? 1 : 0;
-
-            // Col 0: country name (e.g. アメリカ, かんこく, 中国)
-            if (offset < cells.length) {
-                ExtractionResult.ExtractedVocabulary country =
-                        parseSingleVocabCell(cells[offset], jlptLevel);
-                if (country != null) result.add(country);
-            }
-
-            // Col 1: nationality person form (e.g. かんこくじん, アメリカ人) — may be empty
-            int col1 = offset + 1;
-            if (col1 < cells.length && !cells[col1].trim().isBlank()) {
-                ExtractionResult.ExtractedVocabulary person =
-                        parseSingleVocabCell(cells[col1], jlptLevel);
-                if (person != null) result.add(person);
-            }
-
-            // Col 3: language name (e.g. 英語, かんこくご, 中国語)
-            int col3 = offset + 3;
-            if (col3 < cells.length && !cells[col3].trim().isBlank()) {
-                ExtractionResult.ExtractedVocabulary lang =
-                        parseSingleVocabCell(cells[col3], jlptLevel);
-                if (lang != null) result.add(lang);
-            }
-        }
-        return result;
-    }
-
-    /**
-     * Parse a single vocabulary cell (country, language, or nationality form).
-     *
-     * Handles:
-     * <ul>
-     *   <li>Full-width inline meaning: {@code アメリカ（Mỹ）} via {@link FuriganaNormalizer#extractInlineMeaning}</li>
-     *   <li>Half-width inline meaning: {@code アメリカ ( Mý )} — OCR output style</li>
-     *   <li>Pure-kana entries without meanings: {@code かんこく} — tagged AI_INFERRED</li>
-     *   <li>Furigana annotations: {@code 英語[えいご]} → reading extracted</li>
-     * </ul>
-     *
-     * @return {@code null} if the cell does not contain a valid CJK/kana word
-     */
-    private static ExtractionResult.ExtractedVocabulary parseSingleVocabCell(
-            String cellText, String jlptLevel) {
-        if (cellText == null || cellText.isBlank()) return null;
-        String raw = cellText.trim();
-        if (!CJK_OR_KANA.matcher(raw).find()) return null;
-
-        // Extract inline meaning (handles both （）full-width and ( ) half-width)
-        FuriganaNormalizer.InlineMeaning inline = FuriganaNormalizer.extractInlineMeaning(raw);
-        // Collapse internal spaces from compound words like "中国 語" → "中国語"
-        String japanese = (inline.found() ? inline.word() : raw).replaceAll("\\s+", "");
-        String meaningVi = inline.found() ? inline.meaning() : null;
-
-        if (japanese.isBlank() || !CJK_OR_KANA.matcher(japanese).find()) return null;
-
-        // Extract reading if furigana was already normalized: 英語[えいご] → reading=えいご
-        String reading = "";
-        int rb = japanese.indexOf('[');
-        int re = rb >= 0 ? japanese.indexOf(']', rb) : -1;
-        if (rb >= 0 && re > rb) {
-            reading = japanese.substring(rb + 1, re);
-            japanese = japanese.substring(0, rb);
-        } else if (PURE_KANA.matcher(japanese).matches()) {
-            reading = japanese; // the word itself is kana (e.g. かんこく)
-        }
-
-        return ExtractionResult.ExtractedVocabulary.builder()
-                .japaneseText(japanese)
-                .kanjiWriting(japanese)
-                .reading(reading)
-                .romaji("")
-                .meaningVi(meaningVi)
-                .meaningEn(null)
-                .partOfSpeech("noun")
-                .jlptLevel(jlptLevel != null ? jlptLevel : "N5")
-                .exampleSentences(new ArrayList<>())
-                .isKeyWord(false)
-                .meaningSource(meaningVi != null ? "SOURCE_INLINE" : "AI_INFERRED")
-                .build();
-    }
-
     // ── POS tag normalisation ────────────────────────────────────────────────
 
     /**
-     * Map Vietnamese POS abbreviations (as printed in MnN Vietnamese edition)
-     * to English POS strings expected by the vocabulary entity.
+     * Map Vietnamese POS abbreviations to English POS strings expected by the
+     * vocabulary entity. Works for any Vietnamese-edition Japanese textbook.
      */
     private static String normalizePOS(String raw) {
         String lower = raw.toLowerCase();

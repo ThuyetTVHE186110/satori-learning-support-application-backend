@@ -10,7 +10,6 @@ import com.fu.conversation.entity.ConversationTopic;
 import com.fu.conversation.repository.ConversationMissionRepository;
 import com.fu.conversation.repository.ConversationTopicRepository;
 import com.fu.course.entity.Course;
-import com.fu.pronunciation.config.JapanesePronunciationProperties;
 import com.fu.pronunciation.dto.AssessmentRequest;
 import com.fu.pronunciation.dto.AssessmentResult;
 import com.fu.pronunciation.provider.PronunciationAssessmentProvider;
@@ -71,7 +70,6 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     private final RoleplayMissionMapper missionMapper;
 
     private final RoleplayProperties properties;
-    private final JapanesePronunciationProperties japanesePronunciationProperties;
     private final ObjectMapper objectMapper;
     private final Executor roleplayTaskExecutor;
 
@@ -90,7 +88,6 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             RoleplayMessageMapper messageMapper,
             RoleplayMissionMapper missionMapper,
             RoleplayProperties properties,
-            JapanesePronunciationProperties japanesePronunciationProperties,
             ObjectMapper objectMapper,
             @Qualifier("roleplayTaskExecutor") Executor roleplayTaskExecutor) {
         this.sessionRepository = sessionRepository;
@@ -107,7 +104,6 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         this.messageMapper = messageMapper;
         this.missionMapper = missionMapper;
         this.properties = properties;
-        this.japanesePronunciationProperties = japanesePronunciationProperties;
         this.objectMapper = objectMapper;
         this.roleplayTaskExecutor = roleplayTaskExecutor;
     }
@@ -459,8 +455,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             if (avgPitchAccent != null && avgMoraTiming != null) {
                 BigDecimal jpAvg = avgPitchAccent.add(avgMoraTiming)
                         .divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
-                pronunciationScore = avgOverall.multiply(BigDecimal.valueOf(japanesePronunciationProperties.getSpeechSuperWeight()))
-                        .add(jpAvg.multiply(BigDecimal.valueOf(japanesePronunciationProperties.getJapaneseAssessmentWeight())))
+                pronunciationScore = avgOverall.multiply(BigDecimal.valueOf(0.6))
+                        .add(jpAvg.multiply(BigDecimal.valueOf(0.4)))
                         .setScale(2, RoundingMode.HALF_UP);
             } else {
                 pronunciationScore = avgOverall;
