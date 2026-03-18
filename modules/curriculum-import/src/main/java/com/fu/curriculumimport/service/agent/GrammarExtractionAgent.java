@@ -3,9 +3,9 @@ package com.fu.curriculumimport.service.agent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.curriculumimport.service.agent.prompt.GrammarPromptBuilder;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
-import com.fu.curriculumimport.service.ingestion.MnNSectionSplitter;
 import com.fu.curriculumimport.service.ingestion.OcrTextPreprocessor;
 import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +31,9 @@ import java.util.Map;
  * - Example sentences with translations
  * - Common mistakes and corrections
  *
+ * <p>Prompt strings live in {@link GrammarPromptBuilder} — this class handles
+ * only LLM-call mechanics and response parsing.
+ *
  * Reference: Agentic RAG specialized worker pattern
  */
 @Service
@@ -45,82 +48,7 @@ public class GrammarExtractionAgent {
         this.objectMapper = objectMapper;
     }
 
-    private static final String SYSTEM_PROMPT = """
-            You are an expert Japanese grammar analyzer for language learning.
-            Extract ALL grammar points from the given textbook content with detailed explanations.
-            
-            You MUST respond ONLY with valid JSON. No explanations, no markdown code fences.
-            
-            Quality requirements:
-            - Each grammar pattern must have clear structure notation
-            - Explanations must be in BOTH Vietnamese and English
-            - Provide at least one example sentence per pattern
-            - Identify the correct grammar category
-            - Note common mistakes learners make
-            - Flag whether each pattern is a key grammar point
-            """;
-
-    private static final String EXTRACTION_PROMPT = """
-            Extract ALL grammar points from this Japanese textbook content (pages %d-%d).
-            Target JLPT level: %s
-            
-            Content:
-            ---
-            %s
-            ---
-            %s
-            
-            Return JSON:
-            {
-              "grammarPoints": [
-                {
-                  "pattern": "～ている",
-                  "patternReading": "～ている",
-                  "meaningVi": "Đang làm gì / Trạng thái",
-                  "meaningEn": "Ongoing action / Resulting state",
-                  "shortExplanation": "Expresses continuous action or resulting state",
-                  "detailedExplanation": "V-て + いる indicates either an ongoing action (progressive) or a resulting state. Context determines which meaning applies.",
-                  "jlptLevel": "%s",
-                  "category": "VERB_FORM",
-                  "exampleSentences": [
-                    {
-                      "jp": "今、本を読んでいます。",
-                      "vi": "Bây giờ tôi đang đọc sách.",
-                      "en": "I am reading a book now."
-                    }
-                  ],
-                  "commonMistakes": [
-                    {
-                      "mistake": "食べています (for habitual action)",
-                      "correction": "食べます (simple present for habits)",
-                      "explanation": "～ている is for ongoing actions, not habitual ones in formal speech"
-                    }
-                  ],
-                  "isKeyPoint": true
-                }
-              ],
-              "confidence": 0.0-1.0
-            }
-            
-            Grammar categories: VERB_FORM, PARTICLE, ADJECTIVE, CONJUGATION, 
-            SENTENCE_PATTERN, HONORIFIC, CONDITIONAL, PASSIVE, CAUSATIVE, OTHER
-            """;
-
-    private static final String RAG_CONTEXT_TEMPLATE = """
-
-            EXISTING GRAMMAR POINTS (avoid duplicating these):
-            %s
-            """;
-
-    private static final String FULL_PAGE_CONTEXT_TEMPLATE = """
-
-            ─── FULL LESSON PAGE CONTEXT (adjacent sections on the same page) ───────────
-            %s
-            ─────────────────────────────────────────────────────────────────────────────
-            Tip: Use this to find example sentences or explanations that clarify the
-            grammar patterns in the CONTENT block above. Do NOT re-extract vocabulary
-            from this context block — only grammar points.
-            """;
+    // ── Public API ────────────────────────────────────────────────────────────
 
     /**
      * Extract grammar points from a chunk with optional RAG context.
@@ -128,7 +56,6 @@ public class GrammarExtractionAgent {
     public ExtractionResult extractGrammar(DocumentChunk chunk, String jlptLevel, RagContext ragContext) {
         long startTime = System.currentTimeMillis();
 
-        // Skip trivial / noise-only chunks
         if (OcrTextPreprocessor.isTrivial(chunk.getContent())) {
             log.info("Chunk {}: trivial content — skipping grammar LLM extraction",
                     chunk.getChunkIndex());
@@ -136,27 +63,17 @@ public class GrammarExtractionAgent {
         }
 
         try {
-            String ragSection = formatRagContext(ragContext);
-            String sectionHint = buildSectionHint(chunk);
-            String fullPageSection = buildFullPageContextSection(chunk);
-
-            // Cap content to token budget before sending to model
-            String safeContent = OcrTextPreprocessor.truncateToTokenBudget(
-                    chunk.getContent(), OcrTextPreprocessor.MAX_CONTENT_TOKENS);
-
-            String userPrompt = String.format(EXTRACTION_PROMPT,
-                    chunk.getPageStart(), chunk.getPageEnd(),
-                    jlptLevel, safeContent, sectionHint + fullPageSection + ragSection, jlptLevel);
+            String ragSection = GrammarPromptBuilder.formatRagContext(ragContext);
+            String userPrompt = GrammarPromptBuilder.buildExtractionPrompt(chunk, jlptLevel, ragSection, "");
 
             String response = chatClient.prompt()
-                    .system(SYSTEM_PROMPT)
+                    .system(GrammarPromptBuilder.SYSTEM_PROMPT)
                     .user(userPrompt)
                     .options(OpenAiChatOptions.builder().maxTokens(4096).build())
                     .call()
                     .content();
 
-            long processingTime = System.currentTimeMillis() - startTime;
-            return parseResponse(response, chunk.getChunkIndex(), processingTime);
+            return parseResponse(response, chunk.getChunkIndex(), System.currentTimeMillis() - startTime);
 
         } catch (Exception e) {
             log.error("Grammar extraction failed for chunk {}: {}", chunk.getChunkIndex(), e.getMessage());
@@ -172,28 +89,20 @@ public class GrammarExtractionAgent {
         long startTime = System.currentTimeMillis();
 
         try {
-            String ragSection = formatRagContext(ragContext);
-            String sectionHint = buildSectionHint(chunk);
-            String fullPageSection = buildFullPageContextSection(chunk);
+            String ragSection = GrammarPromptBuilder.formatRagContext(ragContext);
             String feedbackSection = "\n\nPREVIOUS EXTRACTION ISSUES (please fix):\n" + validationFeedback;
-
-            String safeContentFb = OcrTextPreprocessor.truncateToTokenBudget(
-                    chunk.getContent(), OcrTextPreprocessor.MAX_CONTENT_TOKENS);
-
-            String userPrompt = String.format(EXTRACTION_PROMPT,
-                    chunk.getPageStart(), chunk.getPageEnd(),
-                    jlptLevel, safeContentFb,
-                    sectionHint + fullPageSection + ragSection + feedbackSection, jlptLevel);
+            String userPrompt = GrammarPromptBuilder.buildExtractionPrompt(
+                    chunk, jlptLevel, ragSection, feedbackSection);
 
             String response = chatClient.prompt()
-                    .system(SYSTEM_PROMPT + "\nIMPORTANT: Fix the issues noted in the feedback.")
+                    .system(GrammarPromptBuilder.SYSTEM_PROMPT
+                            + GrammarPromptBuilder.REEXTRACTION_SYSTEM_SUFFIX)
                     .user(userPrompt)
                     .options(OpenAiChatOptions.builder().maxTokens(4096).build())
                     .call()
                     .content();
 
-            long processingTime = System.currentTimeMillis() - startTime;
-            return parseResponse(response, chunk.getChunkIndex(), processingTime);
+            return parseResponse(response, chunk.getChunkIndex(), System.currentTimeMillis() - startTime);
 
         } catch (Exception e) {
             log.error("Grammar re-extraction failed for chunk {}: {}", chunk.getChunkIndex(), e.getMessage());
@@ -201,45 +110,7 @@ public class GrammarExtractionAgent {
         }
     }
 
-    /**
-     * Inject the full lesson page context when this chunk is a section sub-chunk.
-     * Allows the grammar agent to see example sentences from adjacent sections.
-     */
-    private String buildFullPageContextSection(DocumentChunk chunk) {
-        String fullCtx = chunk.getFullPageContext();
-        String content  = chunk.getContent();
-        if (fullCtx == null || fullCtx.isBlank() || fullCtx.equals(content)) return "";
-        String trimmed = OcrTextPreprocessor.truncateToTokenBudget(
-                fullCtx, OcrTextPreprocessor.MAX_PAGE_CONTEXT_TOKENS);
-        return String.format(FULL_PAGE_CONTEXT_TEMPLATE, trimmed);
-    }
-
-    /**
-     * Build a structural section hint from the chunk's MnN section type.
-     * Guides the LLM on what role this section plays in the lesson.
-     */
-    private String buildSectionHint(DocumentChunk chunk) {
-        String sectionType = chunk.getSectionType();
-        if (sectionType == null || MnNSectionSplitter.UNKNOWN.equals(sectionType)) return "";
-        return switch (sectionType) {
-            case MnNSectionSplitter.GRAMMAR_PATTERN ->
-                    "\n⚠ SECTION TYPE: SENTENCE PATTERNS (文型 / Mẫu câu)\n" +
-                    "This section lists the core grammar patterns introduced in this lesson. " +
-                    "Each numbered item (e.g. '1. ～は ～です') is a distinct grammar pattern. " +
-                    "Extract ALL of them with full structure, meaning, and examples.\n";
-            case MnNSectionSplitter.GRAMMAR_EXPLANATION ->
-                    "\n⚠ SECTION TYPE: GRAMMAR EXPLANATION (文法 / Ngữ pháp)\n" +
-                    "This section provides detailed notes explaining how each grammar pattern works, " +
-                    "including usage rules, nuances, and common mistakes. " +
-                    "Extract each distinct grammar point with its full explanation.\n";
-            case MnNSectionSplitter.EXAMPLE ->
-                    "\n⚠ SECTION TYPE: EXAMPLE SENTENCES (例文 / Ví dụ)\n" +
-                    "This section demonstrates grammar patterns through example sentences. " +
-                    "Identify which grammar pattern each example illustrates and include it " +
-                    "as an exampleSentence for that grammar point.\n";
-            default -> "";
-        };
-    }
+    // ── Response parsing ──────────────────────────────────────────────────────
 
     private ExtractionResult parseResponse(String jsonResponse, int chunkIndex, long processingTimeMs) {
         try {
@@ -267,18 +138,7 @@ public class GrammarExtractionAgent {
         }
     }
 
-    private String formatRagContext(RagContext ragContext) {
-        if (ragContext == null || !ragContext.hasContext()) return "";
-
-        StringBuilder sb = new StringBuilder();
-        for (RagContext.SimilarItem item : ragContext.getSimilarItems()) {
-            if ("GRAMMAR".equals(item.getContentType())) {
-                sb.append("- ").append(item.getTextContent()).append("\n");
-            }
-        }
-
-        return sb.isEmpty() ? "" : String.format(RAG_CONTEXT_TEMPLATE, sb);
-    }
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private <T> T parseField(Map<String, Object> parsed, String field, TypeReference<T> type) {
         try {
@@ -301,5 +161,4 @@ public class GrammarExtractionAgent {
                 .grammarPoints(Collections.emptyList())
                 .build();
     }
-
 }

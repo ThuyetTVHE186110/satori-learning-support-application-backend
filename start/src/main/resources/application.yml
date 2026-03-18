@@ -178,18 +178,9 @@ management:
 curriculum-import:
     # ===== OCR Subsystem =====
     ocr:
-        # OCR provider: paddle | google_vision | auto
-        #   paddle        — self-hosted PaddleOCR sidecar (free, no egress, default)
-        #   google_vision — Google Cloud Vision DOCUMENT_TEXT_DETECTION
-        #                   (better accuracy for MnN scanned books + table detection)
-        #                   Requires GOOGLE_APPLICATION_CREDENTIALS env var.
-        #   auto          — Google Vision with automatic fallback to PaddleOCR
-        provider: ${OCR_PROVIDER:auto}
-        # URL of the PaddleOCR FastAPI container
-        service-url: ${OCR_SERVICE_URL:http://localhost:8090}
-        # HTTP timeout in seconds per page request
-        timeout-seconds: ${OCR_TIMEOUT_SECONDS:60}
-        # Set to false to disable OCR (scanned PDFs will be rejected)
+        # Google Cloud Vision DOCUMENT_TEXT_DETECTION for scanned PDF import.
+        # Requires GOOGLE_APPLICATION_CREDENTIALS env var or credentials-file below.
+        # Set to false to disable OCR (scanned PDFs will be rejected).
         enabled: ${OCR_ENABLED:true}
         # DPI for rendering PDF pages to images.
         # 300 DPI = recommended for MnN scanned pages (furigana strokes preserved,
@@ -267,12 +258,6 @@ pronunciation:
         secret-key: ${SPEECHSUPER_SECRET_KEY:}
         base-url: ${SPEECHSUPER_BASE_URL:https://api.speechsuper.com}
         timeout: ${SPEECHSUPER_TIMEOUT:30000}
-    japanese:
-        enabled: ${JP_PRONUNCIATION_ENABLED:true}
-        service-url: ${JP_PRONUNCIATION_SERVICE_URL:http://localhost:8091}
-        timeout: ${JP_PRONUNCIATION_TIMEOUT:30000}
-        speech-super-weight: ${JP_PRONUNCIATION_SPEECH_SUPER_WEIGHT:0.6}
-        japanese-assessment-weight: ${JP_PRONUNCIATION_JAPANESE_WEIGHT:0.4}
 
 # ==================== Roleplay Module Configuration ====================
 roleplay:

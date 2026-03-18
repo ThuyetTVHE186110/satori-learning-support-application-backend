@@ -2,6 +2,7 @@ package com.fu.conversation.ai;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.common.ai.PromptUtils;
 import com.fu.conversation.dto.response.GeneratedThemeSuggestionResponse;
 import com.fu.conversation.dto.response.GeneratedTopicSuggestionResponse;
 import com.fu.conversation.entity.ConversationTheme;
@@ -296,11 +297,6 @@ public class ConversationGenerationService {
     }
 
     private String cleanJson(String raw) {
-        if (raw == null) return "[]";
-        String cleaned = raw.trim();
-        if (cleaned.startsWith("```json")) cleaned = cleaned.substring(7);
-        else if (cleaned.startsWith("```")) cleaned = cleaned.substring(3);
-        if (cleaned.endsWith("```")) cleaned = cleaned.substring(0, cleaned.length() - 3);
-        return cleaned.trim();
+        return PromptUtils.cleanMarkdownFences(raw, "[]");
     }
 }
