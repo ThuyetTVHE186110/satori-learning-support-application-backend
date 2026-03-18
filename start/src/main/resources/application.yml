@@ -1,33 +1,269 @@
 server:
-    port: 8080
+    port: ${APP_PORT:8080}
 
 spring:
     application:
-        name: korean-learning-platform
+        name: satori-learning-platform
 
+    profiles:
+        active: ${SPRING_PROFILES_ACTIVE:local}
+
+    # ==================== PostgreSQL Configuration ====================
     datasource:
-        url: jdbc:mysql://localhost:3306/korean_learning?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-        username: root
-        password: 03102004AaBbCc!@#
-        driver-class-name: com.mysql.cj.jdbc.Driver
+        url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:satori_learning}?stringtype=unspecified
+        username: ${POSTGRES_USER:satori_user}
+        password: ${POSTGRES_PASSWORD:SatoriSecure2026!}
+        driver-class-name: org.postgresql.Driver
+        hikari:
+            maximum-pool-size: 10
+            minimum-idle: 5
+            connection-timeout: 30000
+            idle-timeout: 600000
+            max-lifetime: 1800000
 
     jpa:
         hibernate:
-            ddl-auto: create
-        show-sql: true
+            ddl-auto: validate
+        show-sql: ${SHOW_SQL:false}
         properties:
             hibernate:
                 format_sql: true
-                dialect: org.hibernate.dialect.MySQLDialect
+                dialect: org.hibernate.dialect.PostgreSQLDialect
+                default_schema: user_management
+        open-in-view: false
 
+    # ==================== Redis Configuration ====================
+    cache:
+        type: redis
+        redis:
+            time-to-live: 3600000 # 1 hour
+    data:
+        redis:
+            host: ${REDIS_HOST:localhost}
+            port: ${REDIS_PORT:6379}
+            password: ${REDIS_PASSWORD:SatoriRedis2026!}
+            timeout: 5000
+            lettuce:
+                pool:
+                    max-active: 8
+                    max-idle: 8
+                    min-idle: 0
+
+    # ==================== Jackson Configuration ====================
+    jackson:
+        deserialization:
+            fail-on-unknown-properties: false
+
+    # ==================== AI Configuration ====================
+    ai:
+        openai:
+            api-key: ${OPENAI_API_KEY:}
+            chat:
+                options:
+                    model: gpt-4o-mini
+                    temperature: 0.7
+                    max-tokens: 2000
+            embedding:
+                options:
+                    model: text-embedding-3-small
+
+    # ==================== File Upload Configuration ====================
+    servlet:
+        multipart:
+            enabled: true
+            max-file-size: 100MB # Increased: PPTX with images can exceed 50 MB
+            max-request-size: 110MB
+
+# ==================== Japanese Learning Configuration ====================
+learning:
+    jlpt:
+        levels:
+            - N5
+            - N4
+            - N3
+            - N2
+            - N1
+
+    session:
+        max-messages-per-session: 100
+        session-timeout-minutes: 60
+
+    personalization:
+        enabled: true
+        recommendation-count: 10
+        similarity-threshold: 0.7
+
+# ==================== Application Security Configuration ====================
+app:
+    security:
+        jwt:
+            # Access token secret (at least 256 bits / 32 characters)
+            access-token-secret: ${JWT_ACCESS_SECRET:SatoriAccessTokenSecret2026!VeryLongSecretKeyForJWT256Bits}
+            # Refresh token secret (different from access token)
+            refresh-token-secret: ${JWT_REFRESH_SECRET:SatoriRefreshTokenSecret2026!AnotherLongSecretKeyForJWT256}
+            # Access token expiration: 30 minutes (1800000 ms)
+            access-token-expiration-ms: ${JWT_ACCESS_EXPIRATION:1800000}
+            # Refresh token expiration: 7 days (604800000 ms)
+            refresh-token-expiration-ms: ${JWT_REFRESH_EXPIRATION:604800000}
+        # Max failed login attempts before account lock
+        max-failed-attempts: ${MAX_FAILED_ATTEMPTS:5}
+        # Account lock duration in minutes
+        lock-duration-minutes: ${LOCK_DURATION_MINUTES:30}
+        # OTP expiration time in minutes
+        otp-expiration-minutes: ${OTP_EXPIRATION_MINUTES:10}
+        # Activation token expiration time in hours
+        activation-token-expiration-hours: ${ACTIVATION_TOKEN_EXPIRATION_HOURS:24}
+
+    # Google OAuth / Firebase Configuration
+    google:
+        firebase:
+            enabled: ${FIREBASE_ENABLED:false}
+            credentials-file: ${FIREBASE_CREDENTIALS_FILE:}
+            project-id: ${FIREBASE_PROJECT_ID:}
+
+    # Email Configuration
+    email:
+        enabled: ${EMAIL_ENABLED:true}
+        from: ${EMAIL_FROM:noreply@satori-learning.com}
+        from-name: ${EMAIL_FROM_NAME:Satori Learning}
+        base-url: ${APP_BASE_URL:http://localhost:3000}
+
+    # Cloudinary Configuration
+    cloudinary:
+        enabled: ${CLOUDINARY_ENABLED:true}
+        cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+        api-key: ${CLOUDINARY_API_KEY:}
+        api-secret: ${CLOUDINARY_API_SECRET:}
+
+# ==================== Spring Mail Configuration ====================
+spring.mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:nihongosatori@gmail.com}
+    password: ${MAIL_PASSWORD:wzsn ucsx jnsh mptd}
+    properties:
+        mail:
+            smtp:
+                auth: true
+                starttls:
+                    enable: true
+                    required: true
+                connectiontimeout: 5000
+                timeout: 5000
+                writetimeout: 5000
+
+# ==================== Logging Configuration ====================
 logging:
     level:
         root: INFO
         com.fu: DEBUG
-        org.springframework.security: DEBUG
+        org.springframework.data.redis: DEBUG
+        # Suppress Hibernate SQL noise (scheduler polls, retry queries, etc.)
+        org.hibernate.SQL: WARN
+        org.hibernate.orm.jdbc.bind: WARN
 
+# ==================== Actuator Configuration ====================
 management:
     endpoints:
         web:
             exposure:
-                include: health,info,metrics
+                include: health,info,metrics,prometheus
+    endpoint:
+        health:
+            show-details: when-authorized
+            probes:
+                enabled: true
+
+# ==================== Curriculum Import - Agentic RAG Configuration ====================
+curriculum-import:
+    # ===== OCR Subsystem =====
+    ocr:
+        # Google Cloud Vision DOCUMENT_TEXT_DETECTION for scanned PDF import.
+        # Requires GOOGLE_APPLICATION_CREDENTIALS env var or credentials-file below.
+        # Set to false to disable OCR (scanned PDFs will be rejected).
+        enabled: ${OCR_ENABLED:true}
+        # DPI for rendering PDF pages to images.
+        # 300 DPI = recommended for MnN scanned pages (furigana strokes preserved,
+        #           ~3 MB/page; OCR service downscales to 1800px after preprocessing).
+        # 150 DPI = fallback for memory-constrained environments.
+        render-dpi: ${OCR_RENDER_DPI:300}
+        # Chars-per-page below this → treated as scanned PDF (route to OCR)
+        scanned-page-threshold: ${OCR_SCANNED_PAGE_THRESHOLD:100.0}
+        # Minimum OCR confidence to accept (below = logged as low quality)
+        min-confidence: ${OCR_MIN_CONFIDENCE:0.5}
+        # Path to Google Cloud service-account JSON key (for google_vision / auto provider).
+        # If blank, uses GOOGLE_APPLICATION_CREDENTIALS env var (ADC).
+        # Example: environment/secrets/satori-489709-ce922a405186.json
+        credentials-file: ${GOOGLE_APPLICATION_CREDENTIALS:environment/secrets/satori-489709-ce922a405186.json}
+
+    agentic-rag:
+        # Minimum confidence for extraction (Corrective RAG threshold)
+        confidence-threshold: ${RAG_CONFIDENCE_THRESHOLD:0.6}
+        # Max re-extraction attempts per chunk
+        max-re-extractions: ${RAG_MAX_RE_EXTRACTIONS:2}
+        # Number of similar items for RAG context
+        rag-top-k: ${RAG_TOP_K:5}
+        # Minimum cosine similarity for RAG retrieval
+        rag-similarity-threshold: ${RAG_SIMILARITY_THRESHOLD:0.7}
+        # Enable parallel chunk processing
+        parallel-processing: ${RAG_PARALLEL_PROCESSING:true}
+        # Max chunks per parallel batch (keep low on machines with <16 GB RAM)
+        parallel-batch-size: ${RAG_PARALLEL_BATCH_SIZE:2}
+        # Thread pool for import jobs (core / max / queue)
+        thread-pool-core-size: ${RAG_THREAD_POOL_CORE:2}
+        thread-pool-max-size: ${RAG_THREAD_POOL_MAX:4}
+        thread-pool-queue-capacity: ${RAG_THREAD_POOL_QUEUE:50}
+        # Enable embedding generation
+        embedding-enabled: ${RAG_EMBEDDING_ENABLED:true}
+        # Embedding dimension (text-embedding-3-small = 1536)
+        embedding-dimension: 1536
+        # Enable content validation step
+        validation-enabled: ${RAG_VALIDATION_ENABLED:true}
+        # Enable RAG context retrieval before extraction
+        rag-retrieval-enabled: ${RAG_RETRIEVAL_ENABLED:true}
+        # Retry scheduler delay (ms)
+        retry-scheduler-delay-ms: ${RAG_RETRY_SCHEDULER_DELAY:30000}
+
+        # ===== Self-Reflection (Self-RAG, Asai et al. 2023) =====
+        # Enable LLM self-critique with reflection tokens
+        self-reflection-enabled: ${RAG_SELF_REFLECTION_ENABLED:true}
+        # Max source chars for reflection prompt (context window limit)
+        self-reflection-max-source-chars: ${RAG_SELF_REFLECTION_MAX_SOURCE_CHARS:4000}
+
+        # ===== Source Grounding Verification (CRAG anti-hallucination) =====
+        # Enable grounding cross-reference check
+        grounding-enabled: ${RAG_GROUNDING_ENABLED:true}
+        # Min grounding confidence (below = flagged as hallucinated)
+        grounding-threshold: ${RAG_GROUNDING_THRESHOLD:0.4}
+
+        # ===== Combined Scoring Weights (must sum to 1.0) =====
+        rule-based-weight: ${RAG_RULE_BASED_WEIGHT:0.30}
+        reflection-weight: ${RAG_REFLECTION_WEIGHT:0.35}
+        grounding-weight: ${RAG_GROUNDING_WEIGHT:0.35}
+        # Combined score below this triggers re-extraction
+        combined-re-extraction-threshold: ${RAG_COMBINED_RE_EXTRACTION_THRESHOLD:0.5}
+
+# ==================== Pronunciation Assessment ====================
+# Provider priority: Azure > SpeechSuper (auto-selected by CompositePronunciationProvider)
+pronunciation:
+    azure:
+        enabled: ${AZURE_SPEECH_ENABLED:false}
+        subscription-key: ${AZURE_SPEECH_KEY:}
+        region: ${AZURE_SPEECH_REGION:southeastasia}
+        language: ${AZURE_SPEECH_LANGUAGE:ja-JP}
+        timeout: ${AZURE_SPEECH_TIMEOUT:30000}
+        granularity: PHONEME # FULL_TEXT | WORD | PHONEME
+    speechsuper:
+        app-key: ${SPEECHSUPER_APP_KEY:}
+        secret-key: ${SPEECHSUPER_SECRET_KEY:}
+        base-url: ${SPEECHSUPER_BASE_URL:https://api.speechsuper.com}
+        timeout: ${SPEECHSUPER_TIMEOUT:30000}
+
+# ==================== Roleplay Module Configuration ====================
+roleplay:
+    max-messages: ${ROLEPLAY_MAX_MESSAGES:50}
+    max-active-sessions: ${ROLEPLAY_MAX_ACTIVE_SESSIONS:3}
+    scoring:
+        mission-weight: ${ROLEPLAY_MISSION_WEIGHT:0.35}
+        pronunciation-weight: ${ROLEPLAY_PRONUNCIATION_WEIGHT:0.30}
+        language-weight: ${ROLEPLAY_LANGUAGE_WEIGHT:0.35}

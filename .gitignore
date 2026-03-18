@@ -64,3 +64,8 @@ release.properties
 **/generated/**
 **/generated-sources/**
 **/generated-test-sources/**
+/docs
+.claude/**
+.github/**
+*.json
+ environment/secrets/

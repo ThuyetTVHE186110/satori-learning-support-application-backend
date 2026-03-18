@@ -1,0 +1,36 @@
+# =============================================================================
+# Test Configuration for H2 In-Memory Database
+# =============================================================================
+# This configuration is used for Repository Integration Tests (@DataJpaTest)
+# H2 database provides fast, isolated testing without external dependencies
+# =============================================================================
+
+spring:
+    datasource:
+        url: jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE
+        driver-class-name: org.h2.Driver
+        username: sa
+        password:
+
+    jpa:
+        hibernate:
+            ddl-auto: create-drop
+        show-sql: true
+        properties:
+            hibernate:
+                format_sql: true
+                dialect: org.hibernate.dialect.H2Dialect
+        # Disable schema for H2 tests
+        open-in-view: false
+
+    # Disable Redis for unit tests
+    data:
+        redis:
+            repositories:
+                enabled: false
+
+    cache:
+        type: none
+
+# Disable security for repository tests
+# Security is tested separately in controller tests
