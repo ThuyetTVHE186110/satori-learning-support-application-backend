@@ -58,7 +58,33 @@ public class ConversationTopicServiceImpl implements ConversationTopicService {
         ConversationTopic topic = topicMapper.toEntity(request);
         topic.setCreatedBy(managerId);
         topic.setUpdatedBy(managerId);
-        return buildTopicResponse(topicRepository.save(topic));
+        ConversationTopic saved = topicRepository.save(topic);
+
+        // Persist inline missions atomically (from AI-generated suggestions)
+        if (request.getMissions() != null && !request.getMissions().isEmpty()) {
+            List<ConversationMission> missions = request.getMissions().stream()
+                    .map(m -> ConversationMission.builder()
+                            .topicId(saved.getId())
+                            .title(m.getTitle())
+                            .titleJapanese(m.getTitleJapanese())
+                            .titleVi(m.getTitleVi())
+                            .description(m.getDescription())
+                            .descriptionVi(m.getDescriptionVi())
+                            .missionType(m.getMissionType() != null
+                                    ? m.getMissionType() : ConversationMission.MissionType.CUSTOM)
+                            .successCriteria(m.getSuccessCriteria() != null ? m.getSuccessCriteria() : "{}")
+                            .requiredVocabulary(m.getRequiredVocabulary() != null ? m.getRequiredVocabulary() : "[]")
+                            .requiredGrammar(m.getRequiredGrammar() != null ? m.getRequiredGrammar() : "[]")
+                            .orderIndex(m.getOrderIndex() != null ? m.getOrderIndex() : 0)
+                            .createdBy(managerId)
+                            .updatedBy(managerId)
+                            .build())
+                    .collect(Collectors.toList());
+            missionRepository.saveAll(missions);
+            log.info("Created {} missions for topic {}", missions.size(), saved.getId());
+        }
+
+        return buildTopicResponse(saved);
     }
 
     @Override

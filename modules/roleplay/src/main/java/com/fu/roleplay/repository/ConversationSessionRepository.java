@@ -22,8 +22,6 @@ public interface ConversationSessionRepository extends JpaRepository<Conversatio
     Page<ConversationSession> findByUserIdAndSessionTypeOrderByCreatedAtDesc(
             @Param("userId") UUID userId, @Param("sessionType") String sessionType, Pageable pageable);
 
-    Page<ConversationSession> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
-
     Optional<ConversationSession> findByIdAndUserId(UUID id, UUID userId);
 
     /**
