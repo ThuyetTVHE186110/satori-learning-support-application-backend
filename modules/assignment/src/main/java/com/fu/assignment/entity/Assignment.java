@@ -89,6 +89,7 @@ public class Assignment extends SoftDeletableEntity {
     @Enumerated(EnumType.STRING)
     @JdbcType(PostgreSQLEnumJdbcType.class)
     @Column(name = "status")
+    @Builder.Default
     private AssignmentStatus status = AssignmentStatus.DRAFT;
 
     /**
