@@ -385,15 +385,16 @@ class AssignmentServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should throw when assignment is not DRAFT")
+        @DisplayName("Should throw when assignment is not DRAFT and has submission")
         void shouldThrowWhenNotDraft() {
             testQuizAssignment.setStatus(AssignmentStatus.PUBLISHED);
+            testQuizAssignment.setHasSubmissions(true);
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
             stubTeacherAccess();
 
             assertThatThrownBy(() -> assignmentService.deleteAssignment(assignmentId, teacherId))
                     .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("DRAFT");
+                    .hasMessageContaining("nháp");
 
             verify(assignmentRepository, never()).save(any());
         }

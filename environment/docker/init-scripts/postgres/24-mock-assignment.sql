@@ -173,7 +173,7 @@ ON CONFLICT (assignment_id) DO NOTHING;
 -- 5. Create Submissions
 -- Learner 1: Graded Quiz
 INSERT INTO assignment.assignment_submissions (id, assignment_id, user_id, status, started_at, submitted_at, score, correct_count, total_questions, time_spent_seconds, answers, graded_by, graded_at)
-VALUES (uuid_generate_v4(), v_quiz1_id, v_learner1_id, 'GRADED', CURRENT_TIMESTAMP - INTERVAL '2 days', CURRENT_TIMESTAMP - INTERVAL '2 days 1 hour', 10.0, 3, 3, 600, 
+VALUES (uuid_generate_v4(), v_quiz1_id, v_learner1_id, 'GRADED', CURRENT_TIMESTAMP - INTERVAL '2 days', CURRENT_TIMESTAMP - INTERVAL '2 days 1 hour', 100.0, 3, 3, 600,
     format('[{"questionId": "%s", "selectedAnswer": "A", "isCorrect": true}, {"questionId": "%s", "selectedAnswer": "A", "isCorrect": true}, {"questionId": "%s", "selectedAnswer": "A", "isCorrect": true}]', v_q1_id, v_q2_id, v_q3_id)::JSONB,
     v_teacher_id, CURRENT_TIMESTAMP - INTERVAL '1 day')
 ON CONFLICT DO NOTHING;
