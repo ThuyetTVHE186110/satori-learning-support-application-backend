@@ -14,98 +14,78 @@ import java.util.regex.Pattern;
 public class MarkdownUtils {
 
     // Allow-list for Japanese content (Markdown-like formatting + Ruby tags)
-    private static final Safelist MARKDOWN_SAFELIST = Safelist.none()
-            // Định dạng text cơ bản
-            .addTags("b", "i", "strong", "em", "u", "br", "p", "span")
+    // Zero-HTML Policy: Strip all HTML tags, rely on custom syntax and Markdown.
+    private static final Safelist MARKDOWN_SAFELIST = Safelist.none();
 
-            // Hỗ trợ tiếng Nhật (Furigana)
-            .addTags("ruby", "rt", "rp")
-            // Cấu trúc Markdown
-            .addTags("h1", "h2", "h3", "h4", "h5", "h6")
-            .addTags("ul", "ol", "li", "blockquote", "hr");
+    private static final Pattern FURIGANA_PATTERN = Pattern.compile("\\[([^\\[\\]]+)\\]\\{([^\\{\\}]+)\\}");
+    private static final Pattern UNDERLINE_PATTERN = Pattern.compile("\\+\\+([^\\+]+)\\+\\+");
 
     /**
-     * Sanitizes HTML/Markdown content and ensures tags are balanced.
-     * Specifically validates Ruby tags for Japanese content.
+     * Sanitizes content and validates custom Furigana/Underline syntax.
      */
     public static String sanitizeAndValidate(String content) {
         if (content == null || content.isBlank()) {
             return content;
         }
 
-        // 1. Basic Sanitization (XSS Prevention + Tag Balancing)
+        // 1. Basic Sanitization (XSS Prevention)
         String sanitized = Jsoup.clean(content, MARKDOWN_SAFELIST);
 
-        // 2. Strip redundant furigana (where reading == text)
+        // 2. Strip invalid custom furigana
         sanitized = stripInvalidFurigana(sanitized);
-
-        // 3. Ruby Tag Integrity Check
-        validateRubyTags(sanitized);
 
         return sanitized;
     }
 
     /**
-     * Removes <ruby> tags where the base text and reading are identical,
-     * or where the base text contains no Kanji.
+     * Validates and cleans up [Kanji]{Reading} syntax.
+     * Removes pattern if reading == base or if base has no Kanji.
      */
-    public static String stripInvalidFurigana(String html) {
-        if (html == null || html.isBlank()) return html;
-        Document doc = Jsoup.parseBodyFragment(html);
+    public static String stripInvalidFurigana(String text) {
+        if (text == null || text.isBlank()) return text;
 
+        // First, handle legacy HTML ruby tags by converting them to new format or stripping
+        text = convertLegacyRuby(text);
+
+        StringBuilder sb = new StringBuilder();
+        java.util.regex.Matcher matcher = FURIGANA_PATTERN.matcher(text);
+        int lastEnd = 0;
+
+        while (matcher.find()) {
+            sb.append(text, lastEnd, matcher.start());
+            String base = matcher.group(1).trim();
+            String reading = matcher.group(2).trim();
+
+            if (base.equalsIgnoreCase(reading) || !containsKanji(base)) {
+                sb.append(base);
+            } else {
+                // Keep it
+                sb.append("[").append(base).append("]{").append(reading).append("}");
+            }
+            lastEnd = matcher.end();
+        }
+        sb.append(text.substring(lastEnd));
+        return sb.toString();
+    }
+
+    private static String convertLegacyRuby(String html) {
+        if (!html.contains("<ruby")) return html;
+        Document doc = Jsoup.parseBodyFragment(html);
         for (Element ruby : doc.select("ruby")) {
             Element rt = ruby.selectFirst("rt");
-            if (rt == null) continue;
-
-            String reading = rt.text().trim();
-            // Get text from ALL nodes inside ruby except <rt>
-            StringBuilder baseContent = new StringBuilder();
-            ruby.childNodes().forEach(node -> {
-                if (!(node instanceof Element && ((Element) node).tagName().equalsIgnoreCase("rt"))) {
-                    baseContent.append(node instanceof Element ? ((Element) node).text() : node.toString());
-                }
-            });
-            String baseText = baseContent.toString().trim();
-
-            // Case 1: Identical or no Kanji -> strip tag entirely
-            if (baseText.equalsIgnoreCase(reading) || !containsKanji(baseText)) {
-                ruby.replaceWith(new org.jsoup.nodes.TextNode(baseText));
-                continue;
-            }
-
-            // Case 2: "Shrink" the ruby tag by extracting common kana prefixes and suffixes
-            // Example: <ruby>行きませんでした<rt>いきませんでした</rt></ruby> -> <ruby>行<rt>い</rt></ruby>きませんでした
-            int prefixLen = 0;
-            while (prefixLen < baseText.length() && prefixLen < reading.length() &&
-                    baseText.charAt(prefixLen) == reading.charAt(prefixLen)) {
-                prefixLen++;
-            }
-
-            int suffixLen = 0;
-            while (suffixLen < (baseText.length() - prefixLen) && suffixLen < (reading.length() - prefixLen) &&
-                    baseText.charAt(baseText.length() - 1 - suffixLen) == reading.charAt(reading.length() - 1 - suffixLen)) {
-                suffixLen++;
-            }
-
-            if (prefixLen > 0 || suffixLen > 0) {
-                String prefix = baseText.substring(0, prefixLen);
-                String suffix = baseText.substring(baseText.length() - suffixLen);
-                String newBase = baseText.substring(prefixLen, baseText.length() - suffixLen);
-                String newReading = reading.substring(prefixLen, reading.length() - suffixLen);
-
-                if (containsKanji(newBase)) {
-                    // Replace with: Prefix + <ruby>NewBase<rt>NewReading</rt></ruby> + Suffix
-                    ruby.before(new org.jsoup.nodes.TextNode(prefix));
-                    Element newRuby = doc.createElement("ruby");
-                    newRuby.text(newBase);
-                    newRuby.appendElement("rt").text(newReading);
-                    ruby.before(newRuby);
-                    ruby.before(new org.jsoup.nodes.TextNode(suffix));
-                    ruby.remove();
-                } else {
-                    // If no Kanji left after shrinking (shouldn't happen due to Case 1, but safe)
-                    ruby.replaceWith(new org.jsoup.nodes.TextNode(baseText));
-                }
+            if (rt != null) {
+                String reading = rt.text().trim();
+                // Get base text
+                StringBuilder baseContent = new StringBuilder();
+                ruby.childNodes().forEach(node -> {
+                    if (!(node instanceof Element && ((Element) node).tagName().equalsIgnoreCase("rt"))) {
+                        baseContent.append(node instanceof Element ? ((Element) node).text() : node.toString());
+                    }
+                });
+                String baseText = baseContent.toString().trim();
+                ruby.replaceWith(new org.jsoup.nodes.TextNode("[" + baseText + "]{" + reading + "}"));
+            } else {
+                ruby.unwrap();
             }
         }
         return doc.body().html();
@@ -118,39 +98,27 @@ public class MarkdownUtils {
     }
 
     /**
-     * Strictly enforces plain text by stripping ALL HTML tags.
-     * Used for explanations as per recent prompt updates.
+     * Strictly enforces plain text by stripping ALL tags and custom syntax.
      */
     public static String sanitizePlainExplanation(String content) {
         if (content == null || content.isBlank()) {
             return content;
         }
-        // Strip everything
+        // Strip tags
         String stripped = Jsoup.clean(content, Safelist.none());
 
-        // Remove common Markdown symbols that AI might still output despite prompt
+        // Strip custom furigana: [Kanji]{Reading} -> Kanji
+        stripped = FURIGANA_PATTERN.matcher(stripped).replaceAll("$1");
+
+        // Strip underline: ++text++ -> text
+        stripped = UNDERLINE_PATTERN.matcher(stripped).replaceAll("$1");
+
+        // Remove common Markdown symbols
         return stripped.replaceAll("\\*\\*", "")
                 .replaceAll("\\*", "")
                 .replaceAll("`", "")
-                .replaceAll("_{4,}", "____") // Keep bridge markers if we decide they belong here, else strip
+                .replaceAll("_{4,}", "____")
                 .trim();
     }
-
-    private static void validateRubyTags(String html) {
-        Document doc = Jsoup.parseBodyFragment(html);
-
-        // Check for <rt> without <ruby>
-        for (Element rt : doc.select("rt")) {
-            if (!rt.parent().tagName().equalsIgnoreCase("ruby")) {
-                throw new BusinessException("INVALID_MARKDOWN", "Thẻ <rt> phải nằm trong thẻ <ruby> (furigana).");
-            }
-        }
-
-        // Check for empty <ruby> or <rt>
-        for (Element ruby : doc.select("ruby")) {
-            if (ruby.text().isBlank()) {
-                throw new BusinessException("INVALID_MARKDOWN", "Thẻ <ruby> không được để trống.");
-            }
-        }
-    }
 }
+

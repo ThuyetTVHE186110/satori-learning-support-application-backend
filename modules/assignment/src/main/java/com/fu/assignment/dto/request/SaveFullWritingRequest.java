@@ -35,11 +35,6 @@ public class SaveFullWritingRequest implements AssignmentMetadataRequest {
     @Future(message = "Due date must be in the future")
     private LocalDateTime dueDate;
 
-    private Integer timeLimitMinutes;
-
-    @Builder.Default
-    private Boolean lateSubmissionAllowed = false;
-
     /**
      * Target status. Use DRAFT for "Ủu bản nháp", PUBLISHED for "Xác nhận giao bài", CLOSED to close.
      * When null, existing status is preserved (no transition).

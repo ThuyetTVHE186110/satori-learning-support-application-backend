@@ -54,36 +54,39 @@ public class QuizAiGenerationService {
             - If SOURCE CONTEXT (Vocabulary/Grammar) is provided, you MUST construct the questions primarily using those exact words and grammar patterns.
             
             ═══════════════════════════════════════════════════════════════
-            FORMATTING RULES (Markdown + Ruby tags):
+            FORMATTING RULES (Custom Syntax - STRICTLY NO HTML):
             ═══════════════════════════════════════════════════════════════
             
-            The fields "questionText", and "options" Use MARKDOWN for text formatting, combined with HTML <ruby><rt> tags for furigana only.
+            The fields "questionText", and "options" MUST Use MARKDOWN for text formatting, combined with CUSTOM syntax for furigana and underline.
+            
+            **CRITICAL RULE**: ABSOLUTELY NO HTML tags are allowed. Any output containing <tags> will be rejected.
             
             ALLOWED FORMATTING:
-            - Markdown: **bold**, *italic*, ____  (four underscores for blank)
-            - HTML: ONLY <ruby> and <rt> tags (for furigana on Kanji)
-            - Do NOT use <b>, <i>, <u>, <span> or any other HTML tags.
+            - Furigana: [Kanji]{Reading}
+            - Underline: ++text++
+            - Markdown: **bold**, *italic*, ____ (four underscores for blank)
+            - Do NOT use ANY HTML tags (like <ruby>, <rt>, <u>, <b>, <i>, <span>, <br>, <p>).
             
-            1. FURIGANA (reading aid) — use <ruby> tags ONLY for Kanji:
-            - **MANDATORY**: EVERY SINGLE KANJI character in "questionText", and "options" MUST have furigana using <ruby> tags.
+            1. FURIGANA (reading aid) — use [Kanji]{Reading} ONLY for Kanji:
+            - **MANDATORY**: EVERY SINGLE KANJI character in "questionText", and "options" MUST have furigana using [Kanji]{Reading} syntax.
             - **CRITICAL**: ABSOLUTELY DO NOT add furigana to Hiragana, Katakana, or any non-Kanji characters. 
-            - WRONG: <ruby>いきます<rt>いきます</rt></ruby> (Hiragana only) -> Just write: いきます
-            - WRONG: <ruby>ビール<rt>びーる</rt></ruby> (Katakana only) -> Just write: ビール
-            - CORRECT: <ruby>日本語<rt>にほんご</rt></ruby>をべんきょうします。
-            - RULE: If the text inside <ruby> does NOT contain any kanji (漢字), do NOT use <ruby> tags at all.
-            - IMPORTANT: You MUST write "わたしは<ruby>学生<rt>がくせい</rt></ruby>です" (using kanji for gakusei) instead of writing just hiragana, and when you use Kanji, you MUST wrap it in <ruby>.
+            - WRONG: [いきます]{いきます} (Hiragana only) -> Just write: いきます
+            - WRONG: [ビール]{びーる} (Katakana only) -> Just write: ビール
+            - CORRECT: [日本語]{にほんご}をべんきょうします。
+            - RULE: If the text inside [ ] does NOT contain any kanji (漢字), do NOT use [ ]{ } syntax at all.
+            - IMPORTANT: You MUST write "わたしは[学生]{がくせい}です" (using kanji for gakusei) instead of writing just hiragana, and when you use Kanji, you MUST wrap it in [ ]{ }.
             
-            2. BOLD — use **text** (Markdown bold) to emphasize key words or grammar patterns:
-               Example: **〜てください** を使って文を作ってください。
+            2. UNDERLINE — use ++text++ (Double plus signs) to underline key words or phrases:
+               Example: ++~てください++ を使って文を作ってください。
             
-            3. ITALIC — use *text* (Markdown italic) for linguistic notes, hints, or context cues:
+            3. BOLD — use **text** (Markdown bold) for emphasis:
+               Example: **Chú ý**: Hãy chọn đáp án đúng nhất.
+            
+            4. ITALIC — use *text* (Markdown italic) for linguistic notes, hints, or context cues:
                Example: *(Thể lịch sự)*
             
-            4. BLANK marker — for fill_blank questions, use ____ (four underscores) to mark where the answer goes:
-               Example: <ruby>昨日<rt>きのう</rt></ruby>、____ を <ruby>食<rt>た</rt></ruby>べました。
-            
-            5. Option text — options MUST use "text" for the vocabulary kanji/kana (**MANDATORY**: wrap all Kanji in <ruby> tags), and "text_reading" for the furigana interpretation (only provide text_reading if text contains Kanji).
-               Example option: {"text": "<ruby>食<rt>た</rt></ruby>べる", "text_reading": "たべる"}
+            5. Option text — options MUST use "text" for the vocabulary kanji/kana (**MANDATORY**: wrap all Kanji in [ ]{ } syntax), and "text_reading" for the furigana interpretation (only provide text_reading if text contains Kanji).
+               Example option: {"text": "[食]{た}べる", "text_reading": "たべる"}
             6. explanation — MUST be plain text (see below).
             
             EXPLANATION GUIDELINES (High Quality):
@@ -94,10 +97,9 @@ public class QuizAiGenerationService {
             - Maintain a polite, educational, and encouraging tone.
             
             
-            Example questionText (fill_blank):
-            "Điền vào chỗ trống với dạng **thể て** đúng: ここで <ruby>写真<rt>しゃしん</rt></ruby>を （____） ください。"
+            Example questionText:
+            "Chọn đáp án đúng nhất: [昨日]{きのう}、[写真]{しゃしん}を ++[撮]{と}りました++。"
             
-            ═══════════════════════════════════════════════════════════════
             ═══════════════════════════════════════════════════════════════
             QUESTION TYPE FORMAT RULES (MANDATORY EXACT JSON STRUCTURE):
             ═══════════════════════════════════════════════════════════════
@@ -107,31 +109,11 @@ public class QuizAiGenerationService {
                - "correctAnswer": Must be the string ID of the correct option (e.g., "A", "B", "C", or "D").
                - "correctAnswers": null
             
-            2. "fill_blank":
-               - "options": null
-               - "correctAnswer": Must contain the exact text to fill in the blank (may use <ruby> for kanji).
-               - "correctAnswers": null
-            
-            3. "true_false":
-               - "options": null
-               - "correctAnswer": Must be "true" or "false" (string).
-               - "correctAnswers": null
-            
-            4. "matching":
-               - "options": {"type": "matching", "left_items": [{"id": "1", "text": "..."}, {"id": "2", "text": "..."}], "right_items": [{"id": "A", "text": "..."}, {"id": "B", "text": "..."}]}
-               - "correctAnswer": null
-               - "correctAnswers": {"pairs": [{"left": "1", "right": "A"}, {"left": "2", "right": "B"}]}
-            
-            5. "ordering":
-               - "options": {"type": "ordering", "items": [{"id": "1", "text": "..."}, {"id": "2", "text": "..."}, {"id": "3", "text": "..."}]}
-               - "correctAnswer": null
-               - "correctAnswers": {"sequence": ["1", "3", "2"]} -> The correct order of the option IDs.
-            
             ═══════════════════════════════════════════════════════════════
             EXPLANATION RULES (MANDATORY — PLAIN TEXT ONLY):
             ═══════════════════════════════════════════════════════════════
             - "explanation": MUST explain why the correct answer is correct. 1-2 sentences and must be Vietnamese. 
-            - **STRICTLY PLAIN TEXT**: Do NOT use **bold**, *italic*, <ruby>, <rt>, or any other Markdown/HTML tags in these fields.
+            - **STRICTLY PLAIN TEXT**: Do NOT use **bold**, *italic*, [ ]{ }, ++ ++, or any other Markdown/HTML tags in these fields.
             - If you leave explanation as empty string "" or null, the question is INVALID.
             """;
 
@@ -555,8 +537,8 @@ public class QuizAiGenerationService {
         }
         sb.append("\nREMINDER:\n");
         sb.append("- Every question MUST have non-empty 'explanation' fields.\n");
-        sb.append("- 'questionText', option 'text', and 'correctAnswer' MUST use <ruby>漢字<rt>reading</rt></ruby> for ALL kanji.\n");
-        sb.append("- Use **bold** (Markdown) for emphasis, ____ (four underscores) for blanks. Do NOT use <b>, <i>, <u> HTML tags.\n");
+        sb.append("- 'questionText', option 'text', and 'correctAnswer' MUST use [漢字]{kanji} for ALL kanji.\n");
+        sb.append("- Use ++text++ for underlines, **bold** (Markdown) for emphasis, ____ (four underscores) for blanks. Do NOT use ANY HTML tags.\n");
         return sb.toString();
     }
 }
