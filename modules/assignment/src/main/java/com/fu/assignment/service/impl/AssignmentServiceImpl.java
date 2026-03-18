@@ -17,7 +17,6 @@ import com.fu.clazz.repository.ClassRepository;
 import com.fu.assignment.util.MarkdownUtils;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
-import com.fu.course.entity.Course;
 import com.fu.infrastructure.cloudinary.CloudinaryService;
 import com.fu.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -994,7 +993,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         List<AssignmentQuestion> aqs = assignmentQuestionRepository.findByAssignmentIdOrderByOrderIndex(assignmentId);
 
         double points = 0;
-        int earned = 0;
+        int correctCount = 0;
         try {
             JsonNode answersArray = objectMapper.readTree(answersJson);
             if (answersArray == null || !answersArray.isArray()) {
@@ -1015,7 +1014,7 @@ public class AssignmentServiceImpl implements AssignmentService {
 
                 boolean isCorrect = checkAnswer(q, selectedAnswer);
                 if (isCorrect) {
-                    earned += 1;
+                    correctCount += 1;
                 }
             }
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
@@ -1028,8 +1027,8 @@ public class AssignmentServiceImpl implements AssignmentService {
             throw new BusinessException("INTERNAL_ERROR", "Lỗi không xác định khi chấm điểm bài thi.");
         }
         int actualCount = aqs.size();
-        points = actualCount > 0 ? (10.0 * earned / actualCount) : 0;
-        return new AutoScoreResult(earned, points, 10);
+        points = actualCount > 0 ? (100.0 * correctCount / actualCount) : 0;
+        return new AutoScoreResult(correctCount, points, 100);
     }
 
     private boolean checkAnswer(QuizQuestion question, String selectedAnswer) {
