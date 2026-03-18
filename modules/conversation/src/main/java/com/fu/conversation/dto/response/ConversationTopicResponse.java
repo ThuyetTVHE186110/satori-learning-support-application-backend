@@ -32,6 +32,8 @@ public class ConversationTopicResponse {
     private String category;
     private Course.JlptLevel jlptLevel;
     private Integer difficultyScore;
+    private String aiRole;
+    private String learnerRole;
     private String roleplayContext;
     private String thumbnailUrl;
     private Course.ContentStatus status;

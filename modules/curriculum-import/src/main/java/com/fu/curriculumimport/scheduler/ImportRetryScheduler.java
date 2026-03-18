@@ -7,9 +7,12 @@ import com.fu.curriculumimport.repository.CurriculumImportRepository;
 import com.fu.curriculumimport.service.orchestrator.ImportOrchestrator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -17,7 +20,8 @@ import java.util.List;
  *
  * This handles:
  * 1. Imports queued via retryImport() that need re-processing
- * 2. Stuck imports that need cleanup
+ * 2. Stuck imports that need cleanup or automatic recovery
+ * 3. Imports interrupted by application restart (auto-resume on startup)
  *
  * Runs on a fixed delay configured via AgenticRagProperties.
  */
@@ -26,13 +30,49 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ImportRetryScheduler {
 
+    private static final List<ImportStatus> PROCESSING_STATUSES = List.of(
+            ImportStatus.EXTRACTING,
+            ImportStatus.CHUNKING,
+            ImportStatus.CLASSIFYING,
+            ImportStatus.AI_PROCESSING,
+            ImportStatus.VALIDATING,
+            ImportStatus.PERSISTING
+    );
+
     private final CurriculumImportRepository importRepository;
     private final ImportOrchestrator orchestrator;
     private final AgenticRagProperties ragProperties;
 
     /**
+     * On application startup, find any imports stuck in processing states
+     * (from a previous crash/restart) and re-queue them for retry.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void recoverInterruptedImports() {
+        for (ImportStatus status : PROCESSING_STATUSES) {
+            List<CurriculumImport> stuck = importRepository
+                    .findByStatusOrderByQueuedAtAsc(status);
+
+            for (CurriculumImport imp : stuck) {
+                if (imp.getRetryCount() >= imp.getMaxRetries()) {
+                    log.warn("Import {} stuck in {} but max retries ({}) exhausted — marking FAILED",
+                            imp.getId(), status, imp.getMaxRetries());
+                    imp.markFailed("Import interrupted (app restart) in " + status
+                            + " state — max retries exhausted");
+                    importRepository.save(imp);
+                } else {
+                    log.info("Import {} was interrupted in {} state — re-queuing for retry (attempt #{})",
+                            imp.getId(), status, imp.getRetryCount() + 1);
+                    imp.resetForRetry();
+                    importRepository.save(imp);
+                }
+            }
+        }
+    }
+
+    /**
      * Pick up QUEUED imports that need processing.
-     * Only processes imports with retryCount > 0 (retried imports).
+     * Processes imports with retryCount > 0 (retried imports or auto-recovered imports).
      *
      * New uploads are triggered directly by initiateImport(),
      * so this scheduler only handles retries.
@@ -72,29 +112,28 @@ public class ImportRetryScheduler {
     /**
      * Detect and clean up stuck imports.
      * An import is "stuck" if it's been in a processing state for too long.
+     * Instead of just marking as FAILED, re-queues for retry if retries remain.
      */
     @Scheduled(fixedDelay = 300000) // Every 5 minutes
     public void cleanupStuckImports() {
-        // Find imports stuck in processing states for > 30 minutes
-        List<ImportStatus> processingStatuses = List.of(
-                ImportStatus.EXTRACTING,
-                ImportStatus.CHUNKING,
-                ImportStatus.CLASSIFYING,
-                ImportStatus.AI_PROCESSING,
-                ImportStatus.VALIDATING,
-                ImportStatus.PERSISTING
-        );
-
-        for (ImportStatus status : processingStatuses) {
+        for (ImportStatus status : PROCESSING_STATUSES) {
             List<CurriculumImport> imports = importRepository
                     .findByStatusOrderByQueuedAtAsc(status);
 
             for (CurriculumImport imp : imports) {
                 if (imp.getStartedAt() != null &&
-                        imp.getStartedAt().plusMinutes(30).isBefore(java.time.LocalDateTime.now())) {
-                    log.warn("Import {} appears stuck in {} state since {}. Marking as FAILED.",
-                            imp.getId(), status, imp.getStartedAt());
-                    imp.markFailed("Import timed out - stuck in " + status + " state");
+                        imp.getStartedAt().plusMinutes(30).isBefore(LocalDateTime.now())) {
+
+                    if (imp.getRetryCount() < imp.getMaxRetries()) {
+                        log.warn("Import {} stuck in {} since {} — re-queuing for retry (attempt #{})",
+                                imp.getId(), status, imp.getStartedAt(), imp.getRetryCount() + 1);
+                        imp.resetForRetry();
+                    } else {
+                        log.warn("Import {} stuck in {} since {} — max retries exhausted, marking FAILED",
+                                imp.getId(), status, imp.getStartedAt());
+                        imp.markFailed("Import timed out - stuck in " + status
+                                + " state — max retries exhausted");
+                    }
                     importRepository.save(imp);
                 }
             }

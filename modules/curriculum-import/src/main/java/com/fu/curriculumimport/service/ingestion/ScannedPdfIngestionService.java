@@ -5,6 +5,7 @@ import com.fu.curriculumimport.exception.InvalidImportFileException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.io.RandomAccessReadBuffer;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.ImageType;
 import org.apache.pdfbox.rendering.PDFRenderer;
@@ -60,7 +61,7 @@ public class ScannedPdfIngestionService {
     public DocumentParseResult parse(MultipartFile file) {
         log.info("Scanned-PDF ingestion start: {}", file.getOriginalFilename());
 
-        try (PDDocument document = Loader.loadPDF(file.getBytes())) {
+        try (PDDocument document = Loader.loadPDF(new RandomAccessReadBuffer(file.getInputStream()))) {
             int totalPages = document.getNumberOfPages();
             log.info("Rendering {} pages at {} DPI…", totalPages, ocrProps.getRenderDpi());
 
@@ -76,6 +77,10 @@ public class ScannedPdfIngestionService {
             int renderFailures = 0;
             int batchSize = ocrProps.getGoogleVisionBatchSize();
 
+            // Retain JPEG bytes per page for vision-first extraction (Tier 2).
+            // Memory estimate: 200 pages × ~400 KB JPEG ≈ 80 MB — acceptable for typical textbooks.
+            Map<Integer, byte[]> pageImageMap = new HashMap<>();
+
             // Accumulate JPEG-encoded pages for the current batch.
             // Pages are encoded to JPEG immediately after rendering so the large
             // raw BufferedImage can be flushed before the next render, keeping
@@ -89,8 +94,10 @@ public class ScannedPdfIngestionService {
                     pageImage = renderer.renderImageWithDPI(
                             i, ocrProps.getRenderDpi(), ImageType.RGB);
                     // Encode to JPEG right away so we can flush the raw image.
-                    batchJpeg.add(encodeToJpeg(pageImage));
+                    byte[] jpeg = encodeToJpeg(pageImage);
+                    batchJpeg.add(jpeg);
                     batchPages.add(i);
+                    pageImageMap.put(i, jpeg);  // retain for vision extraction
                 } catch (Exception e) {
                     log.warn("Page {} render/encode failed ({}), skipping", i + 1, e.getMessage());
                     renderFailures++;
@@ -123,6 +130,9 @@ public class ScannedPdfIngestionService {
                     }
                     batchJpeg.clear();
                     batchPages.clear();
+                    // Hint GC to reclaim flushed BufferedImage from this batch.
+                    // JPEG bytes are still referenced by pageImageMap — do not null them.
+                    System.gc();
                     log.debug("Batch OCR done: pages up to {} of {}", i + 1, totalPages);
                 }
             }
@@ -140,7 +150,7 @@ public class ScannedPdfIngestionService {
                                 + "Please check if the OCR service is running and the file is readable.");
             }
 
-            List<DocumentChunk> chunks = createChunks(pageTexts, pageTableRows);
+            List<DocumentChunk> chunks = createChunks(pageTexts, pageTableRows, pageImageMap);
             log.info("Scanned-PDF ingestion done: {} pages, {} OCR lines, {} chunks",
                     totalPages, totalLinesOcrd, chunks.size());
 
@@ -173,9 +183,11 @@ public class ScannedPdfIngestionService {
      * </ol>
      *
      * @param pageTableRows 0-based page index → table rows from OCR (propagated to VOCABULARY chunks)
+     * @param pageImageMap  0-based page index → JPEG bytes (propagated to VOCABULARY + GRAMMAR chunks)
      */
     private List<DocumentChunk> createChunks(List<String> pageTexts,
-                                              Map<Integer, List<String>> pageTableRows) {
+                                              Map<Integer, List<String>> pageTableRows,
+                                              Map<Integer, byte[]> pageImageMap) {
         LinkedHashMap<Integer, Integer> boundaries = LessonBoundaryDetector.detectBoundaries(pageTexts);
         if (!boundaries.isEmpty()) {
             List<DocumentChunk> lessonChunks = LessonBoundaryDetector.createLessonChunks(
@@ -186,8 +198,11 @@ public class ScannedPdfIngestionService {
             // Layer 2: MnN intra-lesson section splitting
             List<DocumentChunk> sectionChunks = applyMnNSectionSplitting(lessonChunks);
 
-            // Propagate table rows to VOCABULARY section chunks
+            // Propagate OCR table rows to VOCABULARY section chunks
             propagateTableRows(sectionChunks, pageTableRows);
+
+            // Propagate page images to VOCABULARY + GRAMMAR chunks for vision-first extraction (Tier 2)
+            propagatePageImages(sectionChunks, pageImageMap);
 
             log.info("Layer 2 (section-aware, scanned): {} lesson chunks → {} section chunks",
                     lessonChunks.size(), sectionChunks.size());
@@ -219,6 +234,38 @@ public class ScannedPdfIngestionService {
                 chunk.setStructuredTableRows(allRows);
                 log.debug("Propagated {} table rows to VOCABULARY chunk {} (pages {}-{})",
                         allRows.size(), chunk.getChunkIndex(),
+                        chunk.getPageStart(), chunk.getPageEnd());
+            }
+        }
+    }
+
+    /**
+     * Attach JPEG page images to VOCABULARY, GRAMMAR_PATTERN, and GRAMMAR_EXPLANATION chunks.
+     *
+     * <p>The vision-first extraction path (Tier 2) in {@code VocabularyExtractionAgent}
+     * and {@code GrammarExtractionAgent} reads these images when OCR text quality
+     * is insufficient. Only sections that benefit from visual layout analysis receive images.
+     */
+    private void propagatePageImages(List<DocumentChunk> chunks,
+                                      Map<Integer, byte[]> pageImageMap) {
+        if (pageImageMap.isEmpty()) return;
+        for (DocumentChunk chunk : chunks) {
+            String sectionType = chunk.getSectionType();
+            if (!MnNSectionSplitter.VOCABULARY.equals(sectionType)
+                    && !MnNSectionSplitter.GRAMMAR_PATTERN.equals(sectionType)
+                    && !MnNSectionSplitter.GRAMMAR_EXPLANATION.equals(sectionType)) {
+                continue;
+            }
+            List<byte[]> images = new ArrayList<>();
+            // pageStart/pageEnd are 1-based; pageImageMap uses 0-based index
+            for (int p = chunk.getPageStart(); p <= chunk.getPageEnd(); p++) {
+                byte[] img = pageImageMap.get(p - 1);
+                if (img != null) images.add(img);
+            }
+            if (!images.isEmpty()) {
+                chunk.setPageImages(images);
+                log.debug("Propagated {} page image(s) to {} chunk {} (pages {}-{})",
+                        images.size(), sectionType, chunk.getChunkIndex(),
                         chunk.getPageStart(), chunk.getPageEnd());
             }
         }
