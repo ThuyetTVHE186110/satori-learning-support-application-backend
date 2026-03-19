@@ -2593,8 +2593,8 @@ class SpeakingPracticeIntegrationTest {
                     AssessmentResult.builder()
                             .success(true)
                             .transcribedText("Hello")
-                            .overallScore(null)   // SpeechSuper did not return a score
-                            .accuracyScore(null)
+                            .overallScore(0.0)   // SpeechSuper did not return a score
+                            .accuracyScore(0.0)
                             .build());
 
             String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
