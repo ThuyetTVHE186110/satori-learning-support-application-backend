@@ -2739,7 +2739,13 @@ class SpeakingPracticeIntegrationTest {
                     .build());
 
             when(sessionEvaluatorAI.evaluateSession(anyList()))
-                    .thenReturn(SessionEvaluationResponse.LanguageEvaluationDetail.builder().summary("OK").build());
+                    .thenReturn(SessionEvaluationResponse.LanguageEvaluationDetail.builder()
+                            .summary("OK")
+                            .fluencyScore(BigDecimal.ONE)
+                            .accuracyScore(BigDecimal.ONE)
+                            .vocabularyScore(BigDecimal.ONE)
+                            .grammarScore(BigDecimal.ONE)
+                            .build());
 
             int threadCount = 2;
             java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threadCount);
