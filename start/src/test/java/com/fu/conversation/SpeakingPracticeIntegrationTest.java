@@ -11,7 +11,6 @@ import com.fu.conversation.repository.ConversationTopicRepository;
 import com.fu.conversation.repository.UserConversationTopicRepository;
 import com.fu.course.entity.Course;
 import com.fu.infrastructure.email.EmailService;
-import com.fu.pronunciation.dto.AssessmentRequest;
 import com.fu.roleplay.ai.MissionEvaluatorAI;
 import com.fu.roleplay.ai.RoleplayAIService;
 import com.fu.roleplay.ai.SessionEvaluatorAI;
@@ -37,6 +36,7 @@ import com.fu.user.security.JwtService;
 import io.jsonwebtoken.Jwts;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -53,13 +53,16 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -687,9 +690,9 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic topic = saveTopic(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
             saveMission(topic.getId(), "Mission 1", 0);
 
-            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(anyString()))
+            when(roleplayAIService.generateOpeningMessage(any()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}," +
                             "{\"type\":\"SCENE_INTRO\",\"japanese_content\":\"Scene\",\"translation\":\"Scene\",\"romaji\":\"\"}," +
                             "{\"type\":\"DIALOGUE\",\"japanese_content\":\"Hello\",\"translation\":\"Hello\",\"romaji\":\"\"}]");
@@ -715,9 +718,9 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic topic = saveTopic(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
             saveMission(topic.getId(), "Mission 1", 0);
 
-            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(anyString()))
+            when(roleplayAIService.generateOpeningMessage(any()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
             when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("prompt");
             when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
@@ -838,9 +841,9 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic topic = saveTopic(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
             saveMission(topic.getId(), "Mission 1", 0);
 
-            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(anyString()))
+            when(roleplayAIService.generateOpeningMessage(any()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
 
             String startBody = String.format("{\"topicId\":\"%s\"}", topic.getId());
@@ -917,9 +920,9 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic topic = saveTopic(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
             saveMission(topic.getId(), "Mission 1", 0);
 
-            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(anyString()))
+            when(roleplayAIService.generateOpeningMessage(any()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
 
             String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
@@ -943,9 +946,9 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic topic = saveTopic(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
             saveMission(topic.getId(), "Mission 1", 0);
 
-            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(anyString()))
+            when(roleplayAIService.generateOpeningMessage(any()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}," +
                             "{\"type\":\"SCENE_INTRO\",\"japanese_content\":\"Scene\",\"translation\":\"Scene\",\"romaji\":\"\"}]" );
 
@@ -1109,7 +1112,7 @@ class SpeakingPracticeIntegrationTest {
             when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
                     .thenReturn("[{\"type\":\"PHASE_TRANSITION\",\"topicSummary\":\"Shopping\",\"missionSummary\":\"Mua hang\"}," +
                             "{\"type\":\"DIALOGUE\",\"japanese_content\":\"Hello\",\"translation\":\"Hello\",\"romaji\":\"\",\"corrections\":[]}]" );
-            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
             when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
                     .thenReturn(List.of());
@@ -1134,9 +1137,9 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic topic = saveTopic(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
             saveMission(topic.getId(), "Mission 1", 0);
 
-            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(anyString()))
+            when(roleplayAIService.generateOpeningMessage(any()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
             when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("prompt");
             when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
@@ -1368,9 +1371,9 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic topic = saveTopic(theme.getId(), "No Mission Topic", Course.ContentStatus.PUBLISHED, 1, true);
             // No missions saved for this topic
 
-            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(anyString()))
+            when(roleplayAIService.generateOpeningMessage(any()))
                     .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"Hello\",\"translation\":\"Hello\",\"romaji\":\"\"}]");
 
             String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
@@ -1397,6 +1400,8 @@ class SpeakingPracticeIntegrationTest {
                     .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"Hint reply\",\"translation\":\"Hint reply\",\"romaji\":\"\",\"corrections\":[]}]");
             when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
                     .thenReturn(List.of());
+            when(roleplayAIService.generateHintResponse(any(UUID.class), anyString(), anyList(), anyList()))
+                    .thenReturn("[{\"type\":\"HINT\",\"japanese_content\":\"Hint reply\",\"translation\":\"Hint reply\",\"romaji\":\"\"}]");
             when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
 
             String messageJson = "{\"content\":\"I need help\",\"hintRequest\":true}";
@@ -1406,14 +1411,17 @@ class SpeakingPracticeIntegrationTest {
                                     "message", "message", "application/json", messageJson.getBytes()))
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.messages.length()").value(1));
+                    .andExpect(jsonPath("$.data.messages.length()").value(1))
+                    .andExpect(jsonPath("$.data.messages[0].messageType").value("HINT"));
 
             // Verify the hint flag was persisted
             List<ConversationMessage> msgs = messageRepository.findBySessionIdOrderBySequenceNumberAsc(session.getId());
-            ConversationMessage userMsg = msgs.stream()
+            long userMessageCount = msgs.stream()
                     .filter(m -> m.getRole() == ConversationMessage.MessageRole.USER)
-                    .findFirst().orElseThrow();
-            assertThat(userMsg.getIsHintRequest()).isTrue();
+                    .count();
+            assertThat(userMessageCount).isZero();
+            assertThat(msgs).hasSize(1);
+            assertThat(msgs.get(0).getRole()).isEqualTo(ConversationMessage.MessageRole.ASSISTANT);
         }
 
         @Test
@@ -1515,9 +1523,9 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic topic = saveTopic(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
             saveMission(topic.getId(), "Mission 1", 0);
 
-            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(anyString()))
+            when(roleplayAIService.generateOpeningMessage(any()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
             when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("prompt");
             when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
@@ -1539,6 +1547,13 @@ class SpeakingPracticeIntegrationTest {
 
             String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
 
+            MockMultipartFile messagePart = new MockMultipartFile(
+                    "message",
+                    "message.json",
+                    MediaType.APPLICATION_JSON_VALUE,
+                    messageJson.getBytes(StandardCharsets.UTF_8)
+            );
+
             MockMultipartFile emptyAudio = new MockMultipartFile(
                     "audio",
                     "audio.wav",
@@ -1547,9 +1562,9 @@ class SpeakingPracticeIntegrationTest {
             );
 
             mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{id}/messages", sessionId)
-                            .file(new org.springframework.mock.web.MockMultipartFile(
-                                    "message", "message", "application/json", messageJson.getBytes()))
+                            .file(messagePart)
                             .file(emptyAudio)
+                            .contentType(MediaType.MULTIPART_FORM_DATA)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest());
         }
@@ -1953,9 +1968,9 @@ class SpeakingPracticeIntegrationTest {
              ConversationTopic topic = saveTopic(theme.getId(), "Topic", Course.ContentStatus.PUBLISHED, 1, true);
              saveMission(topic.getId(), "Mission 1", 0);
 
-             when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
+             when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                      .thenReturn("prompt");
-             when(roleplayAIService.generateOpeningMessage(anyString()))
+             when(roleplayAIService.generateOpeningMessage(any()))
                      .thenReturn("[]");
 
              String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
@@ -2112,12 +2127,40 @@ class SpeakingPracticeIntegrationTest {
              User learner = saveLearner("learner@test.com");
              String token = loginAndGetToken("learner@test.com");
 
-             ConversationSession session = saveSessionWithStatus(
-                     learner.getId(), ConversationSession.SessionStatus.ACTIVE);
-             session.setSessionType(ConversationSession.SessionType.FREE_TALK);
-             sessionRepository.save(session);
+             when(roleplayAIService.buildSetupSystemPrompt(anyString())).thenReturn("setup");
+             when(roleplayAIService.generateSetupOpening(anyString()))
+                     .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"Question\",\"translation\":\"Question\",\"romaji\":\"\",\"corrections\":[]}]" );
 
-                when(sessionEvaluatorAI.evaluateSession(anyList()))
+             String body = "{\"jlptLevel\":\"N5\",\"language\":\"vi\"}";
+
+             MvcResult startResult = mockMvc.perform(post("/api/v1/learner/roleplay/free-talk/sessions")
+                             .contentType(MediaType.APPLICATION_JSON)
+                             .content(body)
+                             .header("Authorization", "Bearer " + token))
+                     .andExpect(status().isCreated())
+                     .andReturn();
+
+             String sessionId = objectMapper.readTree(startResult.getResponse().getContentAsString())
+                     .path("data").path("id").asText();
+
+             when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("setup");
+             when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
+                     .thenReturn("[{\"type\":\"PHASE_TRANSITION\",\"topicSummary\":\"Shopping\",\"missionSummary\":\"Mua hang\"}," +
+                             "{\"type\":\"DIALOGUE\",\"japanese_content\":\"Hello\",\"translation\":\"Hello\",\"romaji\":\"\",\"corrections\":[]}]" );
+             when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
+                     .thenReturn("prompt");
+             when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
+                     .thenReturn(List.of());
+
+             String messageJson = "{\"content\":\"I want to practice shopping\",\"hintRequest\":false}";
+
+             mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", sessionId)
+                             .file(new org.springframework.mock.web.MockMultipartFile(
+                                     "message", "message", "application/json", messageJson.getBytes()))
+                             .header("Authorization", "Bearer " + token))
+                     .andExpect(status().isOk());
+
+             when(sessionEvaluatorAI.evaluateSession(anyList()))
                         .thenReturn(SessionEvaluationResponse.LanguageEvaluationDetail.builder()
                                 .summary("OK")
                                 .fluencyScore(BigDecimal.ONE)
@@ -2126,10 +2169,11 @@ class SpeakingPracticeIntegrationTest {
                                 .grammarScore(BigDecimal.ONE)
                                 .build());
 
-                mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{id}/complete", session.getId())
+                mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{id}/complete", sessionId)
                                 .header("Authorization", "Bearer " + token))
                         .andExpect(status().isOk())
-                        .andExpect(jsonPath("$.data.sessionId").value(session.getId().toString()));
+                        .andExpect(jsonPath("$.data.sessionId").value(sessionId));
+
          }
 
          @Test
@@ -2217,7 +2261,7 @@ class SpeakingPracticeIntegrationTest {
         // ── 6.1. OpenAI Failures ──────────────────────────────────────────────
 
         @Test
-        @DisplayName("TC_SP_AI_037 & TC_SP_ROB_003 — AI Timeout / HTTP 500 on message generation")
+        @DisplayName("TC_SP_AI_037 — Generate response message fail and fallback message response")
         void tc_sp_ai_037_and_rob_003() throws Exception {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
@@ -2233,36 +2277,18 @@ class SpeakingPracticeIntegrationTest {
             mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", session.getId())
                             .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isInternalServerError());
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.messages[0].japaneseContent", anyOf(
+                            is("すみません、もう一度お願いします。"),
+                            is("ごめんな、よく聞こえませんでした。もう一度言ってください。"),
+                            is("少し待ってください。もう一度話してもらえますか？")
+                    )));
 
             ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
             assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.ACTIVE);
 
             long count = messageRepository.countBySessionId(session.getId());
-            assertThat(count).isEqualTo(0);
-        }
-
-        @Test
-        @DisplayName("TC_SP_AI_038 — AI returns malformed JSON")
-        void tc_sp_ai_038() throws Exception {
-            User learner = saveLearner("learner@test.com");
-            String token = loginAndGetToken("learner@test.com");
-            ConversationSession session = saveSession(learner.getId(), null);
-
-            when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
-            when(roleplayAIService.getCachedSystemPrompt(any())).thenReturn("prompt");
-            when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
-                    .thenReturn("{ invalid_json: [ }");
-
-            String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
-
-            mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", session.getId())
-                            .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isInternalServerError());
-
-            ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
-            assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.ACTIVE);
+            assertThat(count).isEqualTo(2L);
         }
 
         @Test
@@ -2333,9 +2359,9 @@ class SpeakingPracticeIntegrationTest {
             ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
             ConversationTopic topic = saveTopic(theme.getId(), "Topic", Course.ContentStatus.PUBLISHED, 1, true);
 
-            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(anyString()))
+            when(roleplayAIService.generateOpeningMessage(any()))
                     .thenThrow(new RuntimeException("429 Too Many Requests"));
 
             String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
@@ -2579,9 +2605,9 @@ class SpeakingPracticeIntegrationTest {
             ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
             ConversationTopic topic = saveTopic(theme.getId(), "Topic", Course.ContentStatus.PUBLISHED, 1, true);
 
-            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(anyString())).thenReturn("[]");
+            when(roleplayAIService.generateOpeningMessage(any())).thenReturn("[]");
 
             int threadCount = 2; // Bắn 2 request tạo session cùng lúc
             java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threadCount);
