@@ -687,7 +687,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic topic = saveTopic(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
             saveMission(topic.getId(), "Mission 1", 0);
 
-            when(roleplayAIService.buildSystemPrompt(any(), anyString(), anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
                     .thenReturn("prompt");
             when(roleplayAIService.generateOpeningMessage(anyString()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}," +
@@ -715,7 +715,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic topic = saveTopic(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
             saveMission(topic.getId(), "Mission 1", 0);
 
-            when(roleplayAIService.buildSystemPrompt(any(), anyString(), anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
                     .thenReturn("prompt");
             when(roleplayAIService.generateOpeningMessage(anyString()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
@@ -838,7 +838,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic topic = saveTopic(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
             saveMission(topic.getId(), "Mission 1", 0);
 
-            when(roleplayAIService.buildSystemPrompt(any(), anyString(), anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
                     .thenReturn("prompt");
             when(roleplayAIService.generateOpeningMessage(anyString()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
@@ -917,7 +917,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic topic = saveTopic(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
             saveMission(topic.getId(), "Mission 1", 0);
 
-            when(roleplayAIService.buildSystemPrompt(any(), anyString(), anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
                     .thenReturn("prompt");
             when(roleplayAIService.generateOpeningMessage(anyString()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
@@ -943,7 +943,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic topic = saveTopic(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
             saveMission(topic.getId(), "Mission 1", 0);
 
-            when(roleplayAIService.buildSystemPrompt(any(), anyString(), anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
                     .thenReturn("prompt");
             when(roleplayAIService.generateOpeningMessage(anyString()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}," +
@@ -1109,8 +1109,8 @@ class SpeakingPracticeIntegrationTest {
             when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
                     .thenReturn("[{\"type\":\"PHASE_TRANSITION\",\"topicSummary\":\"Shopping\",\"missionSummary\":\"Mua hang\"}," +
                             "{\"type\":\"DIALOGUE\",\"japanese_content\":\"Hello\",\"translation\":\"Hello\",\"romaji\":\"\",\"corrections\":[]}]" );
-            when(roleplayAIService.buildSystemPrompt(any(), anyString(), anyString(), anyList()))
-                    .thenReturn("prompt2");
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
+                    .thenReturn("prompt");
             when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
                     .thenReturn(List.of());
 
@@ -1134,7 +1134,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic topic = saveTopic(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
             saveMission(topic.getId(), "Mission 1", 0);
 
-            when(roleplayAIService.buildSystemPrompt(any(), anyString(), anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
                     .thenReturn("prompt");
             when(roleplayAIService.generateOpeningMessage(anyString()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
@@ -1368,7 +1368,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic topic = saveTopic(theme.getId(), "No Mission Topic", Course.ContentStatus.PUBLISHED, 1, true);
             // No missions saved for this topic
 
-            when(roleplayAIService.buildSystemPrompt(any(), anyString(), anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
                     .thenReturn("prompt");
             when(roleplayAIService.generateOpeningMessage(anyString()))
                     .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"Hello\",\"translation\":\"Hello\",\"romaji\":\"\"}]");
@@ -1515,7 +1515,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic topic = saveTopic(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
             saveMission(topic.getId(), "Mission 1", 0);
 
-            when(roleplayAIService.buildSystemPrompt(any(), anyString(), anyString(), anyList()))
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
                     .thenReturn("prompt");
             when(roleplayAIService.generateOpeningMessage(anyString()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
@@ -1953,7 +1953,7 @@ class SpeakingPracticeIntegrationTest {
              ConversationTopic topic = saveTopic(theme.getId(), "Topic", Course.ContentStatus.PUBLISHED, 1, true);
              saveMission(topic.getId(), "Mission 1", 0);
 
-             when(roleplayAIService.buildSystemPrompt(any(), anyString(), anyString(), anyList()))
+             when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
                      .thenReturn("prompt");
              when(roleplayAIService.generateOpeningMessage(anyString()))
                      .thenReturn("[]");
@@ -2333,7 +2333,8 @@ class SpeakingPracticeIntegrationTest {
             ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
             ConversationTopic topic = saveTopic(theme.getId(), "Topic", Course.ContentStatus.PUBLISHED, 1, true);
 
-            when(roleplayAIService.buildSystemPrompt(any(), anyString(), anyString(), anyList())).thenReturn("prompt");
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
+                    .thenReturn("prompt");
             when(roleplayAIService.generateOpeningMessage(anyString()))
                     .thenThrow(new RuntimeException("429 Too Many Requests"));
 
@@ -2578,7 +2579,8 @@ class SpeakingPracticeIntegrationTest {
             ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
             ConversationTopic topic = saveTopic(theme.getId(), "Topic", Course.ContentStatus.PUBLISHED, 1, true);
 
-            when(roleplayAIService.buildSystemPrompt(any(), anyString(), anyString(), anyList())).thenReturn("prompt");
+            when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), anyString(), anyString(),anyString(),anyString(), anyList()))
+                    .thenReturn("prompt");
             when(roleplayAIService.generateOpeningMessage(anyString())).thenReturn("[]");
 
             int threadCount = 2; // Bắn 2 request tạo session cùng lúc
