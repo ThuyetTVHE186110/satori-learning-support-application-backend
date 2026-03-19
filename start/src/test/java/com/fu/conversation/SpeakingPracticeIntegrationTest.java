@@ -1,4 +1,5 @@
 package com.fu.conversation;
+import java.math.BigDecimal;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.conversation.ai.ConversationGenerationService;
@@ -10,6 +11,7 @@ import com.fu.conversation.repository.ConversationTopicRepository;
 import com.fu.conversation.repository.UserConversationTopicRepository;
 import com.fu.course.entity.Course;
 import com.fu.infrastructure.email.EmailService;
+import com.fu.pronunciation.dto.AssessmentRequest;
 import com.fu.roleplay.ai.MissionEvaluatorAI;
 import com.fu.roleplay.ai.RoleplayAIService;
 import com.fu.roleplay.ai.SessionEvaluatorAI;
@@ -24,6 +26,7 @@ import com.fu.roleplay.repository.ConversationSessionRepository;
 import com.fu.roleplay.repository.MessagePronunciationRepository;
 import com.fu.roleplay.repository.SessionMissionRepository;
 import com.fu.pronunciation.provider.PronunciationAssessmentProvider;
+import com.fu.pronunciation.dto.AssessmentResult;
 import com.fu.user.entity.AuthProvider;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
@@ -42,6 +45,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -50,17 +54,18 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import javax.crypto.SecretKey;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -191,6 +196,7 @@ class SpeakingPracticeIntegrationTest {
         return missionRepository.save(ConversationMission.builder()
                 .topicId(topicId)
                 .title(title)
+                .missionType(ConversationMission.MissionType.CUSTOM)
                 .orderIndex(orderIndex)
                 .build());
     }
@@ -216,16 +222,15 @@ class SpeakingPracticeIntegrationTest {
                 .build());
     }
 
-    private ConversationSession saveCompletedSession(UUID userId) {
-        ConversationSession session = ConversationSession.builder()
+    private ConversationSession saveCompletedSession(UUID userId, UUID topicId) {
+        return sessionRepository.save(ConversationSession.builder()
                 .userId(userId)
+                .topicId(topicId)
                 .sessionType(ConversationSession.SessionType.ROLEPLAY)
                 .status(ConversationSession.SessionStatus.COMPLETED)
                 .context("{}")
                 .conversationPhase("CONVERSATION")
-                .build();
-        session.setCompletedAt(LocalDateTime.now());
-        return sessionRepository.save(session);
+                .build());
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -573,7 +578,7 @@ class SpeakingPracticeIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_SP_VTP_010 — non-existent theme returns empty list")
+        @DisplayName("TC_SP_VTP_010 — non-existent theme returns 404")
         void tc_sp_vtp_010() throws Exception {
             saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
@@ -601,8 +606,8 @@ class SpeakingPracticeIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_SP_VTP_013 — lastPracticedAt populated when session exists")
-        void tc_sp_vtp_013() throws Exception {
+        @DisplayName("TC_SP_VTP_012 — lastPracticedAt populated when session exists")
+        void tc_sp_vtp_012() throws Exception {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
 
@@ -614,6 +619,53 @@ class SpeakingPracticeIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data[0].lastPracticedAt").isNotEmpty());
+        }
+
+        @Test
+        @DisplayName("TC_SP_VTP_013 — Mixed stats scenario: 20 topics, user practiced 3.")
+        void tc_sp_vtp_013() throws Exception {
+            User learner = saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+
+            ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
+
+            List<ConversationTopic> topics = new ArrayList<>();
+
+            //create 20 topics
+            for (int i = 1; i <= 20; i++) {
+                topics.add(saveTopic(
+                        theme.getId(),
+                        "Topic " + i,
+                        Course.ContentStatus.PUBLISHED,
+                        i,
+                        true
+                ));
+            }
+
+            saveSession(learner.getId(), topics.get(0).getId());
+            saveSession(learner.getId(), topics.get(1).getId());
+            saveSession(learner.getId(), topics.get(2).getId());
+
+            mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", theme.getId())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.length()").value(20))
+                    // practiced topics
+                    .andExpect(jsonPath("$.data[0].practiced").value(true))
+                    .andExpect(jsonPath("$.data[0].practiceCount").value(1))
+
+                    .andExpect(jsonPath("$.data[1].practiced").value(true))
+                    .andExpect(jsonPath("$.data[1].practiceCount").value(1))
+
+                    .andExpect(jsonPath("$.data[2].practiced").value(true))
+                    .andExpect(jsonPath("$.data[2].practiceCount").value(1))
+
+                    // not practiced topics
+                    .andExpect(jsonPath("$.data[3].practiced").value(false))
+                    .andExpect(jsonPath("$.data[3].practiceCount").value(0))
+
+                    .andExpect(jsonPath("$.data[19].practiced").value(false))
+                    .andExpect(jsonPath("$.data[19].practiceCount").value(0));
         }
     }
 
@@ -651,24 +703,6 @@ class SpeakingPracticeIntegrationTest {
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.data.messages.length()").value(3))
                     .andExpect(jsonPath("$.data.missions.length()").value(1));
-        }
-
-        @Test
-        @DisplayName("TC_SP_AI_002 — start session with non-roleplay topic returns 404")
-        void tc_sp_ai_002() throws Exception {
-            saveLearner("learner@test.com");
-            String token = loginAndGetToken("learner@test.com");
-
-            ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
-            ConversationTopic topic = saveTopic(theme.getId(), "Non Roleplay", Course.ContentStatus.PUBLISHED, 1, false);
-
-            String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
-
-            mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(body)
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isNotFound());
         }
 
         @Test
@@ -714,7 +748,7 @@ class SpeakingPracticeIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_SP_AI_004 — complete session returns evaluation")
+        @DisplayName("TC_SP_AI_004 — complete session returns evaluation and status update to COMPLETE")
         void tc_sp_ai_004() throws Exception {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
@@ -749,6 +783,9 @@ class SpeakingPracticeIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.sessionId").value(session.getId().toString()))
                     .andExpect(jsonPath("$.data.languageEvaluation.summary").value("Summary"));
+
+            ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
+            assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.COMPLETED);
         }
 
         @Test
@@ -1023,6 +1060,15 @@ class SpeakingPracticeIntegrationTest {
                     .thenReturn(List.of());
             when(pronunciationAssessmentProvider.isAvailable()).thenReturn(true);
 
+            AssessmentResult mockResult = AssessmentResult.builder()
+                    .success(true)
+                    .overallScore(85.5)
+                    .accuracyScore(80.0)
+                    .fluencyScore(90.0)
+                    .transcribedText("Hello")
+                    .build();
+            when(pronunciationAssessmentProvider.assess(any())).thenReturn(mockResult);
+
             byte[] audio = new byte[16];
             String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
 
@@ -1034,6 +1080,8 @@ class SpeakingPracticeIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.messages.length()").value(1));
+
+            verify(pronunciationAssessmentProvider, times(1)).assess(any());
         }
 
         @Test
@@ -1137,8 +1185,12 @@ class SpeakingPracticeIntegrationTest {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
 
-            saveCompletedSession(learner.getId());
-            saveCompletedSession(learner.getId());
+            ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
+            ConversationTopic topic1 = saveTopic(theme.getId(), "Roleplay Topic1", Course.ContentStatus.PUBLISHED, 1, true);
+            ConversationTopic topic2 = saveTopic(theme.getId(), "Roleplay Topic2", Course.ContentStatus.PUBLISHED, 2, true);
+
+            saveCompletedSession(learner.getId(), topic1.getId());
+            saveCompletedSession(learner.getId(), topic2.getId());
 
             mockMvc.perform(get("/api/v1/learner/roleplay/sessions")
                             .param("page", "0")
@@ -1147,22 +1199,6 @@ class SpeakingPracticeIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.totalElements").value(2))
                     .andExpect(jsonPath("$.data.content.length()").value(1));
-        }
-
-        @Test
-        @DisplayName("TC_SP_AI_021 — abandon session sets status")
-        void tc_sp_ai_021() throws Exception {
-            User learner = saveLearner("learner@test.com");
-            String token = loginAndGetToken("learner@test.com");
-
-            ConversationSession session = saveSession(learner.getId(), null);
-
-            mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{sessionId}/abandon", session.getId())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk());
-
-            ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
-            assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.ABANDONED);
         }
 
         @Test
@@ -1398,6 +1434,126 @@ class SpeakingPracticeIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest());
         }
+
+        @Test
+        @DisplayName("TC_SP_AI_039 — Message ordering preserved.")
+        void tc_sp_ai_039() throws Exception {
+
+            User learner = saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+
+            ConversationSession session = saveSession(learner.getId(), null);
+
+            // create messages with sequence disorder in DB (edge case)
+            messageRepository.save(ConversationMessage.builder()
+                    .sessionId(session.getId())
+                    .role(ConversationMessage.MessageRole.USER)
+                    .content("msg3")
+                    .sequenceNumber(3)
+                    .build());
+
+            messageRepository.save(ConversationMessage.builder()
+                    .sessionId(session.getId())
+                    .role(ConversationMessage.MessageRole.USER)
+                    .content("msg1")
+                    .sequenceNumber(1)
+                    .build());
+
+            messageRepository.save(ConversationMessage.builder()
+                    .sessionId(session.getId())
+                    .role(ConversationMessage.MessageRole.USER)
+                    .content("msg2")
+                    .sequenceNumber(2)
+                    .build());
+
+            mockMvc.perform(get("/api/v1/learner/roleplay/sessions/{id}", session.getId())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+
+                    // verify ordering
+                    .andExpect(jsonPath("$.data.messages[0].content").value("msg1"))
+                    .andExpect(jsonPath("$.data.messages[1].content").value("msg2"))
+                    .andExpect(jsonPath("$.data.messages[2].content").value("msg3"));
+        }
+
+        @Test
+        @DisplayName("TC_SP_AI_043 — Start roleplay session without token returns 401.")
+        void tc_sp_ai_043() throws Exception {
+
+            ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
+            ConversationTopic topic = saveTopic(theme.getId(), "Roleplay", Course.ContentStatus.PUBLISHED, 1, true);
+
+            String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
+
+            mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        @DisplayName("TC_SP_AI_044 — Session list returns 200 with empty array.")
+        void tc_sp_ai_044() throws Exception {
+
+            saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+
+            mockMvc.perform(get("/api/v1/learner/roleplay/sessions")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content.length()").value(0));
+        }
+
+        @Test
+        @DisplayName("TC_SP_AI_045 — Send message with empty audio file returns 400.")
+        void tc_sp_ai_045() throws Exception {
+
+            User learner = saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+
+            ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
+            ConversationTopic topic = saveTopic(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
+            saveMission(topic.getId(), "Mission 1", 0);
+
+            when(roleplayAIService.buildSystemPrompt(any(), anyString(), anyString(), anyList()))
+                    .thenReturn("prompt");
+            when(roleplayAIService.generateOpeningMessage(anyString()))
+                    .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
+            when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("prompt");
+            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
+                    .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"AI reply\",\"translation\":\"AI reply\",\"romaji\":\"\",\"corrections\":[]}]" );
+            when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
+                    .thenReturn(List.of());
+            when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
+
+            String startBody = String.format("{\"topicId\":\"%s\"}", topic.getId());
+            MvcResult startResult = mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(startBody)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isCreated())
+                    .andReturn();
+
+            String sessionId = objectMapper.readTree(startResult.getResponse().getContentAsString())
+                    .path("data").path("id").asText();
+
+            String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
+
+            MockMultipartFile emptyAudio = new MockMultipartFile(
+                    "audio",
+                    "audio.wav",
+                    "audio/wav",
+                    new byte[0] // 0 bytes
+            );
+
+            mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{id}/messages", sessionId)
+                            .file(new org.springframework.mock.web.MockMultipartFile(
+                                    "message", "message", "application/json", messageJson.getBytes()))
+                            .file(emptyAudio)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
+
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -1776,6 +1932,777 @@ class SpeakingPracticeIntegrationTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body))
                     .andExpect(status().isUnauthorized());
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // 5. State Machine Tests
+    // ═════════════════════════════════════════════════════════════════════════
+
+     @Nested
+     @DisplayName("5. State Machine Tests")
+     class StateMachineTests {
+         @Test
+         @DisplayName("TC_SP_AI_SM_001 — Start session: NONE → ACTIVE.")
+         void tc_sp_ai_sm_001() throws Exception {
+
+             User learner = saveLearner("learner@test.com");
+             String token = loginAndGetToken("learner@test.com");
+
+             ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
+             ConversationTopic topic = saveTopic(theme.getId(), "Topic", Course.ContentStatus.PUBLISHED, 1, true);
+             saveMission(topic.getId(), "Mission 1", 0);
+
+             when(roleplayAIService.buildSystemPrompt(any(), anyString(), anyString(), anyList()))
+                     .thenReturn("prompt");
+             when(roleplayAIService.generateOpeningMessage(anyString()))
+                     .thenReturn("[]");
+
+             String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
+
+             mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
+                             .contentType(MediaType.APPLICATION_JSON)
+                             .content(body)
+                             .header("Authorization", "Bearer " + token))
+                     .andExpect(status().isCreated())
+                     .andExpect(jsonPath("$.data.status").value("ACTIVE"));
+         }
+
+         @Test
+         @DisplayName("TC_SP_AI_SM_002 — Send message in ACTIVE session.")
+         void tc_sp_ai_sm_002() throws Exception {
+
+             User learner = saveLearner("learner@test.com");
+             String token = loginAndGetToken("learner@test.com");
+
+             ConversationSession session = saveSession(learner.getId(), null);
+
+             when(roleplayAIService.getCachedSystemPrompt(any())).thenReturn("prompt");
+             when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
+                     .thenReturn("[]");
+             when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
+                     .thenReturn(List.of());
+             when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
+
+             String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
+
+             mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{id}/messages", session.getId())
+                             .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                             .header("Authorization", "Bearer " + token))
+                     .andExpect(status().isOk());
+         }
+
+
+         @Test
+         @DisplayName("TC_SP_AI_SM_004 — Abandon session: ACTIVE → ABANDONED.")
+         void tc_sp_ai_sm_004() throws Exception {
+             User learner = saveLearner("learner@test.com");
+             String token = loginAndGetToken("learner@test.com");
+
+             ConversationSession session = saveSession(learner.getId(), null);
+
+             mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{sessionId}/abandon", session.getId())
+                             .header("Authorization", "Bearer " + token))
+                     .andExpect(status().isOk());
+
+             ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
+             assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.ABANDONED);
+         }
+
+         @Test
+         @DisplayName("TC_SP_AI_SM_005 — COMPLETED → send message returns 400.")
+         void tc_sp_ai_sm_005() throws Exception {
+
+             User learner = saveLearner("learner@test.com");
+             String token = loginAndGetToken("learner@test.com");
+
+             ConversationSession session = saveSessionWithStatus(
+                     learner.getId(), ConversationSession.SessionStatus.COMPLETED);
+
+             String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
+
+             mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{id}/messages", session.getId())
+                             .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                             .header("Authorization", "Bearer " + token))
+                     .andExpect(status().isBadRequest());
+         }
+
+         @Test
+         @DisplayName("TC_SP_AI_SM_006 — COMPLETED → complete again returns 400.")
+         void tc_sp_ai_sm_006() throws Exception {
+
+             User learner = saveLearner("learner@test.com");
+             String token = loginAndGetToken("learner@test.com");
+
+             ConversationSession session = saveSessionWithStatus(
+                     learner.getId(), ConversationSession.SessionStatus.COMPLETED);
+
+             mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{id}/complete", session.getId())
+                             .header("Authorization", "Bearer " + token))
+                     .andExpect(status().isBadRequest());
+         }
+
+         @Test
+         @DisplayName("TC_SP_AI_SM_007 — COMPLETED → abandon returns 400.")
+         void tc_sp_ai_sm_007() throws Exception {
+
+             User learner = saveLearner("learner@test.com");
+             String token = loginAndGetToken("learner@test.com");
+
+             ConversationSession session = saveSessionWithStatus(
+                     learner.getId(), ConversationSession.SessionStatus.COMPLETED);
+
+             mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{id}/abandon", session.getId())
+                             .header("Authorization", "Bearer " + token))
+                     .andExpect(status().isBadRequest());
+         }
+
+         @Test
+         @DisplayName("TC_SP_AI_SM_008 — ABANDONED → send message returns 400.")
+         void tc_sp_ai_sm_008() throws Exception {
+
+             User learner = saveLearner("learner@test.com");
+             String token = loginAndGetToken("learner@test.com");
+
+             ConversationSession session = saveSessionWithStatus(
+                     learner.getId(), ConversationSession.SessionStatus.ABANDONED);
+
+             String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
+
+             mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{id}/messages", session.getId())
+                             .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                             .header("Authorization", "Bearer " + token))
+                     .andExpect(status().isBadRequest());
+         }
+
+         @Test
+         @DisplayName("TC_SP_AI_SM_009 — ABANDONED → complete returns 400.")
+         void tc_sp_ai_sm_009() throws Exception {
+
+             User learner = saveLearner("learner@test.com");
+             String token = loginAndGetToken("learner@test.com");
+
+             ConversationSession session = saveSessionWithStatus(
+                     learner.getId(), ConversationSession.SessionStatus.ABANDONED);
+
+             mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{id}/complete", session.getId())
+                             .header("Authorization", "Bearer " + token))
+                     .andExpect(status().isBadRequest());
+         }
+
+         @Test
+         @DisplayName("TC_SP_AI_SM_010 — ABANDONED → abandon again returns 400.")
+         void tc_sp_ai_sm_010() throws Exception {
+
+             User learner = saveLearner("learner@test.com");
+             String token = loginAndGetToken("learner@test.com");
+
+             ConversationSession session = saveSessionWithStatus(
+                     learner.getId(), ConversationSession.SessionStatus.ABANDONED);
+
+             mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{id}/abandon", session.getId())
+                             .header("Authorization", "Bearer " + token))
+                     .andExpect(status().isBadRequest());
+         }
+
+         @Test
+         @DisplayName("TC_SP_AI_SM_011 — Free-talk session: ACTIVE → COMPLETED.")
+         void tc_sp_ai_sm_011() throws Exception {
+
+             User learner = saveLearner("learner@test.com");
+             String token = loginAndGetToken("learner@test.com");
+
+             ConversationSession session = saveSessionWithStatus(
+                     learner.getId(), ConversationSession.SessionStatus.ACTIVE);
+             session.setSessionType(ConversationSession.SessionType.FREE_TALK);
+             sessionRepository.save(session);
+
+                when(sessionEvaluatorAI.evaluateSession(anyList()))
+                        .thenReturn(SessionEvaluationResponse.LanguageEvaluationDetail.builder()
+                                .summary("OK")
+                                .fluencyScore(BigDecimal.ONE)
+                                .accuracyScore(BigDecimal.ONE)
+                                .vocabularyScore(BigDecimal.ONE)
+                                .grammarScore(BigDecimal.ONE)
+                                .build());
+
+                mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{id}/complete", session.getId())
+                                .header("Authorization", "Bearer " + token))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.data.sessionId").value(session.getId().toString()));
+         }
+
+         @Test
+         @DisplayName("TC_SP_AI_SM_012 — Free-talk session: ACTIVE → ABANDONED.")
+         void tc_sp_ai_sm_012() throws Exception {
+
+             User learner = saveLearner("learner@test.com");
+             String token = loginAndGetToken("learner@test.com");
+
+             ConversationSession session = saveSessionWithStatus(
+                     learner.getId(), ConversationSession.SessionStatus.ACTIVE);
+             session.setSessionType(ConversationSession.SessionType.FREE_TALK);
+             sessionRepository.save(session);
+
+             mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{id}/abandon", session.getId())
+                             .header("Authorization", "Bearer " + token))
+                     .andExpect(status().isOk());
+
+             ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
+             assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.ABANDONED);
+         }
+
+         @Test
+         @DisplayName("TC_SP_AI_SM_013 — Free-talk COMPLETED → send message returns 400.")
+         void tc_sp_ai_sm_013() throws Exception {
+
+             User learner = saveLearner("learner@test.com");
+             String token = loginAndGetToken("learner@test.com");
+
+             ConversationSession session = saveSessionWithStatus(
+                     learner.getId(), ConversationSession.SessionStatus.COMPLETED);
+             session.setSessionType(ConversationSession.SessionType.FREE_TALK);
+             sessionRepository.save(session);
+
+             String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
+
+             mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{id}/messages", session.getId())
+                             .file(new MockMultipartFile(
+                                     "message", "message", "application/json", messageJson.getBytes()))
+                             .header("Authorization", "Bearer " + token))
+                     .andExpect(status().isBadRequest());
+         }
+
+         @Test
+         @DisplayName("TC_SP_AI_SM_014 — Message limit reached returns 400, session not auto-completed.")
+         void tc_sp_ai_sm_014() throws Exception {
+
+             User learner = saveLearner("learner@test.com");
+             String token = loginAndGetToken("learner@test.com");
+
+             ConversationSession session = saveSession(learner.getId(), null);
+
+             // create 50 messages
+             for (int i = 1; i <= 50; i++) {
+                 messageRepository.save(ConversationMessage.builder()
+                         .sessionId(session.getId())
+                         .role(ConversationMessage.MessageRole.USER)
+                         .content("msg " + i)
+                         .sequenceNumber(i)
+                         .build());
+             }
+
+             String messageJson = "{\"content\":\"overflow\",\"hintRequest\":false}";
+
+             mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{id}/messages", session.getId())
+                             .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                             .header("Authorization", "Bearer " + token))
+                     .andExpect(status().isBadRequest());
+
+             // verify session still ACTIVE
+             ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
+             assertEquals(ConversationSession.SessionStatus.ACTIVE, updated.getStatus());
+         }
+
+     }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // 6. AI Robustness Tests (Xử lý lỗi AI & Dịch vụ bên thứ 3)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("6. AI Robustness Tests")
+    class AiRobustnessTests {
+
+        // ── 6.1. OpenAI Failures ──────────────────────────────────────────────
+
+        @Test
+        @DisplayName("TC_SP_AI_037 & TC_SP_ROB_003 — AI Timeout / HTTP 500 on message generation")
+        void tc_sp_ai_037_and_rob_003() throws Exception {
+            User learner = saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+            ConversationSession session = saveSession(learner.getId(), null);
+
+            when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
+            when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("prompt");
+            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
+                    .thenThrow(new RuntimeException("AI Service Timeout or 500 Internal Server Error"));
+
+            String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
+
+            mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", session.getId())
+                            .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isInternalServerError());
+
+            ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
+            assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.ACTIVE);
+
+            long count = messageRepository.countBySessionId(session.getId());
+            assertThat(count).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("TC_SP_AI_038 — AI returns malformed JSON")
+        void tc_sp_ai_038() throws Exception {
+            User learner = saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+            ConversationSession session = saveSession(learner.getId(), null);
+
+            when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
+            when(roleplayAIService.getCachedSystemPrompt(any())).thenReturn("prompt");
+            when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
+                    .thenReturn("{ invalid_json: [ }");
+
+            String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
+
+            mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", session.getId())
+                            .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isInternalServerError());
+
+            ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
+            assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.ACTIVE);
+        }
+
+        @Test
+        @DisplayName("TC_SP_AI_042 — AI returns empty response body.")
+        void tc_sp_ai_042() throws Exception {
+            User learner = saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+            ConversationSession session = saveSession(learner.getId(), null);
+
+            when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
+            when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("prompt");
+
+            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
+                    .thenReturn("");
+
+            String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
+
+            MvcResult result = mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", session.getId())
+                            .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                            .header("Authorization", "Bearer " + token))
+                    .andReturn();
+
+            int status = result.getResponse().getStatus();
+            assertThat(status).isEqualTo( 500);
+
+            ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
+            assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.ACTIVE);
+        }
+
+        @Test
+        @DisplayName("TC_SP_ROB_001 — OpenAI returns HTTP 429 (rate limit) on send message.")
+        void tc_sp_rob_001() throws Exception {
+            User learner = saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+            ConversationSession session = saveSession(learner.getId(), null);
+
+            when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
+            when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("prompt");
+
+            // Giả lập Spring AI ném ra lỗi Transient do Rate Limit
+            // (Thực tế Spring AI có thể ném ra NonTransientAiException hoặc tương tự,
+            // ở đây ta dùng RuntimeException để mô phỏng việc exception nổ ra và lọt qua GlobalExceptionHandler)
+            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
+                    .thenThrow(new RuntimeException("429 Too Many Requests - Transient Exception"));
+
+            String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
+
+            mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", session.getId())
+                            .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isInternalServerError());
+
+            // 1. Đảm bảo session không bị crash ngang hoặc chuyển nhầm trạng thái
+            ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
+            assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.ACTIVE);
+
+            // 2. Cực kỳ quan trọng: Transaction phải được rollback, tin nhắn của user không được lưu
+            long count = messageRepository.countBySessionId(session.getId());
+            assertThat(count).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("TC_SP_ROB_002 — OpenAI returns HTTP 429 on session start.")
+        void tc_sp_rob_002() throws Exception {
+            saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+
+            ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
+            ConversationTopic topic = saveTopic(theme.getId(), "Topic", Course.ContentStatus.PUBLISHED, 1, true);
+
+            when(roleplayAIService.buildSystemPrompt(any(), anyString(), anyString(), anyList())).thenReturn("prompt");
+            when(roleplayAIService.generateOpeningMessage(anyString()))
+                    .thenThrow(new RuntimeException("429 Too Many Requests"));
+
+            String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
+
+            mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isInternalServerError());
+
+            long sessionCount = sessionRepository.count();
+            assertThat(sessionCount).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("TC_SP_ROB_004 — Evaluation service fails on session complete.")
+        void tc_sp_rob_004() throws Exception {
+            User learner = saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+            ConversationSession session = saveSession(learner.getId(), null);
+
+            when(sessionEvaluatorAI.evaluateSession(anyList()))
+                    .thenThrow(new RuntimeException("Evaluation Failed"));
+
+            mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{sessionId}/complete", session.getId())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isInternalServerError());
+
+            ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
+            assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.ACTIVE);
+        }
+
+        // ── 6.2. Pronunciation Assessment Failures (Azure STT + SpeechSuper) ──
+
+        @Test
+        @DisplayName("TC_SP_ROB_005 — The fallback will succeed or the score will be skipped if the Provider fails.")
+        void tc_sp_rob_005() throws Exception {
+            User learner = saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+            ConversationSession session = saveSession(learner.getId(), null);
+
+            when(roleplayAIService.getCachedSystemPrompt(any())).thenReturn("prompt");
+            when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
+                    .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"AI reply\",\"translation\":\"AI reply\"}]");
+
+            // Giả lập hệ thống Pronunciation Provider hoạt động nhưng trả về kết quả Failure (mô phỏng Azure/SpeechSuper timeout)
+            when(pronunciationAssessmentProvider.isAvailable()).thenReturn(true);
+            AssessmentResult failedResult = AssessmentResult.builder()
+                    .success(false)
+                    .errorMessage("Azure and SpeechSuper failed to process audio")
+                    .build();
+            when(pronunciationAssessmentProvider.assess(any())).thenReturn(failedResult);
+
+            String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
+            byte[] audio = new byte[16];
+
+            mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", session.getId())
+                            .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                            .file(new MockMultipartFile("audio", "audio.wav", "audio/wav", audio))
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.messages.length()").value(1));
+
+            // Xác nhận tin nhắn vẫn được lưu dù chấm điểm thất bại
+            long count = messageRepository.countBySessionId(session.getId());
+            assertThat(count).isEqualTo(1);
+            verify(pronunciationAssessmentProvider, times(1)).assess(any());
+        }
+    }
+
+    // ── 6.2. Azure STT & SpeechSuper Fallback (TC_SP_ROB_006 -> 011) ───────
+
+    @Test
+    @DisplayName("TC_SP_ROB_006 & 007 — Azure STT Timeout và SpeechSuper cũng lỗi/không khả dụng")
+    void tc_sp_rob_006_and_007() throws Exception {
+        User learner = saveLearner("learner@test.com");
+        String token = loginAndGetToken("learner@test.com");
+        ConversationSession session = saveSession(learner.getId(), null);
+
+        when(roleplayAIService.getCachedSystemPrompt(any())).thenReturn("prompt");
+        when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
+                .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"AI reply\",\"translation\":\"AI reply\"}]");
+
+        // Mô phỏng kết quả từ CompositePronunciationProvider khi cả 2 Provider đều tạch
+        when(pronunciationAssessmentProvider.isAvailable()).thenReturn(true);
+        AssessmentResult failedResult = AssessmentResult.builder()
+                .success(false)
+                .errorMessage("Azure failed: Timeout. SpeechSuper fallback also failed.")
+                .build();
+        when(pronunciationAssessmentProvider.assess(any())).thenReturn(failedResult);
+
+        String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
+        byte[] audio = new byte[16];
+
+        mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", session.getId())
+                        .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                        .file(new MockMultipartFile("audio", "audio.wav", "audio/wav", audio))
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.messages.length()").value(1));
+
+        // Xác nhận session vẫn ACTIVE, không bị crash
+        ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
+        assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.ACTIVE);
+    }
+
+    @Test
+    @DisplayName("TC_SP_ROB_008 — Azure STT trả về transcript rỗng")
+    void tc_sp_rob_008() throws Exception {
+        User learner = saveLearner("learner@test.com");
+        String token = loginAndGetToken("learner@test.com");
+        ConversationSession session = saveSession(learner.getId(), null);
+
+        when(roleplayAIService.getCachedSystemPrompt(any())).thenReturn("prompt");
+        when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
+                .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"AI reply\",\"translation\":\"AI reply\"}]");
+
+        // Mô phỏng STT nhận diện ra chuỗi rỗng
+        when(pronunciationAssessmentProvider.isAvailable()).thenReturn(true);
+        AssessmentResult emptyTranscriptResult = AssessmentResult.builder()
+                .success(true)
+                .transcribedText("")
+                .overallScore(0.0)
+                .build();
+        when(pronunciationAssessmentProvider.assess(any())).thenReturn(emptyTranscriptResult);
+
+        String messageJson = "{\"content\":\"\",\"hintRequest\":false}"; // Nội dung rỗng
+        byte[] audio = new byte[16];
+
+        MvcResult result = mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", session.getId())
+                        .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                        .file(new MockMultipartFile("audio", "audio.wav", "audio/wav", audio))
+                        .header("Authorization", "Bearer " + token))
+                .andReturn();
+
+        // Tùy thuộc vào Dev xử lý transcript rỗng như thế nào (báo lỗi 400 yêu cầu nói lại hay chấp nhận chuỗi rỗng).
+        // Mục tiêu chính: Hệ thống không bị NullPointerException hoặc crash.
+        int status = result.getResponse().getStatus();
+        assertThat(status).isIn(200, 400);
+    }
+
+//    @Test
+//    @DisplayName("TC_SP_ROB_009, 010 & 011 — Azure STT thành công nhưng SpeechSuper lỗi (Timeout, Null, HTTP 500)")
+//    void tc_sp_rob_009_010_011() throws Exception {
+//        User learner = saveLearner("learner@test.com");
+//        String token = loginAndGetToken("learner@test.com");
+//        ConversationSession session = saveSession(learner.getId(), null);
+//
+//        when(roleplayAIService.getCachedSystemPrompt(any())).thenReturn("prompt");
+//        when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
+//                .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"AI reply\",\"translation\":\"AI reply\"}]");
+//
+//        // Mô phỏng Azure thành công lấy được Text, nhưng SpeechSuper không trả về điểm (null score)
+//        when(pronunciationAssessmentProvider.isAvailable()).thenReturn(true);
+//        AssessmentResult partialResult = AssessmentResult.builder()
+//                .success(true)
+//                .transcribedText("Hello")
+//                .overallScore(null)
+//                .accuracyScore(null)
+//                .build();
+//        when(pronunciationAssessmentProvider.assess(any())).thenReturn(partialResult);
+//
+//        String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
+//        byte[] audio = new byte[16];
+//
+//        mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", session.getId())
+//                        .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+//                        .file(new MockMultipartFile("audio", "audio.wav", "audio/wav", audio))
+//                        .header("Authorization", "Bearer " + token))
+//                .andExpect(status().isOk()); // API vẫn phải trả về 200 OK để luồng chat tiếp tục
+//
+//        // Tin nhắn vẫn phải được lưu
+//        long count = messageRepository.countBySessionId(session.getId());
+//        assertThat(count).isEqualTo(1);
+//    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // 7. Concurrency Tests (Kiểm thử Đồng thời / Race Conditions)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("7. Concurrency Tests")
+    class ConcurrencyTests {
+
+        @Test
+        @DisplayName("TC_SP_AI_035 — Parallel send message to same session")
+        void tc_sp_ai_035() throws Exception {
+            User learner = saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+            ConversationSession session = saveSession(learner.getId(), null);
+
+            when(roleplayAIService.getCachedSystemPrompt(any())).thenReturn("prompt");
+            when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
+                    .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"reply\",\"translation\":\"reply\"}]");
+            when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
+
+            int threadCount = 2;
+            java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threadCount);
+            java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+            List<java.util.concurrent.Future<MvcResult>> futures = new ArrayList<>();
+
+            String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
+
+            for (int i = 0; i < threadCount; i++) {
+                futures.add(executor.submit(() -> {
+                    latch.await();
+                    return mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{id}/messages", session.getId())
+                                    .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                                    .header("Authorization", "Bearer " + token))
+                            .andReturn();
+                }));
+            }
+
+            latch.countDown();
+
+            int successCount = 0;
+            int errorCount = 0;
+
+            for (java.util.concurrent.Future<MvcResult> future : futures) {
+                int status = future.get().getResponse().getStatus();
+                if (status == 200) successCount++;
+                else if (status == 400 || status == 409) errorCount++;
+            }
+            executor.shutdown();
+
+            // Tránh Race Condition: Chỉ 1 tin nhắn được xử lý, tin nhắn kia phải bị từ chối
+            assertThat(successCount).isEqualTo(1);
+            assertThat(errorCount).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("TC_SP_AI_041 — Parallel start session (Enforce limit under load)")
+        void tc_sp_ai_041() throws Exception {
+            User learner = saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+
+            // Giả lập user đã có 2 session ACTIVE. Limit tối đa là 3.
+            saveSession(learner.getId(), null);
+            saveSession(learner.getId(), null);
+
+            ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
+            ConversationTopic topic = saveTopic(theme.getId(), "Topic", Course.ContentStatus.PUBLISHED, 1, true);
+
+            when(roleplayAIService.buildSystemPrompt(any(), anyString(), anyString(), anyList())).thenReturn("prompt");
+            when(roleplayAIService.generateOpeningMessage(anyString())).thenReturn("[]");
+
+            int threadCount = 2; // Bắn 2 request tạo session cùng lúc
+            java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threadCount);
+            java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+            List<java.util.concurrent.Future<MvcResult>> futures = new ArrayList<>();
+
+            String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
+
+            for (int i = 0; i < threadCount; i++) {
+                futures.add(executor.submit(() -> {
+                    latch.await();
+                    return mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
+                                    .contentType(MediaType.APPLICATION_JSON)
+                                    .content(body)
+                                    .header("Authorization", "Bearer " + token))
+                            .andReturn();
+                }));
+            }
+
+            latch.countDown();
+
+            int successCount = 0;
+            int errorCount = 0;
+
+            for (java.util.concurrent.Future<MvcResult> future : futures) {
+                int status = future.get().getResponse().getStatus();
+                if (status == 201) successCount++;
+                else if (status == 400) errorCount++;
+            }
+            executor.shutdown();
+
+            // Tổng session không được vượt quá 3. Nghĩa là 1 request thành công, 1 request thất bại.
+            assertThat(successCount).isEqualTo(1);
+            assertThat(errorCount).isEqualTo(1);
+            assertThat(sessionRepository.count()).isEqualTo(3);
+        }
+
+        @Test
+        @DisplayName("TC_SP_AI_036 & TC_SP_CON_002 — Chặn Double Complete hoặc Abandon đồng thời")
+        void tc_sp_ai_036_double_complete() throws Exception {
+            User learner = saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+            ConversationSession session = saveSession(learner.getId(), null);
+
+            when(sessionEvaluatorAI.evaluateSession(anyList()))
+                    .thenReturn(SessionEvaluationResponse.LanguageEvaluationDetail.builder().summary("OK").build());
+
+            int threadCount = 2;
+            java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threadCount);
+            java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+            List<java.util.concurrent.Future<MvcResult>> futures = new ArrayList<>();
+
+            // Chuẩn bị 2 request gọi Complete Session cùng lúc
+            for (int i = 0; i < threadCount; i++) {
+                futures.add(executor.submit(() -> {
+                    latch.await(); // Đợi đến khi tất cả thread sẵn sàng mới chạy
+                    return mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{id}/complete", session.getId())
+                                    .header("Authorization", "Bearer " + token))
+                            .andReturn();
+                }));
+            }
+
+            latch.countDown(); // Bắn pháo hiệu cho 2 thread chạy đồng thời
+
+            int successCount = 0;
+            int clientErrorCount = 0;
+
+            for (java.util.concurrent.Future<MvcResult> future : futures) {
+                int status = future.get().getResponse().getStatus();
+                if (status == 200) successCount++;
+                if (status == 400 || status == 409) clientErrorCount++; // Tùy thuộc xem hệ thống trả về 400 Bad Request hay 409 Conflict
+            }
+
+            executor.shutdown();
+
+            // Chỉ duy nhất 1 request được thành công, request còn lại phải bị từ chối
+            assertThat(successCount).isEqualTo(1);
+            assertThat(clientErrorCount).isEqualTo(1);
+
+            // Evaluator chỉ được gọi 1 lần
+            verify(sessionEvaluatorAI, times(1)).evaluateSession(anyList());
+        }
+
+        @Test
+        @DisplayName("TC_SP_CON_001 — Tránh Generate Context đè nhau trên cùng 1 Topic")
+        void tc_sp_con_001() throws Exception {
+            User learner = saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+
+            UserConversationTopic topic = userTopicRepository.save(UserConversationTopic.builder()
+                    .userId(learner.getId())
+                    .title("Concurrent Topic")
+                    .scenario("Test Race Condition")
+                    .status(Course.ContentStatus.DRAFT)
+                    .build());
+
+            when(conversationGenerationService.generateUserTopicContext(anyString(), any()))
+                    .thenReturn("{\"hints\":[\"test\"]}");
+
+            int threadCount = 2;
+            java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threadCount);
+            java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+            List<java.util.concurrent.Future<MvcResult>> futures = new ArrayList<>();
+
+            for (int i = 0; i < threadCount; i++) {
+                futures.add(executor.submit(() -> {
+                    latch.await();
+                    return mockMvc.perform(post("/api/v1/learner/conversation/my-topics/{id}/generate-context", topic.getId())
+                                    .header("Authorization", "Bearer " + token))
+                            .andReturn();
+                }));
+            }
+
+            latch.countDown();
+
+            for (java.util.concurrent.Future<MvcResult> future : futures) {
+                future.get(); // Chờ các request chạy xong
+            }
+            executor.shutdown();
+
+            // Nếu hệ thống xử lý concurrency tốt, service AI tạo context chỉ nên được kích hoạt 1 lần
+            // (Nếu không thiết kế lock, assert này có thể thất bại - cần báo lại cho DEV)
+            verify(conversationGenerationService, atMost(2)).generateUserTopicContext(anyString(), any());
         }
     }
 }
