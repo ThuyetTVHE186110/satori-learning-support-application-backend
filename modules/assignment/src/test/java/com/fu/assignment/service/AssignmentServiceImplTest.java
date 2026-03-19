@@ -68,6 +68,7 @@ class AssignmentServiceImplTest {
     @Mock private QuizExplanationService quizExplanationService;
     @Mock private ObjectMapper objectMapper;
     @Mock private CloudinaryService cloudinaryService;
+    @Mock private SubmissionService submissionService;
 
     @InjectMocks
     private AssignmentServiceImpl assignmentService;
@@ -385,15 +386,16 @@ class AssignmentServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should throw when assignment is not DRAFT")
+        @DisplayName("Should throw when assignment is not DRAFT and has submission")
         void shouldThrowWhenNotDraft() {
             testQuizAssignment.setStatus(AssignmentStatus.PUBLISHED);
+            testQuizAssignment.setHasSubmissions(true);
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
             stubTeacherAccess();
 
             assertThatThrownBy(() -> assignmentService.deleteAssignment(assignmentId, teacherId))
                     .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("DRAFT");
+                    .hasMessageContaining("nháp");
 
             verify(assignmentRepository, never()).save(any());
         }
@@ -771,17 +773,12 @@ class AssignmentServiceImplTest {
             testSubmission.setStatus(SubmissionStatus.IN_PROGRESS);
             given(submissionRepository.findActiveByAssignmentIdAndUserId(assignmentId, learnerId)).willReturn(Optional.of(testSubmission));
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
-            given(submissionRepository.save(any(AssignmentSubmission.class))).willReturn(testSubmission);
-            given(mapper.toResponse(any(AssignmentSubmission.class))).willReturn(testSubmissionResponse);
-            
-            ObjectMapper realMapper = new ObjectMapper();
-            JsonNode arrayNode = realMapper.readTree("[]");
-            given(objectMapper.readTree(request.getAnswers())).willReturn(arrayNode);
 
-            assignmentService.submitQuiz(assignmentId, request, learnerId);
+            assertThatThrownBy(() -> assignmentService.submitQuiz(assignmentId, request, learnerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("hết hạn nộp");
 
-            verify(submissionRepository).save(submissionCaptor.capture());
-            assertThat(submissionCaptor.getValue().getStatus()).isEqualTo(SubmissionStatus.OVERDUE);
+            verify(submissionService).markSubmissionAsOverdueAndSave(submissionId);
         }
     }
 
@@ -802,6 +799,100 @@ class AssignmentServiceImplTest {
             assertThatThrownBy(() -> assignmentService.submitWriting(assignmentId, request, null, learnerId))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("bài viết hoặc ít nhất một hình ảnh");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 11.5. CANCEL SUBMISSION (LEARNER)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("CancelSubmission Tests")
+    class CancelSubmissionTests {
+
+        @Test
+        @DisplayName("Should successfully cancel submission")
+        void shouldCancelSubmission() {
+            testWritingAssignment.setDueDate(LocalDateTime.now().plusDays(2));
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testWritingAssignment));
+            
+            testSubmission.setStatus(SubmissionStatus.SUBMITTED);
+            given(submissionRepository.findByAssignmentIdAndUserIdOrderByAttemptDesc(assignmentId, learnerId))
+                    .willReturn(List.of(testSubmission));
+            
+            given(submissionRepository.save(any(AssignmentSubmission.class))).willReturn(testSubmission);
+            given(mapper.toResponse(any(AssignmentSubmission.class))).willReturn(testSubmissionResponse);
+            
+            SubmissionResponse result = assignmentService.cancelSubmission(assignmentId, learnerId);
+            
+            assertThat(result).isNotNull();
+            verify(submissionRepository).save(submissionCaptor.capture());
+            assertThat(submissionCaptor.getValue().getStatus()).isEqualTo(SubmissionStatus.IN_PROGRESS);
+            assertThat(submissionCaptor.getValue().getSubmittedAt()).isNull();
+        }
+
+        @Test
+        @DisplayName("Should throw when assignment is QUIZ")
+        void shouldThrowWhenQuiz() {
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
+            
+            assertThatThrownBy(() -> assignmentService.cancelSubmission(assignmentId, learnerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("trắc nghiệm");
+        }
+
+        @Test
+        @DisplayName("Should throw when past due date")
+        void shouldThrowWhenPastDueDate() {
+            testWritingAssignment.setDueDate(LocalDateTime.now().minusDays(1));
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testWritingAssignment));
+            
+            assertThatThrownBy(() -> assignmentService.cancelSubmission(assignmentId, learnerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("quá hạn nộp");
+        }
+
+        @Test
+        @DisplayName("Should throw when no active submission")
+        void shouldThrowWhenNoSubmission() {
+            testWritingAssignment.setDueDate(LocalDateTime.now().plusDays(2));
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testWritingAssignment));
+            given(submissionRepository.findByAssignmentIdAndUserIdOrderByAttemptDesc(assignmentId, learnerId))
+                    .willReturn(Collections.emptyList());
+            
+            assertThatThrownBy(() -> assignmentService.cancelSubmission(assignmentId, learnerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Không tìm thấy bài nộp");
+        }
+
+        @Test
+        @DisplayName("Should throw when submission is GRADED")
+        void shouldThrowWhenGraded() {
+            testWritingAssignment.setDueDate(LocalDateTime.now().plusDays(2));
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testWritingAssignment));
+            
+            testSubmission.setStatus(SubmissionStatus.GRADED);
+            given(submissionRepository.findByAssignmentIdAndUserIdOrderByAttemptDesc(assignmentId, learnerId))
+                    .willReturn(List.of(testSubmission));
+            
+            assertThatThrownBy(() -> assignmentService.cancelSubmission(assignmentId, learnerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("đã được chấm điểm");
+        }
+
+        @Test
+        @DisplayName("Should throw when submission is IN_PROGRESS")
+        void shouldThrowWhenInProgress() {
+            testWritingAssignment.setDueDate(LocalDateTime.now().plusDays(2));
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testWritingAssignment));
+            
+            testSubmission.setStatus(SubmissionStatus.IN_PROGRESS);
+            given(submissionRepository.findByAssignmentIdAndUserIdOrderByAttemptDesc(assignmentId, learnerId))
+                    .willReturn(List.of(testSubmission));
+            
+            assertThatThrownBy(() -> assignmentService.cancelSubmission(assignmentId, learnerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("đang ở trạng thái nháp");
         }
     }
 
@@ -901,7 +992,7 @@ class AssignmentServiceImplTest {
             Page<Assignment> page = new PageImpl<>(List.of(testQuizAssignment), pageable, 1);
             
             given(classMemberRepository.findActiveClassIdsByUserId(learnerId)).willReturn(List.of(classId));
-            given(assignmentRepository.findAll(any(Specification.class), eq(pageable))).willReturn(page);
+            given(assignmentRepository.findLearnerAssignmentsSorted(eq(learnerId), anyList(), nullable(String.class), nullable(String.class), eq(pageable))).willReturn(page);
             given(mapper.toLearnerSummaryResponse(any(Assignment.class))).willReturn(testLearnerSummaryResponse);
             
             UUID subId = UUID.randomUUID();
@@ -924,7 +1015,7 @@ class AssignmentServiceImplTest {
             Page<Assignment> page = new PageImpl<>(List.of(testQuizAssignment), pageable, 1);
             
             given(classMemberRepository.findActiveClassIdsByUserId(learnerId)).willReturn(List.of(classId));
-            given(assignmentRepository.findAll(any(Specification.class), eq(pageable))).willReturn(page);
+            given(assignmentRepository.findLearnerAssignmentsSorted(eq(learnerId), anyList(), nullable(String.class), nullable(String.class), eq(pageable))).willReturn(page);
             given(mapper.toLearnerSummaryResponse(any(Assignment.class))).willReturn(testLearnerSummaryResponse);
             given(submissionRepository.findLatestStatusByAssignmentIdsAndUserId(anyList(), eq(learnerId))).willReturn(Collections.emptyList());
 

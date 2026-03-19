@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 /**
  * Configuration properties for the OCR subsystem.
  * Bound from curriculum-import.ocr.* in application.yml.
+ * Uses Google Cloud Vision DOCUMENT_TEXT_DETECTION.
  */
 @Data
 @Component
@@ -14,64 +15,40 @@ import org.springframework.stereotype.Component;
 public class OcrProperties {
 
     /**
-     * OCR provider selection.
-     * <ul>
-     *   <li>{@code paddle} — self-hosted PaddleOCR sidecar (default, free)</li>
-     *   <li>{@code google_vision} — Google Cloud Vision Document OCR API
-     *       (better accuracy for scanned books; requires GOOGLE_APPLICATION_CREDENTIALS)</li>
-     *   <li>{@code auto} — try Google Vision first, fall back to PaddleOCR on error</li>
-     * </ul>
-     */
-    private String provider = "paddle";
-
-    /** Base URL of the PaddleOCR FastAPI sidecar. */
-    private String serviceUrl = "http://localhost:8090";
-
-    /** HTTP connect + read timeout in seconds. */
-    private int timeoutSeconds = 60;
-
-    /**
-     * Whether the OCR sidecar is enabled.
+     * Whether OCR is enabled.
      * When false, ScannedPdfIngestionService raises an error instead of calling OCR.
      */
     private boolean enabled = true;
 
     /**
      * DPI used when rendering PDF pages to images.
-     * 200 DPI gives good accuracy while keeping image size manageable (~1.5 MB/page).
-     * Use 300 for higher accuracy on dense kanji text (at higher memory cost).
+     * 300 DPI is recommended for MnN scanned pages (furigana strokes preserved).
+     * 150 DPI is a fallback for memory-constrained environments.
      */
-    private int renderDpi = 200;
+    private int renderDpi = 300;
 
     /**
      * Characters-per-page threshold below which a PDF is treated as scanned.
-     * A text-based PDF with Japanese content typically has >200 chars/page.
-     * Scanned PDFs usually yield < 50 chars/page from PDFBox text extraction.
+     * Scanned PDFs usually yield fewer than 50 chars/page from PDFBox text extraction.
      */
     private double scannedPageThreshold = 100.0;
 
     /**
      * Minimum OCR confidence (0-1) to accept a page's result.
-     * Pages with lower confidence are still included but flagged in logs.
+     * Pages below this threshold are still included but flagged in logs.
      */
     private double minConfidence = 0.5;
 
     /**
      * Path to the Google Cloud service-account JSON key file.
-     * Used when {@code provider=google_vision} or {@code provider=auto}.
-     * If empty, the client falls back to Application Default Credentials (ADC /
-     * {@code GOOGLE_APPLICATION_CREDENTIALS} env var).
-     *
-     * <p>Example: {@code environment/secrets/satori-489709-ce922a405186.json}
+     * If empty, falls back to Application Default Credentials
+     * ({@code GOOGLE_APPLICATION_CREDENTIALS} env var).
      */
     private String credentialsFile = "";
 
     /**
      * Number of pages sent in a single {@code batchAnnotateImages} call to Google Vision.
      * Google Vision supports up to 16 images per batch request.
-     * Each page at 300 DPI ≈ 25 MB as a raw image, but is JPEG-encoded to ~200-500 KB
-     * before sending, so memory overhead per batch is small.
-     * Only used when {@code provider=google_vision} or {@code provider=auto}.
      */
     private int googleVisionBatchSize = 8;
 }

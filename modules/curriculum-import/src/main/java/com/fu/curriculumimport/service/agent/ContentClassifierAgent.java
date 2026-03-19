@@ -2,6 +2,7 @@ package com.fu.curriculumimport.service.agent;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.common.ai.PromptFragment;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.service.ingestion.MnNSectionSplitter;
 import com.fu.curriculumimport.util.LlmResponseUtils;
@@ -40,12 +41,10 @@ public class ContentClassifierAgent {
         this.objectMapper = objectMapper;
     }
 
-    private static final String SYSTEM_PROMPT = """
-            You are a Japanese language textbook content classifier.
-            Analyze the given text and classify what type of educational content it contains.
-            
-            You MUST respond ONLY with valid JSON. No explanations, no markdown code fences.
-            """;
+    private static final String SYSTEM_PROMPT =
+            "You are a Japanese language textbook content classifier.\n" +
+            "Analyze the given text and classify what type of educational content it contains.\n\n" +
+            PromptFragment.JSON_ONLY;
 
     private static final String CLASSIFICATION_PROMPT = """
             Classify the following Japanese language textbook content from pages %d-%d.

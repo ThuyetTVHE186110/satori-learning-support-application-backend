@@ -97,80 +97,6 @@ services:
         depends_on:
             - redis
 
-    # ==================== PaddleOCR Microservice ====================
-    # Dual-language OCR for Japanese + Vietnamese text extraction (PaddleOCR 4.0)
-    # Built from environment/docker/ocr-service/
-    # First start downloads both model weights (~3-5 min); subsequent starts
-    # are fast because weights are cached in the named volume below.
-    ocr-service:
-        build:
-            context: ./docker/ocr-service
-            dockerfile: Dockerfile
-        container_name: satori-ocr
-        restart: unless-stopped
-        ports:
-            - "8090:8090"
-        volumes:
-            # Persist downloaded model weights across container restarts
-            - ocr_model_cache:/root/.paddleocr
-            # Google Vision key (optional — only needed when OCR_PROVIDER=google_vision or auto)
-            # Place your service account JSON at environment/secrets/google-vision-key.json
-            # and uncomment the line below:
-            - ./secrets:/app/secrets:ro
-        environment:
-            # Google Cloud Vision credentials (optional)
-            # Uncomment and set path if using google_vision or auto provider:
-            GOOGLE_APPLICATION_CREDENTIALS: /app/secrets/satori-489709-ce922a405186.json
-        networks:
-            - satori-network
-        # OCR is CPU-heavy; cap resources so other services aren't starved
-        # 4G needed for two PaddleOCR models (japan + vi) loaded simultaneously
-        deploy:
-            resources:
-                limits:
-                    memory: 4G
-                    cpus: "2.0"
-                reservations:
-                    memory: 1.5G
-        healthcheck:
-            test:
-                ["CMD-SHELL", "curl -sf http://localhost:8090/health || exit 1"]
-            interval: 30s
-            timeout: 10s
-            retries: 5
-            start_period: 240s # Allow time for dual model download on first start
-
-    # ==================== Japanese Pronunciation Assessment Microservice ====================
-    # Assesses pitch accent and mora timing for Japanese speech using pyopenjtalk + librosa.
-    # First build installs pyopenjtalk (compiles from source, ~3-5 min); subsequent starts are fast.
-    jp-pronunciation:
-        build:
-            context: ./docker/jp-pronunciation-service
-            dockerfile: Dockerfile
-        container_name: satori-jp-pronunciation
-        restart: unless-stopped
-        ports:
-            - "8091:8091"
-        networks:
-            - satori-network
-        deploy:
-            resources:
-                limits:
-                    memory: 2G
-                    cpus: "2.0"
-                reservations:
-                    memory: 512M
-        healthcheck:
-            test:
-                [
-                    "CMD-SHELL",
-                    'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8091/health'')" || exit 1',
-                ]
-            interval: 30s
-            timeout: 10s
-            retries: 5
-            start_period: 60s
-
 networks:
     satori-network:
         driver: bridge
@@ -180,7 +106,3 @@ volumes:
         name: satori-postgres-data
     redis_data:
         name: satori-redis-data
-    ocr_model_cache:
-        name: satori-ocr-model-cache
-        # Stores PaddleOCR Japanese + Vietnamese model weights (~600 MB).
-        # Remove with: docker volume rm satori-ocr-model-cache

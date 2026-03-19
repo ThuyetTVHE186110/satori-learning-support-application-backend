@@ -108,7 +108,7 @@ ON CONFLICT (id) DO NOTHING;
 -- 4. Create Assignments
 -- Assignment 1: Quiz (PUBLISHED)
 INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
-VALUES (v_quiz1_id, '++Kiểm tra++ [語彙]{ごい} & [文法]{ぶんぽう} [第一課]{だいいっか}', 'Bài kiểm tra nhanh về kiến thức cơ bản đã học trong tuần đầu tiên.', 'QUIZ', v_class_id, CURRENT_TIMESTAMP + INTERVAL '7 days', 'PUBLISHED', TRUE, v_teacher_id)
+VALUES (v_quiz1_id, 'Kiểm tra Từ vựng & Ngữ pháp bài 1', 'Bài kiểm tra nhanh về kiến thức cơ bản đã học trong tuần đầu tiên.', 'QUIZ', v_class_id, CURRENT_TIMESTAMP + INTERVAL '7 days', 'PUBLISHED', TRUE, v_teacher_id)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO assignment.assignment_questions (assignment_id, question_id, order_index, points)
@@ -117,7 +117,7 @@ ON CONFLICT (assignment_id, question_id) DO NOTHING;
 
 -- Assignment 2: Writing (PUBLISHED)
 INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
-VALUES (v_writing1_id, 'Giới thiệu bản thân (自己紹介)', 'Hãy viết một đoạn văn ngắn (50-100 chữ) giới thiệu về bản thân bằng tiếng Nhật.', 'WRITING', v_class_id, CURRENT_TIMESTAMP + INTERVAL '10 days', 'PUBLISHED', TRUE, v_teacher_id)
+VALUES (v_writing1_id, 'Giới thiệu bản thân', 'Hãy viết một đoạn văn ngắn (50-100 chữ) giới thiệu về bản thân bằng tiếng Nhật.', 'WRITING', v_class_id, CURRENT_TIMESTAMP + INTERVAL '10 days', 'PUBLISHED', TRUE, v_teacher_id)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO assignment.writing_assignments (assignment_id, prompt)
@@ -154,7 +154,7 @@ ON CONFLICT (assignment_id, question_id) DO NOTHING;
 
 -- Assignment 8: Quiz Kanji (PUBLISHED)
 INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
-VALUES (v_quiz6_id, '++[漢字]{かんじ}++ cơ bản: [自然]{しぜん}', 'Nhận diện các chữ Hán cơ bản về chủ đề thiên nhiên.', 'QUIZ', v_class_id, CURRENT_TIMESTAMP + INTERVAL '12 days', 'PUBLISHED', FALSE, v_teacher_id)
+VALUES (v_quiz6_id, 'Hán tự cơ bản: Thiên nhiên', 'Nhận diện các chữ Hán cơ bản về chủ đề thiên nhiên.', 'QUIZ', v_class_id, CURRENT_TIMESTAMP + INTERVAL '12 days', 'PUBLISHED', FALSE, v_teacher_id)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO assignment.assignment_questions (assignment_id, question_id, order_index, points)
@@ -173,7 +173,7 @@ ON CONFLICT (assignment_id) DO NOTHING;
 -- 5. Create Submissions
 -- Learner 1: Graded Quiz
 INSERT INTO assignment.assignment_submissions (id, assignment_id, user_id, status, started_at, submitted_at, score, correct_count, total_questions, time_spent_seconds, answers, graded_by, graded_at)
-VALUES (uuid_generate_v4(), v_quiz1_id, v_learner1_id, 'GRADED', CURRENT_TIMESTAMP - INTERVAL '2 days', CURRENT_TIMESTAMP - INTERVAL '2 days 1 hour', 10.0, 3, 3, 600, 
+VALUES (uuid_generate_v4(), v_quiz1_id, v_learner1_id, 'GRADED', CURRENT_TIMESTAMP - INTERVAL '2 days', CURRENT_TIMESTAMP - INTERVAL '2 days 1 hour', 100.0, 3, 3, 600,
     format('[{"questionId": "%s", "selectedAnswer": "A", "isCorrect": true}, {"questionId": "%s", "selectedAnswer": "A", "isCorrect": true}, {"questionId": "%s", "selectedAnswer": "A", "isCorrect": true}]', v_q1_id, v_q2_id, v_q3_id)::JSONB,
     v_teacher_id, CURRENT_TIMESTAMP - INTERVAL '1 day')
 ON CONFLICT DO NOTHING;

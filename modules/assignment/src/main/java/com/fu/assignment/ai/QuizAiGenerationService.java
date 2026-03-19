@@ -9,6 +9,7 @@ import com.fu.assignment.dto.response.QuizQuestionResponse;
 import com.fu.assignment.entity.QuizQuestion;
 import com.fu.assignment.mapper.AssignmentMapper;
 import com.fu.assignment.util.MarkdownUtils;
+import com.fu.common.ai.PromptUtils;
 import com.fu.common.exception.BusinessException;
 import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.repository.ClassRepository;
@@ -216,7 +217,7 @@ public class QuizAiGenerationService {
         }
 
         // Strip markdown code fences (```json ... ```)
-        rawContent = stripMarkdownCodeFences(rawContent);
+        rawContent = PromptUtils.cleanMarkdownFences(rawContent, rawContent);
 
         // 1. Try normal parse first
         try {
@@ -293,23 +294,6 @@ public class QuizAiGenerationService {
         return List.of();
     }
 
-    /**
-     * Strip markdown code fences ({@code ```json ... ```}) from AI response.
-     */
-    private String stripMarkdownCodeFences(String content) {
-        if (content == null) return null;
-        String trimmed = content.trim();
-        if (trimmed.startsWith("```")) {
-            int firstNewline = trimmed.indexOf('\n');
-            if (firstNewline > 0) {
-                trimmed = trimmed.substring(firstNewline + 1);
-            }
-            if (trimmed.endsWith("```")) {
-                trimmed = trimmed.substring(0, trimmed.length() - 3).trim();
-            }
-        }
-        return trimmed;
-    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // MAPPING — AI DTO → Preview Response (NO database interaction)

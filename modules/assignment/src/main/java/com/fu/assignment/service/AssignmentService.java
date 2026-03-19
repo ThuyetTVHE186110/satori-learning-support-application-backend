@@ -102,4 +102,7 @@ public interface AssignmentService {
     Page<SubmissionSummaryResponse> getMySubmissions(UUID learnerId, Pageable pageable);
 
     SubmissionResponse getMySubmission(UUID submissionId, UUID learnerId);
+
+    /** Cancel a SUBMITTED writing/translation assignment, returning it to IN_PROGRESS */
+    SubmissionResponse cancelSubmission(UUID assignmentId, UUID learnerId);
 }

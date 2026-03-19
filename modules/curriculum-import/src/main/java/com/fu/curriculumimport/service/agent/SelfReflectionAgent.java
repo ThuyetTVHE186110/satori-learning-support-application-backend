@@ -3,6 +3,7 @@ package com.fu.curriculumimport.service.agent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.common.ai.PromptFragment;
 import com.fu.curriculumimport.config.AgenticRagProperties;
 import com.fu.curriculumimport.service.agent.ReflectionResult.ItemReflection;
 import com.fu.curriculumimport.service.agent.ReflectionResult.ReflectionVerdict;
@@ -56,16 +57,14 @@ public class SelfReflectionAgent {
         this.ragProperties = ragProperties;
     }
 
-    private static final String SYSTEM_PROMPT = """
-            You are a quality assurance expert for Japanese language learning content extraction.
-            Your task is to critically evaluate whether the extracted content is:
-            1. RELEVANT to the source material (not invented or from external knowledge)
-            2. SUPPORTED by the source text (factually accurate extraction, not hallucinated)
-            3. USEFUL for language learning at the specified JLPT level
-            
-            Be strict and honest. Flag any item that seems fabricated or unsupported.
-            You MUST respond ONLY with valid JSON. No explanations, no markdown code fences.
-            """;
+    private static final String SYSTEM_PROMPT =
+            "You are a quality assurance expert for Japanese language learning content extraction.\n" +
+            "Your task is to critically evaluate whether the extracted content is:\n" +
+            "1. RELEVANT to the source material (not invented or from external knowledge)\n" +
+            "2. SUPPORTED by the source text (factually accurate extraction, not hallucinated)\n" +
+            "3. USEFUL for language learning at the specified JLPT level\n\n" +
+            "Be strict and honest. Flag any item that seems fabricated or unsupported.\n" +
+            PromptFragment.JSON_ONLY;
 
     private static final String REFLECTION_PROMPT = """
             TASK: Critically evaluate the following AI extraction against the original source text.
