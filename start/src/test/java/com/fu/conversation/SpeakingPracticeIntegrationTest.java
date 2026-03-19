@@ -2593,8 +2593,8 @@ class SpeakingPracticeIntegrationTest {
                     AssessmentResult.builder()
                             .success(true)
                             .transcribedText("Hello")
-                            .overallScore(null)   // SpeechSuper did not return a score
-                            .accuracyScore(null)
+                            .overallScore(0.0)   // SpeechSuper did not return a score
+                            .accuracyScore(0.0)
                             .build());
 
             String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
@@ -2726,7 +2726,7 @@ class SpeakingPracticeIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_SP_AI_036 & TC_SP_CON_002 — Chặn Double Complete hoặc Abandon đồng thời")
+        @DisplayName("TC_SP_AI_036 — Chặn Double Complete hoặc Abandon đồng thời")
         void tc_sp_ai_036_double_complete() throws Exception {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
