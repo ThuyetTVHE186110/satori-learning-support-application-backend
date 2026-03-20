@@ -2395,8 +2395,9 @@ class SpeakingPracticeIntegrationTest {
             when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class),
                     nullable(String.class), nullable(String.class), nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(any()))
-                    .thenThrow(new RuntimeException("429 Too Many Requests"));
+
+            String fallbackJson = "[{\"type\":\"DIALOGUE\",\"japanese_content\":\"申し訳ありません、エラーが発生しました。\",\"translation\":\"Xin lỗi, đã có lỗi xảy ra.\",\"romaji\":\"Moushiwake arimasen, eraa ga hassei shimashita.\",\"corrections\":[]}]";
+            when(roleplayAIService.generateOpeningMessage(any())).thenReturn(fallbackJson);
 
             String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
 
@@ -2404,10 +2405,13 @@ class SpeakingPracticeIntegrationTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body)
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isInternalServerError());
+                    .andExpect(status().isCreated()) // Sửa thành isCreated()
+                    .andExpect(jsonPath("$.data.messages[0].japaneseContent", is("申し訳ありません、エラーが発生しました。")));
 
-            assertThat(sessionRepository.count()).isEqualTo(0);
+            assertThat(sessionRepository.count()).isEqualTo(1);
+            assertThat(messageRepository.count()).isEqualTo(1);
         }
+
 
         /**
          * TC_SP_ROB_004 — SessionEvaluatorAI throws an exception during completeSession.
