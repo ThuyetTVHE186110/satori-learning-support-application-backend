@@ -7,7 +7,11 @@ import com.fu.course.dto.request.CreateVocabularyRequest;
 import com.fu.course.dto.request.UpdateVocabularyRequest;
 import com.fu.course.dto.response.VocabularyResponse;
 import com.fu.course.entity.Course.JlptLevel;
+import com.fu.course.entity.Lesson;
+import com.fu.course.entity.LessonVocabulary;
 import com.fu.course.entity.Vocabulary;
+import com.fu.course.repository.LessonRepository;
+import com.fu.course.repository.LessonVocabularyRepository;
 import com.fu.course.repository.VocabularyRepository;
 import com.fu.course.service.VocabularyService;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +36,8 @@ import java.util.UUID;
 public class VocabularyServiceImpl implements VocabularyService {
 
     private final VocabularyRepository vocabularyRepository;
+    private final LessonRepository lessonRepository;
+    private final LessonVocabularyRepository lessonVocabularyRepository;
     private final ApplicationEventPublisher eventPublisher;
 
     @Override
@@ -68,6 +74,21 @@ public class VocabularyServiceImpl implements VocabularyService {
 
         Vocabulary saved = vocabularyRepository.save(vocab);
         log.info("Vocabulary created: {}", saved.getId());
+
+        if (request.getLessonId() != null) {
+            Lesson lesson = lessonRepository.findByIdAndNotDeleted(request.getLessonId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Lesson", request.getLessonId()));
+            if (!lessonVocabularyRepository.existsByLessonIdAndVocabularyId(lesson.getId(), saved.getId())) {
+                long orderIndex = lessonVocabularyRepository.countByLessonId(lesson.getId());
+                lessonVocabularyRepository.save(LessonVocabulary.builder()
+                        .lesson(lesson)
+                        .vocabulary(saved)
+                        .orderIndex((int) orderIndex)
+                        .build());
+                log.info("Linked vocabulary {} to lesson {}", saved.getId(), lesson.getId());
+            }
+        }
+
         return toResponse(saved);
     }
 

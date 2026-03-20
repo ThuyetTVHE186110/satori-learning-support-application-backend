@@ -9,7 +9,11 @@ import com.fu.course.dto.response.GrammarPointResponse;
 import com.fu.course.entity.Course.JlptLevel;
 import com.fu.course.entity.GrammarPoint;
 import com.fu.course.entity.GrammarPoint.GrammarCategory;
+import com.fu.course.entity.Lesson;
+import com.fu.course.entity.LessonGrammar;
 import com.fu.course.repository.GrammarPointRepository;
+import com.fu.course.repository.LessonGrammarRepository;
+import com.fu.course.repository.LessonRepository;
 import com.fu.course.service.GrammarPointService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +37,8 @@ import java.util.UUID;
 public class GrammarPointServiceImpl implements GrammarPointService {
 
     private final GrammarPointRepository grammarPointRepository;
+    private final LessonRepository lessonRepository;
+    private final LessonGrammarRepository lessonGrammarRepository;
     private final ApplicationEventPublisher eventPublisher;
 
     @Override
@@ -72,6 +78,21 @@ public class GrammarPointServiceImpl implements GrammarPointService {
 
         GrammarPoint saved = grammarPointRepository.save(grammar);
         log.info("Grammar point created: {}", saved.getId());
+
+        if (request.getLessonId() != null) {
+            Lesson lesson = lessonRepository.findByIdAndNotDeleted(request.getLessonId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Lesson", request.getLessonId()));
+            if (!lessonGrammarRepository.existsByLessonIdAndGrammarPointId(lesson.getId(), saved.getId())) {
+                long orderIndex = lessonGrammarRepository.countByLessonId(lesson.getId());
+                lessonGrammarRepository.save(LessonGrammar.builder()
+                        .lesson(lesson)
+                        .grammarPoint(saved)
+                        .orderIndex((int) orderIndex)
+                        .build());
+                log.info("Linked grammar point {} to lesson {}", saved.getId(), lesson.getId());
+            }
+        }
+
         return toResponse(saved);
     }
 
