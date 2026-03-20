@@ -1598,7 +1598,7 @@ class SpeakingPracticeIntegrationTest {
             for (int i = 1; i <= 45; i++) {
                 messageRepository.save(ConversationMessage.builder()
                         .sessionId(session.getId())
-                        .role(i % 2 == 0 ? ConversationMessage.MessageRole.AI : ConversationMessage.MessageRole.USER)
+                        .role(i % 2 == 0 ? ConversationMessage.MessageRole.ASSISTANT : ConversationMessage.MessageRole.USER)
                         .content("Msg " + i)
                         .sequenceNumber(i)
                         .build());
@@ -1629,7 +1629,7 @@ class SpeakingPracticeIntegrationTest {
 
             // Verify Evaluator Context Window Limit (max 20)
             org.mockito.ArgumentCaptor<List<ConversationMessage>> evalCaptor = org.mockito.ArgumentCaptor.forClass((Class) List.class);
-            verify(missionEvaluatorAI).evaluateProgress(anyList(), nullable(String.class), evalCaptor.capture());
+            verify(missionEvaluatorAI).evaluateProgress(anyList(), nullable(String.class), evalCaptor.capture().);
             List<ConversationMessage> passedEvalHistory = evalCaptor.getValue();
             assertThat(passedEvalHistory.size()).isLessThanOrEqualTo(20);
         }
