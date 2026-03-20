@@ -99,6 +99,18 @@ public class VocabularyServiceImpl implements VocabularyService {
 
         Vocabulary vocab = findOrThrow(vocabularyId);
 
+        if (request.getJapaneseText() != null || request.getJlptLevel() != null) {
+            String newText = request.getJapaneseText() != null ? request.getJapaneseText() : vocab.getJapaneseText();
+            JlptLevel newLevel = request.getJlptLevel() != null ? request.getJlptLevel() : vocab.getJlptLevel();
+            boolean changed = !newText.equals(vocab.getJapaneseText()) || newLevel != vocab.getJlptLevel();
+            if (changed && vocabularyRepository.existsByJapaneseTextAndJlptLevelAndDeletedAtIsNull(newText, newLevel)) {
+                throw new BusinessException(
+                        "Vocabulary '" + newText + "' already exists at level " + newLevel);
+            }
+            if (request.getJapaneseText() != null) vocab.setJapaneseText(request.getJapaneseText());
+            if (request.getJlptLevel() != null) vocab.setJlptLevel(request.getJlptLevel());
+        }
+
         if (request.getReading() != null) vocab.setReading(request.getReading());
         if (request.getRomaji() != null) vocab.setRomaji(request.getRomaji());
         if (request.getMeaningVi() != null) vocab.setMeaningVi(request.getMeaningVi());
