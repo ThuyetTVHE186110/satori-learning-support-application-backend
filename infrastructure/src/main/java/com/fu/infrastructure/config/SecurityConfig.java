@@ -80,8 +80,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/courses/*/lessons/**").permitAll()
                         // Manager course & lesson management
                         .requestMatchers("/api/v1/manager/**").hasRole("MANAGER")
-                        // User management - Manager and Admin access
-                        .requestMatchers("/api/v1/users/**").hasAnyRole("MANAGER", "ADMIN")
+                        // User management - Admin access only
+                        .requestMatchers("/api/v1/users/**").hasRole("ADMIN")
                         // All other requests require authentication
                         .anyRequest().authenticated()
                 )

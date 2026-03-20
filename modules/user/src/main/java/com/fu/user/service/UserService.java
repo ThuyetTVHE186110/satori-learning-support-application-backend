@@ -11,7 +11,7 @@ import java.util.UUID;
  * Service interface for User Management operations.
  * Implements UC-01 to UC-05 from business requirements.
  * 
- * <h2>Use Cases (Manager Operations on Web Portal)</h2>
+ * <h2>Use Cases (Admin Operations on Web Portal)</h2>
  * <ul>
  *   <li>UC-01: View User List - search, filter, pagination</li>
  *   <li>UC-02: Create User - manual creation with welcome email</li>
@@ -28,12 +28,11 @@ import java.util.UUID;
  */
 public interface UserService {
 
-    // ==================== Manager Operations (UC-01 to UC-05) ====================
+    // ==================== Admin Operations (UC-01 to UC-05) ====================
 
     /**
      * UC-02: Create User
-     * Manager creates a new user account (Learner/Teacher).
-     * Admin creates any account (Learner/Teacher/Manager).
+     * Admin creates any account (Learner/Teacher/Manager/Admin).
      * <ul>
      *   <li>Validates email uniqueness (BR-01)</li>
      *   <li>If email exists with DELETED status: throw DeletedUserExistsException</li>
@@ -43,7 +42,7 @@ public interface UserService {
      * </ul>
      * 
      * @param request CreateUserRequest with user details
-     * @param createdByUserId UUID of the manager/admin creating the user
+     * @param createdByUserId UUID of the admin creating the user
      * @param creatorRole Role of the user creating this account
      * @return Created user response
      * @throws DeletedUserExistsException if email belongs to a deleted account
@@ -81,7 +80,6 @@ public interface UserService {
      * Get paginated list of users.
      * Default sort: createdAt DESC
      * - Admin sees all users (including deleted)
-     * - Manager sees only active users
      * 
      * @param pageable Pagination parameters
      * @param currentUserRole Role of the requesting user
@@ -96,7 +94,7 @@ public interface UserService {
      *   <li>Search by keyword (name, email)</li>
      *   <li>Filter by role (LEARNER/TEACHER/MANAGER/ADMIN)</li>
      *   <li>Filter by status (ACTIVE/INACTIVE/etc.)</li>
-     *   <li>Role-based visibility: Manager only sees LEARNER/TEACHER</li>
+     *   <li>Role-based visibility: Admin can see all users</li>
      * </ul>
      * 
      * @param filter Filter criteria
@@ -108,13 +106,12 @@ public interface UserService {
 
     /**
      * UC-04: Update User Information
-     * Manager updates user details (name, phone, status for LEARNER/TEACHER).
-     * Admin can update all users including MANAGER.
+     * Admin can update all users.
      * Deleted users cannot be updated.
      * 
      * @param id User UUID
      * @param request Update request with changed fields
-     * @param updatedByUserId UUID of the manager/admin performing update
+     * @param updatedByUserId UUID of the admin performing update
      * @param updaterRole Role of the user performing the update
      * @return Updated user response
      */
@@ -123,23 +120,22 @@ public interface UserService {
     /**
      * UC-05: Delete User (Soft Delete)
      * Sets status to INACTIVE and marks as deleted.
-     * Manager can delete LEARNER/TEACHER only.
-     * Admin can delete all including MANAGER.
+     * Admin can delete all users.
      * Historical data (learning progress, scores) is preserved for reporting.
      * 
      * @param id User UUID to delete
-     * @param deletedByUserId UUID of the manager/admin performing deletion
+     * @param deletedByUserId UUID of the admin performing deletion
      * @param deleterRole Role of the user performing the deletion
      */
     void deleteUser(UUID id, UUID deletedByUserId, UserRole deleterRole);
 
-    // ==================== Admin/Manager Operations ====================
+    // ==================== Admin Operations ====================
 
     /**
-     * Admin/Manager: Restore a soft-deleted user account
+     * Admin: Restore a soft-deleted user account
      * 
      * @param request Restore request with user ID and new information
-     * @param restoredByUserId UUID of the admin/manager restoring the user
+     * @param restoredByUserId UUID of the admin restoring the user
      * @param restorerRole Role of the user performing the restoration
      * @return Restored user response
      */

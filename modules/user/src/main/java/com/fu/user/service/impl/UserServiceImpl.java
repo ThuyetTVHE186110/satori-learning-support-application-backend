@@ -29,10 +29,10 @@ import java.util.UUID;
 
 /**
  * Implementation of UserService.
- * Handles all User Management use cases (UC-01 to UC-05) for Manager.
+ * Handles all User Management use cases (UC-01 to UC-05) for Admin.
  * Also handles user self-service profile operations.
  *
- * <h2>Manager Operations (Web Portal)</h2>
+ * <h2>Admin Operations (Web Portal)</h2>
  * <ul>
  *   <li>UC-01: View User List - search, filter by role/status, pagination</li>
  *   <li>UC-02: Create User - with welcome email containing login credentials</li>
@@ -64,25 +64,24 @@ public class UserServiceImpl implements UserService {
     private static final String SPECIAL_CHARS = "!@#$%^&*()_+-=[]{}|;:,.<>?";
     private static final int DEFAULT_PASSWORD_LENGTH = 12;
 
-    // ==================== Manager Operations (UC-01 to UC-05) ====================
+    // ==================== Admin Operations (UC-01 to UC-05) ====================
 
     /**
-     * UC-02: Create User (by Manager/Admin)
-     * Creates a new user account (Learner/Teacher/Manager).
+     * UC-02: Create User (by Admin)
+     * Creates a new user account (Learner/Teacher/Manager/Admin).
      * <p>
      * Business Rules:
      * - BR-01: Email must be unique
      * - If email exists with DELETED status: throw DeletedUserExistsException to allow user choice
      * - Otherwise if email exists with non-DELETED status: error
-     * - Manager can only create LEARNER/TEACHER
-     * - Admin can create LEARNER/TEACHER/MANAGER
+     * - Admin can create any role (LEARNER/TEACHER/MANAGER/ADMIN)
      * - Generate random password with strict requirements, hash with BCrypt
      * - Send welcome email with login credentials
      */
     @Override
     @Transactional
     public UserResponse createUser(CreateUserRequest request, UUID createdByUserId, UserRole creatorRole) {
-        log.info("User {} (role: {}) creating user with email: {}", createdByUserId, creatorRole, request.getEmail());
+        log.info("Admin {} creating user with email: {}", createdByUserId, request.getEmail());
 
         // Validate role based on creator's role
         validateRoleCreation(request.getRole(), creatorRole);
@@ -150,12 +149,8 @@ public class UserServiceImpl implements UserService {
     public UserDetailResponse getUserDetailById(UserRole userRole, UUID id) {
 
         log.debug("Fetching detailed user information for id: {}", id);
-        User user = userRole == UserRole.ADMIN
-                ? findUserByIdIncludingDeleted(id)
-                : findUserById(id);
-        if (userRole == UserRole.MANAGER && user.getRole() == UserRole.MANAGER) {
-            throw new BusinessException("FORBIDDEN", "Bạn không có quyền xem chi tiết tài khoản Manager/Admin");
-        }
+        User user = findUserByIdIncludingDeleted(id);
+
         UserResponse userResponse = userMapper.toResponse(user);
 
         UserDetailResponse detailResponse = UserDetailResponse.builder()
@@ -194,68 +189,53 @@ public class UserServiceImpl implements UserService {
      * UC-01: View User List
      * Get paginated list of users.
      * - Admin sees all users (including deleted)
-     * - Manager sees only active users (excluding deleted)
      */
     @Override
     public Page<UserResponse> getAllUsers(Pageable pageable, UserRole currentUserRole) {
-        log.debug("Fetching all users with pageable: {} for role: {}", pageable, currentUserRole);
+        log.debug("Fetching all users with pageable: {} for admin role", pageable);
 
-        if (currentUserRole == UserRole.ADMIN) {
-            // Admin sees all users including deleted
-            return userRepository.findAll(pageable)
-                    .map(userMapper::toResponse);
-        } else {
-            // Manager sees only active users with role LEARNER or TEACHER
-            return userRepository.findAllActive(pageable, Arrays.asList(UserRole.LEARNER, UserRole.TEACHER))
-                    .map(userMapper::toResponse);
+        if (currentUserRole != UserRole.ADMIN) {
+            throw new BusinessException("FORBIDDEN", "Bạn không có quyền thực hiện thao tác này");
         }
+
+        // Admin sees all users including deleted
+        return userRepository.findAll(pageable)
+                .map(userMapper::toResponse);
     }
 
     /**
      * UC-01: Search users with filters
      * Supports search by keyword (name/email), filter by role and status.
-     * Manager can only see LEARNER and TEACHER.
      * Admin can see all users.
      */
     @Override
     public Page<UserResponse> searchUsers(UserFilterRequest filter, Pageable pageable, UserRole currentUserRole) {
-        log.debug("Searching users with filter: {}, role: {}", filter, currentUserRole);
+        log.debug("Searching users with filter: {}, for admin", filter);
 
-        if (currentUserRole == UserRole.ADMIN) {
-            // Admin sees all users
-            return userRepository.searchUsers(
-                    filter.getKeyword(),
-                    filter.getRole(),
-                    filter.getStatus(),
-                    pageable
-            ).map(userMapper::toResponse);
-        } else {
-            // Manager only sees LEARNER and TEACHER
-            List<UserRole> allowedRoles = Arrays.asList(UserRole.LEARNER, UserRole.TEACHER);
-            return userRepository.searchUsersByRoles(
-                    filter.getKeyword(),
-                    filter.getRole(),
-                    filter.getStatus(),
-                    allowedRoles,
-                    pageable
-            ).map(userMapper::toResponse);
+        if (currentUserRole != UserRole.ADMIN) {
+            throw new BusinessException("FORBIDDEN", "Bạn không có quyền thực hiện thao tác này");
         }
+
+        // Admin sees all users
+        return userRepository.searchUsers(
+                filter.getKeyword(),
+                filter.getRole(),
+                filter.getStatus(),
+                pageable
+        ).map(userMapper::toResponse);
     }
 
     /**
      * UC-04: Update User Information
-     * Manager updates user details (name, phone, role, status) for LEARNER/TEACHER.
-     * Admin can update all users including MANAGER.
+     * Admin can update all users.
      * Deleted users cannot be updated.
      */
     @Override
     @Transactional
     public UserResponse updateUser(UUID id, UpdateUserRequest request, UUID updatedByUserId, UserRole updaterRole) {
-        log.info("User {} (role: {}) updating user with id: {}", updatedByUserId, updaterRole, id);
+        log.info("Admin {} updating user with id: {}", updatedByUserId, id);
         // Find user based on updater role
-        User user = updaterRole == UserRole.ADMIN
-                ? findUserByIdIncludingDeleted(id)
-                : findUserById(id);
+        User user = findUserByIdIncludingDeleted(id);
         // Validate user is not deleted
         if (user.getDeletedAt() != null) {
             throw new BusinessException("USER_DELETED", "Không thể chỉnh sửa tài khoản đã bị xóa");
@@ -324,14 +304,13 @@ public class UserServiceImpl implements UserService {
     /**
      * UC-05: Delete User (Soft Delete)
      * Sets deletedAt and deletedBy, changes status to DELETED.
-     * Manager can only delete LEARNER/TEACHER.
-     * Admin can delete all including MANAGER.
+     * Admin can delete all users.
      * Historical data (learning progress, scores) is preserved for reporting.
      */
     @Override
     @Transactional
     public void deleteUser(UUID id, UUID deletedByUserId, UserRole deleterRole) {
-        log.info("User {} (role: {}) soft deleting user with id: {}", deletedByUserId, deleterRole, id);
+        log.info("Admin {} soft deleting user with id: {}", deletedByUserId, id);
 
         User user = findUserById(id);
 
@@ -351,12 +330,12 @@ public class UserServiceImpl implements UserService {
     // ==================== Admin-only Operations ====================
 
     /**
-     * Admin/Manager: Restore deleted user
+     * Admin: Restore deleted user
      */
     @Override
     @Transactional
     public UserResponse restoreUser(RestoreUserRequest request, UUID restoredByUserId, UserRole restorerRole) {
-        log.info("User {} (role: {}) restoring user with id: {}", restoredByUserId, restorerRole, request.getUserId());
+        log.info("Admin {} restoring user with id: {}", restoredByUserId, request.getUserId());
 
         // Find the deleted user
         User user = userRepository.findById(request.getUserId())
@@ -366,7 +345,7 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException("USER_NOT_DELETED", "Tài khoản này chưa bị xóa");
         }
 
-        // Validate permission to restore (Admins may restore any role; Managers only TEACHER/LEARNER) -- kept for clarity
+        // Validate permission to restore (Admin only)
         validateRestorePermission(request.getRole(), restorerRole);
 
         // Generate new password
@@ -505,21 +484,10 @@ public class UserServiceImpl implements UserService {
 
     /**
      * Validate if the creator has permission to create a user with the given role.
-     * - ADMIN can create: LEARNER, TEACHER, MANAGER
-     * - MANAGER can create: LEARNER, TEACHER only
+     * - Admin can create: LEARNER, TEACHER, MANAGER, ADMIN
      */
     private void validateRoleCreation(UserRole targetRole, UserRole creatorRole) {
-        if (creatorRole == UserRole.ADMIN) {
-            // Admin can create all except ADMIN
-            if (targetRole == UserRole.ADMIN) {
-                throw new BusinessException("INVALID_ROLE", "Không thể tạo tài khoản ADMIN. Chỉ có một ADMIN duy nhất trong hệ thống");
-            }
-        } else if (creatorRole == UserRole.MANAGER) {
-            // Manager can only create LEARNER and TEACHER
-            if (targetRole == UserRole.MANAGER || targetRole == UserRole.ADMIN) {
-                throw new BusinessException("INVALID_ROLE", "Manager chỉ có thể tạo tài khoản Learner hoặc Teacher");
-            }
-        } else {
+        if (creatorRole != UserRole.ADMIN) {
             throw new BusinessException("FORBIDDEN", "Bạn không có quyền tạo tài khoản");
         }
     }
@@ -527,14 +495,9 @@ public class UserServiceImpl implements UserService {
     /**
      * Validate if the updater has permission to update the target user.
      * - ADMIN can update all users
-     * - MANAGER can only update LEARNER and TEACHER
      */
     private void validateUpdatePermission(User targetUser, UserRole updaterRole) {
-        if (updaterRole == UserRole.MANAGER) {
-            if (targetUser.getRole() == UserRole.MANAGER || targetUser.getRole() == UserRole.ADMIN) {
-                throw new BusinessException("FORBIDDEN", "Manager không có quyền chỉnh sửa tài khoản Manager/Admin");
-            }
-        } else if (updaterRole != UserRole.ADMIN) {
+        if (updaterRole != UserRole.ADMIN) {
             throw new BusinessException("FORBIDDEN", "Bạn không có quyền chỉnh sửa tài khoản này");
         }
     }
@@ -543,11 +506,7 @@ public class UserServiceImpl implements UserService {
      * Validate if the role can be updated to the target role by the updater.
      */
     private void validateRoleUpdate(UserRole targetRole, UserRole updaterRole) {
-        if (updaterRole == UserRole.MANAGER) {
-            if (targetRole == UserRole.MANAGER || targetRole == UserRole.ADMIN) {
-                throw new BusinessException("INVALID_ROLE", "Manager không thể thay đổi vai trò thành Manager/Admin");
-            }
-        } else if (updaterRole != UserRole.ADMIN) {
+        if (updaterRole != UserRole.ADMIN) {
             throw new BusinessException("FORBIDDEN", "Bạn không có quyền thay đổi vai trò");
         }
     }
@@ -555,34 +514,24 @@ public class UserServiceImpl implements UserService {
     /**
      * Validate if the deleter has permission to delete the target user.
      * - ADMIN can delete all users
-     * - MANAGER can only delete LEARNER and TEACHER
      */
     private void validateDeletePermission(User targetUser, UserRole deleterRole) {
-        if (deleterRole == UserRole.MANAGER) {
-            if (targetUser.getRole() == UserRole.MANAGER || targetUser.getRole() == UserRole.ADMIN) {
-                throw new BusinessException("FORBIDDEN", "Manager không có quyền xóa tài khoản Manager/Admin");
-            }
-        } else if (deleterRole != UserRole.ADMIN) {
+        if (deleterRole != UserRole.ADMIN) {
             throw new BusinessException("FORBIDDEN", "Bạn không có quyền xóa tài khoản này");
+        }
+        if (targetUser.getRole() == UserRole.ADMIN) {
+            throw new BusinessException("FORBIDDEN", "Không thể xóa tài khoản ADMIN");
         }
     }
 
     /**
      * Validate permission to restore a user.
      * - ADMIN: can restore any role
-     * - MANAGER: can restore TEACHER or LEARNER only
      */
     private void validateRestorePermission(UserRole targetRole, UserRole actorRole) {
-        if (actorRole == UserRole.ADMIN) {
-            return;
+        if (actorRole != UserRole.ADMIN) {
+            throw new BusinessException("FORBIDDEN", "Bạn không có quyền khôi phục tài khoản này");
         }
-        if (actorRole == UserRole.MANAGER) {
-            if (targetRole == UserRole.TEACHER || targetRole == UserRole.LEARNER) {
-                return;
-            }
-            throw new BusinessException("FORBIDDEN", "Manager không có quyền khôi phục tài khoản Manager/Admin");
-        }
-        throw new BusinessException("FORBIDDEN", "Bạn không có quyền khôi phục tài khoản này");
     }
 
     /**

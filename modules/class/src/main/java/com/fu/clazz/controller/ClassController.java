@@ -30,8 +30,8 @@ import java.util.UUID;
 /**
  * Unified REST Controller for Class operations.
  *
- * Accessible by both MANAGER and TEACHER roles.
- * - MANAGER: full CRUD, member management, view all classes
+ * Accessible by both OPERATION_MANAGER and TEACHER roles.
+ * - OPERATION_MANAGER: full CRUD, member management, view all classes
  * - TEACHER: read-only, view own assigned active classes only
  *
  * Base path: /api/v1/classes
@@ -40,18 +40,18 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/classes")
 @RequiredArgsConstructor
-@PreAuthorize("hasAnyRole('MANAGER', 'TEACHER')")
+@PreAuthorize("hasAnyRole('OPERATION_MANAGER', 'TEACHER')")
 public class ClassController {
 
     private final ClassService clazzService;
 
     // =====================================================
-    // READ OPERATIONS (MANAGER + TEACHER)
+    // READ OPERATIONS (OPERATION_MANAGER + TEACHER)
     // =====================================================
 
     /**
      * Get all classes with pagination and optional filters.
-     * - MANAGER: sees all non-deleted classes with full filter support
+     * - OPERATION_MANAGER: sees all non-deleted classes with full filter support
      * - TEACHER: sees only their own active classes (filtered by teacher ID auto)
      *
      * GET
@@ -71,7 +71,7 @@ public class ClassController {
         Page<ClassSummaryResponse> classPage;
 
         if (isManager()) {
-            // MANAGER: full access with dynamic filters combined by AND
+            // OPERATION_MANAGER: full access with dynamic filters combined by AND
             classPage = clazzService.getClasses(keyword, teacherId, courseId, isActive, pageable);
         } else {
             // TEACHER: only their own active classes (force filter)
@@ -89,7 +89,7 @@ public class ClassController {
 
     /**
      * Get class detail by ID.
-     * - MANAGER: can view any non-deleted class
+     * - OPERATION_MANAGER: can view any non-deleted class
      * - TEACHER: can only view classes assigned to them
      *
      * GET /api/v1/classes/{classId}
@@ -110,7 +110,7 @@ public class ClassController {
 
     /**
      * Get members of a class with pagination.
-     * - MANAGER: can view members of any class
+     * - OPERATION_MANAGER: can view members of any class
      * - TEACHER: can only view members of their assigned classes
      *
      * GET /api/v1/classes/{classId}/members?page=0&size=10
@@ -143,12 +143,12 @@ public class ClassController {
     /**
      * Get learners eligible to be added to a class.
      * Eligible learners are those with role LEARNER, status ACTIVE/INACTIVE, and not currently an active member.
-     * - MANAGER: can view eligible learners for any class
+     * - OPERATION_MANAGER: can view eligible learners for any class
      *
      * GET /api/v1/classes/{classId}/eligible-learners?page=0&size=10&keyword=...
      */
     @GetMapping("/{classId}/eligible-learners")
-    @PreAuthorize("hasRole('MANAGER')")
+    @PreAuthorize("hasRole('OPERATION_MANAGER')")
     public ResponseEntity<ApiResponse<PageResponse<com.fu.user.dto.UserResponse>>> getEligibleLearners(
             @PathVariable UUID classId,
             @RequestParam(defaultValue = "0") int page,
@@ -169,7 +169,7 @@ public class ClassController {
     }
 
     // =====================================================
-    // WRITE OPERATIONS (MANAGER ONLY)
+    // WRITE OPERATIONS (OPERATION_MANAGER ONLY)
     // =====================================================
 
     /**
@@ -177,7 +177,7 @@ public class ClassController {
      * POST /api/v1/classes
      */
     @PostMapping
-    @PreAuthorize("hasRole('MANAGER')")
+    @PreAuthorize("hasRole('OPERATION_MANAGER')")
     public ResponseEntity<ApiResponse<ClassResponse>> createClass(
             @Valid @RequestBody CreateClassRequest request,
             @AuthenticationPrincipal UUID managerId) {
@@ -193,7 +193,7 @@ public class ClassController {
      * PUT /api/v1/classes/{classId}
      */
     @PutMapping("/{classId}")
-    @PreAuthorize("hasRole('MANAGER')")
+    @PreAuthorize("hasRole('OPERATION_MANAGER')")
     public ResponseEntity<ApiResponse<ClassResponse>> updateClass(
             @PathVariable UUID classId,
             @Valid @RequestBody UpdateClassRequest request,
@@ -209,7 +209,7 @@ public class ClassController {
      * DELETE /api/v1/classes/{classId}
      */
     @DeleteMapping("/{classId}")
-    @PreAuthorize("hasRole('MANAGER')")
+    @PreAuthorize("hasRole('OPERATION_MANAGER')")
     public ResponseEntity<ApiResponse<ClassResponse>> deleteClass(
             @PathVariable UUID classId,
             @AuthenticationPrincipal UUID managerId) {
@@ -224,7 +224,7 @@ public class ClassController {
      * POST /api/v1/classes/{classId}/members
      */
     @PostMapping("/{classId}/members")
-    @PreAuthorize("hasRole('MANAGER')")
+    @PreAuthorize("hasRole('OPERATION_MANAGER')")
     public ResponseEntity<ApiResponse<ClassMemberResponse>> addMember(
             @PathVariable UUID classId,
             @Valid @RequestBody AddMemberRequest request,
@@ -241,7 +241,7 @@ public class ClassController {
      * DELETE /api/v1/classes/{classId}/members/{userId}
      */
     @DeleteMapping("/{classId}/members/{userId}")
-    @PreAuthorize("hasRole('MANAGER')")
+    @PreAuthorize("hasRole('OPERATION_MANAGER')")
     public ResponseEntity<ApiResponse<Void>> removeMember(
             @PathVariable UUID classId,
             @PathVariable UUID userId,
@@ -257,12 +257,12 @@ public class ClassController {
     // =====================================================
 
     /**
-     * Check if the current authenticated user has the MANAGER role.
+     * Check if the current authenticated user has the OPERATION_MANAGER role.
      */
     private boolean isManager() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         return auth.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
-                .anyMatch(role -> role.equals("ROLE_MANAGER"));
+                .anyMatch(role -> role.equals("ROLE_OPERATION_MANAGER"));
     }
 }
