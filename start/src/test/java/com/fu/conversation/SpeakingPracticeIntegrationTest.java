@@ -747,7 +747,8 @@ class SpeakingPracticeIntegrationTest {
                                     "message", "message", "application/json", messageJson.getBytes()))
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.messages.length()").value(1));
+                    .andExpect(jsonPath("$.data.messages.length()").value(1))
+                    .andExpect(jsonPath("$.data.messages[0].corrections").isArray());
         }
 
         @Test
@@ -785,7 +786,9 @@ class SpeakingPracticeIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.sessionId").value(session.getId().toString()))
-                    .andExpect(jsonPath("$.data.languageEvaluation.summary").value("Summary"));
+                    .andExpect(jsonPath("$.data.languageEvaluation.summary").value("Summary"))
+                    .andExpect(jsonPath("$.data.languageEvaluation.strengths").isArray())
+                    .andExpect(jsonPath("$.data.languageEvaluation.improvements").isArray());
 
             ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
             assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.COMPLETED);
@@ -1069,6 +1072,7 @@ class SpeakingPracticeIntegrationTest {
                     .accuracyScore(80.0)
                     .fluencyScore(90.0)
                     .transcribedText("Hello")
+                    .providerName("AZURE")
                     .build();
             when(pronunciationAssessmentProvider.assess(any())).thenReturn(mockResult);
 
@@ -1082,7 +1086,8 @@ class SpeakingPracticeIntegrationTest {
                                     "audio", "audio.wav", "audio/wav", audio))
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.messages.length()").value(1));
+                    .andExpect(jsonPath("$.data.messages.length()").value(1))
+                    .andExpect(jsonPath("$.data.messages[0].pronunciation.providerName").value("AZURE"));
 
             verify(pronunciationAssessmentProvider, times(1)).assess(any());
         }
@@ -1125,6 +1130,12 @@ class SpeakingPracticeIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.missions.length()").value(1));
+
+            List<SessionMission> missions = sessionMissionRepository.findAll().stream()
+                    .filter(m -> m.getSessionId().equals(UUID.fromString(sessionId)))
+                    .collect(Collectors.toList());
+            assertThat(missions).hasSize(1);
+            assertThat(missions.get(0).getTitle()).isEqualTo("Mua hang");
         }
 
         @Test
@@ -1567,6 +1578,60 @@ class SpeakingPracticeIntegrationTest {
                             .contentType(MediaType.MULTIPART_FORM_DATA)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("TC_SP_AI_046 — Truncation window handles more than 40 messages session history length")
+        void tc_sp_ai_046() throws Exception {
+            User learner = saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com");
+
+            ConversationSession session = saveSession(learner.getId(), null);
+            sessionMissionRepository.save(SessionMission.builder()
+                    .sessionId(session.getId())
+                    .title("Pending Mission")
+                    .status(SessionMission.MissionStatus.IN_PROGRESS)
+                    .progressPct(0)
+                    .build());
+
+            // create 45 messages (simulating over context limit)
+            for (int i = 1; i <= 45; i++) {
+                messageRepository.save(ConversationMessage.builder()
+                        .sessionId(session.getId())
+                        .role(i % 2 == 0 ? ConversationMessage.MessageRole.AI : ConversationMessage.MessageRole.USER)
+                        .content("Msg " + i)
+                        .sequenceNumber(i)
+                        .build());
+            }
+
+            when(roleplayAIService.getCachedSystemPrompt(any())).thenReturn("prompt");
+            when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
+                    .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"AI reply\",\"translation\":\"AI reply\"}]");
+            when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
+                    .thenReturn(List.of());
+            when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
+
+            String messageJson = "{\"content\":\"Hello 46\",\"hintRequest\":false}";
+
+            mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{id}/messages", session.getId())
+                            .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk());
+
+            // Since it's an integration test and RoleplayAIService is mocked,
+            // we capture the arguments passed to evaluateProgress / generateResponse to verify truncation behavior.
+            org.mockito.ArgumentCaptor<List<ConversationMessage>> captor = org.mockito.ArgumentCaptor.forClass((Class) List.class);
+            verify(roleplayAIService).generateResponse(eq(session.getId()), anyString(), captor.capture(), anyString());
+
+            List<ConversationMessage> passedHistory = captor.getValue();
+            // It should only pass bounded messages to AI (e.g. 40 context max limit handled by RoleplaySessionServiceImpl)
+            assertThat(passedHistory.size()).isLessThanOrEqualTo(41);
+
+            // Verify Evaluator Context Window Limit (max 20)
+            org.mockito.ArgumentCaptor<List<ConversationMessage>> evalCaptor = org.mockito.ArgumentCaptor.forClass((Class) List.class);
+            verify(missionEvaluatorAI).evaluateProgress(anyList(), nullable(String.class), evalCaptor.capture());
+            List<ConversationMessage> passedEvalHistory = evalCaptor.getValue();
+            assertThat(passedEvalHistory.size()).isLessThanOrEqualTo(20);
         }
 
     }
@@ -2015,6 +2080,19 @@ class SpeakingPracticeIntegrationTest {
              String token = loginAndGetToken("learner@test.com");
 
              ConversationSession session = saveSession(learner.getId(), null);
+             
+             sessionMissionRepository.save(SessionMission.builder()
+                     .sessionId(session.getId())
+                     .title("Mission Pending")
+                     .status(SessionMission.MissionStatus.IN_PROGRESS)
+                     .progressPct(50)
+                     .build());
+             sessionMissionRepository.save(SessionMission.builder()
+                     .sessionId(session.getId())
+                     .title("Mission Completed")
+                     .status(SessionMission.MissionStatus.COMPLETED)
+                     .progressPct(100)
+                     .build());
 
              mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{sessionId}/abandon", session.getId())
                              .header("Authorization", "Bearer " + token))
@@ -2022,6 +2100,18 @@ class SpeakingPracticeIntegrationTest {
 
              ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
              assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.ABANDONED);
+             
+             List<SessionMission> missions = sessionMissionRepository.findAll().stream()
+                     .filter(m -> m.getSessionId().equals(session.getId()))
+                     .collect(Collectors.toList());
+             assertThat(missions).hasSize(2);
+             for (SessionMission sm : missions) {
+                 if (sm.getTitle().equals("Mission Pending")) {
+                     assertThat(sm.getStatus()).isEqualTo(SessionMission.MissionStatus.FAILED);
+                 } else if (sm.getTitle().equals("Mission Completed")) {
+                     assertThat(sm.getStatus()).isEqualTo(SessionMission.MissionStatus.COMPLETED);
+                 }
+             }
          }
 
          @Test
@@ -2246,6 +2336,62 @@ class SpeakingPracticeIntegrationTest {
              // verify session still ACTIVE
              ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
              assertEquals(ConversationSession.SessionStatus.ACTIVE, updated.getStatus());
+         }
+
+         @Test
+         @DisplayName("TC_SP_AI_SM_015 — Mission status locked if already COMPLETED or FAILED.")
+         void tc_sp_ai_sm_015() throws Exception {
+             User learner = saveLearner("learner@test.com");
+             String token = loginAndGetToken("learner@test.com");
+
+             ConversationSession session = saveSession(learner.getId(), null);
+             SessionMission failedMission = sessionMissionRepository.save(SessionMission.builder()
+                     .sessionId(session.getId())
+                     .title("Mission 1")
+                     .status(SessionMission.MissionStatus.FAILED)
+                     .progressPct(50)
+                     .build());
+                     
+             SessionMission completedMission = sessionMissionRepository.save(SessionMission.builder()
+                     .sessionId(session.getId())
+                     .title("Mission 2")
+                     .status(SessionMission.MissionStatus.COMPLETED)
+                     .progressPct(100)
+                     .build());
+
+             when(roleplayAIService.getCachedSystemPrompt(any())).thenReturn("prompt");
+             when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
+                     .thenReturn("[]");
+                     
+             when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
+                     .thenReturn(List.of(
+                         com.fu.roleplay.dto.response.MissionProgressResponse.builder()
+                             .missionId(failedMission.getId().toString())
+                             .progressPct(100)
+                             .isCompleted(true)
+                             .build(),
+                         com.fu.roleplay.dto.response.MissionProgressResponse.builder()
+                             .missionId(completedMission.getId().toString())
+                             .progressPct(100)
+                             .isCompleted(true)
+                             .build()
+                     ));
+             when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
+
+             String messageJson = "{\"content\":\"Hello\",\"hintRequest\":false}";
+
+             mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{id}/messages", session.getId())
+                             .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                             .header("Authorization", "Bearer " + token))
+                     .andExpect(status().isOk());
+                     
+             List<SessionMission> missions = sessionMissionRepository.findAll().stream()
+                     .filter(m -> m.getSessionId().equals(session.getId()))
+                     .collect(Collectors.toList());
+             for(SessionMission m : missions) {
+                 if(m.getTitle().equals("Mission 1")) assertThat(m.getStatus()).isEqualTo(SessionMission.MissionStatus.FAILED);
+                 if(m.getTitle().equals("Mission 2")) assertThat(m.getStatus()).isEqualTo(SessionMission.MissionStatus.COMPLETED);
+             }
          }
 
      }
@@ -2502,6 +2648,7 @@ class SpeakingPracticeIntegrationTest {
             // user message + AI reply must be persisted even when pronunciation scoring fails
             // (pronunciation runs async fire-and-forget after tx commit)
             assertThat(messageRepository.countBySessionId(session.getId())).isEqualTo(2L);
+            assertThat(pronunciationRepository.count()).isEqualTo(0L);
         }
 
         // ── 6.3. Azure STT & SpeechSuper Fallback ────────────────────────────
@@ -2546,6 +2693,9 @@ class SpeakingPracticeIntegrationTest {
             // Xác nhận session vẫn ACTIVE, không bị crash
             ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
             assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.ACTIVE);
+            
+            assertThat(messageRepository.countBySessionId(session.getId())).isEqualTo(2L);
+            assertThat(pronunciationRepository.count()).isEqualTo(0L);
         }
 
         /**
