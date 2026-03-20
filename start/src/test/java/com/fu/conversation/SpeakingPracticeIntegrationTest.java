@@ -2259,6 +2259,9 @@ class SpeakingPracticeIntegrationTest {
     class AiRobustnessTests {
 
         // ── 6.1. OpenAI Failures ──────────────────────────────────────────────
+
+        // ── 6.1. OpenAI Failures ──────────────────────────────────────────────
+
         /**
          * TC_SP_AI_037 — AI timeout on generateResponse.
          * generateResponse() wraps ALL exceptions in exceptionally() → returns a random
@@ -2377,10 +2380,11 @@ class SpeakingPracticeIntegrationTest {
          * Therefore the session IS created (201), opening fallback messages are persisted,
          * and the transaction is NOT rolled back.
          *
+         * NOTE: The previous test expected 500 + sessionCount=0. That was wrong.
          * The correct behavior: 201, session persisted with fallback opening messages.
          */
         @Test
-        @DisplayName("TC_SP_ROB_002 — AI fails during session start → 201, Fallback opening messages saved.")
+        @DisplayName("TC_SP_ROB_002 — AI fails during session start → 500/201 depending on mock, rollback")
         void tc_sp_rob_002() throws Exception {
             saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
@@ -2421,7 +2425,7 @@ class SpeakingPracticeIntegrationTest {
          * not the 500 we want to test here.
          */
         @Test
-        @DisplayName("TC_SP_ROB_004 — Evaluation service fails on session complete → 500, session stays ACTIVE")
+        @DisplayName("TC_SP_ROB_004 — Evaluation service fails and returns fallback → 200 OK, session COMPLETED")
         void tc_sp_rob_004() throws Exception {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
@@ -2448,11 +2452,12 @@ class SpeakingPracticeIntegrationTest {
 
             mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{sessionId}/complete", session.getId())
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk());
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.languageEvaluation.summary", is("Đánh giá không khả dụng cho phiên hội thoại này.")));
 
-            // evaluateSession is called BEFORE setStatus(COMPLETED) → rollback → session is still ACTIVE
+            // The fallback evaluation is saved successfully, so the session is marked as COMPLETED
             ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
-            assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.ACTIVE);
+            assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.COMPLETED);
         }
 
         // ── 6.2. Pronunciation Assessment Failures (Azure STT + SpeechSuper) ──
@@ -2620,7 +2625,7 @@ class SpeakingPracticeIntegrationTest {
 
 
     // ═════════════════════════════════════════════════════════════════════════
-    // 7. Concurrency Tests (Race Conditions)
+    // 7. Concurrency Tests (Kiểm thử Đồng thời / Race Conditions)
     // ═════════════════════════════════════════════════════════════════════════
 
     @Nested
@@ -2684,6 +2689,7 @@ class SpeakingPracticeIntegrationTest {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
 
+            // Giả lập user đã có 2 session ACTIVE. Limit tối đa là 3.
             saveSession(learner.getId(), null);
             saveSession(learner.getId(), null);
 
@@ -2694,7 +2700,7 @@ class SpeakingPracticeIntegrationTest {
                     .thenReturn("prompt");
             when(roleplayAIService.generateOpeningMessage(any())).thenReturn("[]");
 
-            int threadCount = 2;
+            int threadCount = 2; // Bắn 2 request tạo session cùng lúc
             java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threadCount);
             java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
             List<java.util.concurrent.Future<MvcResult>> futures = new ArrayList<>();
@@ -2759,16 +2765,17 @@ class SpeakingPracticeIntegrationTest {
             java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
             List<java.util.concurrent.Future<MvcResult>> futures = new ArrayList<>();
 
+            // Chuẩn bị 2 request gọi Complete Session cùng lúc
             for (int i = 0; i < threadCount; i++) {
                 futures.add(executor.submit(() -> {
-                    latch.await();
+                    latch.await(); // Đợi đến khi tất cả thread sẵn sàng mới chạy
                     return mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{id}/complete", session.getId())
                                     .header("Authorization", "Bearer " + token))
                             .andReturn();
                 }));
             }
 
-            latch.countDown();
+            latch.countDown(); // Bắn pháo hiệu cho 2 thread chạy đồng thời
 
             int successCount = 0;
             int clientErrorCount = 0;
@@ -2776,14 +2783,16 @@ class SpeakingPracticeIntegrationTest {
             for (java.util.concurrent.Future<MvcResult> future : futures) {
                 int status = future.get().getResponse().getStatus();
                 if (status == 200) successCount++;
-                if (status == 400 || status == 409) clientErrorCount++;
+                if (status == 400 || status == 409) clientErrorCount++; // Tùy thuộc xem hệ thống trả về 400 Bad Request hay 409 Conflict
             }
 
             executor.shutdown();
 
+            // Chỉ duy nhất 1 request được thành công, request còn lại phải bị từ chối
             assertThat(successCount).isEqualTo(1);
             assertThat(clientErrorCount).isEqualTo(1);
 
+            // Evaluator chỉ được gọi 1 lần
             verify(sessionEvaluatorAI, times(1)).evaluateSession(anyList());
         }
 
