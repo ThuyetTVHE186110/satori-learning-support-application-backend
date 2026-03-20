@@ -44,7 +44,6 @@ public class SubmissionResponse {
     private String answers;
 
     // Writing submissions
-    private String writtenAnswer;
     private List<String> imageUrls;
 
     // Teacher grading

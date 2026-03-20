@@ -66,7 +66,6 @@ COMMENT ON TABLE assignment.writing_assignments IS 'Nội dung bổ sung cho bà
 
 -- ── 5. assignment_submissions: thêm columns ──────────────────────────────────
 ALTER TABLE assignment.assignment_submissions
-    ADD COLUMN IF NOT EXISTS written_answer TEXT,            -- Bài làm dạng text (Writing/Translation)
     ADD COLUMN IF NOT EXISTS teacher_score DECIMAL(5,2),     -- Điểm Teacher chấm tay
     ADD COLUMN IF NOT EXISTS ai_auto_score DECIMAL(5,2),     -- Điểm Quiz tự động (so sánh đáp án)
     ADD COLUMN IF NOT EXISTS updated_by UUID REFERENCES user_management.users(id);

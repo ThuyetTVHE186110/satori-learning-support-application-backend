@@ -688,11 +688,10 @@ public class AssignmentServiceImpl implements AssignmentService {
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public SubmissionResponse submitWriting(UUID assignmentId, SubmitWritingRequest request, MultipartFile[] images, UUID learnerId) {
-        boolean hasText = request.getWrittenAnswer() != null && !request.getWrittenAnswer().isBlank();
+    public SubmissionResponse submitWriting(UUID assignmentId, MultipartFile[] images, UUID learnerId) {
         boolean hasImages = images != null && images.length > 0 && java.util.Arrays.stream(images).anyMatch(f -> f != null && !f.isEmpty());
 
-        if (!hasText && !hasImages) {
+        if (!hasImages) {
             throw new BusinessException("INVALID_INPUT", "Phải cung cấp bài viết hoặc ít nhất một hình ảnh.");
         }
 
@@ -743,8 +742,7 @@ public class AssignmentServiceImpl implements AssignmentService {
                 }
             }
 
-            submission.setWrittenAnswer(request.getWrittenAnswer());
-            submission.setTimeSpentSeconds(request.getTimeSpentSeconds());
+            submission.setTimeSpentSeconds(0);
             submission.setSubmittedAt(LocalDateTime.now());
             submission.setUpdatedAt(LocalDateTime.now());
 

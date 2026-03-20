@@ -87,10 +87,6 @@ public class AssignmentSubmission {
 
     // ── Writing/Translation Scoring (manual) ──────────────────────────────────
 
-    /** Learner's written answer for WRITING or TRANSLATION assignment */
-    @Column(name = "written_answer", columnDefinition = "TEXT")
-    private String writtenAnswer;
-
     /** URLs of images submitted by learner (e.g. handwritten answers photographed) */
     @Column(name = "image_urls", columnDefinition = "jsonb")
     @JdbcTypeCode(SqlTypes.JSON)

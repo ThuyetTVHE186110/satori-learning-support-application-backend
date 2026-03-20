@@ -15,12 +15,6 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 public class SubmitWritingRequest {
-    /**
-     * Learner's written answer (for WRITING or TRANSLATION).
-     * Optional if images are provided.
-     */
-    private String writtenAnswer;
-
     /** Time spent (seconds) on this attempt */
     private Integer timeSpentSeconds;
 }
