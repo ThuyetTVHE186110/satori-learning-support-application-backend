@@ -2421,7 +2421,7 @@ class SpeakingPracticeIntegrationTest {
          * not the 500 we want to test here.
          */
         @Test
-        @DisplayName("TC_SP_ROB_004 — Evaluation service fails on session complete → 500, session stays ACTIVE")
+        @DisplayName("TC_SP_ROB_004 — Evaluation service fails and returns fallback → 200 OK, session COMPLETED")
         void tc_sp_rob_004() throws Exception {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
@@ -2436,15 +2436,24 @@ class SpeakingPracticeIntegrationTest {
                     .build());
 
             when(sessionEvaluatorAI.evaluateSession(anyList()))
-                    .thenThrow(new RuntimeException("Evaluation Failed"));
+                    .thenReturn(SessionEvaluationResponse.LanguageEvaluationDetail.builder()
+                            .fluencyScore(BigDecimal.ZERO)
+                            .accuracyScore(BigDecimal.ZERO)
+                            .vocabularyScore(BigDecimal.ZERO)
+                            .grammarScore(BigDecimal.ZERO)
+                            .strengths(List.of())
+                            .improvements(List.of("Không thể đánh giá phiên hội thoại này"))
+                            .summary("Đánh giá không khả dụng cho phiên hội thoại này.")
+                            .build());
 
             mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{sessionId}/complete", session.getId())
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isInternalServerError());
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.languageEvaluation.summary", is("Đánh giá không khả dụng cho phiên hội thoại này.")));
 
-            // evaluateSession is called BEFORE setStatus(COMPLETED) → rollback → session is still ACTIVE
+            // The fallback evaluation is saved successfully, so the session is marked as COMPLETED
             ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
-            assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.ACTIVE);
+            assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.COMPLETED);
         }
 
         // ── 6.2. Pronunciation Assessment Failures (Azure STT + SpeechSuper) ──
