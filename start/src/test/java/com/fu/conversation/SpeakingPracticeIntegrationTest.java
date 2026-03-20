@@ -1425,8 +1425,8 @@ class SpeakingPracticeIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_SP_AI_034 — free-talk session limit reached returns 400")
-        void tc_sp_ai_034() throws Exception {
+        @DisplayName("TC_SP_CT_034 — free-talk session limit reached returns 400")
+        void tc_sp_ct_034() throws Exception {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
 
