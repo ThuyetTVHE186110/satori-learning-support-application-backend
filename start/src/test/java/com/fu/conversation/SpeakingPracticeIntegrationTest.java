@@ -1629,7 +1629,7 @@ class SpeakingPracticeIntegrationTest {
 
             // Verify Evaluator Context Window Limit (max 20)
             org.mockito.ArgumentCaptor<List<ConversationMessage>> evalCaptor = org.mockito.ArgumentCaptor.forClass((Class) List.class);
-            verify(missionEvaluatorAI).evaluateProgress(anyList(), nullable(String.class), evalCaptor.capture());
+            verify(missionEvaluatorAI).evaluateProgress(org.mockito.ArgumentMatchers.<SessionMission>anyList(), nullable(String.class), evalCaptor.capture());
             List<ConversationMessage> passedEvalHistory = evalCaptor.getValue();
             assertThat(passedEvalHistory.size()).isLessThanOrEqualTo(20);
         }
