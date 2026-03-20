@@ -103,6 +103,18 @@ public class GrammarPointServiceImpl implements GrammarPointService {
 
         GrammarPoint grammar = findOrThrow(grammarPointId);
 
+        if (request.getPattern() != null || request.getJlptLevel() != null) {
+            String newPattern = request.getPattern() != null ? request.getPattern() : grammar.getPattern();
+            JlptLevel newLevel = request.getJlptLevel() != null ? request.getJlptLevel() : grammar.getJlptLevel();
+            boolean patternChanged = !newPattern.equals(grammar.getPattern()) || newLevel != grammar.getJlptLevel();
+            if (patternChanged && grammarPointRepository.existsByPatternAndJlptLevelAndDeletedAtIsNull(newPattern, newLevel)) {
+                throw new BusinessException(
+                        "Grammar point '" + newPattern + "' already exists at level " + newLevel);
+            }
+            if (request.getPattern() != null) grammar.setPattern(request.getPattern());
+            if (request.getJlptLevel() != null) grammar.setJlptLevel(request.getJlptLevel());
+        }
+
         if (request.getPatternReading() != null) grammar.setPatternReading(request.getPatternReading());
         if (request.getPatternRomaji() != null) grammar.setPatternRomaji(request.getPatternRomaji());
         if (request.getMeaningVi() != null) grammar.setMeaningVi(request.getMeaningVi());
