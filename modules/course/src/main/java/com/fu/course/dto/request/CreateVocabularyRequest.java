@@ -10,6 +10,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Request DTO for creating a vocabulary entry manually.
@@ -20,6 +21,9 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class CreateVocabularyRequest {
+
+    /** Optional: link vocabulary to a lesson on creation. */
+    private UUID lessonId;
 
     @NotBlank(message = "Japanese text is required")
     @Size(max = 255, message = "Japanese text must not exceed 255 characters")

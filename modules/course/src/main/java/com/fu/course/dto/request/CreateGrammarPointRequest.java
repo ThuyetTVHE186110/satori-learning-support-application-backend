@@ -11,6 +11,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Request DTO for creating a new grammar point manually.
@@ -21,6 +22,9 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class CreateGrammarPointRequest {
+
+    /** Optional: link grammar point to a lesson on creation. */
+    private UUID lessonId;
 
     @NotBlank(message = "Pattern is required")
     @Size(max = 255, message = "Pattern must not exceed 255 characters")
