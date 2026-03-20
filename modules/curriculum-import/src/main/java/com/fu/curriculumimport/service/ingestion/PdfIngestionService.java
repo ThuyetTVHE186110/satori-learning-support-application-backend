@@ -25,7 +25,7 @@ public class PdfIngestionService {
     /**
      * Maximum file size: 50MB
      */
-    private static final long MAX_FILE_SIZE = 50 * 1024 * 1024;
+    private static final long MAX_FILE_SIZE = 100 * 1024 * 1024;
 
     /**
      * Target chunk size in characters (~500 tokens ≈ 2000 chars)

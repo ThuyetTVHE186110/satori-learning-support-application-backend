@@ -31,21 +31,6 @@ public class ClassificationResult {
     private String reasoning;
 
     /**
-     * Estimated vocabulary items in this chunk.
-     */
-    private int estimatedVocabCount;
-
-    /**
-     * Estimated grammar points in this chunk.
-     */
-    private int estimatedGrammarCount;
-
-    /**
-     * Whether this chunk contains exercise/practice content.
-     */
-    private boolean containsExercises;
-
-    /**
      * Content type categories
      */
     public enum ContentType {

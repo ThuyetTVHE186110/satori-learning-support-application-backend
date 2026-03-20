@@ -124,8 +124,8 @@ public final class VisionExtractionPrompts {
                   "patternReading": "ます",
                   "meaningVi": "Dạng lịch sự của động từ (thì hiện tại / tương lai)",
                   "meaningEn": "Polite present/future verb form",
-                  "shortExplanation": "Polite verb ending for present/future tense",
-                  "detailedExplanation": "Attach ます to the verb stem to form polite speech.",
+                  "shortExplanationVi": "Đuôi động từ lịch sự cho thì hiện tại/tương lai",
+                  "detailedExplanationVi": "Thêm ます vào thân động từ để tạo thể lịch sự trong giao tiếp.",
                   "jlptLevel": "%s",
                   "category": "VERB_FORM",
                   "exampleSentences": [

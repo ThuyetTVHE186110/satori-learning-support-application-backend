@@ -7,7 +7,6 @@ import com.fu.curriculumimport.service.agent.prompt.VocabularyPromptBuilder;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.service.ingestion.MnNTableParser;
-import com.fu.curriculumimport.service.ingestion.OcrTextPreprocessor;
 import com.fu.curriculumimport.service.vision.VisionPageExtractor;
 import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.extern.slf4j.Slf4j;
@@ -109,12 +108,6 @@ public class VocabularyExtractionAgent {
 
         // ── LLM path (text-based fallback) ────────────────────────────────────
 
-        if (OcrTextPreprocessor.isTrivial(chunk.getContent())) {
-            log.info("Chunk {}: trivial content — skipping vocabulary LLM extraction",
-                    chunk.getChunkIndex());
-            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - t0);
-        }
-
         try {
             String ragSection = VocabularyPromptBuilder.formatRagContext(ragContext);
             String prompt = VocabularyPromptBuilder.buildExtractionPrompt(chunk, jlptLevel, ragSection, "");
@@ -129,7 +122,7 @@ public class VocabularyExtractionAgent {
             return parseResponse(response, chunk.getChunkIndex(), System.currentTimeMillis() - t0);
         } catch (Exception e) {
             log.error("Vocabulary extraction failed for chunk {}: {}", chunk.getChunkIndex(), e.getMessage());
-            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - t0);
+            return ExtractionResult.empty(chunk.getChunkIndex(), System.currentTimeMillis() - t0);
         }
     }
 
@@ -159,7 +152,7 @@ public class VocabularyExtractionAgent {
             return parseResponse(response, chunk.getChunkIndex(), System.currentTimeMillis() - t0);
         } catch (Exception e) {
             log.error("Vocabulary re-extraction failed for chunk {}: {}", chunk.getChunkIndex(), e.getMessage());
-            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - t0);
+            return ExtractionResult.empty(chunk.getChunkIndex(), System.currentTimeMillis() - t0);
         }
     }
 
@@ -175,9 +168,13 @@ public class VocabularyExtractionAgent {
 
             if (vocab != null) {
                 vocab.forEach(v -> {
+                    // MnN Vietnamese edition always has meanings in source;
+                    // fall back to SOURCE (not AI_INFERRED) when the LLM omits the field.
                     if (v.getMeaningSource() == null || v.getMeaningSource().isBlank()) {
-                        v.setMeaningSource("AI_INFERRED");
+                        v.setMeaningSource("SOURCE");
                     }
+                    if (v.getUsageNote() == null) v.setUsageNote("");
+                    if (v.getSuffixNote() == null) v.setSuffixNote("");
                 });
             }
 
@@ -193,7 +190,7 @@ public class VocabularyExtractionAgent {
 
         } catch (JsonProcessingException e) {
             log.error("Failed to parse vocab response for chunk {}: {}", chunkIndex, e.getMessage());
-            return emptyResult(chunkIndex, ms);
+            return ExtractionResult.empty(chunkIndex, ms);
         }
     }
 
@@ -208,10 +205,4 @@ public class VocabularyExtractionAgent {
         }
     }
 
-    private ExtractionResult emptyResult(int chunkIndex, long ms) {
-        return ExtractionResult.builder()
-                .chunkIndex(chunkIndex).confidence(0.0).tokensUsed(0).processingTimeMs(ms)
-                .lessons(Collections.emptyList()).vocabulary(Collections.emptyList())
-                .grammarPoints(Collections.emptyList()).build();
-    }
 }

@@ -112,9 +112,6 @@ class ContentClassifierAgentTest {
                     .isEqualTo(ClassificationResult.ContentType.VOCABULARY);
             assertThat(result.getConfidence()).isEqualTo(0.95);
             assertThat(result.getReasoning()).isEqualTo("Contains word lists");
-            assertThat(result.getEstimatedVocabCount()).isEqualTo(20);
-            assertThat(result.getEstimatedGrammarCount()).isZero();
-            assertThat(result.isContainsExercises()).isFalse();
         }
 
         @Test
@@ -200,7 +197,6 @@ class ContentClassifierAgentTest {
 
             assertThat(result.getContentType())
                     .isEqualTo(ClassificationResult.ContentType.EXERCISE);
-            assertThat(result.isContainsExercises()).isTrue();
         }
 
         @Test

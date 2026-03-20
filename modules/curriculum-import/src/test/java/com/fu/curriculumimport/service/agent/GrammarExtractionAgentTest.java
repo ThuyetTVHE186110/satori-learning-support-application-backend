@@ -101,7 +101,6 @@ class GrammarExtractionAgentTest {
                 .similarItems(items)
                 .existingVocabCount(0)
                 .existingGrammarCount(items.size())
-                .formattedContext("")
                 .build();
     }
 
@@ -118,7 +117,7 @@ class GrammarExtractionAgentTest {
         return String.format(
                 "{\"grammarPoints\":[{\"pattern\":\"%s\",\"patternReading\":\"%s\","
                         + "\"meaningVi\":\"nghia tieng Viet\",\"meaningEn\":\"%s\","
-                        + "\"shortExplanation\":\"short exp\",\"detailedExplanation\":\"detailed exp\","
+                        + "\"shortExplanationVi\":\"short exp\",\"detailedExplanationVi\":\"detailed exp\","
                         + "\"jlptLevel\":\"N5\",\"category\":\"VERB_FORM\"}],"
                         + "\"confidence\":0.88}",
                 pattern, pattern, meaningEn);

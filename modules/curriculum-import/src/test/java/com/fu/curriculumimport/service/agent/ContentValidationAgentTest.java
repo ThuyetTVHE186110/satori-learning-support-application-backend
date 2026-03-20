@@ -87,7 +87,7 @@ class ContentValidationAgentTest {
                 .patternReading("〜ている")
                 .meaningVi("đang làm gì đó")
                 .meaningEn("is doing; ongoing action")
-                .shortExplanation("Indicates an ongoing action or state.")
+                .shortExplanationVi("Diễn tả hành động đang xảy ra hoặc trạng thái hiện tại.")
                 .jlptLevel("N5")
                 .category("TENSE")
                 .build();
@@ -129,7 +129,7 @@ class ContentValidationAgentTest {
         void validate_perfectVocab_valid() {
             ExtractionResult result = resultWith(List.of(validVocab()), List.of(), 0.9);
 
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getStatus()).isEqualTo(ValidationStatus.VALID);
             assertThat(vr.getValidVocabCount()).isEqualTo(1);
@@ -142,7 +142,7 @@ class ContentValidationAgentTest {
         void validate_perfectGrammar_valid() {
             ExtractionResult result = resultWith(List.of(), List.of(validGrammar()), 0.9);
 
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getStatus()).isEqualTo(ValidationStatus.VALID);
             assertThat(vr.getValidGrammarCount()).isEqualTo(1);
@@ -153,7 +153,7 @@ class ContentValidationAgentTest {
         void validate_emptyExtraction_invalid() {
             ExtractionResult result = resultWith(List.of(), List.of(), 0.9);
 
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getStatus()).isEqualTo(ValidationStatus.INVALID);
             assertThat(vr.isNeedsReExtraction()).isTrue();
@@ -169,7 +169,7 @@ class ContentValidationAgentTest {
             bad.setJapaneseText("");
 
             ExtractionResult result = resultWith(List.of(bad), List.of(), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getIssues()).anyMatch(i ->
                     i.getField().equals("japaneseText") &&
@@ -184,7 +184,7 @@ class ContentValidationAgentTest {
             bad.setJapaneseText("taberu"); // Latin only, no Japanese
 
             ExtractionResult result = resultWith(List.of(bad), List.of(), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getIssues()).anyMatch(i ->
                     i.getField().equals("japaneseText") &&
@@ -203,7 +203,7 @@ class ContentValidationAgentTest {
                     .build();
 
             ExtractionResult result = resultWith(List.of(incomplete), List.of(), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             // 3 warnings → reading, meaningVi, meaningEn
             long warningCount = vr.getIssues().stream()
@@ -219,7 +219,7 @@ class ContentValidationAgentTest {
             bad.setJlptLevel("N6"); // Invalid
 
             ExtractionResult result = resultWith(List.of(bad), List.of(), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getIssues()).anyMatch(i ->
                     i.getField().equals("jlptLevel") &&
@@ -233,7 +233,7 @@ class ContentValidationAgentTest {
             bad.setRomaji("たべる"); // Hiragana, not romaji
 
             ExtractionResult result = resultWith(List.of(bad), List.of(), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getIssues()).anyMatch(i ->
                     i.getField().equals("romaji") &&
@@ -247,7 +247,7 @@ class ContentValidationAgentTest {
             bad.setPattern("");
 
             ExtractionResult result = resultWith(List.of(), List.of(bad), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getIssues()).anyMatch(i ->
                     i.getField().equals("pattern") &&
@@ -261,12 +261,12 @@ class ContentValidationAgentTest {
                     .pattern("〜ている")
                     .meaningVi(null)
                     .meaningEn(null)
-                    .shortExplanation(null)
-                    .detailedExplanation(null)
+                    .shortExplanationVi(null)
+                    .detailedExplanationVi(null)
                     .build();
 
             ExtractionResult result = resultWith(List.of(), List.of(incomplete), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             long warningCount = vr.getIssues().stream()
                     .filter(i -> i.getSeverity() == ValidationResult.ValidationIssue.IssueSeverity.WARNING)
@@ -281,7 +281,7 @@ class ContentValidationAgentTest {
             bad.setJlptLevel("N0");
 
             ExtractionResult result = resultWith(List.of(), List.of(bad), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getIssues()).anyMatch(i ->
                     i.getField().equals("jlptLevel"));
@@ -292,7 +292,7 @@ class ContentValidationAgentTest {
         void validate_lowConfidence_warningIssue() {
             ExtractionResult result = resultWith(List.of(validVocab()), List.of(), 0.3);
 
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getIssues()).anyMatch(i ->
                     i.getField().equals("confidence") &&
@@ -307,7 +307,7 @@ class ContentValidationAgentTest {
                     validVocab(), validVocab(), validVocab(), validVocab(), validVocab());
 
             ExtractionResult result = resultWith(vocabList, List.of(), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getStatus()).isEqualTo(ValidationStatus.VALID);
         }
@@ -328,7 +328,7 @@ class ContentValidationAgentTest {
                     validVocab(), validVocab(), validVocab(), flaggedVocab);
 
             ExtractionResult result = resultWith(vocabList, List.of(), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             // Quality = 3/4 = 0.75 → PARTIAL
             assertThat(vr.getQualityScore()).isEqualTo(0.75);
@@ -340,7 +340,7 @@ class ContentValidationAgentTest {
         void validate_needsReExtraction_providesHint() {
             // Empty extraction → needsReExtraction = true
             ExtractionResult result = resultWith(List.of(), List.of(), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.isNeedsReExtraction()).isTrue();
             assertThat(vr.getReExtractionHint()).isNotBlank();
