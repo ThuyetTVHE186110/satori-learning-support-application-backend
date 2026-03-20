@@ -2363,17 +2363,17 @@ class SpeakingPracticeIntegrationTest {
              when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
                      .thenReturn("[]");
                      
-             when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
+             when(missionEvaluatorAI.evaluateProgress(any(), any(), any()))
                      .thenReturn(List.of(
-                         com.fu.roleplay.dto.response.MissionProgressResponse.builder()
+                         com.fu.roleplay.ai.MissionEvaluatorAI.MissionProgress.builder()
                              .missionId(failedMission.getId().toString())
                              .progressPct(100)
-                             .isCompleted(true)
+                             .status("COMPLETED")
                              .build(),
-                         com.fu.roleplay.dto.response.MissionProgressResponse.builder()
+                         com.fu.roleplay.ai.MissionEvaluatorAI.MissionProgress.builder()
                              .missionId(completedMission.getId().toString())
                              .progressPct(100)
-                             .isCompleted(true)
+                             .status("COMPLETED")
                              .build()
                      ));
              when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
