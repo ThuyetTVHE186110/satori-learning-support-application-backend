@@ -21,6 +21,7 @@ DECLARE
     v_writing2_id UUID := 'b0000000-0000-0000-0000-000000000006';
     v_quiz5_id    UUID := 'b0000000-0000-0000-0000-000000000007';
     v_quiz6_id    UUID := 'b0000000-0000-0000-0000-000000000008';
+    v_writing3_id UUID := 'b0000000-0000-0000-0000-000000000009';
     v_course_id   UUID := 'd0000000-0000-0000-0000-000000000001';
     
     v_q1_id       UUID := 'e0000000-0000-0000-0000-000000000001';
@@ -179,6 +180,15 @@ INSERT INTO assignment.writing_assignments (assignment_id, prompt)
 VALUES (v_writing2_id, 'Viết về gia đình bạn bằng tiếng Nhật. Sử dụng các từ vựng đã học về gia đình.')
 ON CONFLICT (assignment_id) DO NOTHING;
 
+-- Assignment 9: Graded Writing (PUBLISHED)
+INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
+VALUES (v_writing3_id, 'Sở thích của tôi', 'Viết một đoạn văn ngắn về sở thích cá nhân của bạn.', 'WRITING', v_class_id, CURRENT_TIMESTAMP - INTERVAL '5 days', 'PUBLISHED', TRUE, v_teacher_id)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO assignment.writing_assignments (assignment_id, prompt)
+VALUES (v_writing3_id, 'Hãy viết về ++[趣味]{しゅみ}++ của bạn. Bạn thích làm gì vào thời gian rảnh?')
+ON CONFLICT (assignment_id) DO NOTHING;
+
 -- 5. Create Submissions
 -- Learner 1: Graded Quiz
 INSERT INTO assignment.assignment_submissions (id, assignment_id, user_id, status, started_at, submitted_at, score, correct_count, total_questions, time_spent_seconds, answers, graded_by, graded_at)
@@ -197,6 +207,11 @@ INSERT INTO assignment.assignment_submissions (id, assignment_id, user_id, statu
 VALUES (uuid_generate_v4(), v_writing1_id, v_learner2_id, 'SUBMITTED', CURRENT_TIMESTAMP - INTERVAL '5 hours', CURRENT_TIMESTAMP - INTERVAL '4 hours', 900)
 ON CONFLICT DO NOTHING;
 
+-- Learner 1: Graded Writing
+INSERT INTO assignment.assignment_submissions (id, assignment_id, user_id, status, started_at, submitted_at, score, time_spent_seconds, image_urls, graded_by, graded_at)
+VALUES (uuid_generate_v4(), v_writing3_id, v_learner1_id, 'GRADED', CURRENT_TIMESTAMP - INTERVAL '6 days', CURRENT_TIMESTAMP - INTERVAL '5 days 23 hours', 95.0, 1200, '["https://res.cloudinary.com/dtn0i6fvs/image/upload/v1774022189/satori/assignment-submissions/b0000000-0000-0000-0000-000000000006/a0000000-0000-0000-0000-000000000004/ls1854hkcuudwjeuzi2a.jpg"]'::JSONB, v_teacher_id, CURRENT_TIMESTAMP - INTERVAL '4 days')
+ON CONFLICT DO NOTHING;
+
 -- Learner 2: Overdue Quiz
 INSERT INTO assignment.assignment_submissions (id, assignment_id, user_id, status, started_at, score)
 VALUES (uuid_generate_v4(), v_quiz3_id, v_learner2_id, 'OVERDUE', CURRENT_TIMESTAMP - INTERVAL '2 days', 0.0)
@@ -211,7 +226,8 @@ VALUES (v_quiz1_id, v_class_id, v_teacher_id),
        (v_quiz4_id, v_class_id, v_teacher_id),
        (v_quiz5_id, v_class_id, v_teacher_id),
        (v_quiz6_id, v_class_id, v_teacher_id),
-       (v_writing2_id, v_class_id, v_teacher_id)
+       (v_writing2_id, v_class_id, v_teacher_id),
+       (v_writing3_id, v_class_id, v_teacher_id)
 ON CONFLICT DO NOTHING;
 
 RAISE NOTICE 'Mock data for Assignment module seeded successfully.';
