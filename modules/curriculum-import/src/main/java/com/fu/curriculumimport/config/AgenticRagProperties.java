@@ -53,11 +53,6 @@ public class AgenticRagProperties {
     private boolean embeddingEnabled = true;
 
     /**
-     * Embedding model dimension (text-embedding-3-small = 1536).
-     */
-    private int embeddingDimension = 1536;
-
-    /**
      * Enable content validation step.
      */
     private boolean validationEnabled = true;
@@ -143,6 +138,14 @@ public class AgenticRagProperties {
      * Combined score threshold below which re-extraction is triggered.
      */
     private double combinedReExtractionThreshold = 0.5;
+
+    /**
+     * Maximum concurrent LLM calls across all imports.
+     * Acts as a global semaphore to prevent OpenAI rate limit exhaustion
+     * when multiple imports run in parallel.
+     * Default 6 — allows 2 concurrent imports with batch size 3 each.
+     */
+    private int maxConcurrentLlmCalls = 6;
 
     @PostConstruct
     public void validate() {

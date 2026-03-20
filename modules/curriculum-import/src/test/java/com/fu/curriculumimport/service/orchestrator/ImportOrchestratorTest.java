@@ -222,7 +222,7 @@ class ImportOrchestratorTest {
             given(classifierAgent.classify(any())).willReturn(classification);
 
             ExtractionResult result = emptyResult(0);
-            given(extractionAgent.extractContent(any(), any())).willReturn(result);
+            given(extractionAgent.extractContent(any(), any(), any())).willReturn(result);
 
             disableAllRagFeatures();
 
@@ -283,7 +283,7 @@ class ImportOrchestratorTest {
             ClassificationResult classification = ClassificationResult.fallback(); // MIXED
             given(classifierAgent.classify(any())).willReturn(classification);
             ExtractionResult result = emptyResult(0);
-            given(extractionAgent.extractContent(any(), any())).willReturn(result);
+            given(extractionAgent.extractContent(any(), any(), any())).willReturn(result);
 
             disableAllRagFeatures();
 
@@ -318,7 +318,7 @@ class ImportOrchestratorTest {
 
             then(vocabularyAgent).should().extractVocabulary(any(), any(), any());
             then(grammarAgent).should(never()).extractGrammar(any(), any(), any());
-            then(extractionAgent).should(never()).extractContent(any(), any());
+            then(extractionAgent).should(never()).extractContent(any(), any(), any());
         }
 
         @Test
@@ -367,7 +367,7 @@ class ImportOrchestratorTest {
 
             then(vocabularyAgent).should(never()).extractVocabulary(any(), any(), any());
             then(grammarAgent).should(never()).extractGrammar(any(), any(), any());
-            then(extractionAgent).should(never()).extractContent(any(), any());
+            then(extractionAgent).should(never()).extractContent(any(), any(), any());
             assertThat(entity.getStatus()).isEqualTo(ImportStatus.COMPLETED);
         }
 
@@ -439,7 +439,7 @@ class ImportOrchestratorTest {
 
             ClassificationResult classification = ClassificationResult.fallback();
             given(classifierAgent.classify(any())).willReturn(classification);
-            given(extractionAgent.extractContent(any(), any())).willReturn(emptyResult(0));
+            given(extractionAgent.extractContent(any(), any(), any())).willReturn(emptyResult(0));
 
             disableAllRagFeatures();
 

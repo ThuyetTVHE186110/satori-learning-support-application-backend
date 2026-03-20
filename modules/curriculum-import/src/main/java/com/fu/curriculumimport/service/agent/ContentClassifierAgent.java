@@ -58,10 +58,7 @@ public class ContentClassifierAgent {
             {
               "contentType": "VOCABULARY" | "GRAMMAR" | "MIXED" | "CONVERSATION" | "EXERCISE" | "OTHER",
               "confidence": 0.0-1.0,
-              "reasoning": "Brief explanation of classification",
-              "estimatedVocabCount": 0,
-              "estimatedGrammarCount": 0,
-              "containsExercises": false
+              "reasoning": "Brief explanation of classification"
             }
             
             Classification rules:
@@ -156,9 +153,6 @@ public class ContentClassifierAgent {
                     .contentType(contentType)
                     .confidence(((Number) parsed.getOrDefault("confidence", 0.5)).doubleValue())
                     .reasoning((String) parsed.getOrDefault("reasoning", ""))
-                    .estimatedVocabCount(((Number) parsed.getOrDefault("estimatedVocabCount", 0)).intValue())
-                    .estimatedGrammarCount(((Number) parsed.getOrDefault("estimatedGrammarCount", 0)).intValue())
-                    .containsExercises((Boolean) parsed.getOrDefault("containsExercises", false))
                     .build();
 
         } catch (Exception e) {
