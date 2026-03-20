@@ -84,10 +84,9 @@ public class LearnerAssignmentController {
     @Operation(summary = "Submit answers for a WRITING or TRANSLATION assignment (supports image uploads)")
     public ApiResponse<SubmissionResponse> submitWritingAssignment(
             @PathVariable UUID assignmentId,
-            @RequestPart(value = "data") SubmitWritingRequest request,
             @RequestPart(value = "images", required = false) MultipartFile[] images,
             @AuthenticationPrincipal UserDetails userDetails) {
-        return ApiResponse.success(assignmentService.submitWriting(assignmentId, request, images, getUserId(userDetails)));
+        return ApiResponse.success(assignmentService.submitWriting(assignmentId, images, getUserId(userDetails)));
     }
 
     @PostMapping("/{assignmentId}/cancel")
