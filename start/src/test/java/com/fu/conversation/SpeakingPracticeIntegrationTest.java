@@ -1598,7 +1598,7 @@ class SpeakingPracticeIntegrationTest {
             for (int i = 1; i <= 45; i++) {
                 messageRepository.save(ConversationMessage.builder()
                         .sessionId(session.getId())
-                        .role(i % 2 == 0 ? ConversationMessage.MessageRole.AI : ConversationMessage.MessageRole.USER)
+                        .role(i % 2 == 0 ? ConversationMessage.MessageRole.ASSISTANT : ConversationMessage.MessageRole.USER)
                         .content("Msg " + i)
                         .sequenceNumber(i)
                         .build());
