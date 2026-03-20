@@ -2,6 +2,7 @@ package com.fu.assignment.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.assignment.ai.AiGradingService;
 import com.fu.assignment.ai.QuizAiGenerationService;
 import com.fu.assignment.ai.QuizExplanationService;
 import com.fu.assignment.dto.request.*;
@@ -17,7 +18,6 @@ import com.fu.clazz.repository.ClassRepository;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.infrastructure.cloudinary.CloudinaryService;
-import com.fu.user.entity.User;
 import com.fu.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -69,6 +69,7 @@ class AssignmentServiceImplTest {
     @Mock private ObjectMapper objectMapper;
     @Mock private CloudinaryService cloudinaryService;
     @Mock private SubmissionService submissionService;
+    @Mock private AiGradingService aiGradingService;
 
     @InjectMocks
     private AssignmentServiceImpl assignmentService;

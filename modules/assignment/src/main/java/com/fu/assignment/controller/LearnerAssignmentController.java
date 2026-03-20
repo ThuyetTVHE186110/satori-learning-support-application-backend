@@ -3,6 +3,7 @@ package com.fu.assignment.controller;
 import com.cloudinary.Api;
 import com.fu.assignment.dto.request.SubmitAssignmentRequest;
 import com.fu.assignment.dto.request.SubmitWritingRequest;
+import com.fu.assignment.dto.request.WritingEvaluationRequest;
 import com.fu.assignment.dto.response.*;
 import com.fu.assignment.service.AssignmentService;
 import com.fu.common.exception.BusinessException;
@@ -95,6 +96,15 @@ public class LearnerAssignmentController {
             @PathVariable UUID assignmentId,
             @AuthenticationPrincipal UserDetails userDetails) {
         return ApiResponse.success(assignmentService.cancelSubmission(assignmentId, getUserId(userDetails)));
+    }
+
+    @PostMapping(value = "/writing/evaluate", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Evaluate a writing submission's images and prompt using AI before official submission")
+    public ApiResponse<WritingEvaluationResponse> evaluateWriting(@Valid
+                                                                  @RequestPart(value = "data") WritingEvaluationRequest request,
+                                                                  @RequestPart(value = "images") MultipartFile[] images
+    ) {
+        return ApiResponse.success(assignmentService.evaluateWriting(request, images));
     }
     // ═══════════════════════════════════════════════════════════════════════════
     // SUBMISSION HISTORY

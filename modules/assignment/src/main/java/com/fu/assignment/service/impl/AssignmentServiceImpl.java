@@ -2,6 +2,7 @@ package com.fu.assignment.service.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.assignment.ai.AiGradingService;
 import com.fu.assignment.ai.QuizAiGenerationService;
 import com.fu.assignment.ai.QuizExplanationService;
 import com.fu.assignment.dto.request.*;
@@ -57,8 +58,10 @@ public class AssignmentServiceImpl implements AssignmentService {
     private final ObjectMapper objectMapper;
     private final CloudinaryService cloudinaryService;
     private final SubmissionService submissionService;
+    private final AiGradingService aiGradingService;
 
     private static final String SUBMISSION_IMAGE_FOLDER = "satori/assignment-submissions";
+    private static final String SUBMISSION_FAILED_MSG = "Không thể lưu hoặc chấm điểm bài nộp.";
     private static final int MAX_SUBMISSION_IMAGES = 10;
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -761,7 +764,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     @Transactional
     public SubmissionResponse cancelSubmission(UUID assignmentId, UUID learnerId) {
         Assignment assignment = findAssignmentOrThrow(assignmentId);
-        
+
         if (assignment.isQuiz()) {
             throw new BusinessException("INVALID_TYPE", "Không thể hủy nộp bài dạng trắc nghiệm (QUIZ).");
         }
@@ -776,11 +779,11 @@ public class AssignmentServiceImpl implements AssignmentService {
         }
 
         AssignmentSubmission submission = active.get(0);
-        
+
         if (submission.getStatus() == SubmissionStatus.GRADED) {
             throw new BusinessException("ALREADY_GRADED", "Bài nộp đã được chấm điểm, không thể hủy.");
         }
-        
+
         if (submission.getStatus() == SubmissionStatus.IN_PROGRESS) {
             throw new BusinessException("ALREADY_IN_PROGRESS", "Bài nộp đang ở trạng thái nháp.");
         }
@@ -792,10 +795,10 @@ public class AssignmentServiceImpl implements AssignmentService {
         submission.setStatus(SubmissionStatus.IN_PROGRESS);
         submission.setSubmittedAt(null);
         submission.setUpdatedAt(LocalDateTime.now());
-        
+
         submissionRepository.save(submission);
         log.info("Learner {} canceled submission for assignment {}", learnerId, assignmentId);
-        
+
         return enrichSubmissionResponse(submission);
     }
 
@@ -1353,6 +1356,11 @@ public class AssignmentServiceImpl implements AssignmentService {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    @Override
+    public WritingEvaluationResponse evaluateWriting(WritingEvaluationRequest request, MultipartFile[] images) {
+        return aiGradingService.evaluateWriting(request, images);
     }
 }
 

@@ -105,4 +105,7 @@ public interface AssignmentService {
 
     /** Cancel a SUBMITTED writing/translation assignment, returning it to IN_PROGRESS */
     SubmissionResponse cancelSubmission(UUID assignmentId, UUID learnerId);
+
+    /** Evaluate a writing submission's images and prompt before official submission */
+    WritingEvaluationResponse evaluateWriting(WritingEvaluationRequest request, MultipartFile[] images);
 }
