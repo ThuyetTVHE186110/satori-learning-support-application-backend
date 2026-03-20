@@ -134,7 +134,7 @@ class ContentExtractionAgentTest {
                     """;
             stubModelResponse(json);
 
-            ExtractionResult result = agent.extractContent(chunk("食べる N5"), "N5");
+            ExtractionResult result = agent.extractContent(chunk("食べる N5"), "N5", null);
 
             assertThat(result.getConfidence()).isEqualTo(0.8);
 
@@ -163,7 +163,7 @@ class ContentExtractionAgentTest {
                     + "```";
             stubModelResponse(json);
 
-            ExtractionResult result = agent.extractContent(chunk("行く N5"), "N5");
+            ExtractionResult result = agent.extractContent(chunk("行く N5"), "N5", null);
 
             assertThat(result.getConfidence()).isEqualTo(0.75);
             assertThat(result.getVocabulary()).hasSize(1);
@@ -192,7 +192,7 @@ class ContentExtractionAgentTest {
                     """;
             stubModelResponse(json);
 
-            ExtractionResult result = agent.extractContent(chunk("grammar only"), "N5");
+            ExtractionResult result = agent.extractContent(chunk("grammar only"), "N5", null);
 
             assertThat(result.getVocabulary()).isEmpty();
             assertThat(result.getGrammarPoints()).hasSize(1);
@@ -210,7 +210,7 @@ class ContentExtractionAgentTest {
                     """;
             stubModelResponse(json);
 
-            ExtractionResult result = agent.extractContent(chunk("some content"), "N5");
+            ExtractionResult result = agent.extractContent(chunk("some content"), "N5", null);
 
             assertThat(result.getConfidence()).isEqualTo(0.5);
         }
@@ -220,7 +220,7 @@ class ContentExtractionAgentTest {
         void extractContent_malformedJson_returnsEmptyResult() {
             stubModelResponse("this is { definitely not valid } json ][");
 
-            ExtractionResult result = agent.extractContent(chunk("some content"), "N5");
+            ExtractionResult result = agent.extractContent(chunk("some content"), "N5", null);
 
             assertThat(result.getConfidence()).isEqualTo(0.0);
             assertThat(result.getVocabulary()).isEmpty();
@@ -235,7 +235,7 @@ class ContentExtractionAgentTest {
             given(chatModel.call(any(Prompt.class)))
                     .willThrow(new RuntimeException("OpenAI API unavailable"));
 
-            ExtractionResult result = agent.extractContent(chunk("some content"), "N5");
+            ExtractionResult result = agent.extractContent(chunk("some content"), "N5", null);
 
             assertThat(result.getConfidence()).isEqualTo(0.0);
             assertThat(result.getVocabulary()).isEmpty();
@@ -260,7 +260,7 @@ class ContentExtractionAgentTest {
 
             DocumentChunk chunkWithIndex = chunk(expectedChunkIndex, "content for chunk 7");
 
-            ExtractionResult result = agent.extractContent(chunkWithIndex, "N4");
+            ExtractionResult result = agent.extractContent(chunkWithIndex, "N4", null);
 
             assertThat(result.getChunkIndex()).isEqualTo(expectedChunkIndex);
         }
@@ -272,7 +272,7 @@ class ContentExtractionAgentTest {
             String json = "{\"confidence\":0.85,\"vocabulary\":[],\"grammarPoints\":[],\"lessons\":[]}";
             stubModelResponse(json);
 
-            ExtractionResult result = agent.extractContent(chunk("some textbook content"), "N5");
+            ExtractionResult result = agent.extractContent(chunk("some textbook content"), "N5", null);
 
             int expectedTokens = json.length() / 4;
             assertThat(result.getTokensUsed()).isEqualTo(expectedTokens);

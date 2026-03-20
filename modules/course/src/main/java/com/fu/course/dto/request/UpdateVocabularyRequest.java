@@ -1,5 +1,6 @@
 package com.fu.course.dto.request;
 
+import com.fu.course.entity.Course.JlptLevel;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -18,6 +19,11 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class UpdateVocabularyRequest {
+
+    @Size(max = 255, message = "Japanese text must not exceed 255 characters")
+    private String japaneseText;
+
+    private JlptLevel jlptLevel;
 
     @Size(max = 255, message = "Reading must not exceed 255 characters")
     private String reading;

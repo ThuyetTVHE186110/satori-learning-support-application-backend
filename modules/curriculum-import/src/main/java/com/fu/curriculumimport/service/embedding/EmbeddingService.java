@@ -69,12 +69,8 @@ public class EmbeddingService {
                     vectorStr, vectorStr, threshold, vectorStr, topK
             );
 
-            // Format context string for injection into prompts
-            String formattedContext = formatContextForPrompt(items);
-
             return RagContext.builder()
                     .similarItems(items)
-                    .formattedContext(formattedContext)
                     .build();
 
         } catch (Exception e) {
@@ -91,7 +87,14 @@ public class EmbeddingService {
     }
 
     /**
-     * Store embeddings for extracted vocabulary items.
+     * Maximum items per batch embedding request.
+     * OpenAI supports up to 2048 inputs per call; we use a smaller batch
+     * to stay well within rate limits and keep request payloads manageable.
+     */
+    private static final int EMBEDDING_BATCH_SIZE = 50;
+
+    /**
+     * Store embeddings for extracted vocabulary items using batched API calls.
      *
      * @param vocabulary list of extracted vocabulary
      * @param importId   the import ID for tracking
@@ -99,29 +102,50 @@ public class EmbeddingService {
      */
     public int storeVocabularyEmbeddings(List<ExtractionResult.ExtractedVocabulary> vocabulary,
                                           UUID importId) {
-        int count = 0;
-        for (ExtractionResult.ExtractedVocabulary vocab : vocabulary) {
-            try {
-                String text = buildVocabularyEmbeddingText(vocab);
-                float[] embedding = generateEmbedding(text);
-                if (embedding == null) continue;
+        if (vocabulary.isEmpty()) return 0;
 
-                UUID contentId = UUID.randomUUID();
-                storeEmbedding(contentId, "VOCABULARY", text, embedding, count, importId,
-                        Map.of("japaneseText", vocab.getJapaneseText(),
-                                "jlptLevel", vocab.getJlptLevel() != null ? vocab.getJlptLevel() : "N5",
-                                "partOfSpeech", vocab.getPartOfSpeech() != null ? vocab.getPartOfSpeech() : ""));
-                count++;
-            } catch (Exception e) {
-                log.warn("Failed to store embedding for vocab '{}': {}",
-                        vocab.getJapaneseText(), e.getMessage());
+        // Build all texts upfront
+        List<String> texts = new ArrayList<>();
+        List<ExtractionResult.ExtractedVocabulary> validItems = new ArrayList<>();
+        for (ExtractionResult.ExtractedVocabulary vocab : vocabulary) {
+            if (vocab.getJapaneseText() == null || vocab.getJapaneseText().isBlank()) continue;
+            texts.add(buildVocabularyEmbeddingText(vocab));
+            validItems.add(vocab);
+        }
+        if (texts.isEmpty()) return 0;
+
+        // Generate embeddings in batches
+        int count = 0;
+        for (int batchStart = 0; batchStart < texts.size(); batchStart += EMBEDDING_BATCH_SIZE) {
+            int batchEnd = Math.min(batchStart + EMBEDDING_BATCH_SIZE, texts.size());
+            List<String> batchTexts = texts.subList(batchStart, batchEnd);
+
+            List<float[]> embeddings = generateEmbeddingsBatch(batchTexts);
+            if (embeddings == null) continue;
+
+            for (int i = 0; i < embeddings.size(); i++) {
+                float[] embedding = embeddings.get(i);
+                if (embedding == null) continue;
+                ExtractionResult.ExtractedVocabulary vocab = validItems.get(batchStart + i);
+                try {
+                    UUID contentId = UUID.randomUUID();
+                    storeEmbedding(contentId, "VOCABULARY", batchTexts.get(i), embedding,
+                            batchStart + i, importId,
+                            Map.of("japaneseText", vocab.getJapaneseText(),
+                                    "jlptLevel", vocab.getJlptLevel() != null ? vocab.getJlptLevel() : "N5",
+                                    "partOfSpeech", vocab.getPartOfSpeech() != null ? vocab.getPartOfSpeech() : ""));
+                    count++;
+                } catch (Exception e) {
+                    log.warn("Failed to store embedding for vocab '{}': {}",
+                            vocab.getJapaneseText(), e.getMessage());
+                }
             }
         }
         return count;
     }
 
     /**
-     * Store embeddings for extracted grammar points.
+     * Store embeddings for extracted grammar points using batched API calls.
      *
      * @param grammarPoints list of extracted grammar points
      * @param importId      the import ID for tracking
@@ -129,22 +153,43 @@ public class EmbeddingService {
      */
     public int storeGrammarEmbeddings(List<ExtractionResult.ExtractedGrammar> grammarPoints,
                                        UUID importId) {
-        int count = 0;
-        for (ExtractionResult.ExtractedGrammar grammar : grammarPoints) {
-            try {
-                String text = buildGrammarEmbeddingText(grammar);
-                float[] embedding = generateEmbedding(text);
-                if (embedding == null) continue;
+        if (grammarPoints.isEmpty()) return 0;
 
-                UUID contentId = UUID.randomUUID();
-                storeEmbedding(contentId, "GRAMMAR", text, embedding, count, importId,
-                        Map.of("pattern", grammar.getPattern(),
-                                "jlptLevel", grammar.getJlptLevel() != null ? grammar.getJlptLevel() : "N5",
-                                "category", grammar.getCategory() != null ? grammar.getCategory() : "OTHER"));
-                count++;
-            } catch (Exception e) {
-                log.warn("Failed to store embedding for grammar '{}': {}",
-                        grammar.getPattern(), e.getMessage());
+        // Build all texts upfront
+        List<String> texts = new ArrayList<>();
+        List<ExtractionResult.ExtractedGrammar> validItems = new ArrayList<>();
+        for (ExtractionResult.ExtractedGrammar grammar : grammarPoints) {
+            if (grammar.getPattern() == null || grammar.getPattern().isBlank()) continue;
+            texts.add(buildGrammarEmbeddingText(grammar));
+            validItems.add(grammar);
+        }
+        if (texts.isEmpty()) return 0;
+
+        // Generate embeddings in batches
+        int count = 0;
+        for (int batchStart = 0; batchStart < texts.size(); batchStart += EMBEDDING_BATCH_SIZE) {
+            int batchEnd = Math.min(batchStart + EMBEDDING_BATCH_SIZE, texts.size());
+            List<String> batchTexts = texts.subList(batchStart, batchEnd);
+
+            List<float[]> embeddings = generateEmbeddingsBatch(batchTexts);
+            if (embeddings == null) continue;
+
+            for (int i = 0; i < embeddings.size(); i++) {
+                float[] embedding = embeddings.get(i);
+                if (embedding == null) continue;
+                ExtractionResult.ExtractedGrammar grammar = validItems.get(batchStart + i);
+                try {
+                    UUID contentId = UUID.randomUUID();
+                    storeEmbedding(contentId, "GRAMMAR", batchTexts.get(i), embedding,
+                            batchStart + i, importId,
+                            Map.of("pattern", grammar.getPattern(),
+                                    "jlptLevel", grammar.getJlptLevel() != null ? grammar.getJlptLevel() : "N5",
+                                    "category", grammar.getCategory() != null ? grammar.getCategory() : "OTHER"));
+                    count++;
+                } catch (Exception e) {
+                    log.warn("Failed to store embedding for grammar '{}': {}",
+                            grammar.getPattern(), e.getMessage());
+                }
             }
         }
         return count;
@@ -249,7 +294,7 @@ public class EmbeddingService {
     }
 
     /**
-     * Generate embedding using OpenAI text-embedding-3-small.
+     * Generate embedding using OpenAI text-embedding-3-small (single item).
      */
     private float[] generateEmbedding(String text) {
         try {
@@ -258,6 +303,30 @@ public class EmbeddingService {
         } catch (Exception e) {
             log.error("Embedding generation failed: {}", e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Generate embeddings for a batch of texts in a single API call.
+     * Falls back to individual calls if batch API is not available.
+     *
+     * @param texts list of texts to embed
+     * @return list of embeddings (same order), null entries on individual failures
+     */
+    private List<float[]> generateEmbeddingsBatch(List<String> texts) {
+        try {
+            List<String> truncated = texts.stream()
+                    .map(this::truncateForEmbedding)
+                    .toList();
+            return embeddingModel.embed(truncated);
+        } catch (Exception e) {
+            log.warn("Batch embedding failed, falling back to individual calls: {}", e.getMessage());
+            // Fallback: generate one by one
+            List<float[]> results = new ArrayList<>(texts.size());
+            for (String text : texts) {
+                results.add(generateEmbedding(text));
+            }
+            return results;
         }
     }
 
@@ -316,22 +385,7 @@ public class EmbeddingService {
         sb.append(grammar.getPattern());
         if (grammar.getMeaningEn() != null) sb.append(" - ").append(grammar.getMeaningEn());
         if (grammar.getMeaningVi() != null) sb.append(" - ").append(grammar.getMeaningVi());
-        if (grammar.getShortExplanation() != null) sb.append(". ").append(grammar.getShortExplanation());
-        return sb.toString();
-    }
-
-    /**
-     * Format similar items into a context string for prompt injection.
-     */
-    private String formatContextForPrompt(List<RagContext.SimilarItem> items) {
-        if (items.isEmpty()) return "";
-
-        StringBuilder sb = new StringBuilder("Existing related content in the system:\n");
-        for (RagContext.SimilarItem item : items) {
-            sb.append(String.format("- [%s] %s (%.0f%% similar)\n",
-                    item.getContentType(), item.getTextContent(),
-                    item.getSimilarity() * 100));
-        }
+        if (grammar.getShortExplanationVi() != null) sb.append(". ").append(grammar.getShortExplanationVi());
         return sb.toString();
     }
 

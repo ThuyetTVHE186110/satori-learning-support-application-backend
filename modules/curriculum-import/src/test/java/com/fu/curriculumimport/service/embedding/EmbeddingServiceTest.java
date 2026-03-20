@@ -75,7 +75,7 @@ class EmbeddingServiceTest {
                 .pattern(pattern)
                 .meaningEn("must do")
                 .meaningVi("phải làm")
-                .shortExplanation("obligation form")
+                .shortExplanationVi("Dạng bắt buộc phải làm")
                 .jlptLevel("N4")
                 .category("obligation")
                 .build();

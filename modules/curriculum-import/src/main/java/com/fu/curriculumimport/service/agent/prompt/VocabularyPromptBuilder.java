@@ -19,60 +19,70 @@ public final class VocabularyPromptBuilder {
     // ── System prompt ─────────────────────────────────────────────────────────
 
     public static final String SYSTEM_PROMPT = """
-            You are an expert Japanese vocabulary extractor for a language-learning platform.
-            Your input is Japanese textbook content — it may be a text-based PDF, a scanned PDF, or a PowerPoint slide.
+            Bạn là chuyên gia trích xuất từ vựng tiếng Nhật cho nền tảng học ngôn ngữ.
+            Nguồn tài liệu chính: sách "Minna no Nihongo I — Bản dịch và Giải thích Ngữ pháp (N5)"
+            (tiếng Việt). Input có thể là PDF text, PDF scan (OCR), hoặc PowerPoint slide.
 
-            ═══ CRITICAL RULE — MEANINGS ═══
-            The source text may NOT contain Vietnamese or English meanings.
-            This is especially common with PowerPoint slides that only list Japanese words.
+            ═══ QUY TẮC NGHĨA TIẾNG VIỆT ═══
+            Đây là sách dịch tiếng Việt — nghĩa tiếng Việt LUÔN CÓ TRONG NGUỒN.
+            Mặc định: "meaningSource": "SOURCE". Chỉ dùng "AI_INFERRED" khi tuyệt đối
+            không tìm thấy nghĩa (ví dụ: slide PPTX chỉ liệt kê từ Nhật thuần túy).
 
-            • INLINE MEANING PATTERN (most important rule):
-              Vietnamese-edition textbooks often attach the meaning directly after the
-              Japanese word inside full-width parentheses （）:
-                行きます（đi）        食べます（ăn）        先生（giáo viên）
-              When you see this pattern:
-                - japaneseText = the Japanese part ONLY → "行きます"  (NO brackets, NO meaning)
-                - meaningVi    = the content inside （）   → "đi"
+            • PATTERN NGHĨA INLINE — ưu tiên cao nhất:
+              Sách dịch tiếng Việt thường gắn nghĩa ngay sau từ Nhật trong ngoặc （）:
+                行きます（đi）     食べます（ăn）     先生（giáo viên）
+              Khi thấy pattern này:
+                - japaneseText = phần tiếng Nhật ONLY → "行きます"  (không có ngoặc)
+                - meaningVi    = nội dung trong （）   → "đi"
                 - meaningSource = "SOURCE_INLINE"
-              NEVER include the （…） portion in japaneseText. Ever.
+              KHÔNG BAO GIỜ đưa phần （…） vào japaneseText.
 
-            • EXCEPTION — furigana (kana-only content inside （）):
-              If the content inside （） is hiragana or katakana only, it is a furigana
-              reading, NOT a meaning.  Extract it as the "reading" field instead.
-                先生（せんせい）  → japaneseText="先生", reading="せんせい"  (NOT a meaning)
+            • NGOẠI LỆ — furigana (kana thuần túy trong （）):
+              Nếu nội dung trong （） là hiragana/katakana thuần, đó là furigana,
+              KHÔNG phải nghĩa. Đưa vào trường "reading":
+                先生（せんせい）  → japaneseText="先生", reading="せんせい"
 
-            • If a meaning IS present in the source text in a separate column or line
-              → extract it exactly. Set "meaningSource": "SOURCE".
+            • Nếu nghĩa nằm ở cột/dòng riêng → trích chính xác, "meaningSource": "SOURCE".
 
-            • If a meaning is NOT present → infer the most accurate meaning using:
-                1. The lesson topic / slide title (provided in the prompt).
-                2. The JLPT level context.
-                3. Your knowledge of standard Japanese vocabulary.
-              Set "meaningSource": "AI_INFERRED".
+            LUÔN cung cấp cả meaningVi (tiếng Việt) lẫn meaningEn (tiếng Anh).
+            KHÔNG để trống nghĩa. KHÔNG viết "unknown" hay "N/A".
+            Giữ nguyên 100% phần tiếng Việt như trong sách, kể cả dấu ngoặc và chú thích.
 
-            You MUST always provide both meaningVi (Vietnamese) and meaningEn (English).
-            NEVER leave meanings empty. NEVER write "unknown" or "N/A".
+            ═══ QUY TẮC HẬU TỐ (SUFFIX) ═══
+            Các mục như ~さん, ~ちゃん, ~くん, ~じん, ~ご, ~ご PHẢI được đánh dấu:
+              • "isSuffix": true
+              • "suffixNote": giải thích cách dùng hậu tố (tiếng Việt, ngắn gọn)
+                Ví dụ: "Thêm vào sau tên người để thể hiện sự lịch sự. Không tự dùng cho bản thân."
 
-            ═══ OTHER RULES ═══
-            • Every Japanese word MUST have a hiragana reading (ふりがな).
-            • Part of speech must be precise (noun/verb/i-adjective/na-adjective/
-              adverb/particle/conjunction/interjection/counter/prefix/suffix/expression).
-            • Include example sentences where possible; derive from the slide if present,
-              otherwise construct a natural example appropriate for the JLPT level.
-            • Respond ONLY with valid JSON — no markdown, no explanations.
+            ═══ QUY TẮC CHÚ THÍCH SỬ DỤNG (usageNote) ═══
+            Sách thường có ghi chú hạn chế cách dùng trong ngoặc đơn sau nghĩa, ví dụ:
+              "anh, chị, ông, bà (cách gọi người khác một cách lịch sự...)"
+            Trích toàn bộ nội dung trong ngoặc đó vào trường "usageNote".
+            Nếu không có chú thích → "usageNote": "".
 
-            ═══ COUNTRY-LANGUAGE TABLE PATTERN ═══
-            Minna no Nihongo has a 4-column country/language reference table:
-              Col 0: country name (国名)  | Col 1: nationality (〜人) | Col 2: empty | Col 3: language (〜語)
-              アメリカ ( Mý )             |                           |              | 英語 ( tiêng Anh )
-              かんこく                    | かんこくじん               |              | かんこく ご
+            ═══ QUY TẮC SỐ THỨ TỰ (stt) ═══
+            Ghi số thứ tự của từ trong danh sách từ vựng bài học (1, 2, 3...).
+            Nếu không xác định được → "stt": 0.
 
-            CRITICAL RULES for this pattern:
-            • Col 0 (country) and Col 3 (language) are SEPARATE vocabulary items — extract BOTH.
-            • NEVER use the language name (Col 3) as the meaning/definition of the country (Col 0).
-            • If Col 1 (nationality) is non-empty, extract it as a THIRD vocabulary item.
-            • Each item gets its own entry in the "vocabulary" array.
-            • The half-width parentheses pattern word ( meaning ) is the inline Vietnamese meaning.
+            ═══ QUY TẮC KHÁC ═══
+            • Mọi từ tiếng Nhật phải có reading (hiragana/katakana).
+            • Loại từ phải chính xác: noun/verb/i-adjective/na-adjective/
+              adverb/particle/conjunction/interjection/counter/prefix/suffix/expression.
+            • Câu ví dụ: lấy từ sách nếu có, nếu không tự tạo phù hợp với cấp JLPT.
+            • Chỉ trả về JSON hợp lệ — không có markdown, không giải thích.
+
+            ═══ PATTERN BẢNG QUỐC GIA-NGÔN NGỮ ═══
+            Minna no Nihongo có bảng tham chiếu 4 cột:
+              Cột 0: tên quốc gia (国名) | Cột 1: quốc tịch (〜人) | Cột 2: trống | Cột 3: ngôn ngữ (〜語)
+              アメリカ ( Mỹ )            |                          |               | 英語 ( tiếng Anh )
+              かんこく                   | かんこくじん              |               | かんこく ご
+
+            QUY TẮC QUAN TRỌNG:
+            • Cột 0 (quốc gia) và Cột 3 (ngôn ngữ) là CÁC TỪ RIÊNG BIỆT — trích cả hai.
+            • KHÔNG dùng tên ngôn ngữ (Cột 3) làm nghĩa của quốc gia (Cột 0).
+            • Nếu Cột 1 (quốc tịch) khác trống, trích thành MỤC RIÊNG.
+            • Mỗi mục có entry riêng trong mảng "vocabulary".
+            • Ngoặc tròn nửa chiều rộng word ( meaning ) là nghĩa tiếng Việt inline.
             """;
 
     /** Suffix appended to the system prompt on re-extraction attempts. */
@@ -82,48 +92,70 @@ public final class VocabularyPromptBuilder {
     // ── Extraction prompt template ─────────────────────────────────────────────
 
     private static final String EXTRACTION_TEMPLATE = """
-            Extract ALL vocabulary items from the following Japanese learning content.
+            Trích xuất TOÀN BỘ từ vựng từ nội dung học tiếng Nhật sau đây.
 
-            Slide / Page: %d-%d
-            JLPT Level: %s
-            Lesson topic / title: %s
-            Source type: %s
+            Trang: %d-%d
+            Cấp JLPT: %s
+            Chủ đề / tiêu đề bài: %s
+            Loại nguồn: %s
             %s
 
-            ─── CONTENT ────────────────────────────────────────────────────────
+            ─── NỘI DUNG ────────────────────────────────────────────────────────
             %s
             ─────────────────────────────────────────────────────────────────────
 
             %s
 
-            Return this exact JSON structure:
+            Trả về đúng cấu trúc JSON sau:
             {
               "vocabulary": [
                 {
-                  "japaneseText": "待合室",
-                  "reading": "まちあいしつ",
-                  "romaji": "machiaishitsu",
-                  "meaningVi": "Phòng chờ",
-                  "meaningEn": "Waiting room",
-                  "partOfSpeech": "noun",
+                  "stt": 1,
+                  "japaneseText": "わたし",
+                  "reading": "わたし",
+                  "romaji": "watashi",
+                  "meaningVi": "tôi",
+                  "meaningEn": "I / me",
+                  "partOfSpeech": "pronoun",
                   "jlptLevel": "%s",
-                  "kanjiWriting": "待合室",
+                  "kanjiWriting": "",
+                  "usageNote": "",
+                  "isSuffix": false,
+                  "suffixNote": "",
                   "exampleSentences": [
                     {
-                      "jp": "待合室で少々お待ちください。",
-                      "vi": "Vui lòng chờ một chút ở phòng chờ.",
-                      "en": "Please wait a moment in the waiting room."
+                      "jp": "わたしは マイク・ミラーです。",
+                      "vi": "Tôi là Mike Miller.",
+                      "en": "I am Mike Miller."
                     }
                   ],
                   "isKeyWord": true,
+                  "meaningSource": "SOURCE"
+                },
+                {
+                  "stt": 10,
+                  "japaneseText": "〜さん",
+                  "reading": "〜さん",
+                  "romaji": "~san",
+                  "meaningVi": "anh, chị, ông, bà (cách gọi người khác một cách lịch sự bằng cách thêm từ này vào sau tên của người đó)",
+                  "meaningEn": "honorific suffix added after a person's name",
+                  "partOfSpeech": "suffix",
+                  "jlptLevel": "%s",
+                  "kanjiWriting": "",
+                  "usageNote": "cách gọi người khác một cách lịch sự bằng cách thêm từ này vào sau tên của người đó",
+                  "isSuffix": true,
+                  "suffixNote": "Thêm vào sau tên người để thể hiện sự lịch sự. Không tự dùng cho bản thân.",
+                  "exampleSentences": [],
+                  "isKeyWord": false,
                   "meaningSource": "SOURCE"
                 }
               ],
               "confidence": 0.9
             }
 
-            Use "meaningSource": "SOURCE" if the meaning was in the content above.
-            Use "meaningSource": "AI_INFERRED" if you inferred the meaning from context.
+            Dùng "meaningSource": "SOURCE" nếu nghĩa có trong nội dung trên.
+            Dùng "meaningSource": "SOURCE_INLINE" nếu nghĩa được trích từ dạng 漢字（nghĩa）.
+            Dùng "meaningSource": "AI_INFERRED" nếu AI suy ra nghĩa (không có trong nguồn).
             """;
 
     // ── Context block templates ────────────────────────────────────────────────
@@ -174,6 +206,7 @@ public final class VocabularyPromptBuilder {
                 contextBlocks,
                 safeContent,
                 buildMeaningHint(chunk),
+                jlptLevel,
                 jlptLevel);
     }
 
@@ -216,19 +249,21 @@ public final class VocabularyPromptBuilder {
         if (sectionType == null || MnNSectionSplitter.UNKNOWN.equals(sectionType)) return "";
         return switch (sectionType) {
             case MnNSectionSplitter.VOCABULARY ->
-                    "\n⚠ SECTION TYPE: VOCABULARY LIST (語彙 / Từ vựng)\n" +
-                    "This section contains the lesson's vocabulary list. " +
-                    "Each entry has a Japanese word, its reading, and meaning. " +
-                    "Extract EVERY word — do not skip any.\n";
+                    "\n⚠ LOẠI PHẦN: DANH SÁCH TỪ VỰNG (語彙 / Từ vựng — Phần I)\n" +
+                    "Phần này chứa danh sách từ vựng của bài, được đánh số thứ tự. " +
+                    "Mỗi mục có: từ tiếng Nhật, cách đọc, và nghĩa tiếng Việt. " +
+                    "Nghĩa tiếng Việt LUÔN có sẵn trong nguồn — 'meaningSource': 'SOURCE'. " +
+                    "Điền 'stt' theo số thứ tự trong danh sách. " +
+                    "Trích TOÀN BỘ — không bỏ sót từ nào. " +
+                    "Hậu tố như ~さん, ~ちゃん, ~くん, ~じん phải có 'isSuffix': true.\n";
             case MnNSectionSplitter.EXAMPLE ->
-                    "\n⚠ SECTION TYPE: EXAMPLE SENTENCES (例文 / Ví dụ)\n" +
-                    "This section contains illustrative example sentences that use vocabulary " +
-                    "from this lesson. Extract vocabulary items that appear in these examples " +
-                    "if they are not already covered by the vocabulary list section.\n";
+                    "\n⚠ LOẠI PHẦN: CÂU VÍ DỤ (例文 / Ví dụ — Phần II)\n" +
+                    "Phần này chứa câu ví dụ minh họa từ vựng của bài. " +
+                    "Trích từ vựng xuất hiện trong ví dụ nếu chưa có trong phần Từ vựng.\n";
             case MnNSectionSplitter.DIALOG ->
-                    "\n⚠ SECTION TYPE: DIALOGUE (会話 / Hội thoại)\n" +
-                    "This section is a scripted dialogue. Extract key vocabulary items " +
-                    "that appear in the dialogue and are relevant to the lesson theme.\n";
+                    "\n⚠ LOẠI PHẦN: HỘI THOẠI (会話 / Hội thoại — Phần II)\n" +
+                    "Phần này là hội thoại có kịch bản. " +
+                    "Trích từ vựng quan trọng xuất hiện trong hội thoại và liên quan chủ đề bài.\n";
             default -> "";
         };
     }

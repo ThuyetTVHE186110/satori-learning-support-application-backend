@@ -230,7 +230,7 @@ public class SelfReflectionAgent {
                         grammar.getPattern() != null ? grammar.getPattern() : "?",
                         grammar.getMeaningVi() != null ? grammar.getMeaningVi() : "?",
                         grammar.getMeaningEn() != null ? grammar.getMeaningEn() : "?",
-                        grammar.getShortExplanation() != null ? grammar.getShortExplanation() : "?"));
+                        grammar.getShortExplanationVi() != null ? grammar.getShortExplanationVi() : "?"));
             }
         }
 

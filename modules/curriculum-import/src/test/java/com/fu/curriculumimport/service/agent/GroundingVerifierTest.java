@@ -108,11 +108,11 @@ class GroundingVerifierTest {
     }
 
     private ExtractionResult.ExtractedGrammar grammar(String pattern, String patternReading,
-                                                       String shortExplanation) {
+                                                       String shortExplanationVi) {
         return ExtractionResult.ExtractedGrammar.builder()
                 .pattern(pattern)
                 .patternReading(patternReading)
-                .shortExplanation(shortExplanation)
+                .shortExplanationVi(shortExplanationVi)
                 .meaningEn("ongoing action")
                 .meaningVi("đang làm")
                 .build();

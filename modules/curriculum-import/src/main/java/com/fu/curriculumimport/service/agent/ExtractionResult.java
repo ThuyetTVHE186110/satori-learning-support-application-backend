@@ -1,5 +1,6 @@
 package com.fu.curriculumimport.service.agent;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -39,6 +40,22 @@ public class ExtractionResult {
     private List<ExtractedVocabulary> vocabulary;
     private List<ExtractedGrammar> grammarPoints;
 
+    /**
+     * Create an empty result for a chunk (no vocab, no grammar).
+     * Useful for skipped/trivial/failed chunks.
+     */
+    public static ExtractionResult empty(int chunkIndex, long processingTimeMs) {
+        return ExtractionResult.builder()
+                .chunkIndex(chunkIndex)
+                .confidence(0.0)
+                .tokensUsed(0)
+                .processingTimeMs(processingTimeMs)
+                .lessons(java.util.Collections.emptyList())
+                .vocabulary(java.util.Collections.emptyList())
+                .grammarPoints(java.util.Collections.emptyList())
+                .build();
+    }
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -59,6 +76,8 @@ public class ExtractionResult {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ExtractedVocabulary {
+        /** 1-based sequence number within the lesson vocabulary list (0 = unknown). */
+        private int stt;
         private String japaneseText;
         private String reading;
         private String romaji;
@@ -84,6 +103,20 @@ public class ExtractionResult {
          * </ul>
          */
         private String meaningSource; // "SOURCE" | "SOURCE_INLINE" | "AI_INFERRED"
+        /**
+         * Usage restriction note copied verbatim from the book, e.g.
+         * "(không dùng khi nói về chính mình)". Empty string when absent.
+         */
+        private String usageNote;
+        /** True for suffix entries such as ~さん, ~ちゃん, ~くん, ~じん, ~ご. */
+        @JsonProperty("isSuffix")
+        private boolean isSuffix;
+        /**
+         * Explanation of how to attach/use this suffix, e.g.
+         * "Thêm vào sau tên người để thể hiện sự lịch sự. Không tự dùng cho bản thân."
+         * Empty string when {@code isSuffix} is false.
+         */
+        private String suffixNote;
     }
 
     @Data
@@ -91,12 +124,37 @@ public class ExtractionResult {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ExtractedGrammar {
+        /** 1-based sequence number within the lesson grammar section (0 = unknown). */
+        private int stt;
+        /**
+         * Human-readable grammar point name, e.g. "Trợ từ は (wa)"
+         * or "Câu phủ định: Danh từ じゃ ありません".
+         */
+        private String grammarPoint;
+        /** Abstract structural pattern, e.g. "Danh từ は Danh từ です". */
         private String pattern;
         private String patternReading;
+        /**
+         * One-line function description quoted from the book, e.g.
+         * "Biểu thị danh từ đứng trước nó là chủ đề của câu".
+         */
+        private String function;
         private String meaningVi;
         private String meaningEn;
-        private String shortExplanation;
-        private String detailedExplanation;
+        /** Short one-liner in Vietnamese, verbatim from the book. */
+        private String shortExplanationVi;
+        /** Full paragraph explanation in Vietnamese, verbatim from the book. */
+        private String detailedExplanationVi;
+        /**
+         * [Chú ý] / ※ cautionary notes copied verbatim from the book.
+         * Each numbered sub-note is a separate list element.
+         */
+        private List<String> usageNotes;
+        /**
+         * Chunk IDs or lesson references of related grammar points,
+         * e.g. ["bai02_nguPhap_001"] or ["xem thêm Bài 2"].
+         */
+        private List<String> relatedTo;
         private String jlptLevel;
         private String category;
         private List<Map<String, String>> exampleSentences;

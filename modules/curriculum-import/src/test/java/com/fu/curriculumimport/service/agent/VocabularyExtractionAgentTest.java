@@ -102,7 +102,6 @@ class VocabularyExtractionAgentTest {
                 .similarItems(items)
                 .existingVocabCount(items.size())
                 .existingGrammarCount(0)
-                .formattedContext("")
                 .build();
     }
 
