@@ -68,6 +68,13 @@
             <artifactId>jsoup</artifactId>
         </dependency>
 
+        <!-- Google Cloud Vision API -->
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-vision</artifactId>
+            <version>3.37.0</version>
+        </dependency>
+
         <!-- Test dependencies -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

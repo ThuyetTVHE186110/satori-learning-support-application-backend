@@ -1,6 +1,7 @@
 package com.fu.assignment.repository;
 
 import com.fu.assignment.entity.AssignmentTarget;
+import com.fu.course.entity.Course;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -33,4 +34,18 @@ public interface AssignmentTargetRepository extends JpaRepository<AssignmentTarg
             WHERE t.assignmentId = :assignmentId AND t.classId IS NOT NULL
             """)
     List<UUID> findClassIdsByAssignmentId(@Param("assignmentId") UUID assignmentId);
+
+    /**
+     * Fetch JLPT level for an assignment by joining targets, classes, and courses.
+     * Useful for AI grading to know the target proficiency level.
+     */
+    @Query(value = """
+            SELECT co.jlpt_level
+            FROM assignment.assignment_targets at
+            JOIN user_management.classes cl ON at.class_id = cl.id
+            JOIN learning_content.courses co ON cl.course_id = co.id
+            WHERE at.assignment_id = :assignmentId
+            LIMIT 1
+            """, nativeQuery = true)
+    String findJlptLevelByAssignmentId(@Param("assignmentId") UUID assignmentId);
 }
