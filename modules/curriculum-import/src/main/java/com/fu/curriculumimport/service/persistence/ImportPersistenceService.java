@@ -319,31 +319,4 @@ public class ImportPersistenceService {
                 lessons.size(), joinRecordsRemoved, importId);
     }
 
-    /**
-     * Build a human-readable lesson title from the extraction result.
-     * <ul>
-     *   <li>If the chunk had a detected lesson title (e.g. "Bài 1"), use it directly.</li>
-     *   <li>Otherwise fall back to "Vocabulary — Chunk N (filename.pdf)".</li>
-     * </ul>
-     */
-    private String buildAutoLessonTitle(ExtractionResult result, CurriculumImport importEntity) {
-        if (result.getLessonTitle() != null && !result.getLessonTitle().isBlank()) {
-            return result.getLessonTitle();
-        }
-
-        String typeLabel = !result.getGrammarPoints().isEmpty() && result.getVocabulary().isEmpty()
-                ? "Grammar"
-                : !result.getVocabulary().isEmpty() && result.getGrammarPoints().isEmpty()
-                        ? "Vocabulary"
-                        : "Mixed Content";
-
-        String fileName = importEntity.getOriginalFilename() != null
-                ? importEntity.getOriginalFilename() : "import";
-        if (fileName.length() > 40) {
-            fileName = fileName.substring(0, 37) + "...";
-        }
-
-        return String.format("%s — Chunk %d (%s)", typeLabel, result.getChunkIndex(), fileName);
-    }
-
 }

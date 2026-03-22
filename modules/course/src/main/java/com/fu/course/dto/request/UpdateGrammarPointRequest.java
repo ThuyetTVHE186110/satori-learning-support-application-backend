@@ -1,5 +1,6 @@
 package com.fu.course.dto.request;
 
+import com.fu.course.entity.Course.JlptLevel;
 import com.fu.course.entity.GrammarPoint.GrammarCategory;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
@@ -19,6 +20,11 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class UpdateGrammarPointRequest {
+
+    @Size(max = 255, message = "Pattern must not exceed 255 characters")
+    private String pattern;
+
+    private JlptLevel jlptLevel;
 
     @Size(max = 255, message = "Pattern reading must not exceed 255 characters")
     private String patternReading;

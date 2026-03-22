@@ -84,6 +84,25 @@ public class ImportOrchestrator {
     private final Map<UUID, AtomicBoolean> cancelFlags = new ConcurrentHashMap<>();
 
     /**
+     * Global semaphore limiting concurrent LLM calls across all imports.
+     * Prevents OpenAI rate limit exhaustion when multiple imports run simultaneously.
+     * Initialized lazily after Spring injects ragProperties.
+     */
+    private volatile java.util.concurrent.Semaphore llmSemaphore;
+
+    private java.util.concurrent.Semaphore getLlmSemaphore() {
+        if (llmSemaphore == null) {
+            synchronized (this) {
+                if (llmSemaphore == null) {
+                    llmSemaphore = new java.util.concurrent.Semaphore(
+                            ragProperties.getMaxConcurrentLlmCalls());
+                }
+            }
+        }
+        return llmSemaphore;
+    }
+
+    /**
      * Process an import asynchronously — full Agentic RAG pipeline.
      * Main entry point triggered after file upload.
      *
@@ -197,11 +216,17 @@ public class ImportOrchestrator {
             int hallucinatedItems = 0;
 
             if (ragProperties.isValidationEnabled()) {
+                // Pre-build index maps for O(1) lookup during validation loop
+                Map<Integer, ImportChunk> dbChunkIndex = buildChunkIndexMap(dbChunks,
+                        c -> c.getChunkIndex() != null ? c.getChunkIndex() : -1);
+                Map<Integer, DocumentChunk> docChunkIndex = buildChunkIndexMap(parseResult.getChunks(),
+                        DocumentChunk::getChunkIndex);
+
                 for (int i = 0; i < allResults.size(); i++) {
                     checkCancelled(cancelFlag, importId);
                     ExtractionResult result = allResults.get(i);
-                    ImportChunk dbChunk = findChunkByIndex(dbChunks, result.getChunkIndex());
-                    DocumentChunk sourceDocChunk = findDocChunkByIndex(parseResult.getChunks(), result.getChunkIndex());
+                    ImportChunk dbChunk = findChunkByIndex(dbChunkIndex, result.getChunkIndex());
+                    DocumentChunk sourceDocChunk = findDocChunkByIndex(docChunkIndex, result.getChunkIndex());
 
                     // Skip validation for trivially-skipped chunks (cover pages, separators)
                     if (dbChunk != null && "SKIPPED_TRIVIAL".equals(dbChunk.getValidationStatus())) {
@@ -240,7 +265,7 @@ public class ImportOrchestrator {
                                         ? validation.getReflectionResult().getGroundingScore() : "N/A",
                                 validation.getHallucinatedItemCount());
 
-                        DocumentChunk docChunk = findDocChunkByIndex(parseResult.getChunks(), result.getChunkIndex());
+                        DocumentChunk docChunk = findDocChunkByIndex(docChunkIndex, result.getChunkIndex());
                         if (docChunk != null) {
                             ContentType contentType = classifications.containsKey(result.getChunkIndex())
                                     ? classifications.get(result.getChunkIndex()).getContentType()
@@ -410,10 +435,10 @@ public class ImportOrchestrator {
 
             importEntity.setTokensUsed(totalTokens.get());
             importEntity.setActualCostUsd(estimateCost(totalTokens.get()));
-            importEntity.markCompleted();
+            importEntity.markPendingApproval();
             persistenceService.updateImportProgress(importEntity);
 
-            log.info("[{}] Retry import completed!", importId);
+            log.info("[{}] Retry import ready for manager approval!", importId);
 
         } catch (Exception e) {
             log.error("[{}] Retry import failed: {}", importId, e.getMessage(), e);
@@ -461,6 +486,10 @@ public class ImportOrchestrator {
         ConcurrentHashMap<Integer, ExtractionResult> resultMap = new ConcurrentHashMap<>();
         int batchSize = ragProperties.getParallelBatchSize();
 
+        // Pre-build index map for O(1) lookup
+        Map<Integer, ImportChunk> dbChunkIndex = buildChunkIndexMap(dbChunks,
+                c -> c.getChunkIndex() != null ? c.getChunkIndex() : -1);
+
         for (int batchStart = 0; batchStart < docChunks.size(); batchStart += batchSize) {
             if (cancelFlag.get()) break;
 
@@ -471,7 +500,7 @@ public class ImportOrchestrator {
                 final int idx = i;
                 final DocumentChunk docChunk = docChunks.get(idx);
                 // Defensive: find dbChunk by chunkIndex rather than positional index
-                final ImportChunk dbChunk = findChunkByIndex(dbChunks, docChunk.getChunkIndex());
+                final ImportChunk dbChunk = findChunkByIndex(dbChunkIndex, docChunk.getChunkIndex());
                 if (dbChunk == null) {
                     log.warn("[{}] No DB chunk found for docChunk index {}, skipping", importId, idx);
                     continue;
@@ -482,11 +511,20 @@ public class ImportOrchestrator {
                 CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                     try {
                         if (cancelFlag.get()) return;
-                        ExtractionResult result = processOneChunk(
-                                docChunk, dbChunk, classification, jlptLevel, importId);
-                        // Key by chunkIndex — preserves order regardless of thread timing
-                        resultMap.put(docChunk.getChunkIndex(), result);
-                        totalTokens.addAndGet(result.getTokensUsed());
+                        // Acquire semaphore to limit concurrent LLM calls
+                        getLlmSemaphore().acquire();
+                        try {
+                            ExtractionResult result = processOneChunk(
+                                    docChunk, dbChunk, classification, jlptLevel, importId);
+                            // Key by chunkIndex — preserves order regardless of thread timing
+                            resultMap.put(docChunk.getChunkIndex(), result);
+                            totalTokens.addAndGet(result.getTokensUsed());
+                        } finally {
+                            getLlmSemaphore().release();
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        log.warn("[{}] Chunk {} interrupted waiting for LLM semaphore", importId, idx);
                     } catch (Exception e) {
                         log.error("[{}] Parallel chunk {} failed: {}", importId, idx, e.getMessage());
                         dbChunk.markFailed(e.getMessage());
@@ -662,7 +700,26 @@ public class ImportOrchestrator {
         return switch (contentType) {
             case VOCABULARY -> vocabularyAgent.reExtractWithFeedback(chunk, jlptLevel, ragContext, feedback);
             case GRAMMAR -> grammarAgent.reExtractWithFeedback(chunk, jlptLevel, ragContext, feedback);
-            default -> extractionAgent.extractContent(chunk, jlptLevel, ragContext); // fallback with RAG
+            default -> {
+                // Inject feedback into chunk content so ContentExtractionAgent sees it
+                if (feedback != null && !feedback.isBlank()) {
+                    DocumentChunk enriched = DocumentChunk.builder()
+                            .chunkIndex(chunk.getChunkIndex())
+                            .content(chunk.getContent()
+                                    + "\n\n[PREVIOUS EXTRACTION ISSUES — please fix ALL of these]\n"
+                                    + feedback)
+                            .pageStart(chunk.getPageStart())
+                            .pageEnd(chunk.getPageEnd())
+                            .chunkType(chunk.getChunkType())
+                            .lessonTitle(chunk.getLessonTitle())
+                            .lessonNumber(chunk.getLessonNumber())
+                            .sectionType(chunk.getSectionType())
+                            .fullPageContext(chunk.getFullPageContext())
+                            .build();
+                    yield extractionAgent.extractContent(enriched, jlptLevel, ragContext);
+                }
+                yield extractionAgent.extractContent(chunk, jlptLevel, ragContext);
+            }
         };
     }
 
@@ -685,16 +742,24 @@ public class ImportOrchestrator {
         }
     }
 
-    private ImportChunk findChunkByIndex(List<ImportChunk> chunks, int index) {
-        return chunks.stream()
-                .filter(c -> c.getChunkIndex() != null && c.getChunkIndex() == index)
-                .findFirst().orElse(null);
+    /**
+     * Build index map for O(1) chunk lookup by chunkIndex.
+     */
+    private static <T> Map<Integer, T> buildChunkIndexMap(List<T> chunks,
+                                                            java.util.function.ToIntFunction<T> indexExtractor) {
+        Map<Integer, T> map = new HashMap<>(chunks.size());
+        for (T chunk : chunks) {
+            map.put(indexExtractor.applyAsInt(chunk), chunk);
+        }
+        return map;
     }
 
-    private DocumentChunk findDocChunkByIndex(List<DocumentChunk> chunks, int index) {
-        return chunks.stream()
-                .filter(c -> c.getChunkIndex() == index)
-                .findFirst().orElse(null);
+    private ImportChunk findChunkByIndex(Map<Integer, ImportChunk> indexMap, int index) {
+        return indexMap.get(index);
+    }
+
+    private DocumentChunk findDocChunkByIndex(Map<Integer, DocumentChunk> indexMap, int index) {
+        return indexMap.get(index);
     }
 
     private String serializeResult(ExtractionResult result) {

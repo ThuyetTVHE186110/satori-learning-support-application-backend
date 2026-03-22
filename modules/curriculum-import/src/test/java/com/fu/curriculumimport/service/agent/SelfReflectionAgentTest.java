@@ -98,7 +98,7 @@ class SelfReflectionAgentTest {
                 .patternReading("ています")
                 .meaningVi("đang làm")
                 .meaningEn("ongoing action")
-                .shortExplanation("Used for progressive actions")
+                .shortExplanationVi("Dùng để diễn tả hành động đang tiến hành")
                 .jlptLevel("N5")
                 .build();
     }

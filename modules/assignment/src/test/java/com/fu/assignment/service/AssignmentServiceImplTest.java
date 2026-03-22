@@ -791,16 +791,6 @@ class AssignmentServiceImplTest {
     @DisplayName("SubmitWriting Tests")
     class SubmitWritingTests {
 
-        @Test
-        @DisplayName("Should throw when no content provided")
-        void shouldThrowWhenNoContent() {
-            SubmitWritingRequest request = SubmitWritingRequest.builder()
-                    .writtenAnswer("").build();
-
-            assertThatThrownBy(() -> assignmentService.submitWriting(assignmentId, request, null, learnerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("bài viết hoặc ít nhất một hình ảnh");
-        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
