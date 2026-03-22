@@ -41,7 +41,7 @@ public class GlobalExceptionHandler {
         log.warn("Access denied: {}", ex.getMessage());
         return ResponseEntity
                 .status(HttpStatus.FORBIDDEN)
-                .body(ApiResponse.error("ACCESS_DENIED", "Access denied"));
+                .body(ApiResponse.error("FORBIDDEN", "Bạn không có quyền truy cập tài nguyên này"));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

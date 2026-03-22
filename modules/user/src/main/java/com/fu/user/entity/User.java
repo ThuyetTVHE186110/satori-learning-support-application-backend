@@ -131,12 +131,6 @@ public class User extends SoftDeletableEntity {
             && (lockedUntil == null || lockedUntil.isBefore(LocalDateTime.now()));
     }
 
-    /**
-     * Check if user has manager/admin privileges
-     */
-    public boolean isManager() {
-        return role == UserRole.MANAGER || role == UserRole.ADMIN;
-    }
 
     /**
      * Check if user is a teacher

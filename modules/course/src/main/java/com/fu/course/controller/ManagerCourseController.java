@@ -38,7 +38,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/manager/courses")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('MANAGER')")
+@PreAuthorize("hasRole('CONTENT_MANAGER')")
 public class ManagerCourseController {
 
     private final CourseService courseService;
