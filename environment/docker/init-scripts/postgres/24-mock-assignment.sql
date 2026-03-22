@@ -154,7 +154,7 @@ INSERT INTO assignment.assignment_questions (assignment_id, question_id, order_i
 VALUES (v_quiz4_id, v_q4_id, 0, 5), (v_quiz4_id, v_q5_id, 1, 5)
 ON CONFLICT (assignment_id, question_id) DO NOTHING;
 
--- Assignment 7: Quiz Adjectives (PUBLISHED)
+-- Assignment 6: New Quiz (Adjectives - PUBLISHED)
 INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
 VALUES (v_quiz5_id, 'Luyện tập Tính từ N5', 'Kiểm tra ý nghĩa các tính từ đuôi -i thông dụng trong N5.', 'QUIZ', v_class_id, CURRENT_TIMESTAMP + INTERVAL '10 days', 'PUBLISHED', FALSE, v_teacher_id)
 ON CONFLICT (id) DO NOTHING;
@@ -163,7 +163,7 @@ INSERT INTO assignment.assignment_questions (assignment_id, question_id, order_i
 VALUES (v_quiz5_id, v_q6_id, 0, 2), (v_quiz5_id, v_q7_id, 1, 2), (v_quiz5_id, v_q8_id, 2, 2), (v_quiz5_id, v_q9_id, 3, 2), (v_quiz5_id, v_q10_id, 4, 2)
 ON CONFLICT (assignment_id, question_id) DO NOTHING;
 
--- Assignment 8: Quiz Kanji (PUBLISHED)
+-- Assignment 7: New Quiz (Kanji - PUBLISHED)
 INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
 VALUES (v_quiz6_id, 'Hán tự cơ bản: Thiên nhiên', 'Nhận diện các chữ Hán cơ bản về chủ đề thiên nhiên.', 'QUIZ', v_class_id, CURRENT_TIMESTAMP + INTERVAL '12 days', 'PUBLISHED', FALSE, v_teacher_id)
 ON CONFLICT (id) DO NOTHING;
@@ -172,13 +172,22 @@ INSERT INTO assignment.assignment_questions (assignment_id, question_id, order_i
 VALUES (v_quiz6_id, v_q11_id, 0, 2), (v_quiz6_id, v_q12_id, 1, 2), (v_quiz6_id, v_q13_id, 2, 2), (v_quiz6_id, v_q14_id, 3, 2), (v_quiz6_id, v_q15_id, 4, 2)
 ON CONFLICT (assignment_id, question_id) DO NOTHING;
 
--- Assignment 6: New Writing (PUBLISHED - No Submissions)
+-- Assignment 8: New Writing (Family - PUBLISHED)
 INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
 VALUES (v_writing2_id, 'Kể về gia đình của bạn', 'Hãy viết một đoạn văn ngắn mô tả về gia đình bạn (số lượng thành viên, nghề nghiệp...).', 'WRITING', v_class_id, CURRENT_TIMESTAMP + INTERVAL '12 days', 'PUBLISHED', FALSE, v_teacher_id)
 ON CONFLICT (id) DO NOTHING;
  
 INSERT INTO assignment.writing_assignments (assignment_id, prompt)
 VALUES (v_writing2_id, 'Viết về gia đình bạn bằng tiếng Nhật. Sử dụng các từ vựng đã học về gia đình.')
+ON CONFLICT (assignment_id) DO NOTHING;
+
+-- Assignment 9: New Writing (Favorites - PUBLISHED)
+INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
+VALUES (v_writing3_id, 'Luyện tập viết: Chủ đề tự chọn', 'Viết đoạn văn ngắn về chủ đề bạn yêu thích, kèm hình ảnh minh họa.', 'WRITING', v_class_id, CURRENT_TIMESTAMP + INTERVAL '14 days', 'PUBLISHED', TRUE, v_teacher_id)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO assignment.writing_assignments (assignment_id, prompt)
+VALUES (v_writing3_id, 'Hãy viết một đoạn văn ngắn (khoảng 100 chữ) về một chủ đề bạn yêu thích, sử dụng các cấu trúc ngữ pháp N5 đã học.')
 ON CONFLICT (assignment_id) DO NOTHING;
 
 -- 5. Create Submissions
