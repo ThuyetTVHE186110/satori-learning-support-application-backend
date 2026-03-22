@@ -143,6 +143,7 @@ class AccountManagementIntegrationTest {
             buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
             buildAndSaveUser("teacher@test.com", UserRole.TEACHER, UserStatus.ACTIVE);
             buildAndSaveUser("learner@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
+            buildAndSaveDeletedUser("deleted.learner@test.com", UserRole.LEARNER);
 
             String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
@@ -151,13 +152,26 @@ class AccountManagementIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.pageNumber").value(0))
+                    .andExpect(jsonPath("$.data.pageSize").value(20))
+                    .andExpect(jsonPath("$.data.first").value(true))
                     .andReturn();
 
             String body = result.getResponse().getContentAsString();
-            var content = objectMapper.readTree(body).path("data").path("content");
+            var data = objectMapper.readTree(body).path("data");
+            var content = data.path("content");
+
+            assertThat(data.path("totalElements").asInt()).isGreaterThanOrEqualTo(4);
 
             var roles = new ArrayList<String>();
-            content.forEach(n -> roles.add(n.path("role").asText()));
+            boolean deletedFound = false;
+            for (var node : content) {
+                roles.add(node.path("role").asText());
+                if ("deleted.learner@test.com".equals(node.path("email").asText())) {
+                    deletedFound = true;
+                    assertThat(node.path("status").asText()).isEqualTo("DELETED");
+                }
+            }
+            assertThat(deletedFound).isTrue();
             assertThat(roles).contains("MANAGER", "TEACHER", "LEARNER", "ADMIN");
         }
 
@@ -167,6 +181,8 @@ class AccountManagementIntegrationTest {
             buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             buildAndSaveUser("manager1@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
             buildAndSaveUser("manager2@test.com", UserRole.MANAGER, UserStatus.SUSPENDED);
+            buildAndSaveUser("teacher1@test.com", UserRole.TEACHER, UserStatus.ACTIVE);
+            buildAndSaveUser("teacher2@test.com", UserRole.TEACHER, UserStatus.INACTIVE);
 
             String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
@@ -176,10 +192,15 @@ class AccountManagementIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.pageNumber").value(0))
+                    .andExpect(jsonPath("$.data.pageSize").value(20))
+                    .andExpect(jsonPath("$.data.first").value(true))
+                    .andExpect(jsonPath("$.data.last").value(true))
+                    .andExpect(jsonPath("$.data.totalElements").value(1))
                     .andReturn();
 
             var data = objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
-            assertThat(data.path("content").size()).isGreaterThanOrEqualTo(1);
+            assertThat(data.path("content").size()).isEqualTo(1);
             data.path("content").forEach(node -> {
                 assertThat(node.path("role").asText()).isEqualTo("MANAGER");
                 assertThat(node.path("status").asText()).isEqualTo("ACTIVE");
@@ -200,6 +221,16 @@ class AccountManagementIntegrationTest {
                     .authProvider(AuthProvider.LOCAL)
                     .failedLoginAttempts(0)
                     .build());
+            userRepository.save(User.builder()
+                    .email("jane.smith@test.com")
+                    .passwordHash(passwordEncoder.encode("ValidPass@1"))
+                    .firstName("Jane")
+                    .lastName("Smith")
+                    .role(UserRole.TEACHER)
+                    .status(UserStatus.ACTIVE)
+                    .authProvider(AuthProvider.LOCAL)
+                    .failedLoginAttempts(0)
+                    .build());
             buildAndSaveUser("other.user@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
 
             String token = loginAndGetToken("admin@test.com", "ValidPass@1");
@@ -209,6 +240,11 @@ class AccountManagementIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.pageNumber").value(0))
+                    .andExpect(jsonPath("$.data.pageSize").value(20))
+                    .andExpect(jsonPath("$.data.first").value(true))
+                    .andExpect(jsonPath("$.data.last").value(true))
+                    .andExpect(jsonPath("$.data.totalElements").value(1))
                     .andReturn();
 
             var content = objectMapper.readTree(result.getResponse().getContentAsString())
@@ -223,12 +259,19 @@ class AccountManagementIntegrationTest {
         @Test
         @DisplayName("TC_AM_VAL_004 — Manager cannot view account list")
         void tc_am_val_004_managerCannotViewAccountList() throws Exception {
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
+            buildAndSaveUser("learner@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             mockMvc.perform(get("/api/v1/users")
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
+                    .andExpect(jsonPath("$.message").isNotEmpty())
+                    .andExpect(jsonPath("$.timestamp").isNotEmpty())
+                    .andExpect(jsonPath("$.path").value("/api/v1/users"));
         }
     }
 
@@ -260,7 +303,16 @@ class AccountManagementIntegrationTest {
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.email").value("newaccount@test.com"))
-                    .andExpect(jsonPath("$.data.status").value("ACTIVE"));
+                    .andExpect(jsonPath("$.data.firstName").value("New"))
+                    .andExpect(jsonPath("$.data.lastName").value("Account"))
+                    .andExpect(jsonPath("$.data.role").value("LEARNER"))
+                    .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+                    .andExpect(jsonPath("$.data.id").isNotEmpty())
+                    .andExpect(jsonPath("$.data.createdAt").isNotEmpty())
+                    .andExpect(jsonPath("$.data.updatedAt").isNotEmpty())
+                    .andExpect(jsonPath("$.data.passwordHash").doesNotExist())
+                    .andExpect(jsonPath("$.data.deletedAt").isEmpty())
+                    .andExpect(jsonPath("$.data.deletedBy").isEmpty());
 
             User saved = userRepository.findByEmail("newaccount@test.com").orElseThrow();
             assertThat(saved.getStatus()).isEqualTo(UserStatus.ACTIVE);
@@ -287,7 +339,16 @@ class AccountManagementIntegrationTest {
                                     .role(UserRole.LEARNER)
                                     .build())))
                     .andExpect(status().isConflict())
-                    .andExpect(jsonPath("$.code").value("DELETED_USER_EXISTS"));
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("DELETED_USER_EXISTS"))
+                    .andExpect(jsonPath("$.data.userId").isNotEmpty())
+                    .andExpect(jsonPath("$.data.email").value("deleted@test.com"))
+                    .andExpect(jsonPath("$.data.status").value("DELETED"))
+                    .andExpect(jsonPath("$.data.deletedAt").isNotEmpty())
+                    .andExpect(jsonPath("$.data.deletedBy").isNotEmpty())
+                    .andExpect(jsonPath("$.message").isNotEmpty())
+                    .andExpect(jsonPath("$.timestamp").isNotEmpty())
+                    .andExpect(jsonPath("$.path").value("/api/v1/users"));
         }
 
         @Test
@@ -357,6 +418,7 @@ class AccountManagementIntegrationTest {
         @Test
         @DisplayName("TC_AM_CREATE_006 — Manager cannot create new account")
         void tc_am_create_006_managerCannotCreate() throws Exception {
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
@@ -366,7 +428,12 @@ class AccountManagementIntegrationTest {
                             .content(objectMapper.writeValueAsString(CreateUserRequest.builder()
                                     .email("mnew@test.com").firstName("A").lastName("B")
                                     .role(UserRole.LEARNER).build())))
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
+                    .andExpect(jsonPath("$.message").isNotEmpty())
+                    .andExpect(jsonPath("$.timestamp").isNotEmpty())
+                    .andExpect(jsonPath("$.path").value("/api/v1/users"));
         }
     }
 
@@ -389,19 +456,31 @@ class AccountManagementIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.userInfo.email").value("learner@test.com"));
+                    .andExpect(jsonPath("$.data.userInfo.role").value("LEARNER"))
+                    .andExpect(jsonPath("$.data.userInfo.email").value("learner@test.com"))
+                    .andExpect(jsonPath("$.data.userInfo.status").value("ACTIVE"))
+                    .andExpect(jsonPath("$.data.userInfo.firstName").isNotEmpty())
+                    .andExpect(jsonPath("$.data.userInfo.lastName").isNotEmpty())
+                    .andExpect(jsonPath("$.data.courseEnrollments").isArray())
+                    .andExpect(jsonPath("$.data.classEnrollments").isArray());
         }
 
         @Test
         @DisplayName("TC_AM_VIEW_002 — Manager cannot view account information")
         void tc_am_view_002_managerCannotView() throws Exception {
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
             User learner = buildAndSaveUser("learner@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             mockMvc.perform(get("/api/v1/users/{id}/details", learner.getId())
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
+                    .andExpect(jsonPath("$.message").isNotEmpty())
+                    .andExpect(jsonPath("$.timestamp").isNotEmpty())
+                    .andExpect(jsonPath("$.path").value("/api/v1/users/" + learner.getId() + "/details"));
         }
     }
 
@@ -486,6 +565,7 @@ class AccountManagementIntegrationTest {
         @Test
         @DisplayName("TC_AM_UPDATE_004 — Manager cannot update account")
         void tc_am_update_004_managerCannotUpdate() throws Exception {
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
             User learner = buildAndSaveUser("learner@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
@@ -497,7 +577,12 @@ class AccountManagementIntegrationTest {
                                     .firstName("Updated")
                                     .email("learner@test.com")
                                     .build())))
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
+                    .andExpect(jsonPath("$.message").isNotEmpty())
+                    .andExpect(jsonPath("$.timestamp").isNotEmpty())
+                    .andExpect(jsonPath("$.path").value("/api/v1/users/" + learner.getId()));
         }
 
         @Test
@@ -620,30 +705,47 @@ class AccountManagementIntegrationTest {
             buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             User learner = buildAndSaveUser("learner@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
 
-            String learnerToken = loginAndGetToken("learner@test.com", "ValidPass@1");
-            assertThat(learnerToken).isNotBlank();
-            assertThat(sessionRepository.countActiveSessionsByUserId(learner.getId(), LocalDateTime.now()))
-                    .isGreaterThan(0);
+            LoginRequest req = new LoginRequest();
+            req.setEmail("learner@test.com");
+            req.setPassword("ValidPass@1");
+            MvcResult loginResult = mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(req)))
+                    .andExpect(status().isOk())
+                    .andReturn();
+            String refreshToken = objectMapper.readTree(loginResult.getResponse().getContentAsString())
+                    .path("data").path("refreshToken").asText();
 
             String adminToken = loginAndGetToken("admin@test.com", "ValidPass@1");
             mockMvc.perform(delete("/api/v1/users/{id}", learner.getId())
                             .header("Authorization", "Bearer " + adminToken))
-                    .andExpect(status().isOk());
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.message").value("Xóa người dùng thành công"));
 
-            assertThat(sessionRepository.countActiveSessionsByUserId(learner.getId(), LocalDateTime.now()))
-                    .isEqualTo(0);
+            mockMvc.perform(post("/api/v1/auth/refresh")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"refreshToken\":\"" + refreshToken + "\"}"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("SESSION_EXPIRED"));
         }
 
         @Test
         @DisplayName("TC_AM_DELETE_004 — manager cannot delete account")
         void tc_am_delete_004_managerCannotDelete() throws Exception {
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
             User learner = buildAndSaveUser("learner@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             mockMvc.perform(delete("/api/v1/users/{id}", learner.getId())
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
+                    .andExpect(jsonPath("$.message").isNotEmpty())
+                    .andExpect(jsonPath("$.timestamp").isNotEmpty())
+                    .andExpect(jsonPath("$.path").value("/api/v1/users/" + learner.getId()));
         }
     }
 
@@ -708,12 +810,17 @@ class AccountManagementIntegrationTest {
                                     .role(UserRole.LEARNER)
                                     .build())))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("USER_NOT_DELETED"));
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("INVALID_OPERATION"))
+                    .andExpect(jsonPath("$.message").isNotEmpty())
+                    .andExpect(jsonPath("$.timestamp").isNotEmpty())
+                    .andExpect(jsonPath("$.path").value("/api/v1/users/restore"));
         }
 
         @Test
         @DisplayName("TC_AM_RESTORE_003 — manager cannot restore account")
         void tc_am_restore_003_managerCannotRestore() throws Exception {
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
             User deleted = buildAndSaveDeletedUser("restore2@test.com", UserRole.LEARNER);
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
@@ -728,7 +835,12 @@ class AccountManagementIntegrationTest {
                                     .lastName("Account")
                                     .role(UserRole.LEARNER)
                                     .build())))
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
+                    .andExpect(jsonPath("$.message").isNotEmpty())
+                    .andExpect(jsonPath("$.timestamp").isNotEmpty())
+                    .andExpect(jsonPath("$.path").value("/api/v1/users/restore"));
         }
     }
 }
