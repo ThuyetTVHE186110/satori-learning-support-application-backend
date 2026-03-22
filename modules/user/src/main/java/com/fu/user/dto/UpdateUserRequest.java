@@ -25,11 +25,13 @@ public class UpdateUserRequest {
     @Size(max = 100, message = "First name must not exceed 100 characters")
     @NoEmoji(message = "First name must not contain emoji characters")
     @SafeText(message = "First name contains invalid characters")
+    @NotBlank(message = "First name cannot be blank")
     private String firstName;
 
     @Size(max = 100, message = "Last name must not exceed 100 characters")
     @NoEmoji(message = "Last name must not contain emoji characters")
     @SafeText(message = "Last name contains invalid characters")
+    @NotBlank(message = "Last name cannot be blank")
     private String lastName;
 
     @Size(max = 100, message = "Display name must not exceed 100 characters")

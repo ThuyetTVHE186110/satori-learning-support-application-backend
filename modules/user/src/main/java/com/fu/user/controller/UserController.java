@@ -39,7 +39,7 @@ public class UserController {
 
     /**
      * UC-02: Create User
-     * Admin creates LEARNER/TEACHER/MANAGER.
+     * Admin creates LEARNER/TEACHER/CONTENT_MANAGER/OPERATION_MANAGER.
      * 
      * POST /api/v1/users
      * 

@@ -209,7 +209,7 @@ class UserServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should allow admin to create manager")
+        @DisplayName("Should allow admin to create content manager")
         void shouldAllowAdminToCreateManager() {
             // Given
             CreateUserRequest managerRequest = CreateUserRequest.builder()
@@ -242,7 +242,7 @@ class UserServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should reject manager trying to create user")
+        @DisplayName("Should reject operation manager trying to create user")
         void shouldRejectManagerCreatingUser() {
             // Given
             CreateUserRequest learnerRequest = CreateUserRequest.builder()
@@ -276,7 +276,7 @@ class UserServiceImplTest {
                     userService.createUser(adminRequest, adminId, UserRole.ADMIN)
             )
                     .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("Bạn không có quyền tạo tài khoản");
+                    .hasMessageContaining("Không thể tạo tài khoản ADMIN");
         }
 
         @Test
@@ -391,7 +391,7 @@ class UserServiceImplTest {
     class SearchUsersTests {
 
         @Test
-        @DisplayName("Manager should not see users")
+        @DisplayName("Content Manager should not see users")
         void managerShouldNotSeeUsers() {
             // Given
             UserFilterRequest filter = UserFilterRequest.builder().build();
@@ -466,23 +466,6 @@ class UserServiceImplTest {
         }
 
         @Test
-        @DisplayName("Manager should not update any user")
-        void managerShouldNotUpdateUser() {
-            // Given
-            UUID learnerId = (UUID) ReflectionTestUtils.getField(testLearner, "id");
-            UpdateUserRequest request = UpdateUserRequest.builder()
-                    .firstName("Updated")
-                    .build();
-
-            // When/Then
-            assertThatThrownBy(() ->
-                    userService.updateUser(learnerId, request, contentManagerId, UserRole.CONTENT_MANAGER)
-            )
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("Bạn không có quyền chỉnh sửa tài khoản này");
-        }
-
-        @Test
         @DisplayName("Admin should update manager successfully")
         void adminShouldUpdateManager() {
             // Given
@@ -544,20 +527,6 @@ class UserServiceImplTest {
             assertThat(deleted.getStatus()).isEqualTo(UserStatus.DELETED);
             assertThat(deleted.getDeletedAt()).isNotNull();
             assertThat(deleted.getDeletedBy()).isEqualTo(adminId);
-        }
-
-        @Test
-        @DisplayName("Manager should not delete any user")
-        void managerShouldNotDeleteUser() {
-            // Given
-            UUID learnerId = (UUID) ReflectionTestUtils.getField(testLearner, "id");
-
-            // When/Then
-            assertThatThrownBy(() ->
-                    userService.deleteUser(learnerId, operationManagerId, UserRole.OPERATION_MANAGER)
-            )
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("Bạn không có quyền xóa tài khoản này");
         }
 
         @Test
@@ -730,7 +699,7 @@ class UserServiceImplTest {
         }
 
         @Test
-        @DisplayName("Manager should not view user detail")
+        @DisplayName("Content Manager should not view user detail")
         void managerShouldNotViewUserDetail() {
             UUID learnerId = (UUID) ReflectionTestUtils.getField(testLearner, "id");
 

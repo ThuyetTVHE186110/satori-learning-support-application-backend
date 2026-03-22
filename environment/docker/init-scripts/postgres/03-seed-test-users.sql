@@ -61,7 +61,7 @@ INSERT INTO user_management.users (
     role, status, auth_provider,
     email_verified_at, created_at, updated_at
 ) VALUES (
-             'a0000000-0000-0000-0000-000000000002',
+             'a0000000-0000-0000-0000-000000000010',
              'operation-manager@test.satori.com',
              '$2a$12$wXFj.DR15CKPFTyhwFL.XuV8JvVqvnTPSIK3E8w0WTNC5omj9Lzp2', -- Password123!
              'Operation Manager',

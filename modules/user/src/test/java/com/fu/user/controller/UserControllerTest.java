@@ -8,6 +8,8 @@ import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
 import com.fu.user.security.CustomUserDetails;
 import com.fu.user.service.UserService;
+import com.fu.user.service.AuthService;
+import com.fu.user.service.ProfileService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -58,9 +60,15 @@ class UserControllerTest {
     @MockBean
     private UserService userService;
 
+    @MockBean
+    private AuthService authService;
+
+    @MockBean
+    private ProfileService profileService;
+
     // Test data
     private UUID testUserId;
-    private UUID managerId;
+    private UUID contentManagerId;
     private UUID adminId;
     private UserResponse testUserResponse;
     private CreateUserRequest createRequest;
@@ -69,7 +77,7 @@ class UserControllerTest {
     @BeforeEach
     void setUp() {
         testUserId = UUID.randomUUID();
-        managerId = UUID.randomUUID();
+        contentManagerId = UUID.randomUUID();
         adminId = UUID.randomUUID();
 
         testUserResponse = UserResponse.builder()
@@ -129,7 +137,7 @@ class UserControllerTest {
 
         @Test
         @DisplayName("Should return 403 when Manager tries to create user")
-        @WithMockUser(roles = "MANAGER")
+        @WithMockUser(roles = "CONTENT_MANAGER")
         void createUser_managerRole_returns403() throws Exception {
             // When
             ResultActions result = mockMvc.perform(post("/api/v1/users")
@@ -156,7 +164,7 @@ class UserControllerTest {
 
         @Test
         @DisplayName("Should return 400 when email is invalid")
-        @WithMockUser(roles = "MANAGER")
+        @WithMockUser(roles = "CONTENT_MANAGER")
         void createUser_invalidEmail_returns400() throws Exception {
             // Given
             createRequest.setEmail("invalid-email"); // Invalid email format
@@ -173,7 +181,7 @@ class UserControllerTest {
 
         @Test
         @DisplayName("Should return 400 when firstName is blank")
-        @WithMockUser(roles = "MANAGER")
+        @WithMockUser(roles = "CONTENT_MANAGER")
         void createUser_blankFirstName_returns400() throws Exception {
             // Given
             createRequest.setFirstName(""); // Blank firstName
@@ -190,7 +198,7 @@ class UserControllerTest {
 
         @Test
         @DisplayName("Should return 400 when lastName is blank")
-        @WithMockUser(roles = "MANAGER")
+        @WithMockUser(roles = "CONTENT_MANAGER")
         void createUser_blankLastName_returns400() throws Exception {
             // Given
             createRequest.setLastName(""); // Blank lastName
@@ -234,7 +242,7 @@ class UserControllerTest {
 
         @Test
         @DisplayName("Should return 403 when Manager tries to access")
-        @WithMockUser(roles = "MANAGER")
+        @WithMockUser(roles = "CONTENT_MANAGER")
         void getUserById_managerRole_returns403() throws Exception {
             // When
             ResultActions result = mockMvc.perform(get("/api/v1/users/{id}", testUserId));
@@ -426,7 +434,7 @@ class UserControllerTest {
 
         @Test
         @DisplayName("Should return 403 when manager tries to view deleted users")
-        @WithMockUser(roles = "MANAGER")
+        @WithMockUser(roles = "CONTENT_MANAGER")
         void getDeletedUsers_asManager_returns403() throws Exception {
             // When
             ResultActions result = mockMvc.perform(get("/api/v1/users/deleted"));
@@ -470,7 +478,7 @@ class UserControllerTest {
 
         @Test
         @DisplayName("Should return 403 when manager tries to restore user")
-        @WithMockUser(roles = "MANAGER")
+        @WithMockUser(roles = "CONTENT_MANAGER")
         void restoreUser_asManager_returns403() throws Exception {
             // Given
             RestoreUserRequest restoreRequest = RestoreUserRequest.builder()

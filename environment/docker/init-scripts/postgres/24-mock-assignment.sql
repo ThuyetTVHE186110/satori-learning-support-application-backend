@@ -12,6 +12,7 @@ DECLARE
     v_learner1_id UUID := 'a0000000-0000-0000-0000-000000000004';
     v_learner2_id UUID := 'a0000000-0000-0000-0000-000000000005';
     v_class_id    UUID := 'c0000000-0000-0000-0000-000000000001';
+    v_manager_id  UUID := 'a0000000-0000-0000-0000-000000000010';
     
     v_quiz1_id    UUID := 'b0000000-0000-0000-0000-000000000001';
     v_writing1_id UUID := 'b0000000-0000-0000-0000-000000000002';
@@ -41,8 +42,8 @@ BEGIN
 
 -- 1. Create Class (if not exists)
 IF NOT EXISTS (SELECT 1 FROM user_management.classes WHERE id = v_class_id) THEN
-    INSERT INTO user_management.classes (id, name, description, teacher_id, max_students, is_active, created_at)
-    VALUES (v_class_id, 'Lớp Tiếng Nhật N5 - Cấp tốc', 'Lớp học dành cho người mới bắt đầu, tập trung vào giao tiếp và JLPT N5.', v_teacher_id, 30, TRUE, CURRENT_TIMESTAMP);
+    INSERT INTO user_management.classes (id, name, description, teacher_id, max_students, is_active, created_at, created_by)
+    VALUES (v_class_id, 'Lớp Tiếng Nhật N5 - Cấp tốc', 'Lớp học dành cho người mới bắt đầu, tập trung vào giao tiếp và JLPT N5.', v_teacher_id, 30, TRUE, CURRENT_TIMESTAMP, v_manager_id);
     
     RAISE NOTICE 'Class created: Lớp Tiếng Nhật N5';
 END IF;

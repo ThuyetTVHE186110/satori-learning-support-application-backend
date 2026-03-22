@@ -22,8 +22,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
-import java.util.Arrays;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -68,13 +66,13 @@ public class UserServiceImpl implements UserService {
 
     /**
      * UC-02: Create User (by Admin)
-     * Creates a new user account (Learner/Teacher/Manager/Admin).
+     * Creates a new user account (Learner/Teacher/Content Manager/Operation Manager/Admin).
      * <p>
      * Business Rules:
      * - BR-01: Email must be unique
      * - If email exists with DELETED status: throw DeletedUserExistsException to allow user choice
      * - Otherwise if email exists with non-DELETED status: error
-     * - Admin can create any role (LEARNER/TEACHER/MANAGER/ADMIN)
+     * - Admin can create any role (LEARNER/TEACHER/CONTENT_MANAGER/OPERATION_MANAGER/ADMIN)
      * - Generate random password with strict requirements, hash with BCrypt
      * - Send welcome email with login credentials
      */
@@ -137,7 +135,6 @@ public class UserServiceImpl implements UserService {
      */
     @Override
     public UserResponse getUserById(UUID id) {
-        log.debug("Fetching user by id: {}", id);
         User user = findUserById(id);
         return userMapper.toResponse(user);
     }
@@ -147,7 +144,9 @@ public class UserServiceImpl implements UserService {
      */
     @Override
     public UserDetailResponse getUserDetailById(UserRole userRole, UUID id) {
-
+        if(userRole != UserRole.ADMIN) {
+            throw new BusinessException("FORBIDDEN", "Bạn không có quyền xem chi tiết tài khoản này");
+        }
         log.debug("Fetching detailed user information for id: {}", id);
         User user = findUserByIdIncludingDeleted(id);
 
@@ -242,25 +241,6 @@ public class UserServiceImpl implements UserService {
         }
         // Validate permission to update this user
         validateUpdatePermission(user, updaterRole);
-        //Update email if provided
-        if (request.getEmail() != null && !request.getEmail().equals(user.getEmail())) {
-            // Check if new email already exists
-            Optional<User> existingUserOpt = userRepository.findByEmail(request.getEmail());
-            //Check if existingUser is deleted
-            if (existingUserOpt.isPresent()) {
-                User existingUser = existingUserOpt.get();
-                // If DELETED status → throw error
-                if (existingUser.getDeletedAt() != null) {
-                    log.warn("Email already exists with DELETED status: {}", request.getEmail());
-                    throw new BusinessException("EMAIL_EXISTS_DELETED", "Email này đã tồn tại trong hệ thống nhưng đã bị xóa. Vui lòng chọn email khác hoặc khôi phục tài khoản đã xóa");
-                }
-            }
-            // If email exists with non-DELETED status → error
-            if (existingUserOpt.isPresent() && !existingUserOpt.get().getId().equals(id)) {
-                throw new BusinessException("EMAIL_EXISTS", "Email này đã được sử dụng. Vui lòng nhập email khác");
-            }
-            user.setEmail(request.getEmail());
-        }
         // Update fields if provided
         if (request.getFirstName() != null) {
             user.setFirstName(request.getFirstName());
@@ -484,11 +464,14 @@ public class UserServiceImpl implements UserService {
 
     /**
      * Validate if the creator has permission to create a user with the given role.
-     * - Admin can create: LEARNER, TEACHER, MANAGER, ADMIN
+     * - Admin can create: LEARNER, TEACHER, CONTENT_MANAGER, OPERATION_MANAGER, ADMIN
      */
     private void validateRoleCreation(UserRole targetRole, UserRole creatorRole) {
         if (creatorRole != UserRole.ADMIN) {
             throw new BusinessException("FORBIDDEN", "Bạn không có quyền tạo tài khoản");
+        }
+        if(targetRole == UserRole.ADMIN){
+            throw new BusinessException("FORBIDDEN", "Không thể tạo tài khoản ADMIN");
         }
     }
 

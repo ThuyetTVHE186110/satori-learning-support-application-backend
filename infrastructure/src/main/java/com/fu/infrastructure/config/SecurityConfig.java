@@ -78,8 +78,6 @@ public class SecurityConfig {
                         // Public course & lesson browsing (students can view published content)
                         .requestMatchers(HttpMethod.GET, "/api/v1/courses/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/courses/*/lessons/**").permitAll()
-                        // Manager course & lesson management
-                        .requestMatchers("/api/v1/manager/**").hasRole("MANAGER")
                         // User management - Admin access only
                         .requestMatchers("/api/v1/users/**").hasRole("ADMIN")
                         // All other requests require authentication
