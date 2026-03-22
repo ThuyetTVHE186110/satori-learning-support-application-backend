@@ -34,7 +34,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/manager/grammar-points")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('MANAGER')")
+@PreAuthorize("hasRole('CONTENT_MANAGER')")
 public class ManagerGrammarController {
 
     private final GrammarPointService grammarPointService;

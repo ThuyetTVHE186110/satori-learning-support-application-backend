@@ -2,13 +2,14 @@ package com.fu.user.entity;
 
 /**
  * User roles in the system.
- * Maps to PostgreSQL ENUM: user_role ('LEARNER', 'TEACHER', 'MANAGER', 'ADMIN')
+ * Maps to PostgreSQL ENUM: user_role ('LEARNER', 'TEACHER', 'CONTENT_MANAGER','OPERATION_MANAGER', 'ADMIN')
  * 
- * Note: ADMIN is mapped to MANAGER at application layer (only 1 Manager manages the app)
+ * Note: User management operations (CRUD, restore) are restricted to ADMIN only.
  */
 public enum UserRole {
     LEARNER,    // Student/Learner - can access learning features
     TEACHER,    // Teacher - can manage classes, assignments
-    MANAGER,    // Manager - full system administration
-    ADMIN       // Legacy - treated as MANAGER
+    CONTENT_MANAGER,    // CONTENT_MANAGER - can manage learning content (e.g., courses, materials)
+    OPERATION_MANAGER, // OPERATION_MANAGER - can manage operational aspects
+    ADMIN       // Legacy - full admin rights
 }

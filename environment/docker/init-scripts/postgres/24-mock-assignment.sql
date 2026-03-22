@@ -1,4 +1,4 @@
-    -- ==========================================================================
+-- ==========================================================================
 -- Script 23: Mock Assignment Data
 -- Seeds assignments, questions, submissions, and class data for testing.
 -- Teacher: Tanaka Sensei (a0000000-0000-0000-0000-000000000003)
@@ -12,7 +12,8 @@ DECLARE
     v_learner1_id UUID := 'a0000000-0000-0000-0000-000000000004';
     v_learner2_id UUID := 'a0000000-0000-0000-0000-000000000005';
     v_class_id    UUID := 'c0000000-0000-0000-0000-000000000001';
-    
+    v_manager_id  UUID := 'a0000000-0000-0000-0000-000000000010';
+
     v_quiz1_id    UUID := 'b0000000-0000-0000-0000-000000000001';
     v_writing1_id UUID := 'b0000000-0000-0000-0000-000000000002';
     v_quiz2_id    UUID := 'b0000000-0000-0000-0000-000000000003';
@@ -23,7 +24,7 @@ DECLARE
     v_quiz6_id    UUID := 'b0000000-0000-0000-0000-000000000008';
     v_writing3_id UUID := 'b0000000-0000-0000-0000-000000000009';
     v_course_id   UUID := 'd0000000-0000-0000-0000-000000000001';
-    
+
     v_q1_id       UUID := 'e0000000-0000-0000-0000-000000000001';
     v_q2_id       UUID := 'e0000000-0000-0000-0000-000000000002';
     v_q3_id       UUID := 'e0000000-0000-0000-0000-000000000003';
@@ -45,15 +46,15 @@ BEGIN
 IF NOT EXISTS (SELECT 1 FROM learning_content.courses WHERE id = v_course_id) THEN
     INSERT INTO learning_content.courses (id, name, description, jlpt_level, order_index, status, created_by)
     VALUES (v_course_id, 'Tiếng Nhật N5 cơ bản', 'Khóa học tiếng Nhật trình độ N5 dành cho người mới bắt đầu.', 'N5', 1, 'ACTIVE', v_teacher_id);
-    
+
     RAISE NOTICE 'Course created: Tiếng Nhật N5 cơ bản';
 END IF;
 
 -- 1. Create Class (if not exists)
 IF NOT EXISTS (SELECT 1 FROM user_management.classes WHERE id = v_class_id) THEN
-    INSERT INTO user_management.classes (id, name, description, teacher_id, course_id, max_students, is_active, created_at)
-    VALUES (v_class_id, 'Lớp Tiếng Nhật N5 - Cấp tốc', 'Lớp học dành cho người mới bắt đầu, tập trung vào giao tiếp và JLPT N5.', v_teacher_id, v_course_id, 30, TRUE, CURRENT_TIMESTAMP);
-    
+    INSERT INTO user_management.classes (id, name, description, teacher_id, course_id, max_students, is_active, created_at, created_by)
+    VALUES (v_class_id, 'Lớp Tiếng Nhật N5 - Cấp tốc', 'Lớp học dành cho người mới bắt đầu, tập trung vào giao tiếp và JLPT N5.', v_teacher_id, v_course_id, 30, TRUE, CURRENT_TIMESTAMP, v_manager_id);
+
     RAISE NOTICE 'Class created: Lớp Tiếng Nhật N5';
 END IF;
 
@@ -153,7 +154,7 @@ INSERT INTO assignment.assignment_questions (assignment_id, question_id, order_i
 VALUES (v_quiz4_id, v_q4_id, 0, 5), (v_quiz4_id, v_q5_id, 1, 5)
 ON CONFLICT (assignment_id, question_id) DO NOTHING;
 
--- Assignment 7: Quiz Adjectives (PUBLISHED)
+-- Assignment 6: New Quiz (Adjectives - PUBLISHED)
 INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
 VALUES (v_quiz5_id, 'Luyện tập Tính từ N5', 'Kiểm tra ý nghĩa các tính từ đuôi -i thông dụng trong N5.', 'QUIZ', v_class_id, CURRENT_TIMESTAMP + INTERVAL '10 days', 'PUBLISHED', FALSE, v_teacher_id)
 ON CONFLICT (id) DO NOTHING;
@@ -162,7 +163,7 @@ INSERT INTO assignment.assignment_questions (assignment_id, question_id, order_i
 VALUES (v_quiz5_id, v_q6_id, 0, 2), (v_quiz5_id, v_q7_id, 1, 2), (v_quiz5_id, v_q8_id, 2, 2), (v_quiz5_id, v_q9_id, 3, 2), (v_quiz5_id, v_q10_id, 4, 2)
 ON CONFLICT (assignment_id, question_id) DO NOTHING;
 
--- Assignment 8: Quiz Kanji (PUBLISHED)
+-- Assignment 7: New Quiz (Kanji - PUBLISHED)
 INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
 VALUES (v_quiz6_id, 'Hán tự cơ bản: Thiên nhiên', 'Nhận diện các chữ Hán cơ bản về chủ đề thiên nhiên.', 'QUIZ', v_class_id, CURRENT_TIMESTAMP + INTERVAL '12 days', 'PUBLISHED', FALSE, v_teacher_id)
 ON CONFLICT (id) DO NOTHING;
@@ -171,7 +172,7 @@ INSERT INTO assignment.assignment_questions (assignment_id, question_id, order_i
 VALUES (v_quiz6_id, v_q11_id, 0, 2), (v_quiz6_id, v_q12_id, 1, 2), (v_quiz6_id, v_q13_id, 2, 2), (v_quiz6_id, v_q14_id, 3, 2), (v_quiz6_id, v_q15_id, 4, 2)
 ON CONFLICT (assignment_id, question_id) DO NOTHING;
 
--- Assignment 6: New Writing (PUBLISHED - No Submissions)
+-- Assignment 8: New Writing (Family - PUBLISHED)
 INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
 VALUES (v_writing2_id, 'Kể về gia đình của bạn', 'Hãy viết một đoạn văn ngắn mô tả về gia đình bạn (số lượng thành viên, nghề nghiệp...).', 'WRITING', v_class_id, CURRENT_TIMESTAMP + INTERVAL '12 days', 'PUBLISHED', FALSE, v_teacher_id)
 ON CONFLICT (id) DO NOTHING;
@@ -180,13 +181,13 @@ INSERT INTO assignment.writing_assignments (assignment_id, prompt)
 VALUES (v_writing2_id, 'Viết về gia đình bạn bằng tiếng Nhật. Sử dụng các từ vựng đã học về gia đình.')
 ON CONFLICT (assignment_id) DO NOTHING;
 
--- Assignment 9: Graded Writing (PUBLISHED)
+-- Assignment 9: New Writing (Favorites - PUBLISHED)
 INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
-VALUES (v_writing3_id, 'Sở thích của tôi', 'Viết một đoạn văn ngắn về sở thích cá nhân của bạn.', 'WRITING', v_class_id, CURRENT_TIMESTAMP - INTERVAL '5 days', 'PUBLISHED', TRUE, v_teacher_id)
+VALUES (v_writing3_id, 'Luyện tập viết: Chủ đề tự chọn', 'Viết đoạn văn ngắn về chủ đề bạn yêu thích, kèm hình ảnh minh họa.', 'WRITING', v_class_id, CURRENT_TIMESTAMP + INTERVAL '14 days', 'PUBLISHED', TRUE, v_teacher_id)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO assignment.writing_assignments (assignment_id, prompt)
-VALUES (v_writing3_id, 'Hãy viết về ++[趣味]{しゅみ}++ của bạn. Bạn thích làm gì vào thời gian rảnh?')
+VALUES (v_writing3_id, 'Hãy viết một đoạn văn ngắn (khoảng 100 chữ) về một chủ đề bạn yêu thích, sử dụng các cấu trúc ngữ pháp N5 đã học.')
 ON CONFLICT (assignment_id) DO NOTHING;
 
 -- 5. Create Submissions
