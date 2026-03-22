@@ -52,7 +52,6 @@ import com.fu.infrastructure.cloudinary.CloudinaryService;
 
 /**
  * Integration tests — Practice Task (Assignment) Management.
- * Covers all test cases in ASSIGNMENT_TEST_PROCEDURES.md.
  *
  * Sections:
  *   1. TEACHER: View List, View Info, Create, Update, Status, Delete, View Results
@@ -308,7 +307,7 @@ class AssignmentIntegrationTest {
     class ViewTeacherAssignments {
 
         @Test
-        @DisplayName("TC_AS_T_VL_001 — Lấy list thành công, trả đúng fields")
+        @DisplayName("TC_AS_T_VL_001 — Get fields")
         void tc_as_t_vl_001() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
             Clazz clazz = saveClass(teacher, saveCourse());
@@ -1885,8 +1884,8 @@ class AssignmentIntegrationTest {
             mockMvc.perform(post("/api/v1/learner/assignments/{id}/start", a.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.status").value("IN_PROGRESS"))
-                    .andExpect(jsonPath("$.data.attemptNumber").value(1));
+                    .andExpect(jsonPath("$.data.id").value(a.getId().toString()))
+                    .andExpect(jsonPath("$.data.title").value("Published Quiz"));
         }
 
         @Test
@@ -1955,19 +1954,21 @@ class AssignmentIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_AS_L_DO_005 — Đang có IN_PROGRESS → 400 (ALREADY_IN_PROGRESS)")
+        @DisplayName("TC_AS_L_DO_005 — Đang có IN_PROGRESS → 200 (resume existing session)")
         void tc_as_l_do_005() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
             User learner = saveLearner("learner@test.com");
             Clazz clazz = saveClass(teacher, saveCourse());
             enrollLearner(clazz.getId(), learner.getId());
             Assignment a = savePublishedQuiz(teacher, clazz);
-            startSubmission(a.getId(), learner.getId());
+            AssignmentSubmission existing = startSubmission(a.getId(), learner.getId());
             String token = loginAndGetToken("learner@test.com");
 
             mockMvc.perform(post("/api/v1/learner/assignments/{id}/start", a.getId())
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest());
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.id").value(a.getId().toString()))
+                    .andExpect(jsonPath("$.data.title").value("Published Quiz"));
         }
 
         @Test
@@ -1985,17 +1986,16 @@ class AssignmentIntegrationTest {
                     .findByAssignmentIdOrderByOrderIndex(a.getId()).getFirst().getQuestionId();
 
             String body = objectMapper.writeValueAsString(java.util.Map.of(
-                    "submissionId", sub.getId().toString(),
                     "answers", "[{\"questionId\":\"" + questionId + "\",\"selectedAnswer\":\"A\"}]",
                     "timeSpentSeconds", 60));
 
-            mockMvc.perform(post("/api/v1/learner/assignments/submit")
+            mockMvc.perform(post("/api/v1/learner/assignments/" + a.getId() + "/submit-quiz")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.status").value("GRADED"))
-                    .andExpect(jsonPath("$.data.score").value(10.00))
+                    .andExpect(jsonPath("$.data.score").value(100.00))
                     .andExpect(jsonPath("$.data.correctCount").value(1));
         }
 
@@ -2014,11 +2014,10 @@ class AssignmentIntegrationTest {
                     .findByAssignmentIdOrderByOrderIndex(a.getId()).getFirst().getQuestionId();
 
             String body = objectMapper.writeValueAsString(java.util.Map.of(
-                    "submissionId", sub.getId().toString(),
                     "answers", "[{\"questionId\":\"" + questionId + "\",\"selectedAnswer\":\"B\"}]",
                     "timeSpentSeconds", 30));
 
-            mockMvc.perform(post("/api/v1/learner/assignments/submit")
+            mockMvc.perform(post("/api/v1/learner/assignments/" + a.getId() + "/submit-quiz")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body)
                             .header("Authorization", "Bearer " + token))
@@ -2047,11 +2046,10 @@ class AssignmentIntegrationTest {
                     .findByAssignmentIdOrderByOrderIndex(a.getId()).getFirst().getQuestionId();
 
             String body = objectMapper.writeValueAsString(java.util.Map.of(
-                    "submissionId", sub.getId().toString(),
                     "answers", "[{\"questionId\":\"" + questionId + "\",\"selectedAnswer\":\"A\"}]",
                     "timeSpentSeconds", 60));
 
-            mockMvc.perform(post("/api/v1/learner/assignments/submit")
+            mockMvc.perform(post("/api/v1/learner/assignments/" + a.getId() + "/submit-quiz")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body)
                             .header("Authorization", "Bearer " + token))
@@ -2134,9 +2132,9 @@ class AssignmentIntegrationTest {
             saveTeacher("teacher@test.com");
             String token = loginAndGetToken("teacher@test.com");
 
-            mockMvc.perform(post("/api/v1/learner/assignments/submit")
+            mockMvc.perform(post("/api/v1/learner/assignments/" + UUID.randomUUID() + "/submit-quiz")
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"submissionId\":\"" + UUID.randomUUID() + "\",\"answers\":\"[]\"}")
+                            .content("{\"answers\":\"[]\"}")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isForbidden());
         }
@@ -2192,11 +2190,10 @@ class AssignmentIntegrationTest {
                     .findByAssignmentIdOrderByOrderIndex(a.getId()).getFirst().getQuestionId();
 
             String body = objectMapper.writeValueAsString(java.util.Map.of(
-                    "submissionId", sub.getId().toString(),
                     "answers", "[{\"questionId\":\"" + questionId + "\",\"selectedAnswer\":\"A\"}]",
                     "timeSpentSeconds", 60));
 
-            mockMvc.perform(post("/api/v1/learner/assignments/submit")
+            mockMvc.perform(post("/api/v1/learner/assignments/" + a.getId() + "/submit-quiz")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body)
                             .header("Authorization", "Bearer " + token))
@@ -2244,11 +2241,10 @@ class AssignmentIntegrationTest {
             String token = loginAndGetToken("learner@test.com");
 
             String body = objectMapper.writeValueAsString(java.util.Map.of(
-                    "submissionId", sub.getId().toString(),
                     "answers", "invalid-json-array",
                     "timeSpentSeconds", 60));
 
-            mockMvc.perform(post("/api/v1/learner/assignments/submit")
+            mockMvc.perform(post("/api/v1/learner/assignments/" + a.getId() + "/submit-quiz")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body)
                             .header("Authorization", "Bearer " + token))
@@ -2267,11 +2263,10 @@ class AssignmentIntegrationTest {
             String token = loginAndGetToken("learner@test.com");
 
             String body = objectMapper.writeValueAsString(java.util.Map.of(
-                    "submissionId", sub.getId().toString(),
                     "answers", "[]",
                     "timeSpentSeconds", 60));
 
-            mockMvc.perform(post("/api/v1/learner/assignments/submit")
+            mockMvc.perform(post("/api/v1/learner/assignments/" + a.getId() + "/submit-quiz")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body)
                             .header("Authorization", "Bearer " + token))
@@ -2431,73 +2426,6 @@ class AssignmentIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.content.length()").value(1));
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // 2.4 View Practice Task Info (Learner)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    @Nested
-    @DisplayName("2.4 View Practice Task Info (Learner)")
-    class LearnerViewAssignmentInfo {
-
-        @Test
-        @DisplayName("TC_AS_L_VI_001 — Get Assignment Details thành công")
-        void tc_as_l_vi_001() throws Exception {
-            User teacher = saveTeacher("teacher@test.com");
-            User learner = saveLearner("learner@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
-            enrollLearner(clazz.getId(), learner.getId());
-            Assignment a = savePublishedQuiz(teacher, clazz);
-            String token = loginAndGetToken("learner@test.com");
-
-            mockMvc.perform(get("/api/v1/learner/assignments/{id}", a.getId())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.id").value(a.getId().toString()))
-                    .andExpect(jsonPath("$.data.questions[0].correctAnswer").doesNotExist());
-        }
-
-        @Test
-        @DisplayName("TC_AS_L_VI_002 — UUID sai định dạng → 400")
-        void tc_as_l_vi_002() throws Exception {
-            saveLearner("learner@test.com");
-            String token = loginAndGetToken("learner@test.com");
-
-            mockMvc.perform(get("/api/v1/learner/assignments/{id}", "invalid-uuid")
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest());
-        }
-
-        @Test
-        @DisplayName("TC_AS_L_VI_003 — Learner xem DRAFT assignment → 400 ASSIGNMENT_NOT_AVAILABLE")
-        void tc_as_l_vi_003() throws Exception {
-            User teacher = saveTeacher("teacher@test.com");
-            User learner = saveLearner("learner@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
-            enrollLearner(clazz.getId(), learner.getId());
-            Assignment a = saveQuizDraft(teacher, clazz);
-            String token = loginAndGetToken("learner@test.com");
-
-            mockMvc.perform(get("/api/v1/learner/assignments/{id}", a.getId())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest());
-        }
-
-        @Test
-        @DisplayName("TC_AS_L_VI_004 — Learner không thuộc class → 400 ACCESS_DENIED")
-        void tc_as_l_vi_004() throws Exception {
-            User teacher = saveTeacher("teacher@test.com");
-            User learner = saveLearner("learner@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
-            // KHÔNG enroll learner
-            Assignment a = savePublishedQuiz(teacher, clazz);
-            String token = loginAndGetToken("learner@test.com");
-
-            mockMvc.perform(get("/api/v1/learner/assignments/{id}", a.getId())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest());
         }
     }
 

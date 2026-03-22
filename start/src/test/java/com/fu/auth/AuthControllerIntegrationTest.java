@@ -41,8 +41,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * -c "CREATE DATABASE satori_test OWNER satori_user;"
  *
  * Coverage (test plan sections 1–4):
- * Section 1 – Login              TC_AUTH_LG_001–014
- * Section 2 – Forgot Password    TC_AUTH_FP_001–008
+ * Section 1 – Login              TC_AUTH_LG_001–016
+ * Section 2 – Forgot Password    TC_AUTH_FP_001–012, TC_AUTH_FP_009b
  * Section 3 – Change Password    TC_AUTH_CP_001–008
  * Section 4 – Logout             TC_AUTH_LO_001–002
  *
@@ -157,7 +157,9 @@ class   AuthControllerIntegrationTest {
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
+                    .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"))
+                    .andExpect(jsonPath("$.message").value("Sai email hoặc mật khẩu. Hãy thử lại"));
+
         }
 
         /**
@@ -216,7 +218,8 @@ class   AuthControllerIntegrationTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("ACCOUNT_SUSPENDED"));
+                    .andExpect(jsonPath("$.code").value("ACCOUNT_SUSPENDED"))
+                    .andExpect(jsonPath("$.message").value("Tài khoản của bạn đã bị chặn. Hãy liên hệ quản lý"));
         }
 
         /**
@@ -534,7 +537,8 @@ class   AuthControllerIntegrationTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(refreshReq)))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("SESSION_EXPIRED"));
+                    .andExpect(jsonPath("$.code").value("SESSION_EXPIRED"))
+                    .andExpect(jsonPath("$.message").value("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại"));
         }
 
         /**
@@ -574,7 +578,63 @@ class   AuthControllerIntegrationTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(refreshReq)))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("SESSION_EXPIRED"));
+                    .andExpect(jsonPath("$.code").value("SESSION_EXPIRED"))
+                    .andExpect(jsonPath("$.message").value("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại"));
+        }
+
+        /**
+         * TC_AUTH_LG_015 — Email with leading/trailing whitespace is trimmed (BR-48).
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/login with email containing leading/trailing whitespace.
+         *   2. AuthController → trim the email before validation and processing.
+         *   3. AuthService    → retrieve the user account by the trimmed email.
+         *   4. AuthService    → validate the credentials and account status.
+         *   5. AuthService    → create a login session and generate tokens.
+         *   6. System         → return the authentication response.
+         */
+        @Test
+        @DisplayName("TC_AUTH_LG_015 — Email with whitespace trimmed (BR-48) → successful login")
+        void tc_lg_015_emailWithWhitespaceTrimmed() throws Exception {
+            LoginRequest request = new LoginRequest();
+            request.setEmail("  learner@test.com  ");
+            request.setPassword("ValidPass@1");
+
+            mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(request)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.accessToken").isNotEmpty())
+                    .andExpect(jsonPath("$.data.refreshToken").isNotEmpty())
+                    .andExpect(jsonPath("$.data.user.email").value("learner@test.com"))
+                    .andExpect(jsonPath("$.data.user.role").value("LEARNER"));
+        }
+
+        /**
+         * TC_AUTH_LG_016 — Email length exceeds 255 characters (BR-49).
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/login with email longer than 255 characters.
+         *   2. AuthController → validate the request body and detect email length violation.
+         *   3. System         → return the validation error response before reaching AuthService.
+         */
+        @Test
+        @DisplayName("TC_AUTH_LG_016 — Email length > 255 characters (BR-49) → 400 validation error")
+        void tc_lg_016_emailTooLong() throws Exception {
+            // Create email with 256 characters (255 + 1 extra)
+            String longEmail = "a".repeat(256) + "@test.com";
+            
+            LoginRequest request = new LoginRequest();
+            request.setEmail(longEmail);
+            request.setPassword("ValidPass@1");
+
+            mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(request)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
         }
     }
 
@@ -685,7 +745,8 @@ class   AuthControllerIntegrationTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(verifyRequest)))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("INVALID_OTP"));
+                    .andExpect(jsonPath("$.code").value("INVALID_OTP"))
+                    .andExpect(jsonPath("$.message").value("Mã OTP không hợp lệ"));
         }
 
         /**
@@ -714,7 +775,8 @@ class   AuthControllerIntegrationTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(verifyRequest)))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("OTP_EXPIRED"));
+                    .andExpect(jsonPath("$.code").value("OTP_EXPIRED"))
+                    .andExpect(jsonPath("$.message").value("Mã OTP đã hết hạn"));
         }
 
         /**
@@ -895,6 +957,289 @@ class   AuthControllerIntegrationTest {
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.code").value("PASSWORD_MISMATCH"));
         }
+
+        /**
+         * TC_AUTH_FP_009 — Incorrect/non-existent email address on verify OTP screen (A3).
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/forgot-password with learner@test.com.
+         *   2. System         → generates OTP for learner@test.com.
+         *   3. Client         → POST /api/v1/auth/verify-otp with non-existent email (nonexistent@test.com) and valid OTP.
+         *   4. Scenario       → User sees wrong email displayed, tries to correct but enters non-existent email.
+         *   5. AuthController → call AuthService.verifyOtp().
+         *   6. AuthService    → attempt to retrieve OTP by nonexistent@test.com (no user exists).
+         *   7. System         → return invalid OTP error response.
+         */
+        @Test
+        @DisplayName("TC_AUTH_FP_009 — Non-existent email on verify OTP screen (A3) → INVALID_OTP")
+        void tc_fp_009_nonExistentEmailOnVerifyScreen() throws Exception {
+            // Request OTP for existing email
+            ForgotPasswordRequest fpRequest = new ForgotPasswordRequest();
+            fpRequest.setEmail("learner@test.com");
+            mockMvc.perform(post("/api/v1/auth/forgot-password")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(fpRequest)));
+
+            // Get the OTP generated for learner@test.com
+            User learnerUser = userRepository.findByEmail("learner@test.com").orElseThrow();
+            String validOtp = learnerUser.getPasswordResetToken();
+
+            // Scenario: User sees wrong email on screen and tries to correct with non-existent email
+            VerifyOtpRequest verifyRequest = new VerifyOtpRequest();
+            verifyRequest.setEmail("nonexistent@test.com");  // Non-existent email
+            verifyRequest.setOtp(validOtp);                  // Valid OTP but for wrong email
+
+            mockMvc.perform(post("/api/v1/auth/verify-otp")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(verifyRequest)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("INVALID_OTP"))
+                    .andExpect(jsonPath("$.message").value("Mã OTP không hợp lệ"));
+        }
+
+        /**
+         * TC_AUTH_FP_009b — Email mismatch: OTP requested for email A, verification attempted with email B (A3).
+         *
+         * Test Procedure:
+         *   1. Setup         → Create two users: user.a@test.com and user.b@test.com.
+         *   2. Client         → POST /api/v1/auth/forgot-password with user.a@test.com.
+         *   3. System         → generates OTP for user.a@test.com.
+         *   4. Client         → POST /api/v1/auth/verify-otp with user.b@test.com (wrong existing email) and user.a@test.com's OTP.
+         *   5. Scenario       → User sees wrong email displayed (user.b@test.com), tries to use correct OTP for user.a@test.com.
+         *   6. AuthController → call AuthService.verifyOtp().
+         *   7. AuthService    → retrieve OTP by user.b@test.com (no OTP exists or different OTP).
+         *   8. System         → return invalid OTP error response.
+         */
+        @Test
+        @DisplayName("TC_AUTH_FP_009b — Email mismatch: A requests OTP, B tries to verify (A3) → INVALID_OTP")
+        void tc_fp_009b_emailMismatchBothExist() throws Exception {
+            // Create second user that exists in the database
+            userRepository.save(User.builder()
+                    .email("user.b@test.com")
+                    .passwordHash(passwordEncoder.encode("ValidPass@1"))
+                    .firstName("User")
+                    .lastName("B")
+                    .role(UserRole.LEARNER)
+                    .status(UserStatus.ACTIVE)
+                    .authProvider(AuthProvider.LOCAL)
+                    .failedLoginAttempts(0)
+                    .build());
+
+            // Request OTP only for user.a@test.com (learner@test.com)
+            ForgotPasswordRequest fpRequest = new ForgotPasswordRequest();
+            fpRequest.setEmail("learner@test.com");
+            mockMvc.perform(post("/api/v1/auth/forgot-password")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(fpRequest)));
+
+            // Get the OTP generated for learner@test.com
+            User userA = userRepository.findByEmail("learner@test.com").orElseThrow();
+            String validOtpForUserA = userA.getPasswordResetToken();
+
+            // Scenario: User sees wrong email (user.b@test.com) on screen but tries to use OTP for learner@test.com
+            VerifyOtpRequest verifyRequest = new VerifyOtpRequest();
+            verifyRequest.setEmail("user.b@test.com");     // Wrong existing email shown on screen
+            verifyRequest.setOtp(validOtpForUserA);      // Valid OTP but for different email
+
+            mockMvc.perform(post("/api/v1/auth/verify-otp")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(verifyRequest)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("INVALID_OTP"))
+                    .andExpect(jsonPath("$.message").value("Mã OTP không hợp lệ"));
+        }
+
+        /**
+         * TC_AUTH_FP_010 — Resend OTP functionality (A4).
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/forgot-password with email (first request).
+         *   2. System         → generates and saves first OTP.
+         *   3. Client         → POST /api/v1/auth/forgot-password with same email (resend request).
+         *   4. System         → generates new OTP and overwrites the previous one.
+         *   5. Client         → POST /api/v1/auth/verify-otp with old OTP → should fail.
+         *   6. Client         → POST /api/v1/auth/verify-otp with new OTP → should succeed.
+         */
+        @Test
+        @DisplayName("TC_AUTH_FP_010 — Resend OTP (A4) → new OTP generated, old OTP invalid")
+        void tc_fp_010_resendOtp() throws Exception {
+            ForgotPasswordRequest fpRequest = new ForgotPasswordRequest();
+            fpRequest.setEmail("learner@test.com");
+
+            // First OTP request
+            mockMvc.perform(post("/api/v1/auth/forgot-password")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(fpRequest)));
+
+            User user = userRepository.findByEmail("learner@test.com").orElseThrow();
+            String firstOtp = user.getPasswordResetToken();
+
+            // Resend OTP request
+            mockMvc.perform(post("/api/v1/auth/forgot-password")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(fpRequest)));
+
+            user = userRepository.findByEmail("learner@test.com").orElseThrow();
+            String secondOtp = user.getPasswordResetToken();
+
+            // Verify that OTPs are different
+            assertThat(secondOtp).isNotEqualTo(firstOtp);
+
+            // Old OTP should fail
+            VerifyOtpRequest verifyOldRequest = new VerifyOtpRequest();
+            verifyOldRequest.setEmail("learner@test.com");
+            verifyOldRequest.setOtp(firstOtp);
+
+            mockMvc.perform(post("/api/v1/auth/verify-otp")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(verifyOldRequest)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("INVALID_OTP"));
+
+            // New OTP should succeed
+            VerifyOtpRequest verifyNewRequest = new VerifyOtpRequest();
+            verifyNewRequest.setEmail("learner@test.com");
+            verifyNewRequest.setOtp(secondOtp);
+
+            mockMvc.perform(post("/api/v1/auth/verify-otp")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(verifyNewRequest)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.resetToken").isNotEmpty());
+        }
+
+        /**
+         * TC_AUTH_FP_011 — Password reset doesn't auto-login (BR-58).
+         *
+         * Test Procedure:
+         *   1. Client         → Complete full forgot password flow (request OTP → verify → reset password).
+         *   2. System         → successfully resets password.
+         *   3. Client         → Try to access protected endpoint without new login.
+         *   4. System         → should return 401 Unauthorized.
+         *   5. Client         → Login with new credentials → should succeed.
+         */
+        @Test
+        @DisplayName("TC_AUTH_FP_011 — Password reset doesn't auto-login (BR-58) → must login with new credentials")
+        void tc_fp_011_passwordResetNoAutoLogin() throws Exception {
+            // Complete full password reset flow
+            ForgotPasswordRequest fpRequest = new ForgotPasswordRequest();
+            fpRequest.setEmail("learner@test.com");
+            mockMvc.perform(post("/api/v1/auth/forgot-password")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(fpRequest)));
+
+            User user = userRepository.findByEmail("learner@test.com").orElseThrow();
+            String otp = user.getPasswordResetToken();
+
+            VerifyOtpRequest verifyRequest = new VerifyOtpRequest();
+            verifyRequest.setEmail("learner@test.com");
+            verifyRequest.setOtp(otp);
+
+            MvcResult verifyResult = mockMvc.perform(post("/api/v1/auth/verify-otp")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(verifyRequest)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.resetToken").isNotEmpty())
+                    .andReturn();
+
+            String resetToken = objectMapper.readTree(
+                    verifyResult.getResponse().getContentAsString()).path("data").path("resetToken").asText();
+
+            ResetPasswordRequest resetRequest = ResetPasswordRequest.builder()
+                    .resetToken(resetToken).newPassword("NewPass@1").confirmPassword("NewPass@1").build();
+
+            mockMvc.perform(post("/api/v1/auth/reset-password")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(resetRequest)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true));
+
+            // Verify that old password no longer works
+            LoginRequest oldLoginRequest = new LoginRequest();
+            oldLoginRequest.setEmail("learner@test.com");
+            oldLoginRequest.setPassword("ValidPass@1");
+
+            mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(oldLoginRequest)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
+
+            // Verify that new password works (must explicitly login)
+            LoginRequest newLoginRequest = new LoginRequest();
+            newLoginRequest.setEmail("learner@test.com");
+            newLoginRequest.setPassword("NewPass@1");
+
+            mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(newLoginRequest)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.accessToken").isNotEmpty());
+        }
+
+        /**
+         * TC_AUTH_FP_012 — OTP valid for exactly 10 minutes (BR-54).
+         *
+         * Test Procedure:
+         *   1. Client         → POST /api/v1/auth/forgot-password → OTP generated.
+         *   2. Client         → POST /api/v1/auth/verify-otp within 10 minutes → should succeed.
+         *   3. Client         → POST /api/v1/auth/forgot-password → new OTP generated.
+         *   4. Wait for 10+ minutes to pass.
+         *   5. Client         → POST /api/v1/auth/verify-otp after 10 minutes → should fail.
+         */
+        @Test
+        @DisplayName("TC_AUTH_FP_012 — OTP valid for exactly 10 minutes (BR-54) → expires after 10 minutes")
+        void tc_fp_012_otpValidTenMinutes() throws Exception {
+            ForgotPasswordRequest fpRequest = new ForgotPasswordRequest();
+            fpRequest.setEmail("learner@test.com");
+
+            // Test 1: OTP within 10 minutes should work
+            mockMvc.perform(post("/api/v1/auth/forgot-password")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(fpRequest)));
+
+            User user = userRepository.findByEmail("learner@test.com").orElseThrow();
+            String validOtp = user.getPasswordResetToken();
+            LocalDateTime expiresAt = user.getPasswordResetTokenExpiresAt();
+
+            // Verify OTP is set to expire in approximately 10 minutes
+            assertThat(expiresAt).isAfter(LocalDateTime.now().plusMinutes(9));
+            assertThat(expiresAt).isBefore(LocalDateTime.now().plusMinutes(11));
+
+            // Verify OTP works within valid time
+            VerifyOtpRequest verifyRequest = new VerifyOtpRequest();
+            verifyRequest.setEmail("learner@test.com");
+            verifyRequest.setOtp(validOtp);
+
+            mockMvc.perform(post("/api/v1/auth/verify-otp")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(verifyRequest)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.resetToken").isNotEmpty());
+
+            // Test 2: OTP after 10 minutes should fail
+            mockMvc.perform(post("/api/v1/auth/forgot-password")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(fpRequest)));
+
+            user = userRepository.findByEmail("learner@test.com").orElseThrow();
+            String expiredOtp = user.getPasswordResetToken();
+
+            // Manually set OTP as expired (more than 10 minutes ago)
+            user.setPasswordResetTokenExpiresAt(LocalDateTime.now().minusMinutes(11));
+            userRepository.save(user);
+
+            VerifyOtpRequest expiredVerifyRequest = new VerifyOtpRequest();
+            expiredVerifyRequest.setEmail("learner@test.com");
+            expiredVerifyRequest.setOtp(expiredOtp);
+
+            mockMvc.perform(post("/api/v1/auth/verify-otp")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(expiredVerifyRequest)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("OTP_EXPIRED"));
+        }
     }
 
     // =========================================================================
@@ -968,7 +1313,7 @@ class   AuthControllerIntegrationTest {
         }
 
         /**
-         * TC_AUTH_CP_002 — logoutOtherDevices=true revokes all other sessions.
+         * TC_AUTH_CP_002 — Password change invalidates ALL sessions (BR-61, BR-63).
          *
          * Test Procedure:
          *   1. Client         → POST /api/v1/auth/change-password with logoutOtherDevices = true.
@@ -976,12 +1321,13 @@ class   AuthControllerIntegrationTest {
          *   3. AuthController → call AuthService.changePassword().
          *   4. AuthService    → retrieve the user account by identity.
          *   5. AuthService    → verify the current password and save the new password.
-         *   6. AuthService    → retrieve all active sessions of the user.
-         *   7. AuthService    → revoke all sessions except the current one.
-         *   8. System         → return the success response.
+         *   6. AuthService    → revoke ALL sessions including current one (BR-61, BR-63).
+         *   7. System         → return the success response.
+         *   8. Verification   → Current token becomes invalid (SESSION_EXPIRED).
+         *   9. Verification   → All other sessions become invalid (SESSION_EXPIRED).
          */
         @Test
-        @DisplayName("TC_AUTH_CP_002 — logoutOtherDevices=true revokes other sessions")
+        @DisplayName("TC_AUTH_CP_002 — Password change invalidates ALL sessions (BR-61, BR-63)")
         void tc_cp_002_logoutOtherDevices() throws Exception {
             String body1      = loginAndGetBody("learner@test.com", "ValidPass@1");
             String token1     = objectMapper.readTree(body1).path("data").path("accessToken").asText();
@@ -999,9 +1345,20 @@ class   AuthControllerIntegrationTest {
                                     .confirmPassword("NewPass@2").logoutOtherDevices(true).build())))
                     .andExpect(status().isOk());
 
+            // BR-61 & BR-63: ALL sessions should be revoked, including current one
             assertThat(sessionRepository.findAll().stream()
-                    .filter(s -> s.getRevokedAt() == null).count()).isEqualTo(1);
+                    .filter(s -> s.getRevokedAt() == null).count()).isEqualTo(0);
 
+            // Verify current token is invalid (BR-61)
+            mockMvc.perform(post("/api/v1/auth/logout")
+                            .header("Authorization", "Bearer " + token1)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(
+                                    LogoutRequest.builder().refreshToken("any").logoutAll(false).build())))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+
+            // Verify other session refresh token is invalid (BR-63)
             RefreshTokenRequest refreshReq = new RefreshTokenRequest();
             refreshReq.setRefreshToken(refresh2);
             mockMvc.perform(post("/api/v1/auth/refresh")
@@ -1034,7 +1391,8 @@ class   AuthControllerIntegrationTest {
                                     .currentPassword("WrongPass@1").newPassword("NewPass@2")
                                     .confirmPassword("NewPass@2").logoutOtherDevices(false).build())))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("WRONG_PASSWORD"));
+                    .andExpect(jsonPath("$.code").value("WRONG_PASSWORD"))
+                    .andExpect(jsonPath("$.message").value("Mật khẩu hiện tại không chính xác"));
         }
 
         /**
@@ -1061,7 +1419,8 @@ class   AuthControllerIntegrationTest {
                                     .currentPassword("ValidPass@1").newPassword("ValidPass@1")
                                     .confirmPassword("ValidPass@1").logoutOtherDevices(false).build())))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("PASSWORD_REUSE"));
+                    .andExpect(jsonPath("$.code").value("PASSWORD_REUSE"))
+                    .andExpect(jsonPath("$.message").value("Mật khẩu mới không được trùng với mật khẩu cũ."));
         }
 
         /**
@@ -1086,7 +1445,8 @@ class   AuthControllerIntegrationTest {
                                     .currentPassword("ValidPass@1").newPassword("NewPass@2")
                                     .confirmPassword("NewPass@3").logoutOtherDevices(false).build())))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("PASSWORD_MISMATCH"));
+                    .andExpect(jsonPath("$.code").value("PASSWORD_MISMATCH"))
+                    .andExpect(jsonPath("$.message").value("Mật khẩu xác nhận không khớp"));
         }
 
         /**
@@ -1187,7 +1547,7 @@ class   AuthControllerIntegrationTest {
         }
 
         /**
-         * TC_AUTH_LO_001 — Logout revokes session.
+         * TC_AUTH_LO_001 — Logout revokes session and invalidates access token.
          *
          * Test Procedure:
          *   1. Client         → POST /api/v1/auth/logout with a valid Bearer token and refreshToken.
@@ -1196,9 +1556,11 @@ class   AuthControllerIntegrationTest {
          *   4. AuthService    → retrieve the session by refreshToken.
          *   5. AuthService    → revoke the session.
          *   6. System         → return the success response.
+         *   7. Verification   → Access token becomes invalid (UNAUTHORIZED).
+         *   8. Verification   → Refresh token becomes invalid (SESSION_EXPIRED).
          */
         @Test
-        @DisplayName("TC_AUTH_LO_001 — Logout revokes session in DB (revokedAt set)")
+        @DisplayName("TC_AUTH_LO_001 — Logout revokes session and invalidates access token")
         void tc_lo_001_logoutRevokesSession() throws Exception {
             String body        = loginAndGetBody("learner@test.com", "ValidPass@1");
             String accessToken = objectMapper.readTree(body).path("data").path("accessToken").asText();
@@ -1215,6 +1577,16 @@ class   AuthControllerIntegrationTest {
             assertThat(sessionRepository.findAll().stream()
                     .filter(s -> s.getRevokedAt() == null).count()).isZero();
 
+            // Verify access token is invalid after logout
+            mockMvc.perform(post("/api/v1/auth/logout")
+                            .header("Authorization", "Bearer " + accessToken)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(
+                                    LogoutRequest.builder().refreshToken("any").logoutAll(false).build())))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+
+            // Verify refresh token is invalid after logout
             RefreshTokenRequest refreshReq = new RefreshTokenRequest();
             refreshReq.setRefreshToken(refreshToken);
             mockMvc.perform(post("/api/v1/auth/refresh")
@@ -1225,50 +1597,78 @@ class   AuthControllerIntegrationTest {
         }
 
         /**
-         * TC_AUTH_LO_002 — logoutAll=true revokes all sessions.
+         * TC_AUTH_LO_001b — Logout does not affect other sessions.
          *
          * Test Procedure:
-         *   1. Client         → POST /api/v1/auth/logout with logoutAll = true.
-         *   2. AuthFilter     → parse the token and resolve the user identity.
-         *   3. AuthController → call AuthService.logout().
-         *   4. AuthService    → retrieve all active sessions of the user.
-         *   5. AuthService    → revoke all sessions.
-         *   6. System         → return the success response.
+         *   1. Client         → Create 2 separate login sessions.
+         *   2. Client         → POST /api/v1/auth/logout with session 1 token and refreshToken.
+         *   3. AuthService    → revoke only session 1.
+         *   4. Verification   → Session 2 remains active and functional.
          */
         @Test
-        @DisplayName("TC_AUTH_LO_002 — logoutAll=true revokes all sessions")
-        void tc_lo_002_logoutAll() throws Exception {
-            String body1      = loginAndGetBody("learner@test.com", "ValidPass@1");
-            String body2      = loginAndGetBody("learner@test.com", "ValidPass@1");
-            String body3      = loginAndGetBody("learner@test.com", "ValidPass@1");
+        @DisplayName("TC_AUTH_LO_001b — Logout does not affect other sessions")
+        void tc_lo_001b_logoutDoesNotAffectOtherSessions() throws Exception {
+            // Create two separate sessions
+            String body1        = loginAndGetBody("learner@test.com", "ValidPass@1");
+            String accessToken1 = objectMapper.readTree(body1).path("data").path("accessToken").asText();
+            String refreshToken1 = objectMapper.readTree(body1).path("data").path("refreshToken").asText();
+            
+            String body2        = loginAndGetBody("learner@test.com", "ValidPass@1");
+            String accessToken2 = objectMapper.readTree(body2).path("data").path("accessToken").asText();
+            String refreshToken2 = objectMapper.readTree(body2).path("data").path("refreshToken").asText();
 
-            String accessToken  = objectMapper.readTree(body1).path("data").path("accessToken").asText();
-            String refresh1     = objectMapper.readTree(body1).path("data").path("refreshToken").asText();
-            String refresh2     = objectMapper.readTree(body2).path("data").path("refreshToken").asText();
-            String refresh3     = objectMapper.readTree(body3).path("data").path("refreshToken").asText();
-
+            // Verify both sessions are active
             assertThat(sessionRepository.findAll().stream()
-                    .filter(s -> s.getRevokedAt() == null).count()).isEqualTo(3);
+                    .filter(s -> s.getRevokedAt() == null).count()).isEqualTo(2);
 
+            // Logout session 1 only
             mockMvc.perform(post("/api/v1/auth/logout")
-                            .header("Authorization", "Bearer " + accessToken)
+                            .header("Authorization", "Bearer " + accessToken1)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(
-                                    LogoutRequest.builder().refreshToken(refresh1).logoutAll(true).build())))
-                    .andExpect(status().isOk());
+                                    LogoutRequest.builder().refreshToken(refreshToken1).logoutAll(false).build())))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true));
 
+            // Verify only 1 session remains active (session 2)
             assertThat(sessionRepository.findAll().stream()
-                    .filter(s -> s.getRevokedAt() == null).count()).isZero();
+                    .filter(s -> s.getRevokedAt() == null).count()).isEqualTo(1);
 
-            for (String rt : new String[]{refresh2, refresh3}) {
-                RefreshTokenRequest r = new RefreshTokenRequest();
-                r.setRefreshToken(rt);
-                mockMvc.perform(post("/api/v1/auth/refresh")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(r)))
-                        .andExpect(status().isBadRequest())
-                        .andExpect(jsonPath("$.code").value("SESSION_EXPIRED"));
-            }
+            // Verify session 1 access token is invalid
+            mockMvc.perform(post("/api/v1/auth/logout")
+                            .header("Authorization", "Bearer " + accessToken1)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(
+                                    LogoutRequest.builder().refreshToken("any").logoutAll(false).build())))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+
+            // Verify session 1 refresh token is invalid
+            RefreshTokenRequest refreshReq1 = new RefreshTokenRequest();
+            refreshReq1.setRefreshToken(refreshToken1);
+            mockMvc.perform(post("/api/v1/auth/refresh")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(refreshReq1)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("SESSION_EXPIRED"));
+
+            // Verify session 2 access token is still valid
+            mockMvc.perform(post("/api/v1/auth/logout")
+                            .header("Authorization", "Bearer " + accessToken2)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(
+                                    LogoutRequest.builder().refreshToken(refreshToken2).logoutAll(false).build())))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true));
+
+            // Verify session 2 refresh token was still valid before this last logout
+            RefreshTokenRequest refreshReq2 = new RefreshTokenRequest();
+            refreshReq2.setRefreshToken(refreshToken2);
+            mockMvc.perform(post("/api/v1/auth/refresh")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(refreshReq2)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("SESSION_EXPIRED"));
         }
     }
 }
