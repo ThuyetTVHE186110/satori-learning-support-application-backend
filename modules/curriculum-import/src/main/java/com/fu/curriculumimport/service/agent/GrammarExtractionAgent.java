@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.service.agent.prompt.GrammarPromptBuilder;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
-import com.fu.curriculumimport.service.ingestion.OcrTextPreprocessor;
 import com.fu.curriculumimport.service.vision.VisionPageExtractor;
 import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.extern.slf4j.Slf4j;
@@ -80,12 +79,6 @@ public class GrammarExtractionAgent {
 
         // ── Text-based LLM path ────────────────────────────────────────────────
 
-        if (OcrTextPreprocessor.isTrivial(chunk.getContent())) {
-            log.info("Chunk {}: trivial content — skipping grammar LLM extraction",
-                    chunk.getChunkIndex());
-            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - startTime);
-        }
-
         try {
             String ragSection = GrammarPromptBuilder.formatRagContext(ragContext);
             String userPrompt = GrammarPromptBuilder.buildExtractionPrompt(chunk, jlptLevel, ragSection, "");
@@ -101,7 +94,7 @@ public class GrammarExtractionAgent {
 
         } catch (Exception e) {
             log.error("Grammar extraction failed for chunk {}: {}", chunk.getChunkIndex(), e.getMessage());
-            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - startTime);
+            return ExtractionResult.empty(chunk.getChunkIndex(), System.currentTimeMillis() - startTime);
         }
     }
 
@@ -130,7 +123,7 @@ public class GrammarExtractionAgent {
 
         } catch (Exception e) {
             log.error("Grammar re-extraction failed for chunk {}: {}", chunk.getChunkIndex(), e.getMessage());
-            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - startTime);
+            return ExtractionResult.empty(chunk.getChunkIndex(), System.currentTimeMillis() - startTime);
         }
     }
 
@@ -158,7 +151,7 @@ public class GrammarExtractionAgent {
 
         } catch (JsonProcessingException e) {
             log.error("Failed to parse grammar extraction response for chunk {}: {}", chunkIndex, e.getMessage());
-            return emptyResult(chunkIndex, processingTimeMs);
+            return ExtractionResult.empty(chunkIndex, processingTimeMs);
         }
     }
 
@@ -174,15 +167,4 @@ public class GrammarExtractionAgent {
         }
     }
 
-    private ExtractionResult emptyResult(int chunkIndex, long processingTimeMs) {
-        return ExtractionResult.builder()
-                .chunkIndex(chunkIndex)
-                .confidence(0.0)
-                .tokensUsed(0)
-                .processingTimeMs(processingTimeMs)
-                .lessons(Collections.emptyList())
-                .vocabulary(Collections.emptyList())
-                .grammarPoints(Collections.emptyList())
-                .build();
-    }
 }

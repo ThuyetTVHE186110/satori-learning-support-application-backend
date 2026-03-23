@@ -3,13 +3,13 @@ package com.fu.curriculumimport.service.agent;
 import com.fu.curriculumimport.config.AgenticRagProperties;
 import com.fu.curriculumimport.service.agent.ReflectionResult.GroundingCheck;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
+import com.fu.curriculumimport.util.JapaneseTextPatterns;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -48,10 +48,10 @@ public class GroundingVerifier {
 
     private final AgenticRagProperties ragProperties;
 
-    // Patterns for Japanese text detection
-    private static final Pattern HIRAGANA = Pattern.compile("[\\u3040-\\u309F]");
-    private static final Pattern KATAKANA = Pattern.compile("[\\u30A0-\\u30FF]");
-    private static final Pattern KANJI = Pattern.compile("[\\u4E00-\\u9FAF]");
+    // Patterns for Japanese text detection — shared via JapaneseTextPatterns
+    private static final Pattern HIRAGANA = JapaneseTextPatterns.HIRAGANA;
+    private static final Pattern KATAKANA = JapaneseTextPatterns.KATAKANA;
+    private static final Pattern KANJI = JapaneseTextPatterns.KANJI;
 
     /**
      * Verify all extracted items are grounded in the source document chunk.
@@ -398,9 +398,9 @@ public class GroundingVerifier {
         if (exampleGrounded) score += 0.25;
 
         // Category/explanation context (0.15 weight)
-        if (grammar.getShortExplanation() != null) {
+        if (grammar.getShortExplanationVi() != null) {
             // Check if explanation-related keywords appear in source
-            if (containsAnyWord(sourceText, grammar.getShortExplanation())) {
+            if (containsAnyWord(sourceText, grammar.getShortExplanationVi())) {
                 score += 0.15;
             }
         } else if (textFound) {

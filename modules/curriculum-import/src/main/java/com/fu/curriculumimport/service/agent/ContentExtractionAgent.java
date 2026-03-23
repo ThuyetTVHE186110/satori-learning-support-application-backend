@@ -96,8 +96,8 @@ public class ContentExtractionAgent {
                   "patternReading": "～ます",
                   "meaningVi": "Thể lịch sự",
                   "meaningEn": "Polite form",
-                  "shortExplanation": "Used to make verbs polite",
-                  "detailedExplanation": "Detailed usage...",
+                  "shortExplanationVi": "Dùng để biến động từ thành thể lịch sự",
+                  "detailedExplanationVi": "Chi tiết cách dùng bằng tiếng Việt...",
                   "jlptLevel": "N5",
                   "category": "VERB_FORM",
                   "exampleSentences": [{"jp": "...", "vi": "...", "en": "..."}],
@@ -132,22 +132,6 @@ public class ContentExtractionAgent {
      */
     public ExtractionResult extractContent(DocumentChunk chunk, String jlptLevel, RagContext ragContext) {
         long startTime = System.currentTimeMillis();
-
-        // Skip trivial / noise-only chunks immediately — no AI call needed
-        if (OcrTextPreprocessor.isTrivial(chunk.getContent())) {
-            log.info("Chunk {}: trivial content ({} chars) — skipping AI extraction",
-                    chunk.getChunkIndex(),
-                    chunk.getContent() == null ? 0 : chunk.getContent().length());
-            return ExtractionResult.builder()
-                    .chunkIndex(chunk.getChunkIndex())
-                    .confidence(1.0)
-                    .tokensUsed(0)
-                    .processingTimeMs(System.currentTimeMillis() - startTime)
-                    .lessons(Collections.emptyList())
-                    .vocabulary(Collections.emptyList())
-                    .grammarPoints(Collections.emptyList())
-                    .build();
-        }
 
         try {
             String ragSection = formatRagContext(ragContext);
@@ -196,17 +180,6 @@ public class ContentExtractionAgent {
                     .grammarPoints(Collections.emptyList())
                     .build();
         }
-    }
-
-    /**
-     * Extract structured content from a document chunk using AI (no RAG context).
-     *
-     * @param chunk      the document chunk to process
-     * @param jlptLevel  the target JLPT level for the course (hint)
-     * @return extraction result with vocabulary, grammar, and lessons
-     */
-    public ExtractionResult extractContent(DocumentChunk chunk, String jlptLevel) {
-        return extractContent(chunk, jlptLevel, null);
     }
 
     /**

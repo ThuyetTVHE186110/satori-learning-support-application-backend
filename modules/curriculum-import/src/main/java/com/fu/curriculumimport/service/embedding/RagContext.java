@@ -34,11 +34,6 @@ public class RagContext {
     private int existingGrammarCount;
 
     /**
-     * Formatted context string to inject into extraction prompts.
-     */
-    private String formattedContext;
-
-    /**
      * Whether meaningful context was found.
      */
     public boolean hasContext() {
@@ -64,7 +59,6 @@ public class RagContext {
                 .similarItems(List.of())
                 .existingVocabCount(0)
                 .existingGrammarCount(0)
-                .formattedContext("")
                 .build();
     }
 }

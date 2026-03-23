@@ -24,7 +24,7 @@ CREATE SCHEMA IF NOT EXISTS ai_conversation;
 -- ==================== ENUM Types ====================
 
 -- User related enums
-CREATE TYPE user_role AS ENUM ('LEARNER', 'TEACHER', 'MANAGER', 'ADMIN');
+CREATE TYPE user_role AS ENUM ('LEARNER', 'TEACHER', 'OPERATION_MANAGER','CONTENT_MANAGER', 'ADMIN');
 CREATE TYPE user_status AS ENUM ('PENDING_ACTIVATION', 'ACTIVE', 'INACTIVE', 'SUSPENDED', 'DELETED');
 CREATE TYPE auth_provider AS ENUM ('LOCAL', 'GOOGLE');
 CREATE TYPE gender AS ENUM ('MALE', 'FEMALE', 'OTHER', 'PREFER_NOT_TO_SAY');

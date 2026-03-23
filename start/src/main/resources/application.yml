@@ -216,8 +216,6 @@ curriculum-import:
         thread-pool-queue-capacity: ${RAG_THREAD_POOL_QUEUE:50}
         # Enable embedding generation
         embedding-enabled: ${RAG_EMBEDDING_ENABLED:true}
-        # Embedding dimension (text-embedding-3-small = 1536)
-        embedding-dimension: 1536
         # Enable content validation step
         validation-enabled: ${RAG_VALIDATION_ENABLED:true}
         # Enable RAG context retrieval before extraction

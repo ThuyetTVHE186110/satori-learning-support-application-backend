@@ -33,7 +33,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/manager/vocabulary")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('MANAGER')")
+@PreAuthorize("hasRole('CONTENT_MANAGER')")
 public class ManagerVocabularyController {
 
     private final VocabularyService vocabularyService;

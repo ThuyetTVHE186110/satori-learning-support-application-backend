@@ -233,7 +233,7 @@ class UserMapperTest {
             // Given
             User user1 = createTestUser("user1@example.com", "John", "Doe", UserRole.LEARNER);
             User user2 = createTestUser("user2@example.com", "Jane", "Smith", UserRole.TEACHER);
-            User user3 = createTestUser("user3@example.com", "Bob", "Brown", UserRole.MANAGER);
+            User user3 = createTestUser("user3@example.com", "Bob", "Brown", UserRole.CONTENT_MANAGER);
             
             List<User> users = List.of(user1, user2, user3);
 
