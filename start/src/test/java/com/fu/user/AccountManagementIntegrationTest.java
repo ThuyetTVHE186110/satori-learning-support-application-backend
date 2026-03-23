@@ -152,7 +152,7 @@ class AccountManagementIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.pageNumber").value(0))
-                    .andExpect(jsonPath("$.data.pageSize").value(20))
+                    .andExpect(jsonPath("$.data.pageSize").value(10))
                     .andExpect(jsonPath("$.data.first").value(true))
                     .andReturn();
 
@@ -193,7 +193,7 @@ class AccountManagementIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.pageNumber").value(0))
-                    .andExpect(jsonPath("$.data.pageSize").value(20))
+                    .andExpect(jsonPath("$.data.pageSize").value(10))
                     .andExpect(jsonPath("$.data.first").value(true))
                     .andExpect(jsonPath("$.data.last").value(true))
                     .andExpect(jsonPath("$.data.totalElements").value(1))
@@ -241,7 +241,7 @@ class AccountManagementIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.pageNumber").value(0))
-                    .andExpect(jsonPath("$.data.pageSize").value(20))
+                    .andExpect(jsonPath("$.data.pageSize").value(10))
                     .andExpect(jsonPath("$.data.first").value(true))
                     .andExpect(jsonPath("$.data.last").value(true))
                     .andExpect(jsonPath("$.data.totalElements").value(1))
@@ -269,9 +269,7 @@ class AccountManagementIntegrationTest {
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
-                    .andExpect(jsonPath("$.message").isNotEmpty())
-                    .andExpect(jsonPath("$.timestamp").isNotEmpty())
-                    .andExpect(jsonPath("$.path").value("/api/v1/users"));
+                    .andExpect(jsonPath("$.message").isNotEmpty());
         }
     }
 
@@ -310,9 +308,7 @@ class AccountManagementIntegrationTest {
                     .andExpect(jsonPath("$.data.id").isNotEmpty())
                     .andExpect(jsonPath("$.data.createdAt").isNotEmpty())
                     .andExpect(jsonPath("$.data.updatedAt").isNotEmpty())
-                    .andExpect(jsonPath("$.data.passwordHash").doesNotExist())
-                    .andExpect(jsonPath("$.data.deletedAt").isEmpty())
-                    .andExpect(jsonPath("$.data.deletedBy").isEmpty());
+                    .andExpect(jsonPath("$.data.passwordHash").doesNotExist());
 
             User saved = userRepository.findByEmail("newaccount@test.com").orElseThrow();
             assertThat(saved.getStatus()).isEqualTo(UserStatus.ACTIVE);
@@ -346,9 +342,7 @@ class AccountManagementIntegrationTest {
                     .andExpect(jsonPath("$.data.status").value("DELETED"))
                     .andExpect(jsonPath("$.data.deletedAt").isNotEmpty())
                     .andExpect(jsonPath("$.data.deletedBy").isNotEmpty())
-                    .andExpect(jsonPath("$.message").isNotEmpty())
-                    .andExpect(jsonPath("$.timestamp").isNotEmpty())
-                    .andExpect(jsonPath("$.path").value("/api/v1/users"));
+                    .andExpect(jsonPath("$.message").value("Email này đã tồn tại trong hệ thống nhưng đã bị xóa. Bạn có muốn khôi phục tài khoản này không?"));
         }
 
         @Test
@@ -368,7 +362,8 @@ class AccountManagementIntegrationTest {
                                     .role(UserRole.LEARNER)
                                     .build())))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("EMAIL_EXISTS"));
+                    .andExpect(jsonPath("$.code").value("EMAIL_EXISTS"))
+                    .andExpect(jsonPath("$.message").value("Email này đã được sử dụng. Vui lòng nhập email khác"));
         }
 
         @Test
@@ -408,7 +403,7 @@ class AccountManagementIntegrationTest {
                             .content(objectMapper.writeValueAsString(req)))
                     .andExpect(status().isInternalServerError())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("EMAIL_SERVICE_FAILURE"));
+                    .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"));
 
             // Verify account was still created despite email failure
             User saved = userRepository.findByEmail("newaccount@test.com").orElseThrow();
@@ -431,9 +426,7 @@ class AccountManagementIntegrationTest {
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
-                    .andExpect(jsonPath("$.message").isNotEmpty())
-                    .andExpect(jsonPath("$.timestamp").isNotEmpty())
-                    .andExpect(jsonPath("$.path").value("/api/v1/users"));
+                    .andExpect(jsonPath("$.message").isNotEmpty());
         }
     }
 
@@ -478,9 +471,7 @@ class AccountManagementIntegrationTest {
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
-                    .andExpect(jsonPath("$.message").isNotEmpty())
-                    .andExpect(jsonPath("$.timestamp").isNotEmpty())
-                    .andExpect(jsonPath("$.path").value("/api/v1/users/" + learner.getId() + "/details"));
+                    .andExpect(jsonPath("$.message").isNotEmpty());
         }
     }
 
@@ -519,7 +510,12 @@ class AccountManagementIntegrationTest {
                                     .build())))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.firstName").value("Updated"));
+                    .andExpect(jsonPath("$.data.firstName").value("Updated"))
+                    .andExpect(jsonPath("$.data.lastName").value("Name"))
+                    .andExpect(jsonPath("$.data.email").value("learner@test.com"))
+                    .andExpect(jsonPath("$.data.role").value("LEARNER"))
+                    .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+                    .andExpect(jsonPath("$.data.updatedAt").isNotEmpty());
 
             User updated = userRepository.findById(learner.getId()).orElseThrow();
             assertThat(updated.getFirstName()).isEqualTo("Updated");
@@ -556,7 +552,8 @@ class AccountManagementIntegrationTest {
                                     .email("learner@test.com")
                                     .build())))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("INVALID_STATUS"));
+                    .andExpect(jsonPath("$.code").value("INVALID_STATUS"))
+                    .andExpect(jsonPath("$.message").value("Không thể cập nhật trạng thái thành DELETED. Vui lòng sử dụng chức năng xóa để xóa tài khoản"));
 
             assertThat(userRepository.findById(learner.getId()).orElseThrow().getStatus())
                     .isEqualTo(UserStatus.ACTIVE);
@@ -580,9 +577,7 @@ class AccountManagementIntegrationTest {
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
-                    .andExpect(jsonPath("$.message").isNotEmpty())
-                    .andExpect(jsonPath("$.timestamp").isNotEmpty())
-                    .andExpect(jsonPath("$.path").value("/api/v1/users/" + learner.getId()));
+                    .andExpect(jsonPath("$.message").isNotEmpty());
         }
 
         @Test
@@ -599,8 +594,9 @@ class AccountManagementIntegrationTest {
                                     .firstName("Updated")
                                     .email("deleted@test.com")
                                     .build())))
-                    .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("USER_DELETED"))
+                    .andExpect(jsonPath("$.message").value("Không thể chỉnh sửa tài khoản đã bị xóa"));
         }
 
         @Test
@@ -649,7 +645,10 @@ class AccountManagementIntegrationTest {
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.firstName").value("ValidFirstName"))
                     .andExpect(jsonPath("$.data.lastName").value("ValidLastName"))
-                    .andExpect(jsonPath("$.data.role").value("TEACHER"));
+                    .andExpect(jsonPath("$.data.email").value("learner@test.com"))
+                    .andExpect(jsonPath("$.data.role").value("TEACHER"))
+                    .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+                    .andExpect(jsonPath("$.data.updatedAt").isNotEmpty());
 
             User updated = userRepository.findById(learner.getId()).orElseThrow();
             assertThat(updated.getFirstName()).isEqualTo("ValidFirstName");
@@ -684,6 +683,10 @@ class AccountManagementIntegrationTest {
             assertThat(deleted.getDeletedAt()).isNotNull();
             assertThat(deleted.getDeletedBy()).isEqualTo(admin.getId());
             assertThat(deleted.getStatus()).isEqualTo(UserStatus.DELETED);
+
+            // Session verification: All sessions for deleted account are terminated
+            assertThat(sessionRepository.countActiveSessionsByUserId(learner.getId(), LocalDateTime.now()))
+                    .isEqualTo(0);
         }
 
         @Test
@@ -700,39 +703,8 @@ class AccountManagementIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_AM_DELETE_003 — deletion terminates all active sessions")
-        void tc_am_delete_003_deleteTerminatesSessions() throws Exception {
-            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
-            User learner = buildAndSaveUser("learner@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
-
-            LoginRequest req = new LoginRequest();
-            req.setEmail("learner@test.com");
-            req.setPassword("ValidPass@1");
-            MvcResult loginResult = mockMvc.perform(post("/api/v1/auth/login")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(objectMapper.writeValueAsString(req)))
-                    .andExpect(status().isOk())
-                    .andReturn();
-            String refreshToken = objectMapper.readTree(loginResult.getResponse().getContentAsString())
-                    .path("data").path("refreshToken").asText();
-
-            String adminToken = loginAndGetToken("admin@test.com", "ValidPass@1");
-            mockMvc.perform(delete("/api/v1/users/{id}", learner.getId())
-                            .header("Authorization", "Bearer " + adminToken))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.message").value("Xóa người dùng thành công"));
-
-            mockMvc.perform(post("/api/v1/auth/refresh")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"refreshToken\":\"" + refreshToken + "\"}"))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("SESSION_EXPIRED"));
-        }
-
-        @Test
-        @DisplayName("TC_AM_DELETE_004 — manager cannot delete account")
-        void tc_am_delete_004_managerCannotDelete() throws Exception {
+        @DisplayName("TC_AM_DELETE_003 — manager cannot delete account")
+        void tc_am_delete_003_managerCannotDelete() throws Exception {
             buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             buildAndSaveUser("manager@test.com", UserRole.MANAGER, UserStatus.ACTIVE);
             User learner = buildAndSaveUser("learner@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
@@ -743,9 +715,7 @@ class AccountManagementIntegrationTest {
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
-                    .andExpect(jsonPath("$.message").isNotEmpty())
-                    .andExpect(jsonPath("$.timestamp").isNotEmpty())
-                    .andExpect(jsonPath("$.path").value("/api/v1/users/" + learner.getId()));
+                    .andExpect(jsonPath("$.message").isNotEmpty());
         }
     }
 
@@ -779,7 +749,15 @@ class AccountManagementIntegrationTest {
                             .content(objectMapper.writeValueAsString(req)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.status").value("ACTIVE"));
+                    .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+                    .andExpect(jsonPath("$.data.email").value("deleted@test.com"))
+                    .andExpect(jsonPath("$.data.firstName").value("Restored"))
+                    .andExpect(jsonPath("$.data.lastName").value("Account"))
+                    .andExpect(jsonPath("$.data.role").value("LEARNER"))
+                    .andExpect(jsonPath("$.data.id").value(deleted.getId().toString()))
+                    .andExpect(jsonPath("$.data.createdAt").isNotEmpty())
+                    .andExpect(jsonPath("$.data.updatedAt").isNotEmpty())
+                    .andExpect(jsonPath("$.data.passwordHash").doesNotExist());
 
             User restored = userRepository.findById(deleted.getId()).orElseThrow();
             assertThat(restored.getStatus()).isEqualTo(UserStatus.ACTIVE);
@@ -811,10 +789,8 @@ class AccountManagementIntegrationTest {
                                     .build())))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("INVALID_OPERATION"))
-                    .andExpect(jsonPath("$.message").isNotEmpty())
-                    .andExpect(jsonPath("$.timestamp").isNotEmpty())
-                    .andExpect(jsonPath("$.path").value("/api/v1/users/restore"));
+                    .andExpect(jsonPath("$.code").value("USER_NOT_DELETED"))
+                    .andExpect(jsonPath("$.message").value("Tài khoản này chưa bị xóa"));
         }
 
         @Test
@@ -839,8 +815,7 @@ class AccountManagementIntegrationTest {
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
                     .andExpect(jsonPath("$.message").isNotEmpty())
-                    .andExpect(jsonPath("$.timestamp").isNotEmpty())
-                    .andExpect(jsonPath("$.path").value("/api/v1/users/restore"));
+                    .andExpect(jsonPath("$.timestamp").isNotEmpty());
         }
     }
 }

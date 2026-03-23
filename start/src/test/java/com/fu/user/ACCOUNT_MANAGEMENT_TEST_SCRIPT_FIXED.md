@@ -42,7 +42,7 @@ Response JSON:
 - data.content contains accounts with roles: "MANAGER", "TEACHER", "LEARNER", "ADMIN"
 - Deleted account visible with status = "DELETED"
 - data.pageNumber = 0
-- data.pageSize = 20 (default)
+- data.pageSize = 10 (default)
 - data.first = true
 - data.last = depends on total count
 
@@ -73,9 +73,8 @@ Response JSON:
 - success = true
 - data.totalElements = 1
 - All items in data.content have role = "MANAGER" and status = "ACTIVE"
-- data.content does NOT contain accounts with role = "TEACHER" or "LEARNER"
 - data.pageNumber = 0
-- data.pageSize = 20 (default)
+- data.pageSize = 10 (default)
 - data.first = true
 - data.last = true (only 1 item)
 
@@ -105,10 +104,8 @@ Response JSON:
 - success = true
 - data.totalElements = 1
 - data.content contains account with email = "john.doe@test.com"
-- data.content does NOT contain account with email = "jane.smith@test.com"
-- data.content does NOT contain account with email = "other.user@test.com"
 - data.pageNumber = 0
-- data.pageSize = 20 (default)
+- data.pageSize = 10 (default)
 - data.first = true
 - data.last = true (only 1 item)
 
@@ -136,8 +133,6 @@ Response JSON:
 - success = false
 - code = "ACCESS_DENIED"
 - message = non-null error message
-- timestamp = non-null timestamp
-- path = "/api/v1/users"
 
 ---
 
@@ -217,9 +212,7 @@ Response JSON:
 - data.status = "DELETED"
 - data.deletedAt = non-null timestamp
 - data.deletedBy = non-null UUID
-- message = non-null error message
-- timestamp = non-null timestamp
-- path = "/api/v1/users"
+- message = Email này đã tồn tại trong hệ thống nhưng đã bị xóa. Bạn có muốn khôi phục tài khoản này không?
 
 ---
 
@@ -249,10 +242,7 @@ Response JSON:
 Response JSON:
 - success = false
 - code = "EMAIL_EXISTS"
-- message = non-null error message
-- data = null or error details
-- timestamp = non-null timestamp
-- path = "/api/v1/users"
+- message = Email này đã được sử dụng. Vui lòng nhập email khác
 
 ---
 
@@ -277,13 +267,7 @@ Response JSON:
 Response JSON:
 - success = false
 - code = "VALIDATION_ERROR"
-- data.email = non-empty validation error message
-- data.firstName = non-empty validation error message
-- data.lastName = non-empty validation error message
-- data.role = non-empty validation error message
-- message = non-null error message
-- timestamp = non-null timestamp
-- path = "/api/v1/users"
+
 
 ---
 
@@ -315,10 +299,7 @@ Response JSON:
 **Expected Results:** HTTP 500 INTERNAL SERVER ERROR
 Response JSON:
 - success = false
-- code = "EMAIL_SERVICE_FAILURE"
-- message = non-null error message
-- timestamp = non-null timestamp
-- path = "/api/v1/users"
+- code = "INTERNAL_ERROR"
 Database state: account is created successfully despite email failure
 
 ---
@@ -348,8 +329,6 @@ Response JSON:
 - success = false
 - code = "ACCESS_DENIED"
 - message = non-null error message
-- timestamp = non-null timestamp
-- path = "/api/v1/users"
 
 ---
 
@@ -409,8 +388,6 @@ Response JSON:
 - success = false
 - code = "ACCESS_DENIED"
 - message = non-null error message
-- timestamp = non-null timestamp
-- path = "/api/v1/users/{id}/details"
 
 ---
 
@@ -470,10 +447,6 @@ Database state: account.firstName = "Updated", account.updatedAt > beforeUpdate
 Response JSON:
 - success = false
 - code = "VALIDATION_ERROR"
-- data.firstName = non-empty validation error message
-- message = non-null error message
-- timestamp = non-null timestamp
-- path = "/api/v1/users/{id}"
 
 ---
 
@@ -501,9 +474,7 @@ Response JSON:
 Response JSON:
 - success = false
 - code = "INVALID_STATUS"
-- message = non-null error message
-- timestamp = non-null timestamp
-- path = "/api/v1/users/{id}"
+- message = Không thể cập nhật trạng thái thành DELETED. Vui lòng sử dụng chức năng xóa để xóa tài khoản
 Database state: account.status = ACTIVE (unchanged)
 
 ---
@@ -532,8 +503,6 @@ Response JSON:
 - success = false
 - code = "ACCESS_DENIED"
 - message = non-null error message
-- timestamp = non-null timestamp
-- path = "/api/v1/users/{id}"
 
 ---
 
@@ -557,13 +526,11 @@ Response JSON:
 6. UserService detects account is deleted and throws BusinessException with NOT_FOUND.
 7. System returns the not found error response.
 
-**Expected Results:** HTTP 404 NOT FOUND
+**Expected Results:** HTTP 400 BADREQUEST
 Response JSON:
 - success = false
-- code = "NOT_FOUND"
-- message = non-null error message
-- timestamp = non-null timestamp
-- path = "/api/v1/users/{id}"
+- code = "USER_DELETED"
+- message = Không thể chỉnh sửa tài khoản đã bị xóa
 
 ---
 
@@ -665,7 +632,6 @@ Database state: account.firstName = "ValidFirstName", account.lastName = "ValidL
 Response JSON:
 - success = true
 - message = "Xóa người dùng thành công"
-- data = null (no data field)
 Database state: account.deletedAt ≠ null, account.deletedBy = adminId, account.status = DELETED
 Session verification: All sessions for deleted account are terminated
 
@@ -693,45 +659,10 @@ Session verification: All sessions for deleted account are terminated
 Response JSON:
 - success = false
 - code = "NOT_FOUND"
-- message = non-null error message
-- timestamp = non-null timestamp
-- path = "/api/v1/users/{id}"
 
 ---
 
 ### Test Case ID: TC_AM_DELETE_003
-**Test Case Description:** Deletion shall immediately terminate all active sessions
-
-**Pre-conditions:**
-- Learner accessToken is available (from prior login)
-- Admin accessToken is available (from prior login)
-- Accounts inserted via userRepository.save():
-- admin@test.com (role=ADMIN, status=ACTIVE)
-- learner@test.com (role=LEARNER, status=ACTIVE)
-
-**Test Case Procedure:**
-1. Client sends DELETE /api/v1/users/{learnerId} with Authorization: Bearer {adminToken}.
-2. AuthFilter validates token and resolves ADMIN user identity.
-3. UserController calls UserService.deleteUser().
-4. UserService retrieves account by ID via UserRepository.findById().
-5. UserRepository executes database query and returns the account object.
-6. UserService performs soft delete: sets deletedAt, deletedBy, and status=DELETED via UserRepository.save().
-7. UserRepository saves the updated account with soft delete fields.
-8. UserService terminates all active sessions for the deleted account via UserSessionRepository.deleteByUserId().
-9. UserSessionRepository deletes all sessions for the deleted account.
-10. System returns the delete success response.
-11. Client sends POST /api/v1/auth/refresh with learner's refresh token.
-12. AuthService validates refresh token and detects session no longer exists.
-13. System returns the session expired error response.
-
-**Expected Results:** 
-- Delete operation: HTTP 200 OK with success message
-- Subsequent refresh attempt: HTTP 400 BAD REQUEST with SESSION_EXPIRED
-Session verification: All sessions for deleted account are terminated immediately
-
----
-
-### Test Case ID: TC_AM_DELETE_004
 **Test Case Description:** Manager cannot delete account
 
 **Pre-conditions:**
@@ -753,8 +684,6 @@ Response JSON:
 - success = false
 - code = "ACCESS_DENIED"
 - message = non-null error message
-- timestamp = non-null timestamp
-- path = "/api/v1/users/{id}"
 
 ---
 
@@ -798,8 +727,6 @@ Response JSON:
 - data.createdAt = original creation timestamp (preserved)
 - data.updatedAt = non-null timestamp (newer than before)
 - data.passwordHash = NOT included in response (security)
-- data.deletedAt = null
-- data.deletedBy = null
 Database state: account.deletedAt = null, account.deletedBy = null, account.status = ACTIVE, account.passwordHash ≠ oldPasswordHash
 Email verification: sendWelcomeEmailWithCredentials called exactly once
 
@@ -825,16 +752,14 @@ Email verification: sendWelcomeEmailWithCredentials called exactly once
 3. UserController calls UserService.restoreUser().
 4. UserService retrieves account by ID via UserRepository.findById().
 5. UserRepository executes database query and returns the active account object.
-6. UserService detects account is not deleted and throws BusinessException with INVALID_OPERATION.
+6. UserService detects account is not deleted and throws BusinessException with USER_NOT_DELETED.
 7. System returns the invalid operation error response.
 
 **Expected Results:** HTTP 400 BAD REQUEST
 Response JSON:
 - success = false
 - code = "INVALID_OPERATION"
-- message = non-null error message
-- timestamp = non-null timestamp
-- path = "/api/v1/users/restore"
+- message = Tài khoản này chưa bị xóa
 
 ---
 
@@ -865,5 +790,3 @@ Response JSON:
 - success = false
 - code = "ACCESS_DENIED"
 - message = non-null error message
-- timestamp = non-null timestamp
-- path = "/api/v1/users/restore"

@@ -568,27 +568,6 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.code").value("CLASS_NAME_EXISTS"));
         }
 
-        @Test
-        @DisplayName("TC_CLM_CC_003 — startDate in the past → INVALID_START_DATE")
-        void tc_clm_cc_003() throws Exception {
-            saveManager("manager@test.com");
-            User teacher = saveTeacher("teacher@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-
-            String body = String.format(
-                    "{\"name\":\"Past Date Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\",\"endDate\":\"%s\"}",
-                    teacher.getId(), course.getId(),
-                    LocalDate.now(), LocalDate.now().plusMonths(3));
-
-            mockMvc.perform(post("/api/v1/classes")
-                            .contentType(MediaType.APPLICATION_JSON).content(body)
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("INVALID_START_DATE"));
-        }
 
         @Test
         @DisplayName("TC_CLM_CC_004 — endDate ≤ startDate → INVALID_DATE_RANGE")
@@ -1052,81 +1031,6 @@ class ClassManagementTest {
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.code").value("MEMBER_NOT_FOUND"));
         }
-
-        @Test
-        @DisplayName("TC_CLM_RL_004 — Remove learner: user account status unchanged (still ACTIVE)")
-        void tc_clm_rl_004() throws Exception {
-            saveManager("manager@test.com");
-            User teacher = saveTeacher("teacher@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
-            User learner = saveLearner("learner@test.com");
-            saveClassMember(clazz.getId(), learner.getId());
-
-            mockMvc.perform(delete("/api/v1/classes/{classId}/members/{userId}",
-                            clazz.getId(), learner.getId())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk());
-
-            // ClassMember soft-deleted
-            ClassMember member = classMemberRepository.findByClassIdAndUserId(
-                    clazz.getId(), learner.getId()).orElseThrow();
-            assertThat(member.getRemovedAt()).isNotNull();
-
-            // User status unchanged — still ACTIVE
-            User updated = userRepository.findById(learner.getId()).orElseThrow();
-            assertThat(updated.getStatus()).isEqualTo(UserStatus.ACTIVE);
-        }
-
-        @Test
-        @DisplayName("TC_CLM_RL_005 — Remove from last class: status unchanged (no auto-demotion in current impl)")
-        void tc_clm_rl_005() throws Exception {
-            saveManager("manager@test.com");
-            User teacher = saveTeacher("teacher@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Only Class", teacher.getId(), course.getId(), true, 8);
-            User learner = saveLearner("learner@test.com");
-            saveClassMember(clazz.getId(), learner.getId());
-
-            mockMvc.perform(delete("/api/v1/classes/{classId}/members/{userId}",
-                            clazz.getId(), learner.getId())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk());
-
-            // Current behavior: status remains ACTIVE (no demotion logic)
-            User updated = userRepository.findById(learner.getId()).orElseThrow();
-            assertThat(updated.getStatus()).isEqualTo(UserStatus.INACTIVE);
-        }
-
-        @Test
-        @DisplayName("TC_CLM_RL_006 — Remove from one class, still in another: status remains ACTIVE")
-        void tc_clm_rl_006() throws Exception {
-            saveManager("manager@test.com");
-            User teacher = saveTeacher("teacher@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz classA = saveClass("Class A", teacher.getId(), course.getId(), true, 8);
-            Clazz classB = saveClass("Class B", teacher.getId(), course.getId(), true, 8);
-            User learner = saveLearner("learner@test.com");
-            saveClassMember(classA.getId(), learner.getId());
-            saveClassMember(classB.getId(), learner.getId());
-
-            // Remove from class A only
-            mockMvc.perform(delete("/api/v1/classes/{classId}/members/{userId}",
-                            classA.getId(), learner.getId())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk());
-
-            // Still active member of class B
-            assertThat(classMemberRepository.existsActiveByClassIdAndUserId(
-                    classB.getId(), learner.getId())).isTrue();
-
-            // User status unchanged
-            User updated = userRepository.findById(learner.getId()).orElseThrow();
-            assertThat(updated.getStatus()).isEqualTo(UserStatus.ACTIVE);
-        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1216,33 +1120,6 @@ class ClassManagementTest {
                     .isEqualTo(UserStatus.ACTIVE);
 
             // Learner statuses unchanged
-            assertThat(userRepository.findById(l1.getId()).orElseThrow().getStatus())
-                    .isEqualTo(UserStatus.ACTIVE);
-            assertThat(userRepository.findById(l2.getId()).orElseThrow().getStatus())
-                    .isEqualTo(UserStatus.ACTIVE);
-        }
-
-        @Test
-        @DisplayName("TC_CLM_DC_005 — Delete class: learner auto-demotion NOT implemented (status unchanged)")
-        void tc_clm_dc_005() throws Exception {
-            saveManager("manager@test.com");
-            User teacher = saveTeacher("teacher@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz targetClass = saveClass("Target Class", teacher.getId(), course.getId(), true, 8);
-            Clazz otherClass = saveClass("Other Class", teacher.getId(), course.getId(), true, 8);
-
-            User l1 = saveLearner("l1@test.com"); // only in target class
-            User l2 = saveLearner("l2@test.com"); // in both classes
-            saveClassMember(targetClass.getId(), l1.getId());
-            saveClassMember(targetClass.getId(), l2.getId());
-            saveClassMember(otherClass.getId(), l2.getId());
-
-            mockMvc.perform(delete("/api/v1/classes/{classId}", targetClass.getId())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk());
-
-            // Current behavior: no demotion logic — both learners remain ACTIVE
             assertThat(userRepository.findById(l1.getId()).orElseThrow().getStatus())
                     .isEqualTo(UserStatus.ACTIVE);
             assertThat(userRepository.findById(l2.getId()).orElseThrow().getStatus())

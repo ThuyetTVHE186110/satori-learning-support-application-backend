@@ -245,6 +245,10 @@ class CourseManagementTest {
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.content").isArray())
                     .andExpect(jsonPath("$.data.totalElements").value(3))
+                    .andExpect(jsonPath("$.data.pageNumber").value(0))
+                    .andExpect(jsonPath("$.data.pageSize").value(10))
+                    .andExpect(jsonPath("$.data.first").value(true))
+                    .andExpect(jsonPath("$.data.last").value(true))
                     .andReturn();
 
             String body = result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
@@ -287,6 +291,10 @@ class CourseManagementTest {
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.totalElements").value(1))
                     .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andExpect(jsonPath("$.data.pageNumber").value(0))
+                    .andExpect(jsonPath("$.data.pageSize").value(10))
+                    .andExpect(jsonPath("$.data.first").value(true))
+                    .andExpect(jsonPath("$.data.last").value(true))
                     .andReturn();
 
             String body = result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
@@ -317,6 +325,10 @@ class CourseManagementTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.totalElements").value(2))
+                    .andExpect(jsonPath("$.data.pageNumber").value(0))
+                    .andExpect(jsonPath("$.data.pageSize").value(10))
+                    .andExpect(jsonPath("$.data.first").value(true))
+                    .andExpect(jsonPath("$.data.last").value(true))
                     .andReturn();
 
             String body = result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
@@ -359,6 +371,10 @@ class CourseManagementTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.totalElements").value(1))
+                    .andExpect(jsonPath("$.data.pageNumber").value(0))
+                    .andExpect(jsonPath("$.data.pageSize").value(10))
+                    .andExpect(jsonPath("$.data.first").value(true))
+                    .andExpect(jsonPath("$.data.last").value(true))
                     .andReturn();
 
             String body = result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
@@ -448,7 +464,11 @@ class CourseManagementTest {
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.id").isNotEmpty())
+                    .andExpect(jsonPath("$.data.name").value("No Thumb Course"))
+                    .andExpect(jsonPath("$.data.jlptLevel").value("N4"))
                     .andExpect(jsonPath("$.data.status").value("INACTIVE"))
+                    .andExpect(jsonPath("$.data.createdAt").isNotEmpty())
+                    .andExpect(jsonPath("$.data.updatedAt").isNotEmpty())
                     .andReturn();
 
             // Assert DB
@@ -460,6 +480,48 @@ class CourseManagementTest {
 
             // Assert Cloudinary not called
             verify(cloudinaryService, never()).uploadImage(any(), anyString());
+        }
+
+        /**
+         * TC_CM_CR_001b
+         * Create course with thumbnail — course saved with thumbnail URL from Cloudinary, returns Vietnamese success message.
+         */
+        @Test
+        @DisplayName("TC_CM_CR_001b — with thumbnail → HTTP 201, Vietnamese success message, thumbnail URL stored")
+        void tc_cm_cr_001b_createWithThumbnail_returns201_vietnameseMessage_thumbnailUrlStored() throws Exception {
+            // Arrange
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+
+            String mockThumbnailUrl = "https://res.cloudinary.com/demo/image/upload/v123/courses/thumbnails/test.jpg";
+            Mockito.when(cloudinaryService.uploadImage(any(), anyString())).thenReturn(mockThumbnailUrl);
+
+            MockMultipartFile requestPart = courseRequestPart("Course With Thumb", "N5", "Test description");
+
+            // Act
+            MvcResult result = mockMvc.perform(multipart("/api/v1/manager/courses")
+                            .file(requestPart)
+                            .file(validImageFile())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.message").value("Tạo khóa học thành công."))
+                    .andExpect(jsonPath("$.data.id").isNotEmpty())
+                    .andExpect(jsonPath("$.data.name").value("Course With Thumb"))
+                    .andExpect(jsonPath("$.data.jlptLevel").value("N5"))
+                    .andExpect(jsonPath("$.data.status").value("INACTIVE"))
+                    .andExpect(jsonPath("$.data.thumbnailUrl").value(mockThumbnailUrl))
+                    .andReturn();
+
+            // Assert DB
+            String idStr = objectMapper.readTree(result.getResponse().getContentAsString())
+                    .path("data").path("id").asText();
+            Course course = courseRepository.findByIdAndNotDeleted(UUID.fromString(idStr)).orElseThrow();
+            assertThat(course.getThumbnailUrl()).isEqualTo(mockThumbnailUrl);
+            assertThat(course.getDeletedAt()).isNull();
+
+            // Assert Cloudinary called
+            verify(cloudinaryService).uploadImage(any(), anyString());
         }
 
         // ── 2.2 Validation Errors ─────────────────────────────────────────────
@@ -505,14 +567,81 @@ class CourseManagementTest {
             mockMvc.perform(multipart("/api/v1/manager/courses")
                             .file(requestPart)
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().is4xxClientError())
-                    .andExpect(jsonPath("$.success").value(false));
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Khóa học với tên 'Duplicate Course' đã tồn tại"));
 
             // DB: still only 1 course with this name
             long count = courseRepository.findAll().stream()
                     .filter(c -> "Duplicate Course".equalsIgnoreCase(c.getName()) && c.getDeletedAt() == null)
                     .count();
             assertThat(count).isEqualTo(1);
+        }
+
+        /**
+         * TC_CM_CR_003b
+         * Create course with description exceeding 5000 characters — validation error returned.
+         */
+        @Test
+        @DisplayName("TC_CM_CR_003b — description > 5000 chars → HTTP 400 validation error")
+        void tc_cm_cr_003b_descriptionTooLong_returns400ValidationError() throws Exception {
+            // Arrange
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+
+            // Create description with 5001 characters
+            StringBuilder longDesc = new StringBuilder();
+            for (int i = 0; i < 5001; i++) {
+                longDesc.append("a");
+            }
+
+            MockMultipartFile requestPart = new MockMultipartFile(
+                    "request", "", "application/json",
+                    String.format("{\"name\":\"Test Course\",\"jlptLevel\":\"N5\",\"description\":\"%s\"}", longDesc.toString()).getBytes());
+
+            // Act + Assert
+            mockMvc.perform(multipart("/api/v1/manager/courses")
+                            .file(requestPart)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Mô tả không được vượt quá 5000 ký tự"));
+
+            // DB: no course created
+            long count = courseRepository.findAll().stream()
+                    .filter(c -> "Test Course".equalsIgnoreCase(c.getName()) && c.getDeletedAt() == null)
+                    .count();
+            assertThat(count).isEqualTo(0);
+        }
+
+        /**
+         * TC_CM_CR_003c
+         * Create course with invalid JLPT level — validation error returned.
+         */
+        @Test
+        @DisplayName("TC_CM_CR_003c — invalid JLPT level → HTTP 400 validation error")
+        void tc_cm_cr_003c_invalidJlptLevel_returns400ValidationError() throws Exception {
+            // Arrange
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+
+            MockMultipartFile requestPart = new MockMultipartFile(
+                    "request", "", "application/json",
+                    "{\"name\":\"Test Course\",\"jlptLevel\":\"N9\",\"description\":\"Valid description\"}".getBytes());
+
+            // Act + Assert
+            mockMvc.perform(multipart("/api/v1/manager/courses")
+                            .file(requestPart)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("JLPT level không hợp lệ 'N9'. Các giá trị được chấp nhận: [N5, N4, N3, N2, N1]"));
+
+            // DB: no course created
+            long count = courseRepository.findAll().stream()
+                    .filter(c -> "Test Course".equalsIgnoreCase(c.getName()) && c.getDeletedAt() == null)
+                    .count();
+            assertThat(count).isEqualTo(0);
         }
 
         // ── 2.3 Cloudinary — MockMvc ──────────────────────────────────────────
@@ -540,7 +669,8 @@ class CourseManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("UPLOAD_FAILED"));
+                    .andExpect(jsonPath("$.code").value("UPLOAD_FAILED"))
+                    .andExpect(jsonPath("$.message").value("Có lỗi xảy ra khi up ảnh, vui lòng thử lại sau."));
 
             // DB state: course NOT created (rollback)
             long count = courseRepository.findAll().stream()
@@ -570,7 +700,8 @@ class CourseManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("INVALID_FILE_TYPE"));
+                    .andExpect(jsonPath("$.code").value("INVALID_FILE_TYPE"))
+                    .andExpect(jsonPath("$.message").value("Chỉ cho phép các định dạng ảnh JPEG, PNG và WebP."));
 
             // Cloudinary never called
             verify(cloudinaryService, never()).uploadImage(any(), anyString());
@@ -597,49 +728,13 @@ class CourseManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("FILE_TOO_LARGE"));
+                    .andExpect(jsonPath("$.code").value("FILE_TOO_LARGE"))
+                    .andExpect(jsonPath("$.message").value("File vượt quá kích thước tối đa 5MB, vui lòng chọn file khác"));
 
             // Cloudinary never called
             verify(cloudinaryService, never()).uploadImage(any(), anyString());
         }
 
-        /**
-         * TC_CM_CR_007
-         * Create course with thumbnail when cloudinaryEnabled=false — succeeds with placeholder URL.
-         *
-         * Note: CloudinaryService is @MockBean in this test class. We configure uploadImage() to
-         * return the placeholder URL that the real impl would return when disabled.
-         * This simulates the dev/test mode fallback behavior.
-         */
-        @Test
-        @DisplayName("TC_CM_CR_007 — cloudinary disabled (mock returns placeholder) → HTTP 201, placeholder URL in DB")
-        void tc_cm_cr_007_cloudinaryDisabled_returns201_placeholderUrl() throws Exception {
-            // Arrange
-            saveManager("manager@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-
-            String placeholderUrl = "https://placeholder.co/600x400?text=Cloudinary+Disabled";
-            Mockito.when(cloudinaryService.uploadImage(any(), anyString()))
-                    .thenReturn(placeholderUrl);
-
-            MockMultipartFile requestPart = courseRequestPart("Placeholder Course", "N5", "Desc");
-
-            // Act
-            MvcResult result = mockMvc.perform(multipart("/api/v1/manager/courses")
-                            .file(requestPart)
-                            .file(validImageFile())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isCreated())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.thumbnailUrl").value(placeholderUrl))
-                    .andReturn();
-
-            // Assert DB
-            String idStr = objectMapper.readTree(result.getResponse().getContentAsString())
-                    .path("data").path("id").asText();
-            Course course = courseRepository.findByIdAndNotDeleted(UUID.fromString(idStr)).orElseThrow();
-            assertThat(course.getThumbnailUrl()).isEqualTo(placeholderUrl);
-        }
 
         // ── 2.4 Authorization ─────────────────────────────────────────────────
 
@@ -675,31 +770,47 @@ class CourseManagementTest {
 
         // ── 3.1 Happy Path ────────────────────────────────────────────────────
 
+
         /**
          * TC_CM_VD_001
-         * View course detail returns all fields — INACTIVE course accessible to Manager.
+         * View course detail returns comprehensive information including lesson and enrollment counts.
          */
         @Test
-        @DisplayName("TC_CM_VD_001 — INACTIVE course → HTTP 200, all fields present")
-        void tc_cm_vd_001_viewCourseDetail_returns200_allFieldsPresent() throws Exception {
+        @DisplayName("TC_CM_VD_001 — comprehensive course info → HTTP 200, all required fields including counts")
+        void tc_cm_vd_001b_viewCourseDetail_returns200_comprehensiveInfo() throws Exception {
             // Arrange
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Course course = saveCourseWithThumbnail("Inactive Course", JlptLevel.N5, CourseStatus.INACTIVE,
-                    "https://example.com/thumb.jpg");
+            
+            // Create course with thumbnail
+            Course course = saveCourseWithThumbnail("Comprehensive Course", JlptLevel.N4, CourseStatus.ACTIVE,
+                    "https://example.com/course-thumb.jpg");
+            
+            // Add some lessons to the course
+            saveLesson(course, "Lesson 1 - Vocabulary");
+            saveLesson(course, "Lesson 2 - Grammar");
+            saveLesson(course, "Lesson 3 - Reading");
+            
+            // Create some learners and enroll them (simulating enrollment)
+            User learner1 = saveLearner("learner1@test.com");
+            User learner2 = saveLearner("learner2@test.com");
 
             // Act + Assert
-            mockMvc.perform(get("/api/v1/manager/courses/{courseId}", course.getId())
+            MvcResult result = mockMvc.perform(get("/api/v1/manager/courses/{courseId}", course.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.id").isNotEmpty())
-                    .andExpect(jsonPath("$.data.name").value("Inactive Course"))
-                    .andExpect(jsonPath("$.data.jlptLevel").value("N5"))
-                    .andExpect(jsonPath("$.data.status").value("INACTIVE"))
-                    .andExpect(jsonPath("$.data.thumbnailUrl").value("https://example.com/thumb.jpg"))
+                    .andExpect(jsonPath("$.data.id").value(course.getId().toString()))
+                    .andExpect(jsonPath("$.data.name").value("Comprehensive Course"))
+                    .andExpect(jsonPath("$.data.thumbnailUrl").value("https://example.com/course-thumb.jpg"))
+                    .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+                    .andExpect(jsonPath("$.data.description").value("Test description"))
+                    .andExpect(jsonPath("$.data.jlptLevel").value("N4"))
+                    .andExpect(jsonPath("$.data.lessonCount").value(3))
+                    .andExpect(jsonPath("$.data.studentCount").exists())
                     .andExpect(jsonPath("$.data.createdAt").isNotEmpty())
-                    .andExpect(jsonPath("$.data.updatedAt").isNotEmpty());
+                    .andExpect(jsonPath("$.data.updatedAt").isNotEmpty())
+                    .andReturn();
         }
 
         // ── 3.2 Negative Cases ────────────────────────────────────────────────
@@ -719,7 +830,7 @@ class CourseManagementTest {
             mockMvc.perform(get("/api/v1/manager/courses/{courseId}",
                             UUID.fromString("00000000-0000-0000-0000-000000000000"))
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().is4xxClientError())
+                    .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.success").value(false));
         }
 
@@ -743,7 +854,7 @@ class CourseManagementTest {
             // Act + Assert — GET after delete must return not found
             mockMvc.perform(get("/api/v1/manager/courses/{courseId}", course.getId())
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().is4xxClientError())
+                    .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.success").value(false));
         }
     }
@@ -792,6 +903,54 @@ class CourseManagementTest {
             assertThat(updated.getUpdatedAt()).isNotNull();
         }
 
+        /**
+         * TC_CM_UP_001b
+         * Update course with new thumbnail — Cloudinary returns new URL and DB saves new thumbnail URL.
+         */
+        @Test
+        @DisplayName("TC_CM_UP_001b — update with new thumbnail → HTTP 200, Cloudinary returns new URL, DB saves new thumbnail")
+        void tc_cm_up_001b_updateWithNewThumbnail_returns200_newThumbnailUrlStored() throws Exception {
+            // Arrange
+            saveManager("manager@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            
+            String oldThumbnailUrl = "https://old.url/thumb.jpg";
+            String newThumbnailUrl = "https://res.cloudinary.com/demo/image/upload/v456/courses/thumbnails/new-thumb.jpg";
+            
+            Course course = saveCourseWithThumbnail("Course Name", JlptLevel.N5, CourseStatus.ACTIVE, oldThumbnailUrl);
+            
+            // Mock Cloudinary to return new URL
+            Mockito.when(cloudinaryService.uploadImage(any(), anyString())).thenReturn(newThumbnailUrl);
+            Mockito.when(cloudinaryService.extractPublicId(oldThumbnailUrl)).thenReturn("courses/thumbnails/thumb");
+            
+            MockMultipartFile requestPart = updateRequestPart("Updated Name", "Updated description");
+
+            // Act
+            MvcResult result = mockMvc.perform(multipart("/api/v1/manager/courses/{courseId}", course.getId())
+                            .file(requestPart)
+                            .file(validImageFile())
+                            .with(req -> { req.setMethod("PUT"); return req; })
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.name").value("Updated Name"))
+                    .andExpect(jsonPath("$.data.description").value("Updated description"))
+                    .andExpect(jsonPath("$.data.thumbnailUrl").value(newThumbnailUrl))
+                    .andExpect(jsonPath("$.data.updatedAt").isNotEmpty())
+                    .andReturn();
+
+            // Assert DB
+            Course updated = courseRepository.findByIdAndNotDeleted(course.getId()).orElseThrow();
+            assertThat(updated.getName()).isEqualTo("Updated Name");
+            assertThat(updated.getDescription()).isEqualTo("Updated description");
+            assertThat(updated.getThumbnailUrl()).isEqualTo(newThumbnailUrl);
+            assertThat(updated.getUpdatedAt()).isNotNull();
+
+            // Assert Cloudinary was called for upload and delete
+            verify(cloudinaryService).uploadImage(any(), anyString());
+            verify(cloudinaryService).deleteImage("courses/thumbnails/thumb");
+        }
+
         // ── 4.2 Cloudinary — MockMvc ──────────────────────────────────────────
 
         /**
@@ -820,7 +979,8 @@ class CourseManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("UPLOAD_FAILED"));
+                    .andExpect(jsonPath("$.code").value("UPLOAD_FAILED"))
+                    .andExpect(jsonPath("$.message").value("Có lỗi xảy ra khi up ảnh, vui lòng thử lại sau."));
 
             // DB state: course unchanged
             Course unchanged = courseRepository.findByIdAndNotDeleted(course.getId()).orElseThrow();
@@ -851,7 +1011,9 @@ class CourseManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("INVALID_FILE_TYPE"));
+                    .andExpect(jsonPath("$.code").value("INVALID_FILE_TYPE"))
+                    .andExpect(jsonPath("$.message").value("Chỉ cho phép các định dạng ảnh JPEG, PNG và WebP."));
+
 
             // Cloudinary never called
             verify(cloudinaryService, never()).uploadImage(any(), anyString());
@@ -884,7 +1046,9 @@ class CourseManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("FILE_TOO_LARGE"));
+                    .andExpect(jsonPath("$.code").value("FILE_TOO_LARGE"))
+                    .andExpect(jsonPath("$.message").value("File vượt quá kích thước tối đa 5MB, vui lòng chọn file khác"));
+
 
             // Cloudinary never called
             verify(cloudinaryService, never()).uploadImage(any(), anyString());
@@ -924,6 +1088,8 @@ class CourseManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.name").value("Original"))
+                    .andExpect(jsonPath("$.data.description").value("Desc"))
                     .andExpect(jsonPath("$.data.thumbnailUrl").value(newThumbnailUrl));
 
             // DB state: new thumbnailUrl persisted
@@ -981,7 +1147,7 @@ class CourseManagementTest {
                             .file(requestPart)
                             .with(req -> { req.setMethod("PUT"); return req; })
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().is4xxClientError())
+                    .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.success").value(false));
         }
     }
@@ -1007,7 +1173,7 @@ class CourseManagementTest {
         @DisplayName("TC_CM_DL_001 — soft delete → HTTP 200, deleted_at set, course absent from list")
         void tc_cm_dl_001_softDelete_deletedAtSet_absentFromList() throws Exception {
             // Arrange
-            saveManager("manager@test.com");
+            User manager = saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Active Course", JlptLevel.N5, CourseStatus.ACTIVE);
 
@@ -1017,10 +1183,11 @@ class CourseManagementTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true));
 
-            // Assert DB: deleted_at IS NOT NULL, status UNCHANGED
+            // Assert DB: deleted_at IS NOT NULL, status DELETED
             Course inDB = courseRepository.findById(course.getId()).orElseThrow();
             assertThat(inDB.getDeletedAt()).isNotNull();
-            assertThat(inDB.getStatus()).isEqualTo(CourseStatus.ACTIVE); // status unchanged by softDelete()
+            assertThat(inDB.getStatus()).isEqualTo(CourseStatus.DELETED);
+            assertThat(inDB.getDeletedBy()).isEqualTo(manager.getId());
 
             // Assert list: course no longer appears
             mockMvc.perform(get("/api/v1/manager/courses")
@@ -1074,7 +1241,7 @@ class CourseManagementTest {
             mockMvc.perform(delete("/api/v1/manager/courses/{courseId}",
                             UUID.fromString("00000000-0000-0000-0000-000000000000"))
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().is4xxClientError())
+                    .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.success").value(false));
         }
 
@@ -1098,7 +1265,7 @@ class CourseManagementTest {
             // Second delete — must fail
             mockMvc.perform(delete("/api/v1/manager/courses/{courseId}", course.getId())
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().is4xxClientError())
+                    .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.success").value(false));
         }
 
@@ -1154,7 +1321,8 @@ class CourseManagementTest {
             mockMvc.perform(patch("/api/v1/manager/courses/{courseId}/activate", course.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true));
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.status").value("ACTIVE"));
 
             // Assert DB
             Course updated = courseRepository.findByIdAndNotDeleted(course.getId()).orElseThrow();
@@ -1178,7 +1346,8 @@ class CourseManagementTest {
             mockMvc.perform(patch("/api/v1/manager/courses/{courseId}/deactivate", course.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true));
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.status").value("INACTIVE"));
 
             // Assert DB
             Course updated = courseRepository.findByIdAndNotDeleted(course.getId()).orElseThrow();
