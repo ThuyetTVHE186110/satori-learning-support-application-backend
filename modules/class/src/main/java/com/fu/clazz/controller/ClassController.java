@@ -120,15 +120,16 @@ public class ClassController {
             @PathVariable UUID classId,
             @AuthenticationPrincipal UUID userId,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String keyword) {
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("joinedAt").descending());
 
         Page<ClassMemberResponse> memberPage;
         if (isManager()) {
-            memberPage = clazzService.getClassMembers(classId, pageable);
+            memberPage = clazzService.getClassMembers(classId, keyword, pageable);
         } else {
-            memberPage = clazzService.getClassMembersForTeacher(classId, userId, pageable);
+            memberPage = clazzService.getClassMembersForTeacher(classId, userId, keyword, pageable);
         }
 
         PageResponse<ClassMemberResponse> pageResponse = PageResponse.of(

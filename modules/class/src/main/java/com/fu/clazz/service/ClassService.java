@@ -54,9 +54,9 @@ public interface ClassService {
     void removeMember(UUID classId, UUID userId, UUID managerId);
 
     /**
-     * Get active members of a class
+     * Get active members of a class with optional keyword search
      */
-    Page<ClassMemberResponse> getClassMembers(UUID classId, Pageable pageable);
+    Page<ClassMemberResponse> getClassMembers(UUID classId, String keyword, Pageable pageable);
 
     /**
      * Get class by ID for teacher (validates teacher ownership)
@@ -64,9 +64,9 @@ public interface ClassService {
     ClassResponse getClassByIdForTeacher(UUID classId, UUID teacherId);
 
     /**
-     * Get class members for teacher (validates teacher ownership)
+     * Get class members for teacher (validates teacher ownership) with optional keyword search
      */
-    Page<ClassMemberResponse> getClassMembersForTeacher(UUID classId, UUID teacherId, Pageable pageable);
+    Page<ClassMemberResponse> getClassMembersForTeacher(UUID classId, UUID teacherId, String keyword, Pageable pageable);
 
     /**
      * Get eligible learners to add to a class (Active or Inactive, and not currently an active member)

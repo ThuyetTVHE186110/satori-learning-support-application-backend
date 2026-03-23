@@ -138,12 +138,10 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
             "     LOWER(u.lastName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
             "     LOWER(u.displayName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
             "     LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
-            "AND u.id NOT IN (" +
-            "   SELECT m.userId FROM ClassMember m WHERE m.classId = :classId AND m.removedAt IS NULL" +
-            ")")
+            "AND (:#{#excludedUserIds == null || #excludedUserIds.isEmpty()} = true OR u.id NOT IN :excludedUserIds)")
     Page<User> findEligibleLearnersForClass(
-            @Param("classId") UUID classId,
             @Param("keyword") String keyword,
+            @Param("excludedUserIds") java.util.List<UUID> excludedUserIds,
             Pageable pageable
     );
 }
