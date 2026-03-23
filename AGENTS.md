@@ -10,9 +10,14 @@
 - `infrastructure`: cross-cutting config (security, Redis cache, persistence base classes, email, external clients).
 - Feature modules own controller/service/repository/entity stacks; `start` composes them.
 - Security model is path + role based in `infrastructure/src/main/java/com/fu/infrastructure/config/SecurityConfig.java`:
-  - public auth endpoints under `/api/v1/auth/**`
-  - manager endpoints under `/api/v1/manager/**`
-  - authenticated-by-default fallback.
+  - public auth endpoints under `/api/v1/auth/**` and GET `/api/v1/courses/**`
+  - user management under `/api/v1/users/**` — **ADMIN only**
+  - content management under `/api/v1/manager/**` — **CONTENT_MANAGER** role (courses, lessons, vocab, grammar, conversation, curriculum-import, roleplay missions)
+  - class management under `/api/v1/classes/**` — **OPERATION_MANAGER** (write) + TEACHER (read-own)
+  - assignment teaching under `/api/v1/teacher/assignments/**` — **TEACHER**
+  - learner features under `/api/v1/learner/**` — **LEARNER**
+  - `UserRole` enum: `LEARNER`, `TEACHER`, `CONTENT_MANAGER`, `OPERATION_MANAGER`, `ADMIN`
+  - authenticated-by-default fallback for all other paths.
 
 ## Data and Persistence Patterns
 - PostgreSQL + Redis are first-class dependencies (`environment/DOCKER_README.md`).
@@ -49,7 +54,12 @@ docker-compose ps
 ## Agent Guidelines for This Repo
 - Preserve response shape: controllers should return `ApiResponse<T>` and rely on centralized exception mapping.
 - Respect soft-delete semantics; avoid hard deletes unless a repository/service explicitly calls for it.
-- When adding endpoints, align path style with existing role segmentation (`/api/v1/manager/...`, `/api/v1/auth/...`, learner/public split).
+- When adding endpoints, align path style with existing role segmentation:
+  - `/api/v1/manager/...` → CONTENT_MANAGER (content/curriculum)
+  - `/api/v1/classes/...` → OPERATION_MANAGER + TEACHER
+  - `/api/v1/teacher/...` → TEACHER
+  - `/api/v1/learner/...` → LEARNER
+  - `/api/v1/users/...` → ADMIN only
 - Prefer module-local changes first; only move to `common`/`infrastructure` when behavior is truly cross-cutting.
 - For new async/background logic, wire a dedicated executor/config bean rather than reusing unrelated thread pools.
 - Treat credentials in config files as local/dev placeholders; use env overrides and avoid introducing new secrets in source.

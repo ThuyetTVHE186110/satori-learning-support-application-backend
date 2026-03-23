@@ -35,8 +35,8 @@ root/
 │                      Email, base JPA entities (BaseEntity, AuditableEntity, SoftDeletableEntity)
 ├── modules/
 │   ├── user/          Users, roles, sessions, JWT auth, Google OAuth, OTP/password reset, profiles
-│   ├── class/         Class CRUD, member management; MANAGER full access, TEACHER read-only own classes
-│   ├── course/        Courses, Lessons, Vocabulary, GrammarPoints; MANAGER manage, public browse
+│   ├── class/         Class CRUD, member management; OPERATION_MANAGER full access, TEACHER read-only own classes
+│   ├── course/        Courses, Lessons, Vocabulary, GrammarPoints; CONTENT_MANAGER manage, public browse
 │   ├── assignment/    QUIZ/WRITING/TRANSLATION assignments, AI quiz generation, learner submissions
 │   ├── conversation/  Conversation Themes, Topics, Missions; AI-generated context; learner personal topics
 │   ├── roleplay/      Roleplay sessions (topic-based + free-talk), mission evaluation, pronunciation scoring
@@ -55,9 +55,9 @@ All endpoints are under `/api/v1/`.
 |---------|--------|
 | `/api/v1/auth/**` | Public (login, Google, forgot-password, OTP, refresh) |
 | `/api/v1/courses/**` (GET only) | Public (no auth required) |
-| `/api/v1/manager/**` | MANAGER role only |
-| `/api/v1/users/**` | MANAGER or ADMIN |
-| `/api/v1/classes/**` | MANAGER + TEACHER |
+| `/api/v1/manager/**` | CONTENT_MANAGER (courses, lessons, vocab, grammar, conversation themes/topics/missions, curriculum import, roleplay missions) |
+| `/api/v1/users/**` | ADMIN only |
+| `/api/v1/classes/**` | OPERATION_MANAGER (full CRUD) + TEACHER (read-only own classes) |
 | `/api/v1/teacher/assignments/**` | TEACHER |
 | `/api/v1/learner/**` | LEARNER |
 | `/api/v1/profile/**` | Any authenticated user |
@@ -90,11 +90,15 @@ All endpoints are under `/api/v1/`.
 - Module-local exceptions extend global base classes; no per-module `@ControllerAdvice`
 
 ### Role / Auth System
-- `UserRole` enum: `LEARNER`, `TEACHER`, `MANAGER`, `ADMIN`
+- `UserRole` enum: `LEARNER`, `TEACHER`, `CONTENT_MANAGER`, `OPERATION_MANAGER`, `ADMIN`
+  - `CONTENT_MANAGER` — manages learning content: courses, lessons, vocabulary, grammar points, conversation themes/topics/missions, roleplay missions, curriculum imports
+  - `OPERATION_MANAGER` — manages operational aspects: classes (full CRUD), class member management
+  - `ADMIN` — full access to user management (`/api/v1/users/**`); can create/update/delete any user
 - `UserStatus` enum: `ACTIVE`, `INACTIVE`, `PENDING_ACTIVATION`
 - JWT tokens stored as Redis sessions keyed by `sessionId` (UUID); `UserSession` entity tracks device info
-- `@PreAuthorize("hasRole('MANAGER')")` on class or method; `@EnableMethodSecurity` active
+- `@PreAuthorize("hasRole('CONTENT_MANAGER')")` or `@PreAuthorize("hasRole('OPERATION_MANAGER')")` on class or method; `@EnableMethodSecurity` active
 - `AuthenticationPrincipal` resolves to `UUID` (user id) when `@AuthenticationPrincipal(expression = "id")` is used, or `CustomUserDetails` otherwise
+- `ClassController.isManager()` helper checks for `ROLE_OPERATION_MANAGER` authority from `SecurityContextHolder`
 
 ### Specification Pattern
 - `CourseSpecification`, `ClassSpecification`, `AssignmentSpecification` implement `JpaSpecificationExecutor` for dynamic filters
@@ -116,12 +120,12 @@ All endpoints are under `/api/v1/`.
 - Event-driven embedding: `ContentEmbeddingEvent` → `ContentEmbeddingEventListener`
 
 ### DB Schema Segmentation
-| Schema | Tables |
-|--------|--------|
-| `user_management` | users, user_sessions, user_learning_preferences |
-| `learning_content` | courses, lessons, vocabulary, grammar_points, lesson_vocabulary, lesson_grammar |
-| `class_management` | classes, class_members |
-| `assignment` | assignments, assignment_questions, assignment_submissions, assignment_targets, writing_assignments, quiz_questions |
-| `speaking` | conversation_themes, conversation_topics, conversation_missions, user_conversation_topics |
-| `roleplay` | roleplay_sessions, roleplay_messages, session_missions, message_pronunciations, roleplay_missions |
-| `curriculum_import` | curriculum_imports, import_chunks |
+| Schema | Tables | Role(-s) with write access |
+|--------|--------|---------------------------|
+| `user_management` | users, user_sessions, user_learning_preferences | ADMIN (user CRUD), any authenticated (own session/profile) |
+| `learning_content` | courses, lessons, vocabulary, grammar_points, lesson_vocabulary, lesson_grammar | CONTENT_MANAGER |
+| `class_management` | classes, class_members | OPERATION_MANAGER |
+| `assignment` | assignments, assignment_questions, assignment_submissions, assignment_targets, writing_assignments, quiz_questions | TEACHER (create/manage), LEARNER (submissions) |
+| `speaking` | conversation_themes, conversation_topics, conversation_missions, user_conversation_topics | CONTENT_MANAGER (themes/topics/missions); LEARNER (personal topics) |
+| `roleplay` | roleplay_sessions, roleplay_messages, session_missions, message_pronunciations, roleplay_missions | CONTENT_MANAGER (missions), LEARNER (sessions) |
+| `curriculum_import` | curriculum_imports, import_chunks | CONTENT_MANAGER |
