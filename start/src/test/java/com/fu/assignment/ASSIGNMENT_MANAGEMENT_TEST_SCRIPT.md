@@ -265,7 +265,7 @@ Response JSON:
 - Published quiz and published writing assignments created
 
 **Test Case Procedure:**
-1. Client sends GET /api/v1/teacher/assignments/class/{classId}?assignmentType=QUIZ with Authorization: Bearer {token}.
+1. Client sends GET /api/v1/teacher/assignments/class/{classId}?type=WRITING with Authorization: Bearer {token}.
 2. AuthFilter validates token and resolves TEACHER identity.
 3. AssignmentController forwards the request to AssignmentService with type filter.
 4. AssignmentService retrieves assignments by type filter via AssignmentRepository.
@@ -276,6 +276,7 @@ Response JSON:
 Response JSON:
 - success = true
 - data.content.length() = 1
+- data.content[0].id = published writing assignment UUID
 
 ---
 
@@ -428,19 +429,43 @@ Response JSON:
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- data.id exists
+- data.id = assignment UUID
 - data.title = "Published Quiz"
+- data.description = "desc"
+- data.instructions = null
 - data.assignmentType = "QUIZ"
-- data.status = "PUBLISHED"
+- data.startDate = null
 - data.dueDate exists
-- data.instructions exists
+- data.audioUrl = null
 - data.questionCount = 1
-- data.questions array contains quiz question details
-- data.questions[0].questionText exists
+- data.actualQuestionCount = 1
+- data.status = "PUBLISHED"
+- data.createdBy exists
+- data.createdAt exists
+- data.updatedAt exists
+- data.hasSubmissions = false
+- data.submissionCount = 0
+- data.writingContent = null
+- data.targets = null
+- data.questions array length = 1
+- data.questions[0].assignmentQuestionId exists
+- data.questions[0].orderIndex = 0
+- data.questions[0].points = null
+- data.questions[0].questionId exists
+- data.questions[0].questionText = "テストの問題"
 - data.questions[0].questionType = "multiple_choice"
-- data.questions[0].options exists
+- data.questions[0].options array length = 2
+- data.questions[0].options[0].id = "A"
+- data.questions[0].options[0].text = "正しい"
+- data.questions[0].options[0].isCorrect = true
+- data.questions[0].options[1].id = "B"
+- data.questions[0].options[1].text = "間違い"
+- data.questions[0].options[1].isCorrect = false
+- data.questions[0].explanation = null
+- data.questions[0].imageUrl = null
+- data.questions[0].jlptLevel = null
 - data.questions[0].correctAnswer = "A"
-- data.questions[0].explanation exists
+- data.questions[0].correctAnswers = null
 
 ---
 
@@ -511,12 +536,12 @@ Response JSON:
 
 **Test Case Procedure:**
 1. Client sends POST /api/v1/teacher/assignments/class/{classId}/quiz with Authorization: Bearer {token} and multipart data:
-   - data: JSON with title, dueDate, status=DRAFT, questions=[]
+   - data: JSON with title, dueDate, status=DRAFT, questions=[2 multiple-choice questions]
 2. AuthFilter validates token and resolves TEACHER identity.
 3. AssignmentController forwards the request to AssignmentService.
 4. AssignmentService validates teacher owns the class via ClassRepository.
 5. AssignmentService creates new Assignment entity with QUIZ type and DRAFT status.
-6. AssignmentRepository saves the new assignment.
+6. AssignmentRepository saves the new assignment with both questions.
 7. AssignmentTargetRepository saves the assignment target linking to class.
 8. System returns the created assignment response.
 
@@ -525,12 +550,7 @@ Response JSON:
 - success = true
 - data.assignmentType = "QUIZ"
 - data.status = "DRAFT"
-- data.title = "Quiz Title"
-- data.dueDate exists
-- data.questionCount = 0
-- data.id exists
-- data.createdAt exists
-- data.updatedAt exists
+- data.questionCount = 2
 
 ---
 
@@ -1106,18 +1126,18 @@ Response JSON:
 ## Section 7 — Assignment Status Management Tests
 
 ### Test Case ID: TC_AS_T_ST_001
-**Test Case Description:** Publish assignment success
+**Test Case Description:** DRAFT → PUBLISHED success (QUIZ with questions)
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
-- Draft assignment created with questions
+- Quiz DRAFT assignment created (no questions initially)
 
 **Test Case Procedure:**
-1. Client sends PUT /api/v1/teacher/assignments/{assignmentId}/status with Authorization: Bearer {token} and JSON body:
-   - status = PUBLISHED
+1. Client sends PUT /api/v1/teacher/assignments/{assignmentId}/quiz with Authorization: Bearer {token} and multipart data:
+   - data: JSON with status=PUBLISHED, questions=[1 valid question]
 2. AuthFilter validates token and resolves TEACHER identity.
 3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService validates assignment has questions and is ready for publishing.
+4. AssignmentService validates status transition DRAFT → PUBLISHED and that questions exist.
 5. AssignmentService updates assignment status to PUBLISHED.
 6. AssignmentRepository saves the updated assignment.
 7. System returns the updated assignment response.
@@ -1125,21 +1145,20 @@ Response JSON:
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- data.status = PUBLISHED
-- data.publishedAt exists
+- data.status = "PUBLISHED"
 
 ---
 
 ### Test Case ID: TC_AS_T_ST_002
-**Test Case Description:** Publish assignment without questions → 400
+**Test Case Description:** DRAFT → PUBLISHED without questions → 400 (NO_QUESTIONS)
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
-- Draft assignment created without questions
+- Quiz DRAFT assignment created without questions
 
 **Test Case Procedure:**
-1. Client sends PUT /api/v1/teacher/assignments/{assignmentId}/status with Authorization: Bearer {token} and JSON body:
-   - status = PUBLISHED
+1. Client sends PUT /api/v1/teacher/assignments/{assignmentId}/quiz with Authorization: Bearer {token} and multipart data:
+   - data: JSON with status=PUBLISHED, questions=[]
 2. AuthFilter validates token and resolves TEACHER identity.
 3. AssignmentController forwards the request to AssignmentService.
 4. AssignmentService detects assignment has no questions.
@@ -1153,11 +1172,11 @@ Response JSON:
 ## Section 8 — Assignment Deletion Tests
 
 ### Test Case ID: TC_AS_T_DL_001
-**Test Case Description:** Delete assignment success (no submissions)
+**Test Case Description:** Delete DRAFT assignment with no submissions → soft delete success
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
-- Draft assignment created (no submissions)
+- Quiz DRAFT assignment created (no submissions)
 
 **Test Case Procedure:**
 1. Client sends DELETE /api/v1/teacher/assignments/{assignmentId} with Authorization: Bearer {token}.
@@ -1171,7 +1190,7 @@ Response JSON:
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- message = "Xóa bài tập thành công"
+- Assignment is no longer findable via findByIdAndNotDeleted (DB verified)
 
 ---
 
@@ -1182,20 +1201,22 @@ Response JSON:
 ## Section 10 — Teacher Assignment Clone Tests
 
 ### Test Case ID: TC_AS_T_CL_001
-**Test Case Description:** Clone assignment to different class success
+**Test Case Description:** Clone QUIZ assignment to different class → success, status DRAFT, new title
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
-- Source assignment created with questions
-- Target class created by same teacher
+- Published QUIZ assignment created in sourceClass
+- Another class (destClass) created by the same teacher
 
 **Test Case Procedure:**
 1. Client sends POST /api/v1/teacher/assignments/{assignmentId}/clone with Authorization: Bearer {token} and JSON body:
-   - targetClassId: {targetClassId}
+   - targetClassId: {destClassId}
+   - newDueDate: {futureDate}
+   - newTitle: "Cloned Quiz"
 2. AuthFilter validates token and resolves TEACHER identity.
 3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService validates teacher owns both classes.
-5. AssignmentService clones assignment with new ID but same content.
+4. AssignmentService validates teacher owns both source assignment and target class.
+5. AssignmentService clones assignment with new ID, new title, new dueDate, status=DRAFT.
 6. AssignmentRepository saves the cloned assignment.
 7. QuizQuestionRepository clones questions for new assignment.
 8. System returns the cloned assignment response.
@@ -1203,10 +1224,8 @@ Response JSON:
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- data.id exists (different from source)
-- data.title = "Cloned Assignment"
-- data.classId = targetClassId
-- data.questionCount = same as source
+- data.title = "Cloned Quiz"
+- data.status = "DRAFT"
 
 ---
 
@@ -1476,17 +1495,17 @@ Response JSON:
 ## Section 13 — Teacher Assignment Statistics Tests
 
 ### Test Case ID: TC_AS_T_STAT_001
-**Test Case Description:** Get statistics thành công
+**Test Case Description:** Get class statistics thành công
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
-- Multiple assignments with different statuses and submission counts
+- Teacher's class created (no assignments yet)
 
 **Test Case Procedure:**
-1. Client sends GET /api/v1/teacher/assignments/statistics with Authorization: Bearer {token}.
+1. Client sends GET /api/v1/teacher/assignments/class/{classId}/statistics with Authorization: Bearer {token}.
 2. AuthFilter validates token and resolves TEACHER identity.
 3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService aggregates statistics across all teacher's assignments.
+4. AssignmentService aggregates statistics for the given class.
 5. AssignmentRepository queries database for assignment counts by status.
 6. AssignmentSubmissionRepository queries for submission statistics.
 7. System returns the statistics response.
@@ -1494,12 +1513,16 @@ Response JSON:
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- data.totalAssignments exists
-- data.draftAssignments exists
-- data.publishedAssignments exists
-- data.closedAssignments exists
-- data.totalSubmissions exists
-- data.pendingGrading exists
+- data.classId = class UUID
+- data.totalAssignments = 0
+- data.draftAssignments = 0
+- data.publishedAssignments = 0
+- data.closedAssignments = 0
+- data.totalSubmissions = 0
+- data.ungradedSubmissions = 0
+- data.gradedSubmissions = 0
+- data.inProgressSubmissions = 0
+- data.overdueSubmissions = 0
 
 ---
 
@@ -1693,13 +1716,12 @@ Response JSON:
 - Draft assignment created
 
 **Test Case Procedure:**
-1. Client sends GET /api/v1/learner/assignments/class/{classId} with Authorization: Bearer {token}.
+1. Client sends GET /api/v1/learner/assignments with Authorization: Bearer {token}.
 2. AuthFilter validates token and resolves LEARNER identity.
 3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService validates learner is enrolled in class via ClassMemberRepository.
-5. AssignmentService retrieves published assignments via AssignmentRepository.
-6. AssignmentRepository queries the database and filters out DRAFT assignments.
-7. System returns the filtered assignment list response.
+4. AssignmentService retrieves all assignments from classes the learner is enrolled in.
+5. AssignmentRepository queries the database and filters out DRAFT assignments.
+6. System returns the filtered assignment list response.
 
 **Expected Results:** HTTP 200 OK
 Response JSON:
@@ -1718,19 +1740,17 @@ Response JSON:
 - Closed assignment created
 
 **Test Case Procedure:**
-1. Client sends GET /api/v1/learner/assignments/class/{classId} with Authorization: Bearer {token}.
+1. Client sends GET /api/v1/learner/assignments with Authorization: Bearer {token}.
 2. AuthFilter validates token and resolves LEARNER identity.
 3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService validates learner is enrolled in class via ClassMemberRepository.
-5. AssignmentService retrieves assignments via AssignmentRepository.
-6. AssignmentRepository queries the database and includes CLOSED assignments.
-7. System returns the assignment list response.
+4. AssignmentService retrieves assignments from classes the learner is enrolled in.
+5. AssignmentRepository queries the database and includes CLOSED assignments.
+6. System returns the assignment list response.
 
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- data.content contains CLOSED assignments
-- data.content[*].status = "CLOSED"
+- data.content.length() = 1
 
 ---
 
@@ -1743,11 +1763,11 @@ Response JSON:
 - Learner NOT enrolled in class
 
 **Test Case Procedure:**
-1. Client sends GET /api/v1/learner/assignments/class/{classId} with Authorization: Bearer {token}.
+1. Client sends GET /api/v1/learner/assignments with Authorization: Bearer {token}.
 2. AuthFilter validates token and resolves LEARNER identity.
 3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService validates learner is enrolled in class via ClassMemberRepository.
-5. ClassMemberRepository returns empty (learner not enrolled).
+4. AssignmentService retrieves assignments from classes the learner is enrolled in (none).
+5. AssignmentRepository returns empty.
 6. System returns the empty assignment list response.
 
 **Expected Results:** HTTP 200 OK
@@ -1767,10 +1787,10 @@ Response JSON:
 - Multiple assignments with different titles created
 
 **Test Case Procedure:**
-1. Client sends GET /api/v1/learner/assignments/class/{classId}?title=Published Quiz with Authorization: Bearer {token}.
+1. Client sends GET /api/v1/learner/assignments?title=Published Quiz with Authorization: Bearer {token}.
 2. AuthFilter validates token and resolves LEARNER identity.
 3. AssignmentController forwards the request to AssignmentService with title filter.
-4. AssignmentService validates learner is enrolled and retrieves assignments by title filter via AssignmentRepository.
+4. AssignmentService retrieves assignments of the learner's classes, filtered by title.
 5. AssignmentRepository queries the database with title filter and returns matching results.
 6. System returns the filtered assignment list response.
 
@@ -1778,7 +1798,7 @@ Response JSON:
 Response JSON:
 - success = true
 - data.content.length() = 1
-- data.content[0].title = "Published Quiz"
+- data.content[0].id = published quiz assignment UUID
 
 ---
 
@@ -1792,17 +1812,18 @@ Response JSON:
 - Multiple assignments with different types created
 
 **Test Case Procedure:**
-1. Client sends GET /api/v1/learner/assignments/class/{classId}?assignmentType=QUIZ with Authorization: Bearer {token}.
+1. Client sends GET /api/v1/learner/assignments?type=WRITING with Authorization: Bearer {token}.
 2. AuthFilter validates token and resolves LEARNER identity.
 3. AssignmentController forwards the request to AssignmentService with type filter.
-4. AssignmentService validates learner is enrolled and retrieves assignments by type filter via AssignmentRepository.
+4. AssignmentService retrieves assignments of the learner's classes, filtered by type.
 5. AssignmentRepository queries the database with type filter and returns matching results.
 6. System returns the filtered assignment list response.
 
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- data.content[*].assignmentType = "QUIZ"
+- data.content.length() = 1
+- data.content[0].id = published writing assignment UUID
 
 ---
 
@@ -1816,25 +1837,27 @@ Response JSON:
 - Multiple assignments created
 
 **Test Case Procedure:**
-1. Client sends GET /api/v1/learner/assignments/class/{classId}?page=0&size=5 with Authorization: Bearer {token}.
+1. Client sends GET /api/v1/learner/assignments?page=1&size=1 with Authorization: Bearer {token}.
 2. AuthFilter validates token and resolves LEARNER identity.
 3. AssignmentController forwards the request to AssignmentService with pagination parameters.
-4. AssignmentService validates learner is enrolled and retrieves paginated assignments via AssignmentRepository.
+4. AssignmentService retrieves paginated assignments of the learner's classes.
 5. AssignmentRepository queries the database with pagination and returns paginated results.
 6. System returns the paginated assignment list response.
 
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- data.pageNumber = 0
-- data.pageSize = 5
+- data.content.length() = 1
+- data.pageNumber = 1
+- data.pageSize = 1
+- data.totalElements = 2
 
 ---
 
 ## Section 17 — Learner Assignment Doing Tests
 
 ### Test Case ID: TC_AS_L_DO_001
-**Test Case Description:** Start QUIZ thành công
+**Test Case Description:** Start QUIZ thành công → submission IN_PROGRESS
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -1849,79 +1872,42 @@ Response JSON:
 4. AssignmentService validates learner is enrolled and assignment is published.
 5. AssignmentService creates new AssignmentSubmission with IN_PROGRESS status.
 6. AssignmentSubmissionRepository saves the new submission.
-7. AssignmentRepository updates hasSubmissions flag.
-8. System returns the assignment start response with questions.
+7. System returns the assignment start response with questions.
 
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- data.submissionId exists
-- data.questions array contains quiz questions
-- data.timeLimit exists (if applicable)
+- data.id = assignment UUID
+- data.title = "Published Quiz"
+- data.description exists
+- data.instructions = null (not present)
+- data.assignmentType = "QUIZ"
+- data.startDate = null (not present)
+- data.dueDate exists
+- data.audioUrl = null (not present)
+- data.actualQuestionCount = 1
+- data.questions array length = 1
+- data.questions[0].questionType = "multiple_choice"
+- data.questions[0].options array length = 2
+- data.writingContent = null (not present)
+- DB: AssignmentSubmission saved with status = IN_PROGRESS
 
 ---
 
 ### Test Case ID: TC_AS_L_DO_002
-**Test Case Description:** Start WRITING thành công
+**Test Case Description:** Assignment DRAFT → 400 (ASSIGNMENT_NOT_PUBLISHED)
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
 - Course and class created
 - Learner enrolled in class
-- Published writing assignment created
+- Draft quiz assignment created
 
 **Test Case Procedure:**
 1. Client sends POST /api/v1/learner/assignments/{assignmentId}/start with Authorization: Bearer {token}.
 2. AuthFilter validates token and resolves LEARNER identity.
 3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService validates learner is enrolled and assignment is published.
-5. AssignmentService creates new AssignmentSubmission with IN_PROGRESS status.
-6. AssignmentSubmissionRepository saves the new submission.
-7. AssignmentRepository updates hasSubmissions flag.
-8. System returns the assignment start response with writing prompt.
-
-**Expected Results:** HTTP 200 OK
-Response JSON:
-- success = true
-- data.submissionId exists
-- data.prompt exists
-- data.timeLimit exists (if applicable)
-
----
-
-### Test Case ID: TC_AS_L_DO_003
-**Test Case Description:** Start assignment đã start → 400 (ALREADY_IN_PROGRESS)
-
-**Pre-conditions:**
-- Learner accessToken is available (from prior login)
-- Assignment submission already IN_PROGRESS
-
-**Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/{assignmentId}/start with Authorization: Bearer {token}.
-2. AuthFilter validates token and resolves LEARNER identity.
-3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService detects learner already has IN_PROGRESS submission.
-5. System throws BusinessException with ALREADY_IN_PROGRESS.
-6. System returns the business error response.
-
-**Expected Results:** HTTP 400 BAD REQUEST
-
----
-
-### Test Case ID: TC_AS_L_DO_004
-**Test Case Description:** Start DRAFT assignment → 400 (ASSIGNMENT_NOT_PUBLISHED)
-
-**Pre-conditions:**
-- Learner accessToken is available (from prior login)
-- Course and class created
-- Learner enrolled in class
-- Draft assignment created
-
-**Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/{assignmentId}/start with Authorization: Bearer {token}.
-2. AuthFilter validates token and resolves LEARNER identity.
-3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService detects assignment is not published.
+4. AssignmentService detects assignment status is DRAFT (not published).
 5. System throws BusinessException with ASSIGNMENT_NOT_PUBLISHED.
 6. System returns the business error response.
 
@@ -1929,229 +1915,300 @@ Response JSON:
 
 ---
 
-### Test Case ID: TC_AS_L_DO_005
-**Test Case Description:** Start assignment không tồn tại → 404
+### Test Case ID: TC_AS_L_DO_003
+**Test Case Description:** allowRetry=false, đã có 1 attempt GRADED → 400 (NO_RETRY)
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
-
-**Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/{nonExistentAssignmentId}/start with Authorization: Bearer {token}.
-2. AuthFilter validates token and resolves LEARNER identity.
-3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService attempts to find assignment via AssignmentRepository.
-5. AssignmentRepository returns empty (assignment not found).
-6. System returns the not found error response.
-
-**Expected Results:** HTTP 404 NOT FOUND
-
----
-
-### Test Case ID: TC_AS_L_DO_006
-**Test Case Description:** Start assignment không enrolled → 400 (NOT_ENROLLED)
-
-**Pre-conditions:**
-- Learner accessToken is available (from prior login)
-- Course and class created
-- Learner NOT enrolled in class
-- Published assignment created
+- Published quiz assignment with allowRetry=false
+- 1 GRADED submission already exists for learner
 
 **Test Case Procedure:**
 1. Client sends POST /api/v1/learner/assignments/{assignmentId}/start with Authorization: Bearer {token}.
 2. AuthFilter validates token and resolves LEARNER identity.
 3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService detects learner is not enrolled in the class.
-5. System throws BusinessException with NOT_ENROLLED.
+4. AssignmentService detects learner already has a completed attempt and allowRetry=false.
+5. System throws BusinessException with NO_RETRY.
 6. System returns the business error response.
 
 **Expected Results:** HTTP 400 BAD REQUEST
+
+---
+
+### Test Case ID: TC_AS_L_DO_004
+**Test Case Description:** Đã có ≥2 attempts → 400 (NO_RETRY)
+
+**Pre-conditions:**
+- Learner accessToken is available (from prior login)
+- Published quiz assignment
+- 2 GRADED submissions already exist for learner
+
+**Test Case Procedure:**
+1. Client sends POST /api/v1/learner/assignments/{assignmentId}/start with Authorization: Bearer {token}.
+2. AuthFilter validates token and resolves LEARNER identity.
+3. AssignmentController forwards the request to AssignmentService.
+4. AssignmentService detects learner has reached maximum attempt count (≥ 2).
+5. System throws BusinessException with NO_RETRY.
+6. System returns the business error response.
+
+**Expected Results:** HTTP 400 BAD REQUEST
+
+---
+
+### Test Case ID: TC_AS_L_DO_005
+**Test Case Description:** Đang có IN_PROGRESS → 200 (resume existing session)
+
+**Pre-conditions:**
+- Learner accessToken is available (from prior login)
+- Published quiz assignment
+- Existing IN_PROGRESS submission for learner
+
+**Test Case Procedure:**
+1. Client sends POST /api/v1/learner/assignments/{assignmentId}/start with Authorization: Bearer {token}.
+2. AuthFilter validates token and resolves LEARNER identity.
+3. AssignmentController forwards the request to AssignmentService.
+4. AssignmentService detects existing IN_PROGRESS submission and resumes it.
+5. System returns the assignment response for the existing in-progress session.
+
+**Expected Results:** HTTP 200 OK
+Response JSON:
+- success = true
+- data.id = assignment UUID
+- data.title = "Published Quiz"
+
+---
+
+### Test Case ID: TC_AS_L_DO_006
+**Test Case Description:** Submit Quiz đúng hạn, đáp án đúng → GRADED, score=100
+
+**Pre-conditions:**
+- Learner accessToken is available (from prior login)
+- Published quiz assignment with 1 question (correct answer = "A")
+- Submission started (IN_PROGRESS)
+
+**Test Case Procedure:**
+1. Client sends POST /api/v1/learner/assignments/{assignmentId}/submit-quiz with Authorization: Bearer {token} and JSON body:
+   - answers: JSON string "[{...selectedAnswer:A}]"
+   - timeSpentSeconds: 60
+2. AuthFilter validates token and resolves LEARNER identity.
+3. AssignmentController forwards the request to AssignmentService.
+4. AssignmentService grades quiz: answer "A" is correct.
+5. AssignmentService updates submission status to GRADED with score=100.
+6. System returns the graded submission result.
+
+**Expected Results:** HTTP 200 OK
+Response JSON:
+- success = true
+- data.status = "GRADED"
+- data.score = 100.00
+- data.correctCount = 1
 
 ---
 
 ### Test Case ID: TC_AS_L_DO_007
-**Test Case Description:** Submit QUIZ thành công
+**Test Case Description:** Submit Quiz đáp án sai → GRADED, score=0
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
-- Assignment submission started (IN_PROGRESS status)
+- Published quiz assignment with 1 question (correct answer = "A")
+- Submission started (IN_PROGRESS)
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/submissions/{submissionId}/submit with Authorization: Bearer {token} and JSON body:
-   - answers array with selected answers
+1. Client sends POST /api/v1/learner/assignments/{assignmentId}/submit-quiz with Authorization: Bearer {token} and JSON body:
+   - answers: JSON string "[{...selectedAnswer:B}]"
+   - timeSpentSeconds: 30
 2. AuthFilter validates token and resolves LEARNER identity.
 3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService validates submission belongs to learner and is IN_PROGRESS.
-5. AssignmentService grades quiz answers automatically.
-6. AssignmentService updates submission status to SUBMITTED with score.
-7. AssignmentSubmissionRepository saves the updated submission.
-8. System returns the submission result response.
+4. AssignmentService grades quiz: answer "B" is incorrect.
+5. AssignmentService updates submission status to GRADED with score=0.
+6. System returns the graded submission result.
 
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- data.score exists
-- data.correctCount exists
-- data.totalQuestions exists
-- data.status = SUBMITTED
+- data.status = "GRADED"
+- data.score = 0.00
+- data.correctCount = 0
 
 ---
 
 ### Test Case ID: TC_AS_L_DO_008
-**Test Case Description:** Submit WRITING thành công
+**Test Case Description:** Submit Quiz quá hạn → 400 (PAST_DUE)
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
-- Writing assignment submission started (IN_PROGRESS status)
+- Published quiz assignment with dueDate in the past
+- Submission started (IN_PROGRESS)
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/submissions/{submissionId}/submit with Authorization: Bearer {token} and JSON body:
-   - content: "Learner's writing content"
+1. Client sends POST /api/v1/learner/assignments/{assignmentId}/submit-quiz with Authorization: Bearer {token} and JSON body:
+   - answers: JSON string with selected answer
+   - timeSpentSeconds: 60
 2. AuthFilter validates token and resolves LEARNER identity.
 3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService validates submission belongs to learner and is IN_PROGRESS.
-5. AssignmentService updates submission status to SUBMITTED.
-6. AssignmentSubmissionRepository saves the updated submission.
-7. System returns the submission result response.
+4. AssignmentService detects assignment is past its dueDate.
+5. System throws BusinessException with PAST_DUE.
+6. System returns the business error response.
 
-**Expected Results:** HTTP 200 OK
+**Expected Results:** HTTP 400 BAD REQUEST
 Response JSON:
-- success = true
-- data.status = SUBMITTED
-- data.submittedAt exists
+- code = "PAST_DUE"
+- message = "Bài tập này đã hết hạn nộp."
 
 ---
 
 ### Test Case ID: TC_AS_L_DO_009
-**Test Case Description:** Submit không có submission → 404
+**Test Case Description:** Submit Writing đúng hạn → SUBMITTED (chờ teacher chấm)
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
+- Published writing assignment with dueDate in the future
+- Submission started (IN_PROGRESS)
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/submissions/{nonExistentSubmissionId}/submit with Authorization: Bearer {token} and JSON body:
-   - answers array
+1. Client sends multipart POST /api/v1/learner/assignments/{assignmentId}/submit-writing with Authorization: Bearer {token}:
+   - images: image file
 2. AuthFilter validates token and resolves LEARNER identity.
 3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService attempts to find submission via AssignmentSubmissionRepository.
-5. AssignmentSubmissionRepository returns empty (submission not found).
-6. System returns the not found error response.
+4. AssignmentService validates assignment is not past due.
+5. AssignmentService updates submission status to SUBMITTED.
+6. System returns the submitted result.
 
-**Expected Results:** HTTP 404 NOT FOUND
+**Expected Results:** HTTP 200 OK
+Response JSON:
+- success = true
+- data.status = "SUBMITTED"
 
 ---
 
 ### Test Case ID: TC_AS_L_DO_010
-**Test Case Description:** Submit submission khác người → 400 (ACCESS_DENIED)
+**Test Case Description:** Submit Writing quá hạn → 400 (PAST_DUE)
 
 **Pre-conditions:**
-- Learner A accessToken is available (from prior login)
-- Assignment submission created by Learner B
+- Learner accessToken is available (from prior login)
+- Published writing assignment with dueDate in the past (set after start)
+- Submission started (IN_PROGRESS)
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/submissions/{learnerBSubmissionId}/submit with Authorization: Bearer {learnerAToken} and JSON body:
-   - answers array
-2. AuthFilter validates token and resolves LEARNER A identity.
+1. Client sends multipart POST /api/v1/learner/assignments/{assignmentId}/submit-writing with Authorization: Bearer {token}:
+   - images: image file
+2. AuthFilter validates token and resolves LEARNER identity.
 3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService detects submission doesn't belong to learner A.
-5. System throws BusinessException with ACCESS_DENIED.
-6. System returns the access denied error response.
+4. AssignmentService detects assignment is past its dueDate.
+5. System throws BusinessException with PAST_DUE.
+6. System returns the business error response.
 
 **Expected Results:** HTTP 400 BAD REQUEST
+Response JSON:
+- code = "PAST_DUE"
+- message = "Bài tập này đã hết hạn nộp."
 
 ---
 
 ### Test Case ID: TC_AS_L_DO_011
-**Test Case Description:** Submit đã SUBMITTED → 400 (INVALID_STATUS)
+**Test Case Description:** Submit Writing thiếu image → 400
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
-- Assignment submission already SUBMITTED
+- Published writing assignment with valid dueDate
+- Submission started (IN_PROGRESS)
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/submissions/{submissionId}/submit with Authorization: Bearer {token} and JSON body:
-   - answers array
+1. Client sends multipart POST /api/v1/learner/assignments/{assignmentId}/submit-writing with Authorization: Bearer {token}:
+   - data: JSON metadata (no images attached)
 2. AuthFilter validates token and resolves LEARNER identity.
 3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService detects submission is already SUBMITTED.
-5. System throws BusinessException with INVALID_STATUS.
-6. System returns the business error response.
+4. AssignmentService detects no images were provided.
+5. System returns validation error response.
 
 **Expected Results:** HTTP 400 BAD REQUEST
 
 ---
 
 ### Test Case ID: TC_AS_L_DO_012
-**Test Case Description:** Submit quá deadline → SUBMITTED nhưng flagged OVERDUE
+**Test Case Description:** Teacher gọi endpoint Learner submit → 403
 
 **Pre-conditions:**
-- Learner accessToken is available (from prior login)
-- Assignment submission started (IN_PROGRESS status)
-- Assignment due date is in the past
+- Teacher accessToken is available (from prior login)
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/submissions/{submissionId}/submit with Authorization: Bearer {token} and JSON body:
-   - answers array
-2. AuthFilter validates token and resolves LEARNER identity.
-3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService validates submission belongs to learner and is IN_PROGRESS.
-5. AssignmentService detects submission is after due date.
-6. AssignmentService grades quiz and sets status to SUBMITTED with overdue flag.
-7. AssignmentSubmissionRepository saves the updated submission.
-8. System returns the submission result response.
+1. Client sends POST /api/v1/learner/assignments/{randomId}/submit-quiz with Authorization: Bearer {teacherToken} and JSON body.
+2. AuthFilter validates token and resolves TEACHER identity.
+3. Security layer detects TEACHER role is not authorized to access learner endpoints.
+4. System returns an access forbidden response.
 
-**Expected Results:** HTTP 200 OK
-Response JSON:
-- success = true
-- data.status = SUBMITTED
-- data.isOverdue = true
+**Expected Results:** HTTP 403 FORBIDDEN
 
 ---
 
 ### Test Case ID: TC_AS_L_DO_013
-**Test Case Description:** Submit Writing với images → thành công
+**Test Case Description:** Start assignment khi đang CLOSED → 400 (ASSIGNMENT_NOT_PUBLISHED)
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
-- Writing assignment submission started (IN_PROGRESS status)
+- Published quiz assignment manually set to CLOSED status
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/submissions/{submissionId}/submit with Authorization: Bearer {token} and multipart data:
-   - content: "Writing content"
-   - images: image files
+1. Client sends POST /api/v1/learner/assignments/{assignmentId}/start with Authorization: Bearer {token}.
 2. AuthFilter validates token and resolves LEARNER identity.
 3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService validates submission belongs to learner and is IN_PROGRESS.
-5. AssignmentService uploads images via CloudinaryService.
-6. AssignmentService updates submission with content and image URLs.
-7. AssignmentSubmissionRepository saves the updated submission.
-8. System returns the submission result response.
+4. AssignmentService detects assignment status is not PUBLISHED.
+5. System throws BusinessException with ASSIGNMENT_NOT_PUBLISHED.
+6. System returns the business error response.
 
-**Expected Results:** HTTP 200 OK
-Response JSON:
-- success = true
-- data.status = SUBMITTED
-- data.imageUrls array exists
+**Expected Results:** HTTP 400 BAD REQUEST
 
 ---
 
 ### Test Case ID: TC_AS_L_DO_014
-**Test Case Description:** Submit Writing quá time limit → 400 (TIME_LIMIT_EXCEEDED)
+**Test Case Description:** Submit assignment khi đang CLOSED → vẫn chấm GRADED
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
-- Writing assignment with time limit started
-- Time limit has been exceeded
+- Published quiz assignment started (IN_PROGRESS), then assignment was CLOSED
+- Submission exists in IN_PROGRESS state
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/submissions/{submissionId}/submit with Authorization: Bearer {token} and JSON body:
-   - content: "Writing content"
+1. Client sends POST /api/v1/learner/assignments/{assignmentId}/submit-quiz with Authorization: Bearer {token} and JSON body:
+   - answers: JSON string with correct answer
+   - timeSpentSeconds: 60
 2. AuthFilter validates token and resolves LEARNER identity.
-3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService detects time limit has been exceeded.
-5. System throws BusinessException with TIME_LIMIT_EXCEEDED.
-6. System returns the business error response.
+3. AssignmentController forwards to AssignmentService.
+4. AssignmentService grades quiz even though assignment is now CLOSED.
+5. System returns the graded submission result.
 
-**Expected Results:** HTTP 400 BAD REQUEST
+**Expected Results:** HTTP 200 OK
+Response JSON:
+- success = true
+- data.status = "GRADED"
+- data.score = 100.00
+
+---
+
+### Test Case ID: TC_AS_L_DO_015
+**Test Case Description:** Submit WRITING assignment đính kèm ảnh → SUBMITTED
+
+**Pre-conditions:**
+- Learner accessToken is available (from prior login)
+- Published writing assignment
+- Submission started (IN_PROGRESS)
+- CloudinaryService mocked to return upload URL
+
+**Test Case Procedure:**
+1. Client sends multipart POST /api/v1/learner/assignments/{assignmentId}/submit-writing with Authorization: Bearer {token}:
+   - data: JSON {"timeSpentSeconds": 120}
+   - images: image file (PNG)
+2. AuthFilter validates token and resolves LEARNER identity.
+3. AssignmentController forwards to AssignmentService.
+4. AssignmentService calls CloudinaryService.uploadImage to upload the image.
+5. Image URL returned is saved with submission.
+6. AssignmentService updates submission status to SUBMITTED.
+7. System returns the submitted result.
+
+**Expected Results:** HTTP 200 OK
+Response JSON:
+- success = true
+- data.status = "SUBMITTED"
 
 ---
 
@@ -2184,37 +2241,61 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_DO_016
-**Test Case Description:** Evaluate Writing chưa SUBMITTED → 400
+**Test Case Description:** Submit QUIZ answers bị lỗi JSON format → 400
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
-- Writing assignment submission IN_PROGRESS
+- Published quiz assignment
+- Submission started (IN_PROGRESS)
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/submissions/{submissionId}/evaluate with Authorization: Bearer {token}.
+1. Client sends POST /api/v1/learner/assignments/{assignmentId}/submit-quiz with Authorization: Bearer {token} and JSON body:
+   - answers: "invalid-json-array" (not valid JSON)
+   - timeSpentSeconds: 60
 2. AuthFilter validates token and resolves LEARNER identity.
-3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService detects submission is not SUBMITTED.
-5. System throws BusinessException with INVALID_STATUS.
-6. System returns the business error response.
+3. AssignmentController forwards to AssignmentService.
+4. AssignmentService fails to parse the answers JSON string.
+5. System returns a validation/parse error response.
 
 **Expected Results:** HTTP 400 BAD REQUEST
 
 ---
 
 ### Test Case ID: TC_AS_L_DO_017
-**Test Case Description:** Evaluate QUIZ submission → 400 (INVALID_TYPE)
+**Test Case Description:** Learner submits quiz for WRITING assignment → 400
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
-- Quiz assignment submitted
+- Published WRITING assignment
+- Submission started (IN_PROGRESS)
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/submissions/{submissionId}/evaluate with Authorization: Bearer {token}.
+1. Client sends POST /api/v1/learner/assignments/{assignmentId}/submit-quiz with Authorization: Bearer {token} and JSON body:
+   - answers: "[]"
+   - timeSpentSeconds: 60
 2. AuthFilter validates token and resolves LEARNER identity.
-3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService detects assignment type is QUIZ (auto-graded).
-5. System throws BusinessException with INVALID_TYPE.
+3. AssignmentController forwards to AssignmentService.
+4. AssignmentService detects assignment type is WRITING, not QUIZ.
+5. System throws BusinessException (wrong submission type).
+6. System returns the business error response.
+
+**Expected Results:** HTTP 400 BAD REQUEST
+
+---
+
+### Test Case ID: TC_AS_L_DO_018
+**Test Case Description:** Start assignment quá due date → 400 PAST_DUE
+
+**Pre-conditions:**
+- Learner accessToken is available (from prior login)
+- Published quiz assignment with dueDate in the past
+
+**Test Case Procedure:**
+1. Client sends POST /api/v1/learner/assignments/{assignmentId}/start with Authorization: Bearer {token}.
+2. AuthFilter validates token and resolves LEARNER identity.
+3. AssignmentController forwards to AssignmentService.
+4. AssignmentService detects assignment dueDate has passed.
+5. System throws BusinessException with PAST_DUE.
 6. System returns the business error response.
 
 **Expected Results:** HTTP 400 BAD REQUEST
@@ -2244,25 +2325,24 @@ Response JSON:
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
-- Writing assignment submitted with images
+- Published writing assignment
+- Submission started (IN_PROGRESS)
+- AiGradingService mocked to return feedback string
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/submissions/{submissionId}/evaluate with Authorization: Bearer {token}.
+1. Client sends multipart POST /api/v1/learner/assignments/writing/evaluate with Authorization: Bearer {token}:
+   - data: JSON {assignmentId, prompt}
+   - images: image file (JPEG)
 2. AuthFilter validates token and resolves LEARNER identity.
-3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService validates submission belongs to learner and is SUBMITTED.
-5. AssignmentService calls AiGradingService with image URLs.
-6. AiGradingService returns evaluation considering images.
-7. AssignmentService updates submission with AI evaluation.
-8. AssignmentSubmissionRepository saves the updated submission.
-9. System returns the evaluation response.
+3. AssignmentController forwards to AssignmentService.
+4. AssignmentService calls AiGradingService.evaluateWriting with image.
+5. Mocked AI returns feedback string.
+6. System returns the evaluation response.
 
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- data.aiScore exists
-- data.aiFeedback exists
-- data.imageAnalysis exists
+- data.feedback = "Good writing with clear structure. Minor grammar issues."
 
 ---
 
@@ -2271,17 +2351,21 @@ Response JSON:
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
-- Assignment created but not started
+- Published writing assignment (no submission started yet)
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/submissions/{submissionId}/evaluate with Authorization: Bearer {token}.
+1. Client sends multipart POST /api/v1/learner/assignments/writing/evaluate with Authorization: Bearer {token}:
+   - data: JSON {assignmentId, prompt}
+   - images: image file (JPEG)
 2. AuthFilter validates token and resolves LEARNER identity.
-3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService attempts to find submission via AssignmentSubmissionRepository.
-5. AssignmentSubmissionRepository returns empty (no submission exists).
-6. System returns the not found error response.
+3. AssignmentController forwards to AssignmentService.
+4. AssignmentService cannot find an active submission for the learner.
+5. System throws BusinessException with SUBMISSION_NOT_FOUND.
+6. System returns the business error response.
 
-**Expected Results:** HTTP 404 NOT FOUND
+**Expected Results:** HTTP 400 BAD REQUEST
+Response JSON:
+- code = "SUBMISSION_NOT_FOUND"
 
 ---
 
@@ -2290,26 +2374,25 @@ Response JSON:
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
-- Writing assignment submitted with multiple images
+- Published writing assignment
+- Submission started (IN_PROGRESS)
+- AiGradingService mocked to return feedback string
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/submissions/{submissionId}/evaluate with Authorization: Bearer {token}.
+1. Client sends multipart POST /api/v1/learner/assignments/writing/evaluate with Authorization: Bearer {token}:
+   - data: JSON {assignmentId, prompt}
+   - images: 2 image files (JPEG)
 2. AuthFilter validates token and resolves LEARNER identity.
-3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService validates submission belongs to learner and is SUBMITTED.
-5. AssignmentService calls AiGradingService with multiple image URLs.
-6. AiGradingService returns evaluation considering all images.
-7. AssignmentService updates submission with AI evaluation.
-8. AssignmentSubmissionRepository saves the updated submission.
-9. System returns the evaluation response.
+3. AssignmentController forwards to AssignmentService.
+4. AssignmentService calls AiGradingService.evaluateWriting with multiple images.
+5. Mocked AI returns feedback string.
+6. System returns the evaluation response.
 
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- data.aiScore exists
-- data.aiFeedback exists
-- data.imageAnalysis exists
-- data.imageUrls array length > 1
+- data.feedback = "Excellent work with comprehensive content."
+
 
 ---
 
@@ -2453,8 +2536,7 @@ Response JSON:
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- data.status = OVERDUE
-- data.isOverdue = true
+- data.status = "OVERDUE"
 
 ---
 
@@ -2530,279 +2612,214 @@ Response JSON:
 ## Section 19 — AI Services Tests (Additional)
 
 ### Test Case ID: TC_AS_AI_003
-**Test Case Description:** AI generate quiz questions with empty response → 200 with empty data
+**Test Case Description:** AI generate quiz — thiếu teacherPrompt → 400
+
+**Pre-conditions:**
+- Teacher accessToken is available (from prior login)
+
+**Test Case Procedure:**
+1. Client sends POST /api/v1/teacher/assignments/questions/ai-generate with Authorization: Bearer {token} and JSON body:
+   - teacherPrompt: null, questionCount: 1, questionTypes: ["multiple_choice"]
+2. AuthFilter validates token and resolves TEACHER identity.
+3. AssignmentController forwards the request to QuizAiGenerationService.
+4. QuizAiGenerationService detects prompt is missing.
+5. System returns validation error response.
+
+**Expected Results:** HTTP 400 BAD REQUEST
+
+---
+
+### Test Case ID: TC_AS_AI_004
+**Test Case Description:** AI generate quiz — Learner gọi endpoint → 403
+
+**Pre-conditions:**
+- Learner accessToken is available (from prior login)
+
+**Test Case Procedure:**
+1. Client sends POST /api/v1/teacher/assignments/questions/ai-generate with Authorization: Bearer {learnerToken} and JSON body:
+   - teacherPrompt: "Test prompt", questionCount: 1, questionTypes: ["multiple_choice"]
+2. AuthFilter validates token and resolves LEARNER identity.
+3. Security layer detects LEARNER role is not authorized for /api/v1/teacher/** endpoints.
+4. System returns forbidden response.
+
+**Expected Results:** HTTP 403 FORBIDDEN
+
+> Note: Java asserts `.andExpect(status().isBadRequest())` (HTTP 400) because the GlobalExceptionHandler intercepts the access denied at the business layer level in this test context.
+
+---
+
+### Test Case ID: TC_AS_AI_005
+**Test Case Description:** AI generate quiz — AI service throws exception → 400
+
+**Pre-conditions:**
+- Teacher accessToken is available (from prior login)
+- QuizAiGenerationService mocked to throw RuntimeException
+
+**Test Case Procedure:**
+1. Client sends POST /api/v1/teacher/assignments/questions/ai-generate with Authorization: Bearer {token} and JSON body:
+   - teacherPrompt: "Generate quiz about Japanese", questionCount: 3, questionTypes: ["multiple_choice"]
+2. AuthFilter validates token and resolves TEACHER identity.
+3. AssignmentController forwards the request to QuizAiGenerationService.
+4. Mocked AI service throws RuntimeException.
+5. System handles exception and returns error response.
+
+**Expected Results:** HTTP 500 INTERNAL SERVER ERROR or HTTP 400 BAD REQUEST
+
+---
+
+### Test Case ID: TC_AS_AI_006
+**Test Case Description:** AI generate quiz — AI returns empty list → 200, data.length() = 0
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
 - QuizAiGenerationService mocked to return empty list
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/teacher/assignments/ai/generate-quiz with Authorization: Bearer {token} and JSON body:
-   - topic: "Simple topic", difficulty: "EASY", questionCount: 5
+1. Client sends POST /api/v1/teacher/assignments/questions/ai-generate with Authorization: Bearer {token} and JSON body:
+   - teacherPrompt: "Very specific niche topic", questionCount: 1, questionTypes: ["multiple_choice"]
 2. AuthFilter validates token and resolves TEACHER identity.
 3. AssignmentController forwards the request to QuizAiGenerationService.
-4. Mocked AI service returns empty questions list.
-5. System returns the generated questions response with empty data.
+4. Mocked AI returns empty list.
+5. System returns success response with empty data array.
 
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- data.questions array is empty
-- data.questions.length() = 0
-
----
-
-### Test Case ID: TC_AS_AI_004
-**Test Case Description:** AI generate quiz questions with invalid parameters → 400
-
-**Pre-conditions:**
-- Teacher accessToken is available (from prior login)
-
-**Test Case Procedure:**
-1. Client sends POST /api/v1/teacher/assignments/ai/generate-quiz with Authorization: Bearer {token} and JSON body:
-   - topic: "", difficulty: "INVALID", questionCount: -1
-2. AuthFilter validates token and resolves TEACHER identity.
-3. AssignmentController forwards the request to QuizAiGenerationService.
-4. Service validates input parameters and throws validation exception.
-5. System returns the validation error response.
-
-**Expected Results:** HTTP 400 BAD REQUEST
-
----
-
-### Test Case ID: TC_AS_AI_005
-**Test Case Description:** AI generate quiz questions with network error → 400
-
-**Pre-conditions:**
-- Teacher accessToken is available (from prior login)
-- QuizAiGenerationService mocked to throw network exception
-
-**Test Case Procedure:**
-1. Client sends POST /api/v1/teacher/assignments/ai/generate-quiz with Authorization: Bearer {token} and JSON body:
-   - topic: "Test topic", difficulty: "MEDIUM", questionCount: 3
-2. AuthFilter validates token and resolves TEACHER identity.
-3. AssignmentController forwards the request to QuizAiGenerationService.
-4. Mocked AI service throws network exception.
-5. System handles exception and returns error response.
-
-**Expected Results:** HTTP 400 BAD REQUEST
-
----
-
-### Test Case ID: TC_AS_AI_006
-**Test Case Description:** AI generate quiz questions success with multiple choice
-
-**Pre-conditions:**
-- Teacher accessToken is available (from prior login)
-- QuizAiGenerationService mocked to return multiple choice questions
-
-**Test Case Procedure:**
-1. Client sends POST /api/v1/teacher/assignments/ai/generate-quiz with Authorization: Bearer {token} and JSON body:
-   - topic: "Japanese grammar", difficulty: "HARD", questionCount: 2
-2. AuthFilter validates token and resolves TEACHER identity.
-3. AssignmentController forwards the request to QuizAiGenerationService.
-4. Mocked AI service returns multiple choice questions with options.
-5. System returns the generated questions response.
-
-**Expected Results:** HTTP 200 OK
-Response JSON:
-- success = true
-- data.questions array contains multiple choice questions
-- data.questions[*].questionType = "multiple_choice"
-- data.questions[*].options array exists
-- data.questions[*].correctAnswer exists
+- data.length() = 0
 
 ---
 
 ### Test Case ID: TC_AS_AI_007
-**Test Case Description:** AI explain quiz question success → saves explanation to DB
+**Test Case Description:** AI explain quiz question thành công → data.explanation not empty
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
-- QuizExplanationService mocked to return explanation
+- QuizExplanationService mocked to return explanation text
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/teacher/assignments/ai/explain with Authorization: Bearer {token} and JSON body:
-   - questionText: "Test question", selectedAnswer: "A"
+1. Client sends POST /api/v1/teacher/assignments/questions/{questionId}/ai-explain with Authorization: Bearer {token}.
 2. AuthFilter validates token and resolves TEACHER identity.
 3. AssignmentController forwards the request to QuizExplanationService.
-4. Mocked AI service returns explanation.
-5. QuizExplanationRepository saves explanation to database.
-6. System returns the explanation response.
-
-**Expected Results:** HTTP 200 OK
-Response JSON:
-- success = true
-- data.explanation exists
-- data.explanationVi exists
-- data.explanation.savedToDatabase = true
-
----
-
-### Test Case ID: TC_AS_AI_008
-**Test Case Description:** AI explain draft assignment → success
-
-**Pre-conditions:**
-- Teacher accessToken is available (from prior login)
-- Draft assignment created
-- QuizExplanationService mocked to return explanation
-
-**Test Case Procedure:**
-1. Client sends POST /api/v1/teacher/assignments/{assignmentId}/ai/explain with Authorization: Bearer {token}.
-2. AuthFilter validates token and resolves TEACHER identity.
-3. AssignmentController forwards the request to QuizExplanationService.
-4. Mocked AI service returns explanation for draft assignment.
+4. Mocked AI service returns explanation text.
 5. System returns the explanation response.
 
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- data.explanation exists
-- data.assignmentStatus = "DRAFT"
+- data.explanation is not empty
 
 ---
 
-### Test Case ID: TC_AS_AI_009
-**Test Case Description:** AI provider throws exception → 400
-
-**Pre-conditions:**
-- Teacher accessToken is available (from prior login)
-- AI services mocked to throw provider exception
-
-**Test Case Procedure:**
-1. Client sends POST /api/v1/teacher/assignments/ai/generate-quiz with Authorization: Bearer {token} and JSON body:
-   - topic: "Test topic", difficulty: "MEDIUM", questionCount: 3
-2. AuthFilter validates token and resolves TEACHER identity.
-3. AssignmentController forwards the request to QuizAiGenerationService.
-4. Mocked AI service throws provider exception.
-5. System handles provider exception and returns error response.
-
-**Expected Results:** HTTP 400 BAD REQUEST
-
----
-
-### Test Case ID: TC_AS_AI_010
-**Test Case Description:** AI generate: service throw BusinessException → 400
-
-**Pre-conditions:**
-- Teacher accessToken is available (from prior login)
-- QuizAiGenerationService mocked to throw BusinessException
-
-**Test Case Procedure:**
-1. Client sends POST /api/v1/teacher/assignments/ai/generate-quiz with Authorization: Bearer {token} and JSON body:
-   - topic: "Test topic", difficulty: "MEDIUM", questionCount: 3
-2. AuthFilter validates token and resolves TEACHER identity.
-3. AssignmentController forwards the request to QuizAiGenerationService.
-4. Mocked AI service throws BusinessException.
-5. GlobalExceptionHandler handles BusinessException and returns error response.
-
-**Expected Results:** HTTP 400 BAD REQUEST
-
----
-
-### Test Case ID: TC_AS_AI_011
-**Test Case Description:** AI generate returns empty list → 200 with empty data
-
-**Pre-conditions:**
-- Teacher accessToken is available (from prior login)
-- QuizAiGenerationService mocked to return empty list
-
-**Test Case Procedure:**
-1. Client sends POST /api/v1/teacher/assignments/ai/generate-quiz with Authorization: Bearer {token} and JSON body:
-   - topic: "Very specific topic", difficulty: "EXPERT", questionCount: 10
-2. AuthFilter validates token and resolves TEACHER identity.
-3. AssignmentController forwards the request to QuizAiGenerationService.
-4. Mocked AI service returns empty questions list.
-5. System returns success response with empty data.
-
-**Expected Results:** HTTP 200 OK
-Response JSON:
-- success = true
-- data.questions array is empty
-- message = "No questions generated for the given criteria"
-
----
-
-## Section 20 — Cloudinary Services Tests
+## Section 20 — Cloudinary Integration Tests
 
 ### Test Case ID: TC_AS_CLOUD_001
-**Test Case Description:** Upload audio file success → returns URL
+**Test Case Description:** Cloudinary upload audio fail → 500 INTERNAL_SERVER_ERROR
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
-- CloudinaryService mocked to return upload URL
+- Course and class created
+- CloudinaryService mocked to throw RuntimeException
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/teacher/assignments/{assignmentId}/upload-audio with Authorization: Bearer {token} and multipart data:
+1. Client sends multipart POST /api/v1/teacher/assignments/class/{classId}/quiz with Authorization: Bearer {token}:
+   - data: JSON with title, dueDate, status=DRAFT, questions=[]
    - audioFile: MP3 file
 2. AuthFilter validates token and resolves TEACHER identity.
-3. AssignmentController forwards the request to CloudinaryService.
-4. Mocked CloudinaryService returns upload URL.
-5. System returns the upload success response.
+3. AssignmentController forwards to AssignmentService.
+4. AssignmentService calls CloudinaryService.uploadAudio which throws RuntimeException ("Cloudinary connection timeout").
+5. System propagates the uncaught runtime exception.
 
-**Expected Results:** HTTP 200 OK
-Response JSON:
-- success = true
-- data.audioUrl exists
-- data.audioUrl starts with "https://"
+**Expected Results:** HTTP 500 INTERNAL SERVER ERROR
 
 ---
 
 ### Test Case ID: TC_AS_CLOUD_002
-**Test Case Description:** Upload image file success → returns URL
+**Test Case Description:** Cloudinary upload image fail khi submit writing → 400 UPLOAD_FAILED
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
-- CloudinaryService mocked to return upload URL
+- Published writing assignment
+- Submission started (IN_PROGRESS)
+- CloudinaryService mocked to throw RuntimeException ("Cloudinary upload failed")
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/submissions/{submissionId}/upload-image with Authorization: Bearer {token} and multipart data:
-   - imageFile: JPEG file
+1. Client sends multipart POST /api/v1/learner/assignments/{id}/submit-writing with Authorization: Bearer {token}:
+   - data: JSON {"timeSpentSeconds": 60}
+   - images: image file (PNG)
 2. AuthFilter validates token and resolves LEARNER identity.
-3. AssignmentController forwards the request to CloudinaryService.
-4. Mocked CloudinaryService returns upload URL.
-5. System returns the upload success response.
+3. AssignmentController forwards to AssignmentService.
+4. AssignmentService calls CloudinaryService.uploadImage which throws RuntimeException.
+5. System catches and wraps exception as BusinessException with UPLOAD_FAILED.
+6. GlobalExceptionHandler returns 400 response.
 
-**Expected Results:** HTTP 200 OK
-Response JSON:
-- success = true
-- data.imageUrl exists
-- data.imageUrl starts with "https://"
+**Expected Results:** HTTP 400 BAD REQUEST
 
 ---
 
 ### Test Case ID: TC_AS_CLOUD_003
-**Test Case Description:** Upload file with invalid format → 400
+**Test Case Description:** Submit writing quá 10 ảnh → 400 TOO_MANY_IMAGES
 
 **Pre-conditions:**
-- Teacher accessToken is available (from prior login)
+- Learner accessToken is available (from prior login)
+- Published writing assignment
+- Submission started (IN_PROGRESS)
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/teacher/assignments/{assignmentId}/upload-audio with Authorization: Bearer {token} and multipart data:
-   - audioFile: TXT file (invalid format)
-2. AuthFilter validates token and resolves TEACHER identity.
-3. AssignmentController forwards the request to CloudinaryService.
-4. CloudinaryService detects invalid file format and throws exception.
-5. System returns the validation error response.
+1. Client sends multipart POST /api/v1/learner/assignments/{id}/submit-writing with Authorization: Bearer {token}:
+   - data: JSON {"timeSpentSeconds": 60}
+   - images: 11 image files (exceeds MAX_SUBMISSION_IMAGES = 10)
+2. AuthFilter validates token and resolves LEARNER identity.
+3. AssignmentController forwards to AssignmentService.
+4. AssignmentService detects image count > 10.
+5. System throws BusinessException with TOO_MANY_IMAGES.
+6. System returns the business error response.
 
 **Expected Results:** HTTP 400 BAD REQUEST
 
 ---
 
 ### Test Case ID: TC_AS_CLOUD_004
-**Test Case Description:** Upload file too large → 400
+**Test Case Description:** Update audio khi assignment đã có submissions → 400 HAS_SUBMISSIONS
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
+- Published quiz assignment with existing learner submission
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/teacher/assignments/{assignmentId}/upload-audio with Authorization: Bearer {token} and multipart data:
-   - audioFile: Large MP3 file (>10MB)
+1. Client sends multipart PUT /api/v1/teacher/assignments/{id}/quiz with Authorization: Bearer {token}:
+   - data: JSON with status=PUBLISHED, questions=[]
+   - audioFile: new MP3 file
 2. AuthFilter validates token and resolves TEACHER identity.
-3. AssignmentController forwards the request to CloudinaryService.
-4. CloudinaryService detects file size limit exceeded and throws exception.
-5. System returns the file size error response.
+3. AssignmentController forwards to AssignmentService.
+4. AssignmentService detects that assignment already has submissions.
+5. System throws BusinessException with HAS_SUBMISSIONS.
+6. System returns the business error response.
 
 **Expected Results:** HTTP 400 BAD REQUEST
+
+---
+
+## Section 21 — Concurrency Tests
+
+### Test Case ID: TC_AS_L_DO_CONCURRENCY_001
+**Test Case Description:** Double-submit 'startAssignment' → chỉ 1 submission được tạo
+
+**Pre-conditions:**
+- Learner accessToken is available (from prior login)
+- Course and class created
+- Learner enrolled in class
+- Published quiz assignment created
+
+
+**Test Case Procedure:**
+1. Two concurrent threads each call `assignmentService.startAssignment(assignmentId, learnerId)` simultaneously using a 2-thread ExecutorService + CountDownLatch.
+2. Both threads wait for the latch signal to start at the same time.
+3. Once latch is released, both threads execute concurrently.
+4. One thread succeeds (returns true), the other catches BusinessException and returns false.
+5. After both complete, verify database submission count.
+
+**Expected Results:**
+- `result1 XOR result2 = true` (exactly one thread succeeds)
+- `submissionRepository.countByAssignmentIdAndUserId(assignmentId, learnerId) = 1`
 
 ---
