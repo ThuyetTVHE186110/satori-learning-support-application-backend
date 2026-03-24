@@ -29,11 +29,11 @@ import java.util.UUID;
 
 /**
  * Unified REST Controller for Class operations.
- *
+ * <p>
  * Accessible by both OPERATION_MANAGER and TEACHER roles.
  * - OPERATION_MANAGER: full CRUD, member management, view all classes
  * - TEACHER: read-only, view own assigned active classes only
- *
+ * <p>
  * Base path: /api/v1/classes
  */
 @Slf4j
@@ -53,7 +53,7 @@ public class ClassController {
      * Get all classes with pagination and optional filters.
      * - OPERATION_MANAGER: sees all non-deleted classes with full filter support
      * - TEACHER: sees only their own active classes (filtered by teacher ID auto)
-     *
+     * <p>
      * GET
      * /api/v1/classes?page=0&size=10&isActive=true&courseId=xxx&teacherId=xxx&keyword=xxx
      */
@@ -84,14 +84,14 @@ public class ClassController {
                 classPage.getSize(),
                 classPage.getTotalElements(),
                 classPage.getTotalPages());
-        return ResponseEntity.ok(ApiResponse.success(pageResponse));
+        return ResponseEntity.ok(ApiResponse.success(pageResponse.getTotalElements() == 0 ? "Không có lớp học nào." : "Operation completed successfully", pageResponse));
     }
 
     /**
      * Get class detail by ID.
      * - OPERATION_MANAGER: can view any non-deleted class
      * - TEACHER: can only view classes assigned to them
-     *
+     * <p>
      * GET /api/v1/classes/{classId}
      */
     @GetMapping("/{classId}")
@@ -112,7 +112,7 @@ public class ClassController {
      * Get members of a class with pagination.
      * - OPERATION_MANAGER: can view members of any class
      * - TEACHER: can only view members of their assigned classes
-     *
+     * <p>
      * GET /api/v1/classes/{classId}/members?page=0&size=10
      */
     @GetMapping("/{classId}/members")
@@ -145,7 +145,7 @@ public class ClassController {
      * Get learners eligible to be added to a class.
      * Eligible learners are those with role LEARNER, status ACTIVE/INACTIVE, and not currently an active member.
      * - OPERATION_MANAGER: can view eligible learners for any class
-     *
+     * <p>
      * GET /api/v1/classes/{classId}/eligible-learners?page=0&size=10&keyword=...
      */
     @GetMapping("/{classId}/eligible-learners")
