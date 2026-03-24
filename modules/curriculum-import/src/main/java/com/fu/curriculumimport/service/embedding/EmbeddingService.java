@@ -9,6 +9,7 @@ import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
@@ -128,9 +129,13 @@ public class EmbeddingService {
                 if (embedding == null) continue;
                 ExtractionResult.ExtractedVocabulary vocab = validItems.get(batchStart + i);
                 try {
-                    UUID contentId = UUID.randomUUID();
+                    // Derive stable content_id so ON CONFLICT (content_type, content_id, chunk_index)
+                    // fires on re-import of the same item for the same import run.
+                    UUID contentId = UUID.nameUUIDFromBytes(
+                            (importId + ":VOCABULARY:" + vocab.getJapaneseText())
+                                    .getBytes(StandardCharsets.UTF_8));
                     storeEmbedding(contentId, "VOCABULARY", batchTexts.get(i), embedding,
-                            batchStart + i, importId,
+                            0, importId,
                             Map.of("japaneseText", vocab.getJapaneseText(),
                                     "jlptLevel", vocab.getJlptLevel() != null ? vocab.getJlptLevel() : "N5",
                                     "partOfSpeech", vocab.getPartOfSpeech() != null ? vocab.getPartOfSpeech() : ""));
@@ -179,9 +184,11 @@ public class EmbeddingService {
                 if (embedding == null) continue;
                 ExtractionResult.ExtractedGrammar grammar = validItems.get(batchStart + i);
                 try {
-                    UUID contentId = UUID.randomUUID();
+                    UUID contentId = UUID.nameUUIDFromBytes(
+                            (importId + ":GRAMMAR:" + grammar.getPattern())
+                                    .getBytes(StandardCharsets.UTF_8));
                     storeEmbedding(contentId, "GRAMMAR", batchTexts.get(i), embedding,
-                            batchStart + i, importId,
+                            0, importId,
                             Map.of("pattern", grammar.getPattern(),
                                     "jlptLevel", grammar.getJlptLevel() != null ? grammar.getJlptLevel() : "N5",
                                     "category", grammar.getCategory() != null ? grammar.getCategory() : "OTHER"));

@@ -173,6 +173,8 @@ public final class OcrTextPreprocessor {
      */
     public static String truncateToTokenBudget(String text, int maxTokens) {
         if (text == null) return null;
+        // Sanitize control characters that would break JSON serialization to OpenAI
+        text = sanitizeForJson(text);
         int maxChars = maxTokens * CHARS_PER_TOKEN;
         if (text.length() <= maxChars) return text;
 
@@ -183,6 +185,22 @@ public final class OcrTextPreprocessor {
 
         return text.substring(0, cutoff).stripTrailing()
                 + "\n[...nội dung bị cắt do giới hạn token...]";
+    }
+
+    /**
+     * Strip control characters (NUL, BEL, etc.) that would break JSON serialization
+     * when sending prompts to the OpenAI API. Preserves tab, newline, and carriage return.
+     */
+    public static String sanitizeForJson(String text) {
+        if (text == null) return null;
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c >= 0x20 || c == '\n' || c == '\r' || c == '\t') {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /**

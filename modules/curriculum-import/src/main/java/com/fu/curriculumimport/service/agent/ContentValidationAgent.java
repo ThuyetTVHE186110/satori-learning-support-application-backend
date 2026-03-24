@@ -74,6 +74,19 @@ public class ContentValidationAgent {
         log.debug("Starting 3-layer validation for chunk {} ({} vocab, {} grammar)",
                 result.getChunkIndex(), result.getVocabulary().size(), result.getGrammarPoints().size());
 
+        // === LAYER 0: Structural anti-split check (markdown headings vs extracted count) ===
+        if (sourceChunk != null && !result.getGrammarPoints().isEmpty()) {
+            int sectionCount = countNumberedSections(sourceChunk.getContent());
+            int extractedCount = result.getGrammarPoints().size();
+            if (sectionCount > 0 && extractedCount > sectionCount * 2) {
+                log.warn("Chunk {}: anti-split triggered — {} numbered sections in markdown but {} grammar points extracted (>2x). "
+                        + "Likely split sub-components. Will flag for re-extraction.",
+                        result.getChunkIndex(), sectionCount, extractedCount);
+                // Force low confidence to trigger re-extraction with anti-split feedback
+                result.setConfidence(Math.min(result.getConfidence(), 0.3));
+            }
+        }
+
         // === LAYER 1: Rule-Based Validation ===
         ValidationResult ruleBasedResult = validateRuleBased(result, confidenceThreshold);
         double ruleBasedScore = ruleBasedResult.getQualityScore();
@@ -427,6 +440,24 @@ public class ContentValidationAgent {
 
     // --- Grammar Validation ---
 
+    /**
+     * Regex to detect numbered grammar section headings in markdown content.
+     * Matches patterns like: "## 1. ...", "## 2. ...", "### 1) ...", "1. ...", "1) ..."
+     */
+    private static final java.util.regex.Pattern NUMBERED_HEADING_PATTERN =
+            java.util.regex.Pattern.compile("^(?:#{1,4}\\s+)?\\d+[.\\))]\\s+", java.util.regex.Pattern.MULTILINE);
+
+    /**
+     * Count numbered grammar sections in chunk content (markdown headings or plain numbered items).
+     */
+    static int countNumberedSections(String content) {
+        if (content == null || content.isBlank()) return 0;
+        java.util.regex.Matcher m = NUMBERED_HEADING_PATTERN.matcher(content);
+        int count = 0;
+        while (m.find()) count++;
+        return count;
+    }
+
     private List<ValidationIssue> validateGrammar(ExtractionResult.ExtractedGrammar grammar) {
         List<ValidationIssue> issues = new ArrayList<>();
         String id = grammar.getPattern() != null ? grammar.getPattern() : "unknown";
@@ -435,6 +466,18 @@ public class ContentValidationAgent {
         if (isBlank(grammar.getPattern())) {
             issues.add(issue(id, "pattern", IssueSeverity.ERROR,
                     "Grammar pattern is empty", "Provide the grammar pattern"));
+        }
+
+        // Anti-paraphrase check: detailedExplanationVi too short suggests LLM summarized
+        // instead of copying verbatim from the textbook. Raised from 50 to 150 chars because
+        // even the shortest MnN grammar explanations are typically 100+ chars in Vietnamese.
+        if (!isBlank(grammar.getDetailedExplanationVi())
+                && grammar.getDetailedExplanationVi().length() < 150) {
+            issues.add(issue(id, "detailedExplanationVi", IssueSeverity.WARNING,
+                    "Detailed explanation is suspiciously short (" + grammar.getDetailedExplanationVi().length()
+                    + " chars). It should be a VERBATIM copy from the textbook, not a summary.",
+                    "Copy the FULL explanation text from the source, including all sub-explanations "
+                    + "and example sentences within the numbered section."));
         }
 
         // Meanings

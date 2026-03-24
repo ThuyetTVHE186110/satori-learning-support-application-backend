@@ -8,13 +8,20 @@ import com.fu.curriculumimport.entity.CurriculumImport;
 import com.fu.curriculumimport.entity.ImportChunk;
 import com.fu.curriculumimport.repository.CurriculumImportRepository;
 import com.fu.curriculumimport.repository.ImportChunkRepository;
-import com.fu.curriculumimport.service.agent.*;
+import com.fu.curriculumimport.service.agent.ClassificationResult;
 import com.fu.curriculumimport.service.agent.ClassificationResult.ContentType;
+import com.fu.curriculumimport.service.agent.ContentClassifierAgent;
+import com.fu.curriculumimport.service.agent.ContentValidationAgent;
+import com.fu.curriculumimport.service.agent.ExtractionResult;
+import com.fu.curriculumimport.service.agent.GrammarExtractionAgent;
+import com.fu.curriculumimport.service.agent.ValidationResult;
+import com.fu.curriculumimport.service.agent.VocabularyExtractionAgent;
 import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.service.ingestion.DocumentParseResult;
 import com.fu.curriculumimport.service.ingestion.FileIngestionRouter;
+import com.fu.curriculumimport.service.ingestion.LessonMetadataParser;
 import com.fu.curriculumimport.service.ingestion.OcrTextPreprocessor;
 import com.fu.curriculumimport.service.persistence.ImportPersistenceService;
 import lombok.RequiredArgsConstructor;
@@ -40,7 +47,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 4. AI_PROCESSING: Multi-agent extraction with RAG context injection
  *    - VocabularyExtractionAgent (VOCABULARY chunks)
  *    - GrammarExtractionAgent (GRAMMAR chunks)
- *    - ContentExtractionAgent (MIXED/OTHER chunks — fallback)
+ *    - Both agents in parallel for MIXED chunks + LessonMetadataParser for lesson metadata
  * 5. VALIDATING:    ContentValidationAgent (Corrective RAG loop)
  *    - If confidence < threshold → re-extract (up to maxReExtractions)
  * 6. EMBEDDING:     EmbeddingService → pgvector storage for future RAG retrieval
@@ -64,7 +71,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class ImportOrchestrator {
 
     private final FileIngestionRouter fileIngestionRouter;
-    private final ContentExtractionAgent extractionAgent;
     private final ContentClassifierAgent classifierAgent;
     private final VocabularyExtractionAgent vocabularyAgent;
     private final GrammarExtractionAgent grammarAgent;
@@ -153,37 +159,21 @@ public class ImportOrchestrator {
             importEntity.updateProgress("CLASSIFYING", new BigDecimal("15"));
             persistenceService.updateImportProgress(importEntity);
 
-            // Use ConcurrentHashMap — classification futures write from multiple threads
-            Map<Integer, ClassificationResult> classifications = new ConcurrentHashMap<>();
-            List<CompletableFuture<Void>> classifyFutures = new ArrayList<>();
+            // Heuristic classification — 0 LLM calls, all synchronous.
+            // Structural sectionType → content-based regex → default MIXED.
+            Map<Integer, ClassificationResult> classifications = new HashMap<>();
 
             for (int i = 0; i < parseResult.getChunks().size(); i++) {
-                final int idx = i;
-                final DocumentChunk docChunk = parseResult.getChunks().get(idx);
-                final ImportChunk dbChunk = dbChunks.get(idx);
+                final DocumentChunk docChunk = parseResult.getChunks().get(i);
+                final ImportChunk dbChunk = dbChunks.get(i);
 
-                classifyFutures.add(CompletableFuture.runAsync(() -> {
-                    if (cancelFlag.get()) return;
-                    ClassificationResult classification = classifierAgent.classify(docChunk);
-                    classifications.put(idx, classification);
-                    dbChunk.setContentType(classification.getContentType().name());
-                    persistenceService.saveChunk(dbChunk);
-                    log.debug("[{}] Chunk {} classified as {} (confidence: {})",
-                            importId, idx, classification.getContentType(), classification.getConfidence());
-                }, importTaskExecutor));
+                ClassificationResult classification = classifierAgent.heuristicClassify(docChunk);
+                classifications.put(docChunk.getChunkIndex(), classification);
+                dbChunk.setContentType(classification.getContentType().name());
+                persistenceService.saveChunk(dbChunk);
             }
 
-            try {
-                CompletableFuture.allOf(classifyFutures.toArray(new CompletableFuture[0]))
-                        .get(10, TimeUnit.MINUTES);
-            } catch (TimeoutException e) {
-                log.error("[{}] Classification timed out — proceeding with partial results", importId);
-            } catch (ExecutionException e) {
-                log.error("[{}] Classification error: {}", importId, e.getMessage());
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new CancelledException("Import " + importId + " interrupted during classification");
-            }
+            log.info("[{}] Classified {} chunks via heuristics (0 LLM calls)", importId, dbChunks.size());
 
             // === STAGE 4: AI PROCESSING (Multi-Agent with RAG) ===
             checkCancelled(cancelFlag, importId);
@@ -234,6 +224,20 @@ public class ImportOrchestrator {
                         continue;
                     }
 
+                    // Skip validation for fast-path results (parser-extracted, 0 LLM tokens).
+                    // MnNTableParser (confidence=0.95) and MarkdownVocabParser (confidence=0.90)
+                    // produce deterministic output — Self-Reflection LLM calls are wasted tokens.
+                    if (result.getTokensUsed() == 0 && result.getConfidence() >= 0.90) {
+                        if (dbChunk != null) {
+                            dbChunk.setValidationStatus("SKIPPED_FAST_PATH");
+                            persistenceService.saveChunk(dbChunk);
+                        }
+                        validationPassed++;
+                        log.debug("[{}] Chunk {} skipped validation — fast-path (confidence={}, tokens=0)",
+                                importId, result.getChunkIndex(), result.getConfidence());
+                        continue;
+                    }
+
                     // 3-Layer Validation: Rule-Based + Self-Reflection + Grounding
                     ValidationResult validation = validationAgent.validateFull(
                             result, ragProperties.getConfidenceThreshold(),
@@ -281,10 +285,18 @@ public class ImportOrchestrator {
                             ExtractionResult reExtracted = reExtractWithFeedback(
                                     docChunk, contentType, jlptLevel, ragContext, reExtractionFeedback);
 
+                            // Merge strategy: keep grounded items from original, add new items
+                            // from re-extraction. This prevents data loss when re-extraction
+                            // produces fewer items than the original (common when the LLM
+                            // becomes more conservative on retry).
                             if (reExtracted.getConfidence() > result.getConfidence()) {
                                 allResults.set(i, reExtracted);
-                                totalTokens.addAndGet(reExtracted.getTokensUsed());
+                            } else {
+                                // Even if re-extraction has lower confidence, merge any new
+                                // grammar/vocab items that weren't in the original
+                                mergeNewItems(result, reExtracted);
                             }
+                            totalTokens.addAndGet(reExtracted.getTokensUsed());
                             reExtractions++;
 
                             if (dbChunk != null) {
@@ -309,10 +321,18 @@ public class ImportOrchestrator {
             importEntity.setReExtractions(reExtractions);
             importEntity.setHallucinatedItems(hallucinatedItems);
 
-            // === STAGE 6: EMBEDDING ===
+            // === STAGE 6: PERSISTENCE (before embedding to prevent orphan embeddings) ===
             checkCancelled(cancelFlag, importId);
-            log.info("[{}] Stage 6/7: Generating vector embeddings...", importId);
-            importEntity.updateProgress("EMBEDDING", new BigDecimal("85"));
+            log.info("[{}] Stage 6/7: Persisting extracted content...", importId);
+            importEntity.updateProgress("PERSISTING", new BigDecimal("85"));
+            persistenceService.updateImportProgress(importEntity);
+
+            persistenceService.persistExtractedContent(importEntity, allResults);
+
+            // === STAGE 7: EMBEDDING (after persistence — no orphan risk) ===
+            checkCancelled(cancelFlag, importId);
+            log.info("[{}] Stage 7/7: Generating vector embeddings...", importId);
+            importEntity.updateProgress("EMBEDDING", new BigDecimal("92"));
             persistenceService.updateImportProgress(importEntity);
 
             int embeddingsCreated = 0;
@@ -326,14 +346,6 @@ public class ImportOrchestrator {
                 }
             }
             importEntity.setEmbeddingsCreated(embeddingsCreated);
-
-            // === STAGE 7: PERSISTENCE ===
-            checkCancelled(cancelFlag, importId);
-            log.info("[{}] Stage 7/7: Persisting extracted content...", importId);
-            importEntity.updateProgress("PERSISTING", new BigDecimal("92"));
-            persistenceService.updateImportProgress(importEntity);
-
-            persistenceService.persistExtractedContent(importEntity, allResults);
 
             // === PENDING APPROVAL ===
             importEntity.setTokensUsed(totalTokens.get());
@@ -392,11 +404,15 @@ public class ImportOrchestrator {
 
             String jlptLevel = resolveJlptLevel(importEntity);
 
-            // Convert DB chunks back to DocumentChunks for processing (preserving lesson metadata)
+            // Convert DB chunks back to DocumentChunks for processing (preserving lesson metadata).
+            // Note: fullPageContext is set to content (same as char-based chunks) because the
+            // original page context is not stored in the DB. structuredTableRows and pageImages
+            // are not available on retry — the text LLM path will be used for those chunks.
             List<DocumentChunk> docChunks = existingChunks.stream()
                     .map(c -> DocumentChunk.builder()
                             .chunkIndex(c.getChunkIndex())
                             .content(c.getContent())
+                            .fullPageContext(c.getContent()) // best-effort: no page context on retry
                             .pageStart(c.getPageStart() != null ? c.getPageStart() : 0)
                             .pageEnd(c.getPageEnd() != null ? c.getPageEnd() : 0)
                             .chunkType(c.getChunkType())
@@ -413,20 +429,44 @@ public class ImportOrchestrator {
 
             Map<Integer, ClassificationResult> classifications = new HashMap<>();
             for (int i = 0; i < docChunks.size(); i++) {
-                ClassificationResult classification = classifierAgent.classify(docChunks.get(i));
-                classifications.put(i, classification);
-                existingChunks.get(i).setContentType(classification.getContentType().name());
-                existingChunks.get(i).setStatus(ImportChunk.ChunkStatus.PENDING);
-                persistenceService.saveChunk(existingChunks.get(i));
+                ImportChunk dbChunk = existingChunks.get(i);
+                // Skip chunks that already succeeded — avoids re-billing for a partial retry.
+                if (dbChunk.getStatus() == ImportChunk.ChunkStatus.COMPLETED) {
+                    // Preserve the existing classification so processChunks* can route correctly.
+                    ContentType existingType = dbChunk.getContentType() != null
+                            ? ContentType.valueOf(dbChunk.getContentType())
+                            : ContentType.OTHER;
+                    classifications.put(dbChunk.getChunkIndex(),
+                            ClassificationResult.builder()
+                                    .contentType(existingType)
+                                    .confidence(1.0)
+                                    .reasoning("retry-skip-completed")
+                                    .build());
+                    continue;
+                }
+                DocumentChunk docChunk = docChunks.get(i);
+                ClassificationResult classification = classifierAgent.classify(docChunk);
+                // Key by chunkIndex (not loop index) — consistent with main pipeline
+                classifications.put(docChunk.getChunkIndex(), classification);
+                dbChunk.setContentType(classification.getContentType().name());
+                dbChunk.setStatus(ImportChunk.ChunkStatus.PENDING);
+                persistenceService.saveChunk(dbChunk);
             }
 
             importEntity.updateProgress("AI_PROCESSING", new BigDecimal("30"));
             persistenceService.updateImportProgress(importEntity);
 
             AtomicInteger totalTokens = new AtomicInteger(0);
-            List<ExtractionResult> allResults = processChunksSequential(
-                    docChunks, existingChunks, classifications,
-                    jlptLevel, importId, importEntity, totalTokens, cancelFlag);
+            List<ExtractionResult> allResults;
+            if (ragProperties.isParallelProcessing()) {
+                allResults = processChunksParallel(
+                        docChunks, existingChunks, classifications,
+                        jlptLevel, importId, importEntity, totalTokens, cancelFlag);
+            } else {
+                allResults = processChunksSequential(
+                        docChunks, existingChunks, classifications,
+                        jlptLevel, importId, importEntity, totalTokens, cancelFlag);
+            }
 
             // Persist
             importEntity.updateProgress("PERSISTING", new BigDecimal("90"));
@@ -505,8 +545,8 @@ public class ImportOrchestrator {
                     log.warn("[{}] No DB chunk found for docChunk index {}, skipping", importId, idx);
                     continue;
                 }
-                final ClassificationResult classification = classifications.getOrDefault(idx,
-                        ClassificationResult.fallback());
+                final ClassificationResult classification = classifications.getOrDefault(
+                        docChunk.getChunkIndex(), ClassificationResult.fallback());
 
                 CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                     try {
@@ -580,8 +620,8 @@ public class ImportOrchestrator {
 
             DocumentChunk docChunk = docChunks.get(i);
             ImportChunk dbChunk = dbChunks.get(i);
-            ClassificationResult classification = classifications.getOrDefault(i,
-                    ClassificationResult.fallback());
+            ClassificationResult classification = classifications.getOrDefault(
+                    docChunk.getChunkIndex(), ClassificationResult.fallback());
 
             try {
                 ExtractionResult result = processOneChunk(
@@ -611,6 +651,12 @@ public class ImportOrchestrator {
     private ExtractionResult processOneChunk(DocumentChunk docChunk, ImportChunk dbChunk,
                                               ClassificationResult classification, String jlptLevel,
                                               UUID importId) {
+        // On retry, skip chunks that already completed successfully.
+        if (dbChunk.getStatus() == ImportChunk.ChunkStatus.COMPLETED) {
+            log.debug("[{}] Skipping already-COMPLETED chunk {}", importId, docChunk.getChunkIndex());
+            return ExtractionResult.empty(docChunk.getChunkIndex(), 0);
+        }
+
         dbChunk.setStatus(ImportChunk.ChunkStatus.PROCESSING);
         persistenceService.saveChunk(dbChunk);
 
@@ -672,6 +718,10 @@ public class ImportOrchestrator {
 
     /**
      * Route chunk to appropriate specialized agent based on content type.
+     *
+     * <p>MIXED chunks are handled by calling BOTH specialized agents (vocabulary + grammar)
+     * in parallel and merging their results. Lesson metadata is parsed from markdown
+     * headers by {@link LessonMetadataParser} (0 LLM calls).
      */
     private ExtractionResult routeToAgent(DocumentChunk chunk, ContentType contentType,
                                            String jlptLevel, RagContext ragContext) {
@@ -687,8 +737,94 @@ public class ImportOrchestrator {
                     .vocabulary(Collections.emptyList())
                     .grammarPoints(Collections.emptyList())
                     .build();
-            default -> extractionAgent.extractContent(chunk, jlptLevel, ragContext); // MIXED, CONVERSATION
+            case MIXED -> extractWithBothAgents(chunk, jlptLevel, ragContext);
+            // CONVERSATION chunks (dialogs) — extract vocab only, not grammar.
+            // Grammar from dialogs duplicates the authoritative GRAMMAR_EXPLANATION extraction.
+            case CONVERSATION -> vocabularyAgent.extractVocabulary(chunk, jlptLevel, ragContext);
+            default -> extractWithBothAgents(chunk, jlptLevel, ragContext);
         };
+    }
+
+    /**
+     * Extract using BOTH specialized agents for MIXED/CONVERSATION chunks.
+     * Runs vocab + grammar agents IN PARALLEL to avoid timeout.
+     * Lesson metadata is parsed directly from markdown headers (0 LLM calls).
+     */
+    private ExtractionResult extractWithBothAgents(DocumentChunk chunk, String jlptLevel,
+                                                     RagContext ragContext) {
+        long t0 = System.currentTimeMillis();
+
+        // Run both specialized agents in parallel — they are independent LLM calls.
+        // IMPORTANT: Do NOT use importTaskExecutor here — the batch processor already holds
+        // threads from that pool. Submitting to the same pool causes thread starvation/deadlock.
+        // ForkJoinPool.commonPool() (default for supplyAsync) is fine for IO-bound API calls.
+        CompletableFuture<ExtractionResult> vocabFuture = CompletableFuture.supplyAsync(
+                () -> vocabularyAgent.extractVocabulary(chunk, jlptLevel, ragContext));
+        CompletableFuture<ExtractionResult> grammarFuture = CompletableFuture.supplyAsync(
+                () -> grammarAgent.extractGrammar(chunk, jlptLevel, ragContext));
+
+        // Lesson metadata: parse from markdown headers — 0 API calls
+        ExtractionResult.ExtractedLesson parsedLesson = LessonMetadataParser.parseFromChunk(chunk);
+        List<ExtractionResult.ExtractedLesson> lessons = parsedLesson != null
+                ? List.of(parsedLesson) : Collections.emptyList();
+
+        // Wait for both agents to complete
+        ExtractionResult vocabResult;
+        ExtractionResult grammarResult;
+        try {
+            vocabResult = vocabFuture.get(4, TimeUnit.MINUTES);
+        } catch (Exception e) {
+            log.warn("VocabularyAgent timed out/failed for chunk {}: {}", chunk.getChunkIndex(), e.getMessage());
+            vocabResult = ExtractionResult.empty(chunk.getChunkIndex(), 0);
+        }
+        try {
+            grammarResult = grammarFuture.get(4, TimeUnit.MINUTES);
+        } catch (Exception e) {
+            log.warn("GrammarAgent timed out/failed for chunk {}: {}", chunk.getChunkIndex(), e.getMessage());
+            grammarResult = ExtractionResult.empty(chunk.getChunkIndex(), 0);
+        }
+
+        // Merge: vocab from vocabAgent, grammar from grammarAgent, lessons from parser
+        double mergedConfidence = Math.min(vocabResult.getConfidence(), grammarResult.getConfidence());
+        int totalTokens = vocabResult.getTokensUsed() + grammarResult.getTokensUsed();
+
+        return ExtractionResult.builder()
+                .chunkIndex(chunk.getChunkIndex())
+                .confidence(mergedConfidence > 0 ? mergedConfidence : 0.9)
+                .tokensUsed(totalTokens)
+                .processingTimeMs(System.currentTimeMillis() - t0)
+                .lessons(lessons)
+                .vocabulary(vocabResult.getVocabulary())
+                .grammarPoints(grammarResult.getGrammarPoints())
+                .build();
+    }
+
+    /**
+     * Merge new items from re-extraction into the original result without removing
+     * existing grounded items. Prevents data loss when re-extraction is more conservative.
+     */
+    private void mergeNewItems(ExtractionResult original, ExtractionResult reExtracted) {
+        // Merge new vocab items not already present
+        java.util.Set<String> existingVocab = new java.util.HashSet<>();
+        for (var v : original.getVocabulary()) {
+            if (v.getJapaneseText() != null) existingVocab.add(v.getJapaneseText());
+        }
+        for (var v : reExtracted.getVocabulary()) {
+            if (v.getJapaneseText() != null && !existingVocab.contains(v.getJapaneseText())) {
+                original.getVocabulary().add(v);
+            }
+        }
+
+        // Merge new grammar points not already present
+        java.util.Set<String> existingGrammar = new java.util.HashSet<>();
+        for (var g : original.getGrammarPoints()) {
+            if (g.getPattern() != null) existingGrammar.add(g.getPattern());
+        }
+        for (var g : reExtracted.getGrammarPoints()) {
+            if (g.getPattern() != null && !existingGrammar.contains(g.getPattern())) {
+                original.getGrammarPoints().add(g);
+            }
+        }
     }
 
     /**
@@ -698,27 +834,23 @@ public class ImportOrchestrator {
                                                      String jlptLevel, RagContext ragContext,
                                                      String feedback) {
         return switch (contentType) {
-            case VOCABULARY -> vocabularyAgent.reExtractWithFeedback(chunk, jlptLevel, ragContext, feedback);
+            case VOCABULARY, CONVERSATION -> vocabularyAgent.reExtractWithFeedback(chunk, jlptLevel, ragContext, feedback);
             case GRAMMAR -> grammarAgent.reExtractWithFeedback(chunk, jlptLevel, ragContext, feedback);
             default -> {
-                // Inject feedback into chunk content so ContentExtractionAgent sees it
-                if (feedback != null && !feedback.isBlank()) {
-                    DocumentChunk enriched = DocumentChunk.builder()
-                            .chunkIndex(chunk.getChunkIndex())
-                            .content(chunk.getContent()
-                                    + "\n\n[PREVIOUS EXTRACTION ISSUES — please fix ALL of these]\n"
-                                    + feedback)
-                            .pageStart(chunk.getPageStart())
-                            .pageEnd(chunk.getPageEnd())
-                            .chunkType(chunk.getChunkType())
-                            .lessonTitle(chunk.getLessonTitle())
-                            .lessonNumber(chunk.getLessonNumber())
-                            .sectionType(chunk.getSectionType())
-                            .fullPageContext(chunk.getFullPageContext())
-                            .build();
-                    yield extractionAgent.extractContent(enriched, jlptLevel, ragContext);
-                }
-                yield extractionAgent.extractContent(chunk, jlptLevel, ragContext);
+                // For MIXED: re-extract with both specialized agents
+                ExtractionResult vocabResult = vocabularyAgent.reExtractWithFeedback(
+                        chunk, jlptLevel, ragContext, feedback);
+                ExtractionResult grammarResult = grammarAgent.reExtractWithFeedback(
+                        chunk, jlptLevel, ragContext, feedback);
+                yield ExtractionResult.builder()
+                        .chunkIndex(chunk.getChunkIndex())
+                        .confidence(Math.min(vocabResult.getConfidence(), grammarResult.getConfidence()))
+                        .tokensUsed(vocabResult.getTokensUsed() + grammarResult.getTokensUsed())
+                        .processingTimeMs(vocabResult.getProcessingTimeMs() + grammarResult.getProcessingTimeMs())
+                        .lessons(Collections.emptyList())
+                        .vocabulary(vocabResult.getVocabulary())
+                        .grammarPoints(grammarResult.getGrammarPoints())
+                        .build();
             }
         };
     }

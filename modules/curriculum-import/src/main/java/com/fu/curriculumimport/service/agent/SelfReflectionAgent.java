@@ -12,6 +12,7 @@ import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -59,11 +60,16 @@ public class SelfReflectionAgent {
 
     private static final String SYSTEM_PROMPT =
             "You are a quality assurance expert for Japanese language learning content extraction.\n" +
-            "Your task is to critically evaluate whether the extracted content is:\n" +
+            "Your task is to evaluate whether the extracted content is:\n" +
             "1. RELEVANT to the source material (not invented or from external knowledge)\n" +
             "2. SUPPORTED by the source text (factually accurate extraction, not hallucinated)\n" +
             "3. USEFUL for language learning at the specified JLPT level\n\n" +
-            "Be strict and honest. Flag any item that seems fabricated or unsupported.\n" +
+            "Evaluate FAIRLY. Items that clearly appear in the source text should score 0.8+.\n" +
+            "Only flag items as unsupported when they are clearly hallucinated or fabricated.\n" +
+            "Missing English translations or romaji are NOT grounds for rejection — only flag " +
+            "items with WRONG Japanese text, WRONG readings, or FABRICATED meanings.\n" +
+            "The source text may be a SECTION of a larger lesson — items extracted from " +
+            "adjacent sections (vocabulary table, grammar explanation) are still RELEVANT.\n" +
             PromptFragment.JSON_ONLY;
 
     private static final String REFLECTION_PROMPT = """
@@ -105,11 +111,15 @@ public class SelfReflectionAgent {
             }
             
             IMPORTANT GUIDELINES:
-            - An item is NOT relevant if it doesn't appear in or relate to the source text
-            - An item is NOT supported if the meaning/reading differs from what the source implies
-            - An item is NOT useful if it's way above/below the target JLPT level
-            - Be especially strict about Japanese text accuracy and reading correctness
-            - Score: 1.0 = perfect, 0.7+ = acceptable, 0.4-0.7 = needs improvement, <0.4 = reject
+            - An item is RELEVANT if it appears in the source text OR is a standard vocabulary/grammar
+              item for this lesson (the source may be a section of a larger lesson page).
+            - An item is NOT SUPPORTED only if the meaning/reading is clearly WRONG or fabricated.
+              Missing English translations, missing romaji, or incomplete explanations are NOT
+              grounds for marking unsupported — only factual errors matter.
+            - An item is USEFUL if it's appropriate for the target JLPT level.
+            - Score: 1.0 = perfect, 0.8+ = good (minor issues only), 0.5-0.8 = needs improvement, <0.5 = reject
+            - Default to 0.8 for items that are clearly present in the source with correct meanings.
+            - Only score below 0.5 for items with WRONG Japanese text or FABRICATED meanings.
             """;
 
     /**
@@ -133,8 +143,13 @@ public class SelfReflectionAgent {
             // Prepare extracted content summary for the prompt
             String extractedSummary = buildExtractionSummary(extractionResult);
 
-            // Truncate source content to fit context window
-            String sourceContent = truncateForReflection(chunk.getContent());
+            // Use full page context (entire lesson) when available, so the LLM can see
+            // vocabulary tables and grammar sections that feed the extraction.
+            // Falls back to chunk content when no full page context is available.
+            String rawSource = chunk.getFullPageContext() != null && !chunk.getFullPageContext().isBlank()
+                    ? chunk.getFullPageContext()
+                    : chunk.getContent();
+            String sourceContent = truncateForReflection(rawSource);
 
             String userPrompt = String.format(REFLECTION_PROMPT,
                     chunk.getPageStart(), chunk.getPageEnd(),
@@ -145,6 +160,7 @@ public class SelfReflectionAgent {
             String response = chatClient.prompt()
                     .system(SYSTEM_PROMPT)
                     .user(userPrompt)
+                    .options(OpenAiChatOptions.builder().maxTokens(8192).build())
                     .call()
                     .content();
 
@@ -174,7 +190,10 @@ public class SelfReflectionAgent {
 
             double overallScore = ((Number) parsed.getOrDefault("overallScore", 0.7)).doubleValue();
             String reasoning = (String) parsed.getOrDefault("overallReasoning", "");
-            boolean recommends = (Boolean) parsed.getOrDefault("recommendsReExtraction", false);
+            // Use convertValue instead of a direct cast — the LLM may return the JSON boolean
+            // as a String ("true"/"false") or Integer (0/1), causing ClassCastException.
+            boolean recommends = objectMapper.convertValue(
+                    parsed.getOrDefault("recommendsReExtraction", false), Boolean.class);
             String suggestion = (String) parsed.getOrDefault("reExtractionSuggestion", "");
 
             // Parse item reflections
@@ -205,32 +224,54 @@ public class SelfReflectionAgent {
     }
 
     /**
+     * Max items included in the reflection summary per content type.
+     * Prevents runaway prompt size (and response size) when a lesson has 50+ items.
+     * Items beyond this limit are listed as a count only; the LLM still sees a representative sample.
+     */
+    private static final int MAX_REFLECTION_ITEMS = 30;
+
+    /**
      * Build a concise summary of extracted content for the reflection prompt.
+     * Capped at {@value #MAX_REFLECTION_ITEMS} items per type to bound response size.
      */
     private String buildExtractionSummary(ExtractionResult result) {
         StringBuilder sb = new StringBuilder();
 
-        if (!result.getVocabulary().isEmpty()) {
+        List<ExtractionResult.ExtractedVocabulary> vocabList = result.getVocabulary();
+        if (!vocabList.isEmpty()) {
             sb.append("VOCABULARY ITEMS:\n");
-            for (ExtractionResult.ExtractedVocabulary vocab : result.getVocabulary()) {
+            int vocabLimit = Math.min(vocabList.size(), MAX_REFLECTION_ITEMS);
+            for (int i = 0; i < vocabLimit; i++) {
+                ExtractionResult.ExtractedVocabulary vocab = vocabList.get(i);
                 sb.append(String.format("- %s (%s) [%s]: %s / %s [%s]\n",
                         vocab.getJapaneseText() != null ? vocab.getJapaneseText() : "?",
-                        vocab.getReading() != null ? vocab.getReading() : "?",
-                        vocab.getRomaji() != null ? vocab.getRomaji() : "?",
-                        vocab.getMeaningVi() != null ? vocab.getMeaningVi() : "?",
-                        vocab.getMeaningEn() != null ? vocab.getMeaningEn() : "?",
-                        vocab.getPartOfSpeech() != null ? vocab.getPartOfSpeech() : "?"));
+                        vocab.getReading()      != null ? vocab.getReading()      : "?",
+                        vocab.getRomaji()       != null ? vocab.getRomaji()       : "?",
+                        vocab.getMeaningVi()    != null ? vocab.getMeaningVi()    : "?",
+                        vocab.getMeaningEn()    != null ? vocab.getMeaningEn()    : "?",
+                        vocab.getPartOfSpeech() != null ? vocab.getPartOfSpeech(): "?"));
+            }
+            if (vocabList.size() > MAX_REFLECTION_ITEMS) {
+                sb.append(String.format("... and %d more vocabulary items (not shown)\n",
+                        vocabList.size() - MAX_REFLECTION_ITEMS));
             }
         }
 
-        if (!result.getGrammarPoints().isEmpty()) {
+        List<ExtractionResult.ExtractedGrammar> grammarList = result.getGrammarPoints();
+        if (!grammarList.isEmpty()) {
             sb.append("GRAMMAR POINTS:\n");
-            for (ExtractionResult.ExtractedGrammar grammar : result.getGrammarPoints()) {
+            int grammarLimit = Math.min(grammarList.size(), MAX_REFLECTION_ITEMS);
+            for (int i = 0; i < grammarLimit; i++) {
+                ExtractionResult.ExtractedGrammar grammar = grammarList.get(i);
                 sb.append(String.format("- %s: %s / %s — %s\n",
-                        grammar.getPattern() != null ? grammar.getPattern() : "?",
-                        grammar.getMeaningVi() != null ? grammar.getMeaningVi() : "?",
-                        grammar.getMeaningEn() != null ? grammar.getMeaningEn() : "?",
+                        grammar.getPattern()            != null ? grammar.getPattern()            : "?",
+                        grammar.getMeaningVi()          != null ? grammar.getMeaningVi()          : "?",
+                        grammar.getMeaningEn()          != null ? grammar.getMeaningEn()          : "?",
                         grammar.getShortExplanationVi() != null ? grammar.getShortExplanationVi() : "?"));
+            }
+            if (grammarList.size() > MAX_REFLECTION_ITEMS) {
+                sb.append(String.format("... and %d more grammar points (not shown)\n",
+                        grammarList.size() - MAX_REFLECTION_ITEMS));
             }
         }
 
@@ -255,9 +296,9 @@ public class SelfReflectionAgent {
                 items.add(ItemReflection.builder()
                         .itemIdentifier((String) item.getOrDefault("itemIdentifier", "unknown"))
                         .contentType((String) item.getOrDefault("contentType", "VOCABULARY"))
-                        .isRelevant((Boolean) item.getOrDefault("isRelevant", true))
-                        .isSupported((Boolean) item.getOrDefault("isSupported", true))
-                        .isUseful((Boolean) item.getOrDefault("isUseful", true))
+                        .isRelevant(objectMapper.convertValue(item.getOrDefault("isRelevant", true), Boolean.class))
+                        .isSupported(objectMapper.convertValue(item.getOrDefault("isSupported", true), Boolean.class))
+                        .isUseful(objectMapper.convertValue(item.getOrDefault("isUseful", true), Boolean.class))
                         .score(((Number) item.getOrDefault("score", 0.7)).doubleValue())
                         .reasoning((String) item.getOrDefault("reasoning", ""))
                         .build());
@@ -289,9 +330,9 @@ public class SelfReflectionAgent {
 
     private ReflectionResult buildFallbackResult(String reason) {
         return ReflectionResult.builder()
-                .reflectionVerdict(ReflectionVerdict.MOSTLY_APPROVED)
-                .reflectionScore(0.7)
-                .reflectionReasoning("Fallback assessment: " + reason)
+                .reflectionVerdict(ReflectionVerdict.NEEDS_IMPROVEMENT)
+                .reflectionScore(0.5)
+                .reflectionReasoning("Fallback assessment (reflection unavailable): " + reason)
                 .itemReflections(Collections.emptyList())
                 .llmRecommendsReExtraction(false)
                 .groundingScore(0.0)
@@ -299,8 +340,8 @@ public class SelfReflectionAgent {
                 .hallucinatedCount(0)
                 .groundingChecks(List.of())
                 .hallucinatedItems(List.of())
-                .combinedScore(0.7)
-                .combinedVerdict(ReflectionResult.CombinedVerdict.GOOD)
+                .combinedScore(0.5)
+                .combinedVerdict(ReflectionResult.CombinedVerdict.MARGINAL)
                 .needsReExtraction(false)
                 .build();
     }

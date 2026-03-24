@@ -51,4 +51,62 @@ public class OcrProperties {
      * Google Vision supports up to 16 images per batch request.
      */
     private int googleVisionBatchSize = 8;
+
+    // ── Document AI Layout Parser (Tier 0) ────────────────────────────────────
+
+    /**
+     * Whether to enable Document AI Layout Parser as Tier 0 for structured table extraction.
+     * When true, each scanned page is first sent to Document AI for proper table detection.
+     * Falls back to Google Vision OCR if Document AI fails or returns empty.
+     * Requires documentAiProjectId, documentAiLocation, and documentAiProcessorId to be set.
+     */
+    private boolean documentAiEnabled = false;
+
+    /**
+     * Google Cloud project ID for Document AI (e.g. "satori-489709").
+     * Same project used for Vision API is fine.
+     */
+    private String documentAiProjectId = "";
+
+    /**
+     * Document AI processor location. Must be "us" or "eu".
+     * The regional endpoint is derived from this value.
+     */
+    private String documentAiLocation = "us";
+
+    /**
+     * Document AI processor ID (e.g. "abc123def456").
+     * Create a Layout Parser processor in the Google Cloud Console under Document AI.
+     */
+    private String documentAiProcessorId = "";
+
+    /**
+     * Maximum time in minutes to wait for a Document AI processDocument call.
+     * OCR on a full scanned PDF takes significantly longer than the default 60-second
+     * gRPC deadline — 5 minutes covers typical 10-30 page Japanese textbook pages.
+     */
+    private int documentAiTimeoutMinutes = 5;
+
+    /**
+     * Minimum characters a Document AI page result must contain (excluding table rows)
+     * to be accepted without falling back to Google Vision.
+     *
+     * <p>Document AI Layout Parser can struggle with certain scanned PDFs, returning
+     * 5–97 chars for pages that Google Vision extracts 900–1400 chars from.
+     * Pages below this threshold (and with no structured table rows) are queued
+     * for Vision re-processing instead. Set to 0 to disable and accept any non-empty result.
+     *
+     * <p>Default 100 — same as {@link #scannedPageThreshold}, which is the point below
+     * which PDFBox native text extraction is considered inadequate for text PDFs.
+     */
+    private int documentAiMinCharsPerPage = 100;
+
+    // ── Gemini Vision (Tier 2 replacement for GPT-4o) ─────────────────────────
+
+    /**
+     * Google AI API key for Gemini 2.5 Flash vision extraction.
+     * Obtain from https://aistudio.google.com/app/apikey.
+     * If blank, VisionPageExtractor falls back to GPT-4o (existing behaviour).
+     */
+    private String geminiApiKey = "";
 }

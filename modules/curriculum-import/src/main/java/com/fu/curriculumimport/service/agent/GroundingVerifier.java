@@ -253,6 +253,10 @@ public class GroundingVerifier {
     /**
      * Check if individual kanji characters from the text exist in source.
      * Handles cases where OCR or formatting breaks compound words.
+     *
+     * <p>Requires at least 2 kanji in the word before falling back to per-character
+     * matching — single common kanji (日, 語, etc.) appear everywhere in Japanese
+     * source text and would produce false positives for hallucinated words.
      */
     private boolean checkKanjiDecomposition(String japaneseText, String sourceText) {
         long kanjiCount = japaneseText.chars()
@@ -265,6 +269,12 @@ public class GroundingVerifier {
             return sourceText.contains(japaneseText);
         }
 
+        // For single-kanji words the character is too common to be meaningful evidence;
+        // only accept a direct full-word match.
+        if (kanjiCount == 1) {
+            return sourceText.contains(japaneseText);
+        }
+
         long foundKanji = japaneseText.chars()
                 .mapToObj(c -> String.valueOf((char) c))
                 .filter(c -> KANJI.matcher(c).matches())
@@ -272,7 +282,7 @@ public class GroundingVerifier {
                 .count();
 
         // If most kanji are present, it's likely grounded
-        return kanjiCount > 0 && foundKanji >= kanjiCount * 0.7;
+        return foundKanji >= kanjiCount * 0.7;
     }
 
     /**
@@ -451,7 +461,7 @@ public class GroundingVerifier {
      */
     private String condenseJapaneseSpaces(String text) {
         // Replace a space that is flanked by Japanese characters on both sides
-        return text.replaceAll("(?<=[\\u3040-\\u9FFF])[ \\t](?=[\\u3040-\\u9FFF])", "");
+        return text.replaceAll("(?<=[\\u3040-\\u9FFF])[ \\t]+(?=[\\u3040-\\u9FFF])", "");
     }
 
     private String buildHallucinationReason(boolean textFound, boolean readingFound, String item) {

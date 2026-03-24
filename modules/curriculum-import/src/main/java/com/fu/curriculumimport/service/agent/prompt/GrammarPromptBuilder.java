@@ -32,43 +32,79 @@ public final class GrammarPromptBuilder {
               3) Câu nghi vấn か — ...
             Mỗi mục đánh số 1), 2), 3)... là MỘT ĐIỂM NGỮ PHÁP RIÊNG BIỆT.
 
-            ═══ QUY TẮC CHỐNG TÁCH SAI (CRITICAL) ═══
-            KHÔNG được tách các thành phần phụ của một mẫu câu thành grammar point riêng.
+            ═══ QUY TẮC CHỐNG TÁCH SAI (QUAN TRỌNG NHẤT — ĐỌC KỸ) ═══
+            Mỗi mục đánh số (1, 2, 3...) trong sách = MỘT grammar point DUY NHẤT.
+            TUYỆT ĐỐI KHÔNG tách thành phần phụ bên trong một mục thành grammar point riêng.
 
-            Ví dụ SAI — phải tránh:
-              • Mẫu "Danh từ は Danh từ です" → KHÔNG tách "〜です" ra thành grammar point riêng.
-              • Mẫu "Danh từ じゃ ありません" → KHÔNG tách "〜じゃ ありません" hay "ありません" riêng.
-              • Mẫu "〜ますか" → KHÔNG tách "〜か" riêng.
+            ❌ SAI (LỖI THƯỜNG GẶP — PHẢI TRÁNH):
+              Input: "## 1. Danh từ は Danh từ です" + giải thích「は」... + giải thích「です」...
+              Output sai:  4 grammar points → "は", "～です", "～じゃありません", "です"
+              Lý do sai:   Tách thành phần phụ (は, です) thành grammar point riêng.
 
-            Cách nhận biết ĐÚNG:
-              ✔ Grammar point = một mục được đánh số 1), 2), 3)... trong phần ngữ pháp.
-              ✔ Nếu sách giải thích "です là..." BÊN TRONG phần giải thích của "Danh từ は Danh từ です",
-                thì đó là giải thích PHỤ, KHÔNG phải grammar point mới.
-              ✔ Phần giải thích phụ đó phải được đưa vào trường detailedExplanationVi của grammar point CHA.
+            ✅ ĐÚNG:
+              Input: "## 1. Danh từ は Danh từ です" + giải thích「は」... + giải thích「です」...
+              Output đúng: 1 grammar point → pattern="Danh từ は Danh từ です",
+                           detailedExplanationVi chứa TOÀN BỘ giải thích (cả は lẫn です gộp lại).
 
             Quy tắc cụ thể:
-              • Nếu một pattern X xuất hiện như một phần trong pattern lớn hơn Y đã có trong cùng bài,
-                và X không có số thứ tự độc lập → X là giải thích của Y, KHÔNG phải grammar point riêng.
-              • Toàn bộ text giải thích về X trong nguồn (kể cả ví dụ của X) phải được SAO CHÉP NGUYÊN VĂN
-                và NỐI TIẾP vào cuối detailedExplanationVi của Y — KHÔNG được bỏ bất kỳ câu nào.
-              • detailedExplanationVi của Y = [giải thích về Y] + " " + [giải thích về X nguyên văn từ sách]
+              • Nếu sách viết "1. Danh từ は Danh từ です" rồi bên dưới giải thích「は」và「です」riêng
+                → Đó là MỘT grammar point, detailedExplanationVi = giải thích「は」+ giải thích「です」.
+              • Nếu sách viết "2. Danh từ じゃ ありません" → MỘT grammar point, KHÔNG tách.
+              • Nếu sách viết "3. Câu か" → MỘT grammar point, KHÔNG tách「か」riêng.
+              • Chỉ tạo grammar point MỚI khi thấy SỐ THỨ TỰ MỚI (2., 3., 4...) trong sách.
+              • Nếu pattern X xuất hiện BÊN TRONG giải thích của Y mà KHÔNG có số thứ tự riêng
+                → X là giải thích PHỤ, đưa vào detailedExplanationVi của Y.
+              • detailedExplanationVi = [giải thích chính] + [giải thích phụ nguyên văn từ sách]
+
+            ═══ QUY TẮC CHỐNG TRÙNG DẠNG MỞ RỘNG (CRITICAL) ═══
+            Khi sách viết một mẫu TỔNG QUÁT (ví dụ: "Câu か", "Danh từ も"),
+            TUYỆT ĐỐI KHÔNG tạo thêm grammar point là dạng mở rộng/ví dụ cụ thể
+            của mẫu tổng quát đó.
+
+            ❌ SAI — tạo dạng mở rộng:
+              Sách: "3. Câu か" → LLM tạo thêm "Danh từ は Danh từ ですか" (SAI! đây chỉ là ví dụ cụ thể của "Câu か")
+              Sách: "4. Danh từ も" → LLM tạo "Danh từ も Danh từ です" (SAI! sách chỉ dạy trợ từ "も", phần "です" thuộc mẫu câu khác)
+
+            ✅ ĐÚNG — dùng CHÍNH XÁC pattern từ tiêu đề sách:
+              Sách: "3. Câu か" → pattern = "Câu か" (HOẶC "Câu + か")
+              Sách: "4. Danh từ も" → pattern = "Danh từ も" (KHÔNG thêm phần sau)
+
+            QUY TẮC:
+              • Trường "pattern" PHẢI khớp với tiêu đề/mẫu câu trong sách, KHÔNG mở rộng.
+              • Nếu sách dùng "Câu" → pattern dùng "Câu", KHÔNG thay bằng "Danh từ は Danh từ".
+              • Nếu sách dùng "Danh từ も" → pattern dùng "Danh từ も", KHÔNG thêm "Danh từ です".
+              • "Câu" = bất kỳ câu nào, KHÔNG được cụ thể hóa thành một mẫu câu riêng.
 
             ═══ QUY TẮC TRÍCH XUẤT ═══
             1. grammarPoint: Tên điểm ngữ pháp cụ thể, ví dụ:
                "Trợ từ は (wa)", "Câu phủ định: Danh từ じゃ ありません", "Câu nghi vấn か"
-            2. pattern: Mẫu cú pháp trừu tượng, ví dụ:
-               "Danh từ は Danh từ です"  "Danh từ は Danh từ じゃ ありません"
+            2. pattern: Mẫu cú pháp CHÍNH XÁC NHƯ TRONG SÁCH, ví dụ:
+               "Danh từ は Danh từ です"  "Danh từ は Danh từ じゃ ありません"  "Câu か"  "Danh từ も"
             3. function: Chức năng ngữ pháp — TRÍCH NGUYÊN VĂN từ sách (tiếng Việt).
                Ví dụ: "Biểu thị danh từ đứng trước nó là chủ đề của câu"
-            4. detailedExplanationVi: GIẢI THÍCH ĐẦY ĐỦ — SAO CHÉP NGUYÊN VĂN TIẾNG VIỆT từ sách,
-               KHÔNG tóm tắt, KHÔNG diễn giải lại, KHÔNG dịch sang tiếng Anh.
-               NẾU trong mục đó sách tiếp tục giải thích thành phần phụ (ví dụ: giải thích riêng về
-               [です], [じゃ], [ありません] ngay bên dưới) → SAO CHÉP NGUYÊN VĂN phần đó và NỐI TIẾP
-               vào sau phần giải thích chính, cách nhau bằng dấu cách.
-               Kết quả phải chứa ĐẦY ĐỦ mọi câu giải thích trong mục đó từ sách.
+            4. detailedExplanationVi: ĐÂY LÀ TRƯỜNG QUAN TRỌNG NHẤT.
+               BẮT BUỘC SAO CHÉP NGUYÊN VĂN 100% TEXT TIẾNG VIỆT TỪ SÁCH.
+               KHÔNG ĐƯỢC tóm tắt, diễn giải lại, viết lại bằng từ ngữ khác, hay tự sinh câu mới.
+               KHÔNG ĐƯỢC viết dạng "Cấu trúc này được sử dụng để..." — đó là DIỄN GIẢI, KHÔNG phải sao chép.
+
+               ❌ SAI (diễn giải — PHẢI TRÁNH):
+                 "Cấu trúc này được sử dụng để giới thiệu bản thân hay một ai đó bằng cách đặt
+                  danh từ chủ thể trước trợ từ 'は' và theo sau là danh từ khác với 'です'."
+               ✅ ĐÚNG (sao chép nguyên văn từ sách):
+                 "Trợ từ [は] biểu thị rằng danh từ đứng trước nó là chủ đề của câu. Người nói
+                  đặt [は] trước chủ đề mà mình muốn nói đến và lập thành câu bằng cách thêm
+                  vào sau [は] những thông tin cần thiết. [です] được dùng sau danh từ để biểu thị
+                  sự phán đoán hay khẳng định ở thể lịch sự."
+
+               QUY TẮC CỤ THỂ:
+               • Copy-paste CHÍNH XÁC các câu tiếng Việt như chúng xuất hiện trong input.
+               • NẾU mục có giải thích thành phần phụ (ví dụ: giải thích riêng về [です], [じゃ],
+                 [ありません]) → NỐI TIẾP tất cả vào detailedExplanationVi, giữ nguyên từng câu.
+               • Kết quả phải chứa ĐẦY ĐỦ mọi câu giải thích trong mục đó từ sách.
+               • Giữ nguyên dấu ngoặc vuông [は], [です], dấu「」, ký hiệu ①②③, v.v.
             5. usageNotes: Tất cả [chú ý] hoặc ※ trong sách → PHẢI đưa vào đây.
                Mỗi chú ý là một phần tử trong mảng. KHÔNG BỎ QUA.
-            6. examples: Câu ví dụ có ký hiệu ® hoặc ○ trong sách → trích đúng cặp Nhật-Việt.
+            6. examples: Câu ví dụ có ký hiệu ® hoặc ○ hoặc ①②③ trong sách → trích đúng cặp Nhật-Việt.
                Mỗi cặp là một object {"jp": "...", "vi": "...", "en": "..."}.
             7. relatedTo: Nếu điểm ngữ pháp có ghi "xem thêm bài X" → ghi vào đây.
             8. stt: Số thứ tự của điểm trong phần ngữ pháp bài đó (1, 2, 3...).
@@ -190,6 +226,121 @@ public final class GrammarPromptBuilder {
             SENTENCE_PATTERN, HONORIFIC, CONDITIONAL, PASSIVE, CAUSATIVE, OTHER
             """;
 
+    // ── Single-section extraction template (per-heading extraction) ────────────
+
+    /**
+     * System prompt for single-section extraction.
+     * Simpler than the bulk prompt because anti-split is structurally enforced
+     * (one heading = one LLM call = one grammar point).
+     */
+    public static final String SINGLE_SECTION_SYSTEM_PROMPT = """
+            Bạn là chuyên gia phân tích ngữ pháp tiếng Nhật cho nền tảng học ngôn ngữ.
+            Nguồn: sách "Minna no Nihongo I — Bản dịch và Giải thích Ngữ pháp" (bản tiếng Việt).
+
+            Bạn sẽ nhận MỘT MỤC ngữ pháp duy nhất (đã được tách sẵn theo số thứ tự).
+            Nhiệm vụ: trích xuất CHÍNH XÁC MỘT grammar point từ nội dung này.
+
+            ═══ QUY TẮC PATTERN — DÙNG CHÍNH XÁC NHƯ SÁCH (CRITICAL) ═══
+            Trường "pattern" PHẢI khớp với tiêu đề/mẫu câu trong sách, KHÔNG mở rộng.
+            • Nếu tiêu đề mục là "Câu か" → pattern = "Câu か", KHÔNG viết "Danh từ は Danh từ ですか".
+            • Nếu tiêu đề mục là "Danh từ も" → pattern = "Danh từ も", KHÔNG thêm "Danh từ です" phía sau.
+            • "Câu" = bất kỳ câu nào — KHÔNG cụ thể hóa thành một mẫu câu riêng.
+            • KHÔNG tạo dạng mở rộng hay ví dụ cụ thể của một mẫu tổng quát.
+
+            ═══ QUY TẮC SAO CHÉP NGUYÊN VĂN (CRITICAL — ĐỌC RẤT KỸ) ═══
+            • detailedExplanationVi: SAO CHÉP NGUYÊN VĂN 100% giải thích tiếng Việt từ input.
+              KHÔNG tóm tắt, KHÔNG diễn giải lại, KHÔNG viết lại bằng từ ngữ khác.
+              KHÔNG viết dạng "Cấu trúc này được sử dụng để..." — đó là DIỄN GIẢI.
+              PHẢI copy-paste CHÍNH XÁC các câu tiếng Việt như chúng xuất hiện trong NỘI DUNG MỤC.
+            • Nếu mục có giải thích thành phần phụ (ví dụ: giải thích「は」rồi「です」)
+              → NỐI TIẾP tất cả vào detailedExplanationVi, vì đây là MỘT mục duy nhất.
+            • usageNotes: mỗi [chú ý] / ※ → một phần tử mảng. KHÔNG BỎ QUA.
+            • exampleSentences: câu ví dụ ①②③ → trích đúng cặp {"jp", "vi", "en"}.
+            • relatedTo: "xem thêm bài X" → ghi vào đây.
+            • Giữ nguyên dấu ngoặc vuông [は], [です], dấu「」, ký hiệu, và chú thích.
+
+            ═══ CÁC TRƯỜNG BẮT BUỘC — KHÔNG ĐƯỢC ĐỂ NULL ═══
+            • meaningVi: nghĩa tiếng Việt ngắn gọn (ví dụ: "Trợ từ chủ đề — đánh dấu chủ đề của câu")
+            • meaningEn: nghĩa tiếng Anh ngắn gọn (ví dụ: "Topic marker particle")
+            • pattern: mẫu cú pháp trừu tượng
+            • detailedExplanationVi: giải thích nguyên văn từ sách
+
+            Chỉ trả về JSON hợp lệ — không markdown, không giải thích.
+            """;
+
+    private static final String SINGLE_SECTION_TEMPLATE = """
+            Trích xuất CHÍNH XÁC MỘT điểm ngữ pháp từ mục sau.
+            Đây là mục số %d trong phần ngữ pháp bài "%s". Cấp JLPT: %s
+
+            ─── NỘI DUNG MỤC ───────────────────────────────────────────────────
+            %s
+            ─────────────────────────────────────────────────────────────────────
+            %s
+
+            Trả về JSON (CHỈ MỘT grammar point — KHÔNG tách thành nhiều):
+            {
+              "grammarPoints": [
+                {
+                  "stt": %d,
+                  "grammarPoint": "Trợ từ は (wa)",
+                  "pattern": "Danh từ は Danh từ です",
+                  "patternReading": "だいめいし は だいめいし です",
+                  "function": "Biểu thị danh từ đứng trước nó là chủ đề của câu",
+                  "meaningVi": "Trợ từ chủ đề — đánh dấu chủ đề của câu (BẮT BUỘC, KHÔNG ĐƯỢC null)",
+                  "meaningEn": "Topic marker particle (REQUIRED, must NOT be null)",
+                  "shortExplanationVi": "Đặt「は」sau chủ đề muốn nói đến, rồi thêm thông tin cần thiết",
+                  "detailedExplanationVi": "...(SAO CHÉP NGUYÊN VĂN toàn bộ giải thích tiếng Việt trong mục này, kể cả phần giải thích thành phần phụ)...",
+                  "usageNotes": ["...(mỗi [chú ý] là 1 phần tử)..."],
+                  "relatedTo": [],
+                  "jlptLevel": "%s",
+                  "category": "SENTENCE_PATTERN",
+                  "exampleSentences": [{"jp": "...", "vi": "...", "en": "..."}],
+                  "commonMistakes": [],
+                  "isKeyPoint": true
+                }
+              ],
+              "confidence": 0.0
+            }
+
+            ⚠ CÁC TRƯỜNG BẮT BUỘC (KHÔNG ĐƯỢC để null hoặc trống):
+            - meaningVi: nghĩa tiếng Việt ngắn gọn (1-2 câu)
+            - meaningEn: nghĩa tiếng Anh ngắn gọn (1-2 câu)
+            - detailedExplanationVi: SAO CHÉP NGUYÊN VĂN từ sách
+            - pattern: mẫu cú pháp trừu tượng
+            """;
+
+    /**
+     * Build user prompt for extracting a SINGLE grammar section.
+     *
+     * @param section            the markdown section content
+     * @param stt                sequence number (1, 2, 3...)
+     * @param lessonTitle        lesson title for context
+     * @param jlptLevel          JLPT level (e.g. "N5")
+     * @param fullPageContext    optional full lesson text for cross-reference
+     * @param alreadyExtracted  formatted list of patterns already extracted from earlier
+     *                           sections in the same chunk (for dedup); empty string if none
+     */
+    public static String buildSingleSectionPrompt(String section, int stt,
+                                                    String lessonTitle, String jlptLevel,
+                                                    String fullPageContext,
+                                                    String alreadyExtracted) {
+        String contextBlock = "";
+        if (fullPageContext != null && !fullPageContext.isBlank() && !fullPageContext.equals(section)) {
+            String trimmed = OcrTextPreprocessor.truncateToTokenBudget(
+                    fullPageContext, OcrTextPreprocessor.MAX_PAGE_CONTEXT_TOKENS);
+            contextBlock = String.format(FULL_PAGE_CONTEXT_TEMPLATE, trimmed);
+        }
+
+        String dedupBlock = (alreadyExtracted != null) ? alreadyExtracted : "";
+
+        return String.format(SINGLE_SECTION_TEMPLATE,
+                stt, lessonTitle != null ? lessonTitle : "unknown", jlptLevel,
+                section,
+                contextBlock + dedupBlock,
+                stt,
+                jlptLevel);
+    }
+
     // ── Context block templates ────────────────────────────────────────────────
 
     private static final String RAG_CONTEXT_TEMPLATE = """
@@ -233,8 +384,9 @@ public final class GrammarPromptBuilder {
                 jlptLevel,
                 safeContent,
                 contextBlocks,
-                jlptLevel,
-                jlptLevel);
+                jlptLevel,   // example 1 jlptLevel
+                jlptLevel,   // example 2 jlptLevel
+                jlptLevel);  // example 3 jlptLevel
     }
 
     /**
@@ -283,11 +435,13 @@ public final class GrammarPromptBuilder {
                     "Trường 'grammarPoint' nên dùng tên cụ thể như 'Mẫu câu N: Danh từ は Danh từ です'.\n";
             case MnNSectionSplitter.GRAMMAR_EXPLANATION ->
                     "\n⚠ LOẠI PHẦN: GIẢI THÍCH NGỮ PHÁP (文法 / Ngữ pháp — Phần IV)\n" +
-                    "Phần này giải thích chi tiết từng điểm ngữ pháp, được đánh số 1), 2), 3)... " +
-                    "Mỗi số là MỘT điểm ngữ pháp riêng biệt. " +
+                    "Phần này giải thích chi tiết từng điểm ngữ pháp, được đánh số 1., 2., 3.... " +
+                    "Mỗi số là MỘT điểm ngữ pháp riêng biệt — KHÔNG tách thành phần phụ ra. " +
+                    "Ví dụ: mục '1. Danh từ は Danh từ です' chứa giải thích「は」và「です」" +
+                    "→ đó vẫn là MỘT grammar point duy nhất, gộp hết vào detailedExplanationVi. " +
                     "Ký hiệu [chú ý] hoặc ※ → đưa vào mảng 'usageNotes', KHÔNG BỎ QUA. " +
-                    "Câu ví dụ có ký hiệu ® hoặc ○ → trích đúng cặp Nhật-Việt vào 'exampleSentences'. " +
-                    "Giải thích phải giữ nguyên văn tiếng Việt từ sách, không tóm tắt.\n";
+                    "Câu ví dụ có ký hiệu ①②③ hoặc ® → trích đúng cặp Nhật-Việt vào 'exampleSentences'. " +
+                    "Giải thích phải SAO CHÉP NGUYÊN VĂN tiếng Việt từ sách, KHÔNG tóm tắt, KHÔNG tự viết.\n";
             case MnNSectionSplitter.EXAMPLE ->
                     "\n⚠ LOẠI PHẦN: CÂU VÍ DỤ (例文 / Ví dụ — Phần II)\n" +
                     "Phần này minh họa mẫu ngữ pháp qua câu ví dụ (dạng hỏi-đáp). " +

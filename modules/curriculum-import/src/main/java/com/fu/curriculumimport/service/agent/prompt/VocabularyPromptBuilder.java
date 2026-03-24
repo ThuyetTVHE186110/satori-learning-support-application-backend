@@ -64,6 +64,37 @@ public final class VocabularyPromptBuilder {
             Ghi số thứ tự của từ trong danh sách từ vựng bài học (1, 2, 3...).
             Nếu không xác định được → "stt": 0.
 
+            ═══ QUY TẮC GHÉP FURIGANA / KANJI (CRITICAL — ĐỌC KỸ) ═══
+            OCR thường tách reading (hiragana) và kanji ra DÒNG RIÊNG hoặc Ô RIÊNG.
+            Ví dụ OCR trả về:
+              にほん          ← reading (hiragana)
+              日本            ← kanji
+              Nhật Bản        ← nghĩa tiếng Việt
+            hoặc:  かんこく 韓国  Hàn Quốc   (reading + kanji + nghĩa trên cùng dòng)
+
+            QUY TẮC BẮT BUỘC:
+            • Reading (hiragana) + kanji tương ứng = MỘT từ vựng DUY NHẤT:
+              - japaneseText = kanji nếu có (日本), nếu không có kanji thì dùng hiragana (にほん)
+              - reading = hiragana (にほん)
+              - kanjiWriting = kanji (日本)
+            • TUYỆT ĐỐI KHÔNG tạo 2 entry riêng cho reading và kanji của cùng 1 từ.
+            • Cách nhận biết: nếu chuỗi hiragana đọc giống chuỗi kanji liền kề → cùng 1 từ.
+              Ví dụ: にほん → 日本, がくせい → 学生, せんせい → 先生
+            • Nếu chỉ có hiragana không có kanji → japaneseText = hiragana, kanjiWriting = "".
+            • Nếu chỉ có katakana (ví dụ: アメリカ) → japaneseText = katakana, reading = katakana.
+
+            ❌ SAI:
+              Entry 1: japaneseText="にほん", meaningVi="Nhật Bản"
+              Entry 2: japaneseText="日本", meaningVi=""
+            ✅ ĐÚNG:
+              Entry 1: japaneseText="日本", reading="にほん", meaningVi="Nhật Bản", kanjiWriting="日本"
+
+            ═══ QUY TẮC TRÍCH TOÀN BỘ (CRITICAL) ═══
+            • PHẢI trích TOÀN BỘ từ vựng có trong nội dung, KHÔNG ĐƯỢC BỎ SÓT.
+            • Đếm số từ trong nguồn và đảm bảo mảng vocabulary có đủ số lượng.
+            • Nếu danh sách từ dài → trích HẾT, KHÔNG cắt bớt vì giới hạn đầu ra.
+            • Nếu có bảng quốc gia/ngôn ngữ → mỗi ô là 1 từ riêng (quốc gia, quốc tịch, ngôn ngữ).
+
             ═══ QUY TẮC KHÁC ═══
             • Mọi từ tiếng Nhật phải có reading (hiragana/katakana).
             • Loại từ phải chính xác: noun/verb/i-adjective/na-adjective/

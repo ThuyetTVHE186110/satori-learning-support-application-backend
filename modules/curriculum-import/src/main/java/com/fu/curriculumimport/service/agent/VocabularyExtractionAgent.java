@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.service.agent.prompt.VocabularyPromptBuilder;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
+import com.fu.curriculumimport.service.ingestion.MarkdownVocabParser;
 import com.fu.curriculumimport.service.ingestion.MnNTableParser;
 import com.fu.curriculumimport.service.vision.VisionPageExtractor;
 import com.fu.curriculumimport.util.LlmResponseUtils;
@@ -46,12 +47,18 @@ public class VocabularyExtractionAgent {
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
     private final VisionPageExtractor visionPageExtractor;
+    private final MnNTableParser mnNTableParser;
+    private final MarkdownVocabParser markdownVocabParser;
 
     public VocabularyExtractionAgent(OpenAiChatModel chatModel, ObjectMapper objectMapper,
-                                      VisionPageExtractor visionPageExtractor) {
+                                      VisionPageExtractor visionPageExtractor,
+                                      MnNTableParser mnNTableParser,
+                                      MarkdownVocabParser markdownVocabParser) {
         this.chatClient = ChatClient.builder(chatModel).build();
         this.objectMapper = objectMapper;
         this.visionPageExtractor = visionPageExtractor;
+        this.mnNTableParser = mnNTableParser;
+        this.markdownVocabParser = markdownVocabParser;
     }
 
     // ── Public API ───────────────────────────────────────────────────────────
@@ -71,7 +78,7 @@ public class VocabularyExtractionAgent {
         // ── Fast path 1: structured table rows from OCR ────────────────────────
         if (chunk.getStructuredTableRows() != null && !chunk.getStructuredTableRows().isEmpty()) {
             List<ExtractionResult.ExtractedVocabulary> tableVocab =
-                    MnNTableParser.parse(chunk.getStructuredTableRows(), jlptLevel);
+                    mnNTableParser.parse(chunk.getStructuredTableRows(), jlptLevel);
             if (!tableVocab.isEmpty()) {
                 log.info("Chunk {}: table parser extracted {} vocab items (no LLM call)",
                         chunk.getChunkIndex(), tableVocab.size());
@@ -85,25 +92,58 @@ public class VocabularyExtractionAgent {
                         .grammarPoints(Collections.emptyList())
                         .build();
             }
-            log.debug("Chunk {}: table parse failed (low rate), trying vision", chunk.getChunkIndex());
+            log.debug("Chunk {}: table parse failed (low rate), trying markdown tables", chunk.getChunkIndex());
+        }
+
+        // ── Fast path 1.5: markdown tables from Document AI / Gemini ─────────
+        // When content contains pipe-delimited markdown tables, parse standard
+        // vocab tables directly (0 LLM calls). Complex tables (country/grid)
+        // return empty → fall through to vision or LLM path.
+        if (chunk.getContent() != null && chunk.getContent().contains("|")) {
+            List<ExtractionResult.ExtractedVocabulary> mdVocab =
+                    markdownVocabParser.parse(chunk.getContent(), jlptLevel);
+            if (!mdVocab.isEmpty()) {
+                log.info("Chunk {}: markdown table parser extracted {} vocab items (no LLM call)",
+                        chunk.getChunkIndex(), mdVocab.size());
+                return ExtractionResult.builder()
+                        .chunkIndex(chunk.getChunkIndex())
+                        .confidence(0.90)
+                        .tokensUsed(0)
+                        .processingTimeMs(System.currentTimeMillis() - t0)
+                        .lessons(Collections.emptyList())
+                        .vocabulary(mdVocab)
+                        .grammarPoints(Collections.emptyList())
+                        .build();
+            }
         }
 
         // ── Fast path 2: vision-first extraction (Tier 2) ─────────────────────
         // Available when ScannedPdfIngestionService propagated page images to this chunk.
-        if (chunk.getPageImages() != null && !chunk.getPageImages().isEmpty()) {
+        // Skip vision when structured data exists (table rows or markdown tables) — the
+        // text LLM path is cheaper and sufficient when Document AI provided good text.
+        boolean hasStructuredData = (chunk.getStructuredTableRows() != null && !chunk.getStructuredTableRows().isEmpty())
+                || (chunk.getContent() != null && chunk.getContent().contains("|"));
+        if (!hasStructuredData && chunk.getPageImages() != null && !chunk.getPageImages().isEmpty()) {
             String lessonTopic = chunk.getLessonTitle() != null ? chunk.getLessonTitle()
                     : chunk.getContent().substring(0, Math.min(80, chunk.getContent().length()));
             ExtractionResult visionResult = visionPageExtractor.extractVocabulary(
                     chunk.getPageImages(), jlptLevel, lessonTopic, chunk.getChunkIndex());
-            if (visionResult.getConfidence() >= VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD) {
+            boolean visionAccepted = visionResult.getConfidence() >= VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD
+                    && !visionResult.getVocabulary().isEmpty();
+            if (visionAccepted) {
                 log.info("Chunk {}: vision extracted {} vocab items (confidence={})",
                         chunk.getChunkIndex(), visionResult.getVocabulary().size(),
                         visionResult.getConfidence());
                 return visionResult;
             }
-            log.info("Chunk {}: vision confidence {} below threshold {}, falling back to text LLM",
-                    chunk.getChunkIndex(), visionResult.getConfidence(),
-                    VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD);
+            if (visionResult.getVocabulary().isEmpty()) {
+                log.info("Chunk {}: vision returned 0 vocab items (confidence={}) — falling back to text LLM",
+                        chunk.getChunkIndex(), visionResult.getConfidence());
+            } else {
+                log.info("Chunk {}: vision confidence {} below threshold {}, falling back to text LLM",
+                        chunk.getChunkIndex(), visionResult.getConfidence(),
+                        VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD);
+            }
         }
 
         // ── LLM path (text-based fallback) ────────────────────────────────────
@@ -115,7 +155,7 @@ public class VocabularyExtractionAgent {
             String response = chatClient.prompt()
                     .system(VocabularyPromptBuilder.SYSTEM_PROMPT)
                     .user(prompt)
-                    .options(OpenAiChatOptions.builder().maxTokens(4096).build())
+                    .options(OpenAiChatOptions.builder().maxTokens(16384).build())
                     .call()
                     .content();
 
@@ -145,7 +185,7 @@ public class VocabularyExtractionAgent {
                     .system(VocabularyPromptBuilder.SYSTEM_PROMPT
                             + VocabularyPromptBuilder.REEXTRACTION_SYSTEM_SUFFIX)
                     .user(prompt)
-                    .options(OpenAiChatOptions.builder().maxTokens(4096).build())
+                    .options(OpenAiChatOptions.builder().maxTokens(16384).build())
                     .call()
                     .content();
 

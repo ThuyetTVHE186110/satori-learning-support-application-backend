@@ -24,10 +24,11 @@ spring:
     jpa:
         hibernate:
             ddl-auto: validate
-        show-sql: ${SHOW_SQL:false}
+        show-sql: false
         properties:
             hibernate:
-                format_sql: true
+                show_sql: false
+                format_sql: false
                 dialect: org.hibernate.dialect.PostgreSQLDialect
                 default_schema: user_management
         open-in-view: false
@@ -60,12 +61,13 @@ spring:
             api-key: ${OPENAI_API_KEY:}
             chat:
                 options:
-                    model: gpt-4o-mini
+                    model: gpt-4o
                     temperature: 0.7
-                    max-tokens: 2000
+                    max-tokens: 4096
             embedding:
                 options:
-                    model: text-embedding-3-small
+                    model: text-embedding-3-large
+                    dimensions: 1536
 
     # ==================== File Upload Configuration ====================
     servlet:
@@ -195,6 +197,28 @@ curriculum-import:
         # If blank, uses GOOGLE_APPLICATION_CREDENTIALS env var (ADC).
         # Example: environment/secrets/satori-489709-ce922a405186.json
         credentials-file: ${GOOGLE_APPLICATION_CREDENTIALS:environment/secrets/satori-489709-ce922a405186.json}
+
+        # ===== Document AI Layout Parser (OCR Tier 0) =====
+        # Enable for highest-fidelity table extraction from Minna no Nihongo vocabulary pages.
+        # Requires a Layout Parser processor created in Google Cloud Console → Document AI.
+        # Cost: ~$10/1000 pages (vs $1.50 for Vision). Disable to use Vision OCR only.
+        document-ai-enabled: ${DOCUMENT_AI_ENABLED:false}
+        # Google Cloud project ID (same project as Vision API is fine).
+        document-ai-project-id: ${DOCUMENT_AI_PROJECT_ID:703548005421}
+        # Processor region — must be "us" or "eu" (Document AI has no global endpoint).
+        document-ai-location: ${DOCUMENT_AI_LOCATION:us}
+        # Processor ID from Google Cloud Console (e.g. abc123def456).
+        document-ai-processor-id: ${DOCUMENT_AI_PROCESSOR_ID:}
+        # Timeout in minutes for a single processDocument call.
+        # OCR of a full scanned PDF (17 pages @ 300 DPI) can take 2-4 min.
+        # Increase for larger documents; decrease to fail faster on slow connections.
+        document-ai-timeout-minutes: ${DOCUMENT_AI_TIMEOUT_MINUTES:5}
+
+        # ===== Gemini 2.5 Flash Vision (OCR Tier 2 — replaces GPT-4o) =====
+        # Get an API key at https://aistudio.google.com/app/apikey (free tier available).
+        # When blank, Tier 2 falls back to GPT-4o (existing behaviour).
+        # Enabling Gemini reduces Tier 2 cost by ~95 % vs GPT-4o.
+        gemini-api-key: ${GEMINI_API_KEY:}
 
     agentic-rag:
         # Minimum confidence for extraction (Corrective RAG threshold)
