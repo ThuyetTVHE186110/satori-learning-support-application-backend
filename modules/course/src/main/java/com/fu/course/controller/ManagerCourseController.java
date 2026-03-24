@@ -131,7 +131,7 @@ public class ManagerCourseController {
 
         log.info("Manager {} activating course: {}", managerId, courseId);
         CourseResponse response = courseService.activateCourse(courseId, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Course activated successfully", response));
+        return ResponseEntity.ok(ApiResponse.success("Kích hoạt khóa học thành công", response));
     }
 
     /**
@@ -145,7 +145,7 @@ public class ManagerCourseController {
 
         log.info("Manager {} deactivating course: {}", managerId, courseId);
         CourseResponse response = courseService.deactivateCourse(courseId, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Course deactivated successfully", response));
+        return ResponseEntity.ok(ApiResponse.success("Ngưng kích hoạt khóa học thành công", response));
     }
 
     /**
@@ -165,7 +165,7 @@ public class ManagerCourseController {
 
         // Update course with new thumbnail URL
         CourseResponse response = courseService.updateThumbnail(courseId, thumbnailUrl, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Thumbnail uploaded successfully", response));
+        return ResponseEntity.ok(ApiResponse.success("Tải lên ảnh bìa thành công", response));
     }
 
     /**
@@ -179,7 +179,7 @@ public class ManagerCourseController {
 
         log.info("Manager {} deleting course: {}", managerId, courseId);
         courseService.deleteCourse(courseId, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Xóa khóc học thành công.", null));
+        return ResponseEntity.ok(ApiResponse.success("Xóa khóa học thành công.", null));
     }
 
     /**
