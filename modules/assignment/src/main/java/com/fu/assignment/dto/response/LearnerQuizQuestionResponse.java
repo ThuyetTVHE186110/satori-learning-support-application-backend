@@ -24,6 +24,5 @@ public class LearnerQuizQuestionResponse {
     private String questionText;
     private String questionType;
     private JsonNode options;
-    private String imageUrl;
     private Course.JlptLevel jlptLevel;
 }

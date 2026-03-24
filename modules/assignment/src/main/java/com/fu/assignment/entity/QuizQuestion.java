@@ -23,7 +23,6 @@ import com.fu.infrastructure.persistence.SoftDeletableEntity;
 @Entity
 @Table(name = "quiz_questions", schema = "assignment", indexes = {
         @Index(name = "idx_quiz_questions_jlpt_level", columnList = "jlpt_level"),
-        @Index(name = "idx_quiz_questions_lesson_id", columnList = "lesson_id"),
         @Index(name = "idx_quiz_questions_status", columnList = "status"),
         @Index(name = "idx_quiz_questions_ai_generated", columnList = "ai_generated")
 })
@@ -82,17 +81,6 @@ public class QuizQuestion extends SoftDeletableEntity {
     @Column(name = "explanation", columnDefinition = "TEXT")
     private String explanation;
 
-    // ── Source References ─────────────────────────────────────────────────────
-
-    @Column(name = "vocabulary_id")
-    private UUID vocabularyId;
-
-    @Column(name = "grammar_id")
-    private UUID grammarId;
-
-    @Column(name = "lesson_id")
-    private UUID lessonId;
-
     // ── AI Generation ─────────────────────────────────────────────────────────
 
     /** True nếu câu hỏi được AI tạo từ file/text */
@@ -106,13 +94,5 @@ public class QuizQuestion extends SoftDeletableEntity {
     @Column(name = "jlpt_level", length = 5)
     @org.hibernate.annotations.ColumnTransformer(write = "CAST(? AS jlpt_level)")
     private Course.JlptLevel jlptLevel;
-
-    @Column(name = "tags", columnDefinition = "TEXT[]")
-    private String[] tags;
-
-    /** Image URL — dùng cho câu đọc / quan sát */
-    @Column(name = "image_url", columnDefinition = "TEXT")
-    private String imageUrl;
-
 
 }

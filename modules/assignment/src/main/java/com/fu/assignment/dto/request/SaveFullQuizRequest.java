@@ -34,7 +34,7 @@ public class SaveFullQuizRequest implements AssignmentMetadataRequest {
     private String audioUrl;
 
     @NotNull(message = "Due date is required")
-    @Future(message = "Due date must be in the future")
+    @Future(message = "Hạn nộp phải là một thời điểm trong tương lai (sau thời điểm hiện tại).")
     private LocalDateTime dueDate;
 
     /** 

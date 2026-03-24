@@ -144,7 +144,6 @@ class AssignmentServiceImplTest {
                 .totalQuestions(5)
                 .answers("[]")
                 .correctCount(0)
-                .timeSpentSeconds(0)
                 .build();
         ReflectionTestUtils.setField(testSubmission, "id", submissionId);
 
@@ -731,7 +730,6 @@ class AssignmentServiceImplTest {
         void shouldSubmitQuizSuccessfully() throws Exception {
             SubmitAssignmentRequest request = SubmitAssignmentRequest.builder()
                     .answers("[]")
-                    .timeSpentSeconds(60)
                     .build();
 
             testSubmission.setStatus(SubmissionStatus.IN_PROGRESS);
@@ -768,7 +766,6 @@ class AssignmentServiceImplTest {
             testQuizAssignment.setDueDate(LocalDateTime.now().minusDays(1));
             SubmitAssignmentRequest request = SubmitAssignmentRequest.builder()
                     .answers("[]")
-                    .timeSpentSeconds(60)
                     .build();
 
             testSubmission.setStatus(SubmissionStatus.IN_PROGRESS);

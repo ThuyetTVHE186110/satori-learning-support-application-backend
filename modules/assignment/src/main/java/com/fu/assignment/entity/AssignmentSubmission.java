@@ -108,12 +108,6 @@ public class AssignmentSubmission {
     @Column(name = "graded_at")
     private LocalDateTime gradedAt;
 
-    // ── Time Tracking ─────────────────────────────────────────────────────────
-
-    @Column(name = "time_spent_seconds")
-    @Builder.Default
-    private Integer timeSpentSeconds = 0;
-
     // ── Quiz Answers (JSONB) ──────────────────────────────────────────────────
 
     /**

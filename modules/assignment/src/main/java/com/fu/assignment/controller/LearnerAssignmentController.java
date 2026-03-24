@@ -1,8 +1,6 @@
 package com.fu.assignment.controller;
 
-import com.cloudinary.Api;
 import com.fu.assignment.dto.request.SubmitAssignmentRequest;
-import com.fu.assignment.dto.request.SubmitWritingRequest;
 import com.fu.assignment.dto.request.WritingEvaluationRequest;
 import com.fu.assignment.dto.response.*;
 import com.fu.assignment.service.AssignmentService;
