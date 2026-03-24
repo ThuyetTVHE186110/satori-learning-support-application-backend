@@ -89,7 +89,7 @@ class LearningContentManagementTest {
                 .email(email)
                 .passwordHash(passwordEncoder.encode("ValidPass@1"))
                 .firstName("Test").lastName("Manager")
-                .role(UserRole.MANAGER)
+                .role(UserRole.CONTENT_MANAGER)
                 .status(UserStatus.ACTIVE)
                 .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)

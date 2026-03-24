@@ -1464,7 +1464,6 @@ class AssignmentIntegrationTest {
             AssignmentSubmission sub = submissionRepository.save(AssignmentSubmission.builder()
                     .assignmentId(a.getId()).userId(learner.getId())
                     .status(SubmissionStatus.SUBMITTED).attemptNumber(1)
-                    .writtenAnswer("Tôi là sinh viên.")
                     .startedAt(LocalDateTime.now().minusMinutes(10))
                     .submittedAt(LocalDateTime.now().minusMinutes(1))
                     .correctCount(0).totalQuestions(1).timeSpentSeconds(600)
@@ -1555,7 +1554,6 @@ class AssignmentIntegrationTest {
                     .assignmentId(a.getId()).userId(learner.getId())
                     .status(SubmissionStatus.GRADED).attemptNumber(1)
                     .score(BigDecimal.valueOf(80))
-                    .writtenAnswer("Answer.")
                     .startedAt(LocalDateTime.now().minusMinutes(10))
                     .submittedAt(LocalDateTime.now().minusMinutes(5))
                     .gradedAt(LocalDateTime.now().minusMinutes(1))
@@ -1587,7 +1585,6 @@ class AssignmentIntegrationTest {
             AssignmentSubmission sub = submissionRepository.save(AssignmentSubmission.builder()
                     .assignmentId(a.getId()).userId(learner.getId())
                     .status(SubmissionStatus.SUBMITTED).attemptNumber(1)
-                    .writtenAnswer("test answer")
                     .startedAt(LocalDateTime.now().minusMinutes(10))
                     .submittedAt(LocalDateTime.now().minusMinutes(1))
                     .correctCount(0).totalQuestions(1).timeSpentSeconds(600)
@@ -2070,14 +2067,13 @@ class AssignmentIntegrationTest {
 
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    "{\"writtenAnswer\":\"私は学生です。\",\"timeSpentSeconds\":120}".getBytes());
+                    "{\"timeSpentSeconds\":120}".getBytes());
 
             mockMvc.perform(multipart("/api/v1/learner/assignments/{id}/submit-writing", a.getId())
                             .file(dataPart)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.status").value("SUBMITTED"))
-                    .andExpect(jsonPath("$.data.writtenAnswer").value("私は学生です。"));
+                    .andExpect(jsonPath("$.data.status").value("SUBMITTED"));
         }
 
         @Test
@@ -2095,7 +2091,7 @@ class AssignmentIntegrationTest {
             String token = loginAndGetToken("learner@test.com");
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    "{\"writtenAnswer\":\"Late answer.\",\"timeSpentSeconds\":120}".getBytes());
+                    "{\"timeSpentSeconds\":120}".getBytes());
 
             mockMvc.perform(multipart("/api/v1/learner/assignments/{id}/submit-writing", a.getId())
                             .file(dataPart)
@@ -2115,10 +2111,10 @@ class AssignmentIntegrationTest {
             startSubmission(a.getId(), learner.getId());
             String token = loginAndGetToken("learner@test.com");
 
-            // writtenAnswer blank, no image
+            // no image
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    "{\"writtenAnswer\":\"\",\"timeSpentSeconds\":10}".getBytes());
+                    "{\"timeSpentSeconds\":10}".getBytes());
 
             mockMvc.perform(multipart("/api/v1/learner/assignments/{id}/submit-writing", a.getId())
                             .file(dataPart)
@@ -2215,7 +2211,7 @@ class AssignmentIntegrationTest {
 
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    "{\"writtenAnswer\":\"私の答え\",\"timeSpentSeconds\":120}".getBytes());
+                    "{\"timeSpentSeconds\":120}".getBytes());
             MockMultipartFile imagePart = new MockMultipartFile(
                     "images", "test.png", "image/png", "dummy image".getBytes());
 
@@ -2329,7 +2325,6 @@ class AssignmentIntegrationTest {
             AssignmentSubmission sub = submissionRepository.save(AssignmentSubmission.builder()
                     .assignmentId(a.getId()).userId(learner.getId())
                     .status(SubmissionStatus.SUBMITTED).attemptNumber(1)
-                    .writtenAnswer("私は学生です。")
                     .startedAt(LocalDateTime.now().minusMinutes(10))
                     .submittedAt(LocalDateTime.now().minusMinutes(1))
                     .correctCount(0).totalQuestions(1).timeSpentSeconds(600)
@@ -2390,7 +2385,6 @@ class AssignmentIntegrationTest {
             AssignmentSubmission sub = submissionRepository.save(AssignmentSubmission.builder()
                     .assignmentId(a.getId()).userId(learner.getId())
                     .status(SubmissionStatus.GRADED).attemptNumber(1)
-                    .writtenAnswer("私の答えです。")
                     .startedAt(LocalDateTime.now().minusDays(2))
                     .submittedAt(LocalDateTime.now().minusDays(1))
                     .gradedAt(LocalDateTime.now())
@@ -2721,7 +2715,7 @@ class AssignmentIntegrationTest {
 
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    "{\"writtenAnswer\":\"テスト\",\"timeSpentSeconds\":60}".getBytes());
+                    "{\"timeSpentSeconds\":60}".getBytes());
             MockMultipartFile imagePart = new MockMultipartFile(
                     "images", "test.png", "image/png", "dummy image".getBytes());
 
@@ -2748,7 +2742,7 @@ class AssignmentIntegrationTest {
 
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    "{\"writtenAnswer\":\"テスト\",\"timeSpentSeconds\":60}".getBytes());
+                    "{\"timeSpentSeconds\":60}".getBytes());
 
             var builder = multipart("/api/v1/learner/assignments/{id}/submit-writing", a.getId())
                     .file(dataPart);
