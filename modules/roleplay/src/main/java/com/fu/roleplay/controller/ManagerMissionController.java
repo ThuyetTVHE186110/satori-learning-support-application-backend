@@ -21,7 +21,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/manager/roleplay/missions")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('MANAGER')")
+@PreAuthorize("hasRole('CONTENT_MANAGER')")
 public class ManagerMissionController {
 
     private final MissionService missionService;

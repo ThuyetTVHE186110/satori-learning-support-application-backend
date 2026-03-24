@@ -45,7 +45,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/manager/conversation")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('MANAGER')")
+@PreAuthorize("hasRole('CONTENT_MANAGER')")
 public class ManagerConversationController {
 
     private final ConversationThemeService themeService;
