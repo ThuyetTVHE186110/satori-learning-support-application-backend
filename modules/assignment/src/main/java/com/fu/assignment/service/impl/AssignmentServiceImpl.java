@@ -11,6 +11,7 @@ import com.fu.assignment.entity.*;
 import com.fu.assignment.exception.AssignmentNotFoundException;
 import com.fu.assignment.mapper.AssignmentMapper;
 import com.fu.assignment.repository.*;
+import com.fu.assignment.service.AssignmentScheduleManager;
 import com.fu.assignment.service.AssignmentService;
 import com.fu.assignment.service.SubmissionService;
 import com.fu.clazz.entity.Clazz;
@@ -59,6 +60,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     private final CloudinaryService cloudinaryService;
     private final SubmissionService submissionService;
     private final AiGradingService aiGradingService;
+    private final AssignmentScheduleManager scheduleManager;
 
     private static final String SUBMISSION_IMAGE_FOLDER = "satori/assignment-submissions";
     private static final String SUBMISSION_FAILED_MSG = "Không thể lưu hoặc chấm điểm bài nộp.";
@@ -168,6 +170,8 @@ public class AssignmentServiceImpl implements AssignmentService {
         // Save assignment
         Assignment savedAssignment = assignmentRepository.save(assignment);
         UUID finalAssignmentId = savedAssignment.getId();
+
+        scheduleManager.scheduleClosing(savedAssignment);
 
         // If new assignment, bind it to the class target
         if (isNewAssignment && classId != null) {
@@ -280,6 +284,8 @@ public class AssignmentServiceImpl implements AssignmentService {
         Assignment savedAssignment = assignmentRepository.save(assignment);
         UUID savedId = savedAssignment.getId();
 
+        scheduleManager.scheduleClosing(savedAssignment);
+
         // If new assignment, bind it to the class target
         if (isNewAssignment && classId != null) {
             AssignmentTarget target = AssignmentTarget.builder().assignmentId(savedId).classId(classId).build();
@@ -307,6 +313,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         requireDraftOrNoSubmission(assignment);
         assignment.softDelete(teacherId);
         assignmentRepository.save(assignment);
+        scheduleManager.cancelScheduledClosing(assignmentId);
         log.info("Assignment {} soft-deleted by teacher {}", assignmentId, teacherId);
     }
 
