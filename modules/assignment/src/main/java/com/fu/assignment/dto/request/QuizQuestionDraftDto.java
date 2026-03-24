@@ -42,7 +42,6 @@ public class QuizQuestionDraftDto {
 
 
     private String explanation;
-    private String imageUrl;
 
     private Course.JlptLevel jlptLevel;
 

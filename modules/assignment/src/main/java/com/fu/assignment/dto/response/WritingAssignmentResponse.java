@@ -18,6 +18,5 @@ public class WritingAssignmentResponse {
     private UUID id;
     private UUID assignmentId;
     private String prompt;
-    private String sourceText;            // For TRANSLATION: the passage to translate
     private LocalDateTime createdAt;
 }

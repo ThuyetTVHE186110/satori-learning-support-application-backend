@@ -25,4 +25,5 @@ public class SubmissionSummaryResponse {
     private Integer attemptNumber;
     private BigDecimal score;
     private LocalDateTime submittedAt;
+
 }

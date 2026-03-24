@@ -16,15 +16,6 @@ import java.util.UUID;
 public interface QuizQuestionRepository extends JpaRepository<QuizQuestion, UUID> {
 
     /**
-     * Find all published questions for a specific lesson.
-     */
-    @Query("""
-            SELECT q FROM QuizQuestion q
-            WHERE q.lessonId = :lessonId
-            """)
-    List<QuizQuestion> findPublishedByLessonId(@Param("lessonId") UUID lessonId);
-
-    /**
      * Find questions linked to a specific assignment (via assignment_questions join).
      */
     @Query("""
