@@ -1463,7 +1463,7 @@ Response JSON:
 2. AuthFilter validates token and resolves OPERATION_MANAGER user identity.
 3. ClassController calls ClassService.getEligibleLearners().
 4. ClassService retrieves eligible learners via UserRepository.findEligibleLearners().
-5. UserRepository filters by status IN ('ACTIVE', 'INACTIVE').
+5. UserRepository filters by status IN ('INACTIVE').
 6. System returns paginated response with eligible learners only.
 
 **Expected Results:** HTTP 200 OK
@@ -1797,5 +1797,41 @@ Database state:
 - ClassMember records still intact with removedAt = null (historical data preserved)
 - Active learner status unchanged (ACTIVE)
 - Inactive learner status unchanged (INACTIVE)
+
+---
+
+### Test Case ID: TC_CLM_CC_003
+**Test Case Description:** Cannot create class with end date in the past
+
+**Pre-conditions:**
+- Manager accessToken is available (from prior login)
+- Teacher user exists in database with ACTIVE status
+- Course exists with ACTIVE status
+
+**Test Case Procedure:**
+1. Client prepares request body with end date in the past (10 days ago):
+   {
+     "name": "Past Due Class",
+     "description": "Test class with past end date",
+     "teacherId": "{teacherId}",
+     "courseId": "{courseId}",
+     "maxStudents": 20,
+     "startDate": "{currentDate}",
+     "endDate": "{pastDate}"
+   }
+2. Client sends POST /api/v1/classes with Authorization: Bearer {token} and JSON body.
+3. AuthFilter validates token and resolves OPERATION_MANAGER user identity.
+4. ClassController calls ClassService.createClass().
+5. ClassService validates request parameters including date range.
+6. ClassService detects endDate (past date) < current date.
+7. ClassService throws BusinessException with INVALID_DATE_RANGE.
+8. System returns the validation error response.
+
+**Expected Results:** HTTP 400 BAD REQUEST
+Response JSON:
+- success = false
+- code = "INVALID_END_DATE"
+
+```
 
 ---

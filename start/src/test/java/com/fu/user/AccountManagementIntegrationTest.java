@@ -452,6 +452,8 @@ class AccountManagementIntegrationTest {
                     .andExpect(jsonPath("$.data.userInfo.role").value("LEARNER"))
                     .andExpect(jsonPath("$.data.userInfo.email").value("learner@test.com"))
                     .andExpect(jsonPath("$.data.userInfo.status").value("ACTIVE"))
+                    .andExpect(jsonPath("$.data.userInfo.createdAt").isNotEmpty())
+                    .andExpect(jsonPath("$.data.userInfo.updatedAt").isNotEmpty())
                     .andExpect(jsonPath("$.data.userInfo.firstName").isNotEmpty())
                     .andExpect(jsonPath("$.data.userInfo.lastName").isNotEmpty())
                     .andExpect(jsonPath("$.data.courseEnrollments").isArray())

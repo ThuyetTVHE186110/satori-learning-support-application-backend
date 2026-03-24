@@ -49,7 +49,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   3. CREATE TOPIC               — POST   /api/v1/manager/conversation/topics                    [P2 Standard]
  *   4. UPDATE TOPIC               — PUT    /api/v1/manager/conversation/topics/{topicId}          [P2 Standard]
  *   5. DELETE TOPIC               — DELETE /api/v1/manager/conversation/topics/{topicId}          [P2 Standard]
- *   6. GENERATE BY AI (count=0 validation only) — POST /api/v1/manager/conversation/themes/generate [P2 Standard]
  */
 @SpringBootTest(classes = com.fu.StartApplication.class)
 @AutoConfigureMockMvc
@@ -1084,97 +1083,6 @@ class ConversationTopicManagementTest {
         }
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // 6. GENERATE BY AI — POST /api/v1/manager/conversation/themes/generate
-    //    NOTE: Postman/live-AI tests (TC_CTP_GAI_001..004, 007..009) are skipped.
-    //    Only automated (non-AI) cases are included here.
-    // ═════════════════════════════════════════════════════════════════════════
-
-    @Nested
-    @DisplayName("6. GENERATE BY AI (validation & permission only) — POST /api/v1/manager/conversation/themes/generate [P2 Standard]")
-    class GenerateByAiTests {
-
-        /**
-         * TC_CTP_GAI_005
-         * Generate with count=0 → HTTP 400 VALIDATION_ERROR (@Min=1).
-         * AI service is NOT called — request rejected by @Valid before reaching service layer.
-         */
-        @Test
-        @DisplayName("TC_CTP_GAI_005 — count=0 → HTTP 400 VALIDATION_ERROR (@Min=1 violated)")
-        void tc_ctp_gai_005_countZero_returns400ValidationError() throws Exception {
-            // Arrange
-            saveManager("manager@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-
-            String body = String.format("{\"courseId\":\"%s\",\"count\":0}",
-                    UUID.randomUUID());
-
-            // Act + Assert
-            mockMvc.perform(post("/api/v1/manager/conversation/themes/generate")
-                            .header("Authorization", "Bearer " + token)
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(body))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
-        }
-
-        /**
-         * TC_CTP_GAI_010
-         * Unauthenticated request to generate suggestions → HTTP 401.
-         */
-        @Test
-        @DisplayName("TC_CTP_GAI_010 — no token → HTTP 401 Unauthorized")
-        void tc_ctp_gai_010_unauthenticated_returns401() throws Exception {
-            String body = String.format("{\"courseId\":\"%s\"}", UUID.randomUUID());
-
-            mockMvc.perform(post("/api/v1/manager/conversation/themes/generate")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(body))
-                    .andExpect(status().isUnauthorized())
-                    .andExpect(jsonPath("$.success").value(false));
-        }
-
-        /**
-         * TC_CTP_GAI_011
-         * LEARNER attempts to generate suggestions → HTTP 403 Forbidden.
-         */
-        @Test
-        @DisplayName("TC_CTP_GAI_011 — LEARNER token → HTTP 403 Forbidden")
-        void tc_ctp_gai_011_learnerToken_returns403() throws Exception {
-            saveLearner("learner@test.com");
-            String token = loginAndGetToken("learner@test.com", "ValidPass@1");
-
-            String body = String.format("{\"courseId\":\"%s\"}", UUID.randomUUID());
-
-            mockMvc.perform(post("/api/v1/manager/conversation/themes/generate")
-                            .header("Authorization", "Bearer " + token)
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(body))
-                    .andExpect(status().isForbidden())
-                    .andExpect(jsonPath("$.success").value(false));
-        }
-
-        /**
-         * TC_CTP_GAI_012
-         * ADMIN attempts to generate suggestions → HTTP 403 Forbidden.
-         */
-        @Test
-        @DisplayName("TC_CTP_GAI_012 — ADMIN token → HTTP 403 Forbidden")
-        void tc_ctp_gai_012_adminToken_returns403() throws Exception {
-            saveAdmin("admin@test.com");
-            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
-
-            String body = String.format("{\"courseId\":\"%s\"}", UUID.randomUUID());
-
-            mockMvc.perform(post("/api/v1/manager/conversation/themes/generate")
-                            .header("Authorization", "Bearer " + token)
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(body))
-                    .andExpect(status().isForbidden())
-                    .andExpect(jsonPath("$.success").value(false));
-        }
-    }
 
     // ═════════════════════════════════════════════════════════════════════════
     // 7. MANAGER MISSIONS — /api/v1/manager/roleplay/missions

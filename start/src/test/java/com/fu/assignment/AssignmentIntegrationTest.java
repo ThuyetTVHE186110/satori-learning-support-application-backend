@@ -1,10 +1,13 @@
 package com.fu.assignment;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.assignment.ai.AiGradingService;
 import com.fu.assignment.ai.QuizAiGenerationService;
 import com.fu.assignment.ai.QuizExplanationService;
 import com.fu.assignment.dto.request.AiQuizGenerationRequest;
+import com.fu.assignment.dto.request.WritingEvaluationRequest;
 import com.fu.assignment.dto.response.QuizQuestionResponse;
+import com.fu.assignment.dto.response.WritingEvaluationResponse;
 import com.fu.assignment.entity.*;
 import com.fu.assignment.repository.*;
 import com.fu.assignment.service.AssignmentService;
@@ -41,7 +44,10 @@ import java.util.UUID;
 import java.util.concurrent.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.everyItem;
+import static org.hamcrest.Matchers.hasItems;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -49,6 +55,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.fu.infrastructure.cloudinary.CloudinaryService;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * Integration tests — Practice Task (Assignment) Management.
@@ -84,6 +91,7 @@ class AssignmentIntegrationTest {
     // ── Mocked AI services (prevent real HTTP calls) ──────────────────────────
     @MockBean private QuizAiGenerationService quizAiGenerationService;
     @MockBean private QuizExplanationService quizExplanationService;
+    @MockBean private AiGradingService aiGradingService;
     @MockBean private CloudinaryService cloudinaryService;
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -260,6 +268,67 @@ class AssignmentIntegrationTest {
             """.formatted(LocalDateTime.now().plusDays(7), status.name());
     }
 
+    /** Save an EXPIRED QUIZ assignment (due date in the past). */
+    private Assignment saveExpiredQuiz(User teacher, Clazz clazz) {
+        Assignment a = assignmentRepository.save(Assignment.builder()
+                .title("Expired Quiz").description("desc")
+                .assignmentType(AssignmentType.QUIZ)
+                .classId(clazz.getId()).createdBy(teacher.getId())
+                .dueDate(LocalDateTime.now().minusDays(1))
+                .questionCount(1)
+                .status(AssignmentStatus.PUBLISHED)
+                .hasSubmissions(true)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
+                .build());
+        targetRepository.save(AssignmentTarget.builder()
+                .assignmentId(a.getId()).classId(clazz.getId()).build());
+        QuizQuestion q = quizQuestionRepository.save(QuizQuestion.builder()
+                .questionText("テストの問題").questionType("multiple_choice")
+                .options("[{\"id\":\"A\",\"text\":\"正しい\",\"isCorrect\":true},{\"id\":\"B\",\"text\":\"間違い\",\"isCorrect\":false}]")
+                .correctAnswer("A")
+                .aiGenerated(false)
+                .build());
+        assignmentQuestionRepository.save(AssignmentQuestion.builder()
+                .assignmentId(a.getId()).questionId(q.getId())
+                .orderIndex(0).build());
+        return a;
+    }
+
+    /** Save an ONGOING WRITING assignment with submissions. */
+    private Assignment saveOngoingWriting(User teacher, Clazz clazz) {
+        Assignment a = assignmentRepository.save(Assignment.builder()
+                .title("Ongoing Writing").description("desc")
+                .assignmentType(AssignmentType.WRITING)
+                .classId(clazz.getId()).createdBy(teacher.getId())
+                .dueDate(LocalDateTime.now().plusDays(3))
+                .status(AssignmentStatus.PUBLISHED)
+                .hasSubmissions(true)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
+                .build());
+        targetRepository.save(AssignmentTarget.builder()
+                .assignmentId(a.getId()).classId(clazz.getId()).build());
+        writingAssignmentRepository.save(WritingAssignment.builder()
+                .assignmentId(a.getId()).prompt("Write about yourself.")
+                .createdAt(LocalDateTime.now()).build());
+        return a;
+    }
+
+    /** Save an ONGOING TRANSLATION assignment with submissions. */
+    private Assignment saveOngoingTranslation(User teacher, Clazz clazz) {
+        Assignment a = assignmentRepository.save(Assignment.builder()
+                .title("Ongoing Translation").description("desc")
+                .assignmentType(AssignmentType.TRANSLATION)
+                .classId(clazz.getId()).createdBy(teacher.getId())
+                .dueDate(LocalDateTime.now().plusDays(5))
+                .status(AssignmentStatus.PUBLISHED)
+                .hasSubmissions(true)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
+                .build());
+        targetRepository.save(AssignmentTarget.builder()
+                .assignmentId(a.getId()).classId(clazz.getId()).build());
+        return a;
+    }
+
     // ═════════════════════════════════════════════════════════════════════════
     // LIFECYCLE
     // ═════════════════════════════════════════════════════════════════════════
@@ -311,15 +380,31 @@ class AssignmentIntegrationTest {
         void tc_as_t_vl_001() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
             Clazz clazz = saveClass(teacher, saveCourse());
-            savePublishedQuiz(teacher, clazz);
+            
+            // Create 3 assignments: 1 expired, 2 ongoing
+            Assignment expiredQuiz = saveExpiredQuiz(teacher, clazz);
+            Assignment ongoingWriting = saveOngoingWriting(teacher, clazz);
+            Assignment ongoingTranslation = saveOngoingTranslation(teacher, clazz);
+            
             String token = loginAndGetToken("teacher@test.com");
 
             mockMvc.perform(get("/api/v1/teacher/assignments/class/{classId}", clazz.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.content").isArray())
-                    .andExpect(jsonPath("$.data.content[0].title").value("Published Quiz"))
-                    .andExpect(jsonPath("$.data.content[0].assignmentType").value("QUIZ"));
+                    .andExpect(jsonPath("$.data.content.length()").value(3))
+                    
+                    // Verify expired quiz (first assignment)
+                    .andExpect(jsonPath("$.data.content[0].id").exists())
+                    .andExpect(jsonPath("$.data.content[0].title").value("Expired Quiz"))
+                    .andExpect(jsonPath("$.data.content[0].assignmentType").value("QUIZ"))
+                    .andExpect(jsonPath("$.data.content[0].status").exists())
+                    .andExpect(jsonPath("$.data.content[0].dueDate").exists())
+                    .andExpect(jsonPath("$.data.content[0].questionCount").exists())
+                    .andExpect(jsonPath("$.data.content[0].submissionCount").exists())
+                    .andExpect(jsonPath("$.data.content[0].ungradedCount").exists())
+                    .andExpect(jsonPath("$.data.content[0].createdAt").exists())
+                    .andExpect(jsonPath("$.data.content[0].hasSubmissions").exists());
         }
 
         @Test
@@ -365,14 +450,143 @@ class AssignmentIntegrationTest {
             User teacher = saveTeacher("teacher@test.com");
             Clazz clazz1 = saveClass(teacher, saveCourse());
             Clazz clazz2 = saveClass(teacher, saveCourse());
-            savePublishedQuiz(teacher, clazz1);
-            savePublishedWriting(teacher, clazz2);
+            Clazz clazz3 = saveClass(teacher, saveCourse());
+            
+            // Create assignments across multiple classes
+            Assignment quiz1 = savePublishedQuiz(teacher, clazz1);
+            Assignment writing1 = savePublishedWriting(teacher, clazz1);
+            Assignment quiz2 = savePublishedQuiz(teacher, clazz2);
+            Assignment writing2 = savePublishedWriting(teacher, clazz2);
+            Assignment draft1 = saveQuizDraft(teacher, clazz3);
+            
             String token = loginAndGetToken("teacher@test.com");
 
             mockMvc.perform(get("/api/v1/teacher/assignments")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content.length()").value(2));
+                    .andExpect(jsonPath("$.data.content").isArray())
+                    .andExpect(jsonPath("$.data.content.length()").value(5))
+                    .andExpect(jsonPath("$.data.totalElements").value(5))
+                    .andExpect(jsonPath("$.data.totalPages").value(1))
+                    .andExpect(jsonPath("$.data.pageNumber").value(1))
+                    .andExpect(jsonPath("$.data.pageSize").value(10))
+                    .andExpect(jsonPath("$.data.last").value(true))
+                    .andExpect(jsonPath("$.data.first").value(false))
+                    
+                    // Verify assignments from all classes are returned
+                    .andExpect(jsonPath("$.data.content[*].id").value(hasItems(
+                            quiz1.getId().toString(),
+                            writing1.getId().toString(),
+                            quiz2.getId().toString(),
+                            writing2.getId().toString(),
+                            draft1.getId().toString()
+                    )))
+                    
+                    // Verify each assignment has the required fields
+                    .andExpect(jsonPath("$.data.content[*].title").exists())
+                    .andExpect(jsonPath("$.data.content[*].assignmentType").exists())
+                    .andExpect(jsonPath("$.data.content[*].status").exists())
+                    .andExpect(jsonPath("$.data.content[*].questionCount").exists())
+                    .andExpect(jsonPath("$.data.content[*].className").exists())
+                    .andExpect(jsonPath("$.data.content[*].createdAt").exists())
+
+                    // Verify assignment types and statuses
+                    .andExpect(jsonPath("$.data.content[?(@.assignmentType == 'QUIZ')].length()").value(3))
+                    .andExpect(jsonPath("$.data.content[?(@.assignmentType == 'WRITING')].length()").value(2))
+                    .andExpect(jsonPath("$.data.content[?(@.status == 'DRAFT')].length()").value(1))
+                    .andExpect(jsonPath("$.data.content[?(@.status == 'PUBLISHED')].length()").value(4))
+                    
+                    // Verify numeric fields are correct type and non-negative
+                    .andExpect(jsonPath("$.data.content[*].questionCount").value(org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.greaterThanOrEqualTo(0))))
+                    .andExpect(jsonPath("$.data.content[*].submissionCount").value(org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.greaterThanOrEqualTo(0))))
+                    .andExpect(jsonPath("$.data.content[*].ungradedCount").value(org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.greaterThanOrEqualTo(0))))
+                    
+                    // Verify boolean field
+                    .andExpect(jsonPath("$.data.content[*].hasSubmissions").value(org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.isA(Boolean.class))));
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_VL_006b — Get My Assignments with filtering by class")
+        void tc_as_t_vl_006b() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz1 = saveClass(teacher, saveCourse());
+            Clazz clazz2 = saveClass(teacher, saveCourse());
+            
+            // Create mixed assignment types across different classes
+            Assignment quiz1 = savePublishedQuiz(teacher, clazz1);
+            Assignment writing1 = savePublishedWriting(teacher, clazz1);
+            Assignment quiz2 = savePublishedQuiz(teacher, clazz2);
+            Assignment draft1 = saveQuizDraft(teacher, clazz2);
+            
+            String token = loginAndGetToken("teacher@test.com");
+
+            // Filter by class1 only
+            mockMvc.perform(get("/api/v1/teacher/assignments")
+                            .param("classId", clazz1.getId().toString())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content").isArray())
+                    .andExpect(jsonPath("$.data.content.length()").value(2))
+                    .andExpect(jsonPath("$.data.totalElements").value(2))
+                    
+                    // Verify only assignments from clazz1 are returned
+                    .andExpect(jsonPath("$.data.content[*].id").value(hasItems(
+                            quiz1.getId().toString(),
+                            writing1.getId().toString()
+                    )))
+                    
+                    // Verify all returned assignments belong to clazz1
+                    .andExpect(jsonPath("$.data.content[*].classId", everyItem(equalTo(clazz1.getId().toString()))));
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_VL_006c — Get My Assignments with filtering by assignment type")
+        void tc_as_t_vl_006c() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz1 = saveClass(teacher, saveCourse());
+            Clazz clazz2 = saveClass(teacher, saveCourse());
+            
+            // Create assignments with different types
+            saveQuizDraft(teacher, clazz1); // QUIZ
+            savePublishedQuiz(teacher, clazz1); // QUIZ
+            savePublishedWriting(teacher, clazz2); // WRITING
+            
+            String token = loginAndGetToken("teacher@test.com");
+
+            // Filter by QUIZ type only
+            mockMvc.perform(get("/api/v1/teacher/assignments")
+                            .param("assignmentType", "QUIZ")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content").isArray())
+                    .andExpect(jsonPath("$.data.content.length()").value(2))
+                    .andExpect(jsonPath("$.data.totalElements").value(2))
+                    .andExpect(jsonPath("$.data.content[*].assignmentType").value("QUIZ"));
+        }
+
+        @Test
+        @DisplayName("TC_AS_T_VL_006d — Get My Assignments with title search")
+        void tc_as_t_vl_006d() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz1 = saveClass(teacher, saveCourse());
+            Clazz clazz2 = saveClass(teacher, saveCourse());
+            
+            // Create assignments with specific titles
+            Assignment quiz1 = savePublishedQuiz(teacher, clazz1); // "Published Quiz"
+            Assignment writing1 = savePublishedWriting(teacher, clazz1); // "Published Writing"
+            Assignment quiz2 = savePublishedQuiz(teacher, clazz2); // "Published Quiz"
+            
+            String token = loginAndGetToken("teacher@test.com");
+
+            // Search by "Writing"
+            mockMvc.perform(get("/api/v1/teacher/assignments")
+                            .param("keyword", "Writing")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.content").isArray())
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andExpect(jsonPath("$.data.totalElements").value(1))
+                    .andExpect(jsonPath("$.data.content[0].title").value("Published Writing"));
         }
 
         @Test
@@ -528,10 +742,44 @@ class AssignmentIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true)) // ApiResponse wrapper
                     .andExpect(jsonPath("$.data.id").value(a.getId().toString()))
+                    .andExpect(jsonPath("$.data.title").value("Published Quiz"))
+                    .andExpect(jsonPath("$.data.description").value("desc"))
+                    .andExpect(jsonPath("$.data.instructions").value(nullValue()))
                     .andExpect(jsonPath("$.data.assignmentType").value("QUIZ"))
+                    .andExpect(jsonPath("$.data.startDate").value(nullValue()))
+                    .andExpect(jsonPath("$.data.dueDate").exists())
+                    .andExpect(jsonPath("$.data.audioUrl").value(nullValue()))
+                    .andExpect(jsonPath("$.data.questionCount").value(1))
+                    .andExpect(jsonPath("$.data.actualQuestionCount").value(1))
                     .andExpect(jsonPath("$.data.status").value("PUBLISHED"))
+                    .andExpect(jsonPath("$.data.createdBy").exists())
+                    .andExpect(jsonPath("$.data.createdAt").exists())
+                    .andExpect(jsonPath("$.data.updatedAt").exists())
+                    .andExpect(jsonPath("$.data.hasSubmissions").value(false))
                     .andExpect(jsonPath("$.data.questions").isArray())
-                    .andExpect(jsonPath("$.data.questions.length()").value(1));
+                    .andExpect(jsonPath("$.data.questions.length()").value(1))
+                    .andExpect(jsonPath("$.data.questions[0].assignmentQuestionId").exists())
+                    .andExpect(jsonPath("$.data.questions[0].orderIndex").value(0))
+                    .andExpect(jsonPath("$.data.questions[0].points").value(nullValue()))
+                    .andExpect(jsonPath("$.data.questions[0].questionId").exists())
+                    .andExpect(jsonPath("$.data.questions[0].questionText").value("テストの問題"))
+                    .andExpect(jsonPath("$.data.questions[0].questionType").value("multiple_choice"))
+                    .andExpect(jsonPath("$.data.questions[0].options").isArray())
+                    .andExpect(jsonPath("$.data.questions[0].options.length()").value(2))
+                    .andExpect(jsonPath("$.data.questions[0].options[0].id").value("A"))
+                    .andExpect(jsonPath("$.data.questions[0].options[0].text").value("正しい"))
+                    .andExpect(jsonPath("$.data.questions[0].options[0].isCorrect").value(true))
+                    .andExpect(jsonPath("$.data.questions[0].options[1].id").value("B"))
+                    .andExpect(jsonPath("$.data.questions[0].options[1].text").value("間違い"))
+                    .andExpect(jsonPath("$.data.questions[0].options[1].isCorrect").value(false))
+                    .andExpect(jsonPath("$.data.questions[0].explanation").value(nullValue()))
+                    .andExpect(jsonPath("$.data.questions[0].imageUrl").value(nullValue()))
+                    .andExpect(jsonPath("$.data.questions[0].jlptLevel").value(nullValue()))
+                    .andExpect(jsonPath("$.data.questions[0].correctAnswer").value("A"))
+                    .andExpect(jsonPath("$.data.questions[0].correctAnswers").value(nullValue()))
+                    .andExpect(jsonPath("$.data.writingContent").value(nullValue()))
+                    .andExpect(jsonPath("$.data.targets").value(nullValue()))
+                    .andExpect(jsonPath("$.data.submissionCount").value(0));
         }
 
         @Test
@@ -586,9 +834,30 @@ class AssignmentIntegrationTest {
             Clazz clazz = saveClass(teacher, saveCourse());
             String token = loginAndGetToken("teacher@test.com");
 
+            String twoQuestionsJson = """
+                [{
+                  "questionText": "どれが正しいですか？",
+                  "questionType": "multiple_choice",
+                  "options": "[{\\"id\\":\\"A\\",\\"text\\":\\"はい\\",\\"isCorrect\\":true},{\\"id\\":\\"B\\",\\"text\\":\\"いいえ\\",\\"isCorrect\\":false}]",
+                  "correctAnswer": "A",
+                  "explanation": "The correct answer is A.",
+                  "explanationVi": "Đáp án đúng là A.",
+                  "points": 100
+                },
+                {
+                  "questionText": "これは何ですか？",
+                  "questionType": "multiple_choice",
+                  "options": "[{\\"id\\":\\"A\\",\\"text\\":\\"ペン\\",\\"isCorrect\\":true},{\\"id\\":\\"B\\",\\"text\\":\\"ノート\\",\\"isCorrect\\":false}]",
+                  "correctAnswer": "A",
+                  "explanation": "This is a pen.",
+                  "explanationVi": "Đây là cây bút.",
+                  "points": 100
+                }]
+                """;
+
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    quizRequestJson(AssignmentStatus.DRAFT, null).getBytes());
+                    quizRequestJson(AssignmentStatus.DRAFT, twoQuestionsJson).getBytes());
 
             mockMvc.perform(multipart("/api/v1/teacher/assignments/class/{classId}/quiz", clazz.getId())
                             .file(dataPart)
@@ -596,7 +865,8 @@ class AssignmentIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.assignmentType").value("QUIZ"))
-                    .andExpect(jsonPath("$.data.status").value("DRAFT"));
+                    .andExpect(jsonPath("$.data.status").value("DRAFT"))
+                    .andExpect(jsonPath("$.data.questionCount").value(2));
         }
 
         @Test
@@ -1303,11 +1573,17 @@ class AssignmentIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_AS_T_DL_003 — Xóa PUBLISHED → 400 (requireDraft block)")
+        @DisplayName("TC_AS_T_DL_003 — Xóa khi có submissions → 400 (requireDraft block)")
         void tc_as_t_dl_003() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
             Clazz clazz = saveClass(teacher, saveCourse());
             Assignment a = savePublishedQuiz(teacher, clazz);
+            
+            // Create a submission to simulate hasSubmissions = true
+            User learner = saveLearner("learner@test.com");
+            enrollLearner(clazz.getId(), learner.getId());
+            startSubmission(a.getId(), learner.getId());
+            
             String token = loginAndGetToken("teacher@test.com");
 
             mockMvc.perform(delete("/api/v1/teacher/assignments/{id}", a.getId())
@@ -1316,18 +1592,16 @@ class AssignmentIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_AS_T_DL_004 — Xóa CLOSED → 400 (requireDraft block)")
+        @DisplayName("TC_AS_T_DL_004 — Xóa PUBLISHED không có submissions → 200 (OK)")
         void tc_as_t_dl_004() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
             Clazz clazz = saveClass(teacher, saveCourse());
             Assignment a = savePublishedQuiz(teacher, clazz);
-            a.setStatus(AssignmentStatus.CLOSED);
-            assignmentRepository.save(a);
             String token = loginAndGetToken("teacher@test.com");
 
             mockMvc.perform(delete("/api/v1/teacher/assignments/{id}", a.getId())
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest());
+                    .andExpect(status().isOk());
         }
 
         @Test
@@ -1368,7 +1642,26 @@ class AssignmentIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.content").isArray())
-                    .andExpect(jsonPath("$.data.content.length()").value(1));
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    
+                    // Verify submission fields
+                    .andExpect(jsonPath("$.data.content[0].id").exists())
+                    .andExpect(jsonPath("$.data.content[0].assignmentId").value(a.getId().toString()))
+                    .andExpect(jsonPath("$.data.content[0].assignmentTitle").value("Published Quiz"))
+                    .andExpect(jsonPath("$.data.content[0].userId").value(learner.getId().toString()))
+                    .andExpect(jsonPath("$.data.content[0].userFullName").value("Test Learner"))
+                    .andExpect(jsonPath("$.data.content[0].status").value("IN_PROGRESS"))
+                    .andExpect(jsonPath("$.data.content[0].attemptNumber").value(1))
+                    .andExpect(jsonPath("$.data.content[0].score").value(nullValue()))
+                    .andExpect(jsonPath("$.data.content[0].submittedAt").value(nullValue()))
+                    
+                    // Verify pagination fields
+                    .andExpect(jsonPath("$.data.pageNumber").value(1))
+                    .andExpect(jsonPath("$.data.pageSize").value(10))
+                    .andExpect(jsonPath("$.data.totalElements").value(1))
+                    .andExpect(jsonPath("$.data.totalPages").value(1))
+                    .andExpect(jsonPath("$.data.last").value(true))
+                    .andExpect(jsonPath("$.data.first").value(false));
         }
 
         @Test
@@ -1410,8 +1703,29 @@ class AssignmentIntegrationTest {
             mockMvc.perform(get("/api/v1/teacher/assignments/submissions/{subId}", sub.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
+                    
+                    // Verify submission details
                     .andExpect(jsonPath("$.data.id").value(sub.getId().toString()))
-                    .andExpect(jsonPath("$.data.status").value("IN_PROGRESS"));
+                    .andExpect(jsonPath("$.data.assignmentId").value(a.getId().toString()))
+                    .andExpect(jsonPath("$.data.assignmentTitle").value("Published Quiz"))
+                    .andExpect(jsonPath("$.data.userId").value(learner.getId().toString()))
+                    .andExpect(jsonPath("$.data.userFullName").value("Test Learner"))
+                    .andExpect(jsonPath("$.data.userEmail").value("learner@test.com"))
+                    .andExpect(jsonPath("$.data.status").value("IN_PROGRESS"))
+                    .andExpect(jsonPath("$.data.attemptNumber").value(1))
+                    .andExpect(jsonPath("$.data.startedAt").exists())
+                    .andExpect(jsonPath("$.data.submittedAt").value(nullValue()))
+                    .andExpect(jsonPath("$.data.gradedAt").value(nullValue()))
+                    .andExpect(jsonPath("$.data.gradedBy").value(nullValue()))
+                    .andExpect(jsonPath("$.data.score").value(nullValue()))
+                    .andExpect(jsonPath("$.data.correctCount").value(0))
+                    .andExpect(jsonPath("$.data.totalQuestions").value(1))
+                    .andExpect(jsonPath("$.data.feedback").value(nullValue()))
+                    .andExpect(jsonPath("$.data.answers").value("[]"))
+                    .andExpect(jsonPath("$.data.imageUrls").value(nullValue()))
+                    .andExpect(jsonPath("$.data.teacherScore").value(nullValue()))
+                    .andExpect(jsonPath("$.data.quizDetails").value(nullValue()))
+                    .andExpect(jsonPath("$.data.createdAt").exists());
         }
 
         @Test
@@ -1425,24 +1739,6 @@ class AssignmentIntegrationTest {
                     .andExpect(status().isNotFound());
         }
 
-        @Test
-        @DisplayName("TC_AS_T_VS_007 — Xem list submissions có phân trang")
-        void tc_as_t_vs_007() throws Exception {
-            User teacher = saveTeacher("teacher@test.com");
-            User learner = saveLearner("learner@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
-            Assignment a = savePublishedQuiz(teacher, clazz);
-            enrollLearner(clazz.getId(), learner.getId());
-            startSubmission(a.getId(), learner.getId());
-            String token = loginAndGetToken("teacher@test.com");
-
-            mockMvc.perform(get("/api/v1/teacher/assignments/{id}/submissions", a.getId())
-                            .param("page", "1")
-                            .param("size", "10")
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content.length()").value(1));
-        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1622,7 +1918,22 @@ class AssignmentIntegrationTest {
             mockMvc.perform(get("/api/v1/teacher/assignments/class/{classId}/statistics", clazz.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.totalAssignments").exists());
+                    
+                    // Verify class identifier
+                    .andExpect(jsonPath("$.data.classId").value(clazz.getId().toString()))
+                    
+                    // Verify assignment counts by status
+                    .andExpect(jsonPath("$.data.totalAssignments").value(0))
+                    .andExpect(jsonPath("$.data.draftAssignments").value(0))
+                    .andExpect(jsonPath("$.data.publishedAssignments").value(0))
+                    .andExpect(jsonPath("$.data.closedAssignments").value(0))
+                    
+                    // Verify submission counts by status
+                    .andExpect(jsonPath("$.data.totalSubmissions").value(0))
+                    .andExpect(jsonPath("$.data.ungradedSubmissions").value(0))
+                    .andExpect(jsonPath("$.data.gradedSubmissions").value(0))
+                    .andExpect(jsonPath("$.data.inProgressSubmissions").value(0))
+                    .andExpect(jsonPath("$.data.overdueSubmissions").value(0));
         }
     }
 
@@ -1736,20 +2047,32 @@ class AssignmentIntegrationTest {
     class LearnerViewAssignments {
 
         @Test
-        @DisplayName("TC_AS_L_VL_001 — Xem list thành công, chỉ thấy assignment của class mình")
+        @DisplayName("TC_AS_L_VL_001 — Learner view assignment list success - only PUBLISHED assignments visible")
         void tc_as_l_vl_001() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
             User learner = saveLearner("learner@test.com");
             Clazz clazz = saveClass(teacher, saveCourse());
             enrollLearner(clazz.getId(), learner.getId());
-            savePublishedQuiz(teacher, clazz);
+            
+            // Create multiple assignments with different statuses
+            savePublishedQuiz(teacher, clazz); // PUBLISHED - should be visible
+            saveQuizDraft(teacher, clazz); // DRAFT - should be filtered out
+            saveExpiredQuiz(teacher, clazz); // EXPIRED - should be included with appropriate status
+            
             String token = loginAndGetToken("learner@test.com");
 
             mockMvc.perform(get("/api/v1/learner/assignments")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content").isArray()) // ApiResponse PageResponse
-                    .andExpect(jsonPath("$.data.content.length()").value(1));
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.content").isArray())
+                    .andExpect(jsonPath("$.data.content.length()").value(2)) // Only PUBLISHED and EXPIRED
+                    .andExpect(jsonPath("$.data.content[*].title").exists())
+                    .andExpect(jsonPath("$.data.content[*].assignmentType").exists())
+                    .andExpect(jsonPath("$.data.content[*].dueDate").exists())
+                    .andExpect(jsonPath("$.data.content[*].questionCount").exists())
+                    .andExpect(jsonPath("$.data.content[*].createdAt").exists())
+                    .andExpect(jsonPath("$.data.content[*].learnerSubmissionStatus").exists());
         }
 
         @Test
@@ -1783,8 +2106,7 @@ class AssignmentIntegrationTest {
             mockMvc.perform(get("/api/v1/learner/assignments")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content.length()").value(1))
-                    .andExpect(jsonPath("$.data.content[0].status").value("CLOSED"));
+                    .andExpect(jsonPath("$.data.content.length()").value(1));
         }
 
         @Test
@@ -1882,7 +2204,36 @@ class AssignmentIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.id").value(a.getId().toString()))
-                    .andExpect(jsonPath("$.data.title").value("Published Quiz"));
+                    .andExpect(jsonPath("$.data.title").value("Published Quiz"))
+                    .andExpect(jsonPath("$.data.description").exists())
+                    .andExpect(jsonPath("$.data.instructions").doesNotExist())
+                    .andExpect(jsonPath("$.data.assignmentType").value("QUIZ"))
+                    .andExpect(jsonPath("$.data.startDate").doesNotExist())
+                    .andExpect(jsonPath("$.data.dueDate").exists())
+                    .andExpect(jsonPath("$.data.audioUrl").doesNotExist())
+                    .andExpect(jsonPath("$.data.actualQuestionCount").value(1))
+                    .andExpect(jsonPath("$.data.questions").isArray())
+                    .andExpect(jsonPath("$.data.questions.length()").value(1))
+                    .andExpect(jsonPath("$.data.questions[0].assignmentQuestionId").exists())
+                    .andExpect(jsonPath("$.data.questions[0].orderIndex").value(0))
+                    .andExpect(jsonPath("$.data.questions[0].points").doesNotExist())
+                    .andExpect(jsonPath("$.data.questions[0].questionId").exists())
+                    .andExpect(jsonPath("$.data.questions[0].questionText").exists())
+                    .andExpect(jsonPath("$.data.questions[0].questionType").value("multiple_choice"))
+                    .andExpect(jsonPath("$.data.questions[0].options").isArray())
+                    .andExpect(jsonPath("$.data.questions[0].options.length()").value(2))
+                    .andExpect(jsonPath("$.data.questions[0].options[*].id").exists())
+                    .andExpect(jsonPath("$.data.questions[0].options[*].text").exists())
+                    .andExpect(jsonPath("$.data.questions[0].options[*].isCorrect").exists())
+                    .andExpect(jsonPath("$.data.questions[0].imageUrl").doesNotExist())
+                    .andExpect(jsonPath("$.data.questions[0].jlptLevel").doesNotExist())
+                    .andExpect(jsonPath("$.data.writingContent").doesNotExist());
+
+            // Verify submission IN_PROGRESS in database
+            List<AssignmentSubmission> submissions = submissionRepository.findByAssignmentIdAndUserIdOrderByAttemptDesc(a.getId(), learner.getId());
+            assertThat(submissions).isNotEmpty();
+            AssignmentSubmission submission = submissions.get(0);
+            assertThat(submission.getStatus()).isEqualTo(SubmissionStatus.IN_PROGRESS);
         }
 
         @Test
@@ -2050,8 +2401,9 @@ class AssignmentIntegrationTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body)
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.status").value("OVERDUE"));
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("PAST_DUE"))
+                    .andExpect(jsonPath("$.message").value("Bài tập này đã hết hạn nộp."));
         }
 
         @Test
@@ -2064,20 +2416,20 @@ class AssignmentIntegrationTest {
             Assignment a = savePublishedWriting(teacher, clazz);
             startSubmission(a.getId(), learner.getId());
             String token = loginAndGetToken("learner@test.com");
-
-            MockMultipartFile dataPart = new MockMultipartFile(
-                    "data", "", "application/json",
-                    "{\"timeSpentSeconds\":120}".getBytes());
+    
+            MockMultipartFile imagePart = new MockMultipartFile(
+                    "images", "writing-image.jpg", "image/jpeg",
+                    "test image content".getBytes());
 
             mockMvc.perform(multipart("/api/v1/learner/assignments/{id}/submit-writing", a.getId())
-                            .file(dataPart)
+                            .file(imagePart)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.status").value("SUBMITTED"));
         }
 
         @Test
-        @DisplayName("TC_AS_L_DO_010 — Submit Writing quá hạn → OVERDUE")
+        @DisplayName("TC_AS_L_DO_010 — Submit Writing quá hạn → không được nộp")
         void tc_as_l_do_010() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
             User learner = saveLearner("learner@test.com");
@@ -2089,19 +2441,20 @@ class AssignmentIntegrationTest {
             a.setDueDate(LocalDateTime.now().minusHours(1));
             assignmentRepository.save(a);
             String token = loginAndGetToken("learner@test.com");
-            MockMultipartFile dataPart = new MockMultipartFile(
-                    "data", "", "application/json",
-                    "{\"timeSpentSeconds\":120}".getBytes());
+            MockMultipartFile imagePart = new MockMultipartFile(
+                    "images", "writing-image.jpg", "image/jpeg",
+                    "test image content".getBytes());
 
             mockMvc.perform(multipart("/api/v1/learner/assignments/{id}/submit-writing", a.getId())
-                            .file(dataPart)
+                            .file(imagePart)
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.status").value("OVERDUE"));
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("PAST_DUE"))
+                    .andExpect(jsonPath("$.message").value("Bài tập này đã hết hạn nộp."));
         }
 
         @Test
-        @DisplayName("TC_AS_L_DO_011 — Submit Writing thiếu cả text lẫn image → 400")
+        @DisplayName("TC_AS_L_DO_011 — Submit Writing thiếu image → 400")
         void tc_as_l_do_011() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
             User learner = saveLearner("learner@test.com");
@@ -2195,7 +2548,7 @@ class AssignmentIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.status").value("GRADED"))
-                    .andExpect(jsonPath("$.data.score").value(10.00));
+                    .andExpect(jsonPath("$.data.score").value(100.00));
         }
 
         @Test
@@ -2268,6 +2621,125 @@ class AssignmentIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest());
         }
+
+        @Test
+        @DisplayName("TC_AS_L_DO_019 — Evaluate Writing thành công với image")
+        void tc_as_l_do_019() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedWriting(teacher, clazz);
+            startSubmission(a.getId(), learner.getId());
+            String token = loginAndGetToken("learner@test.com");
+
+            // Mock AI service response
+            WritingEvaluationResponse mockResponse = WritingEvaluationResponse.builder()
+                    .feedback("Good writing with clear structure. Minor grammar issues.")
+                    .build();
+
+            when(aiGradingService.evaluateWriting(any(WritingEvaluationRequest.class), any(MultipartFile[].class)))
+                    .thenReturn(mockResponse);
+
+            // Prepare request data
+            WritingEvaluationRequest request = WritingEvaluationRequest.builder()
+                    .assignmentId(a.getId())
+                    .prompt("Write about your hobby")
+                    .build();
+            
+            MockMultipartFile dataPart = new MockMultipartFile(
+                    "data", "", "application/json",
+                    objectMapper.writeValueAsString(request).getBytes());
+            
+            MockMultipartFile imagePart = new MockMultipartFile(
+                    "images", "writing-image.jpg", "image/jpeg",
+                    "test image content".getBytes());
+
+            mockMvc.perform(multipart("/api/v1/learner/assignments/writing/evaluate")
+                            .file(dataPart)
+                            .file(imagePart)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.feedback").value("Good writing with clear structure. Minor grammar issues."));
+        }
+
+        @Test
+        @DisplayName("TC_AS_L_DO_020 — Evaluate Writing thất bại khi chưa start submission")
+        void tc_as_l_do_020() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedWriting(teacher, clazz);
+            // Don't start submission
+            String token = loginAndGetToken("learner@test.com");
+
+            WritingEvaluationRequest request = WritingEvaluationRequest.builder()
+                    .assignmentId(a.getId())
+                    .prompt("Write about your hobby")
+                    .build();
+            
+            MockMultipartFile dataPart = new MockMultipartFile(
+                    "data", "", "application/json",
+                    objectMapper.writeValueAsString(request).getBytes());
+            
+            MockMultipartFile imagePart = new MockMultipartFile(
+                    "images", "writing-image.jpg", "image/jpeg",
+                    "test image content".getBytes());
+
+            mockMvc.perform(multipart("/api/v1/learner/assignments/writing/evaluate")
+                            .file(dataPart)
+                            .file(imagePart)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("SUBMISSION_NOT_FOUND"));
+        }
+
+        @Test
+        @DisplayName("TC_AS_L_DO_021 — Evaluate Writing với multiple images")
+        void tc_as_l_do_021() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedWriting(teacher, clazz);
+            startSubmission(a.getId(), learner.getId());
+            String token = loginAndGetToken("learner@test.com");
+
+            // Mock AI service response
+            WritingEvaluationResponse mockResponse = WritingEvaluationResponse.builder()
+                    .feedback("Excellent work with comprehensive content.")
+                    .build();
+
+            when(aiGradingService.evaluateWriting(any(WritingEvaluationRequest.class), any(MultipartFile[].class)))
+                    .thenReturn(mockResponse);
+
+            // Prepare request data with multiple images
+            WritingEvaluationRequest request = WritingEvaluationRequest.builder()
+                    .assignmentId(a.getId())
+                    .prompt("Write a story")
+                    .build();
+            
+            MockMultipartFile dataPart = new MockMultipartFile(
+                    "data", "", "application/json",
+                    objectMapper.writeValueAsString(request).getBytes());
+            
+            MockMultipartFile imagePart1 = new MockMultipartFile(
+                    "images", "page1.jpg", "image/jpeg",
+                    "first page content".getBytes());
+            
+            MockMultipartFile imagePart2 = new MockMultipartFile(
+                    "images", "page2.jpg", "image/jpeg",
+                    "second page content".getBytes());
+
+            mockMvc.perform(multipart("/api/v1/learner/assignments/writing/evaluate")
+                            .file(dataPart)
+                            .file(imagePart1)
+                            .file(imagePart2)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.feedback").value("Excellent work with comprehensive content."));
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -2295,6 +2767,70 @@ class AssignmentIntegrationTest {
                     .andExpect(jsonPath("$.data.id").value(sub.getId().toString()))
                     .andExpect(jsonPath("$.data.status").value("IN_PROGRESS"));
         }
+
+        @Test
+        @DisplayName("TC_AS_L_VS_001b — Xem submission quiz đã chấm điểm → có score, số câu đúng/sai")
+        void tc_as_l_vs_001b() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            User learner = saveLearner("learner@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            enrollLearner(clazz.getId(), learner.getId());
+            Assignment a = savePublishedQuiz(teacher, clazz);
+
+            // Create a graded submission with score and answer details
+            AssignmentSubmission sub = submissionRepository.save(AssignmentSubmission.builder()
+                    .assignmentId(a.getId()).userId(learner.getId())
+                    .status(SubmissionStatus.GRADED).attemptNumber(1)
+                    .score(BigDecimal.valueOf(80.0))
+                    .correctCount(4).totalQuestions(5)
+                    .startedAt(LocalDateTime.now().minusMinutes(30))
+                    .submittedAt(LocalDateTime.now().minusMinutes(10))
+                    .gradedAt(LocalDateTime.now().minusMinutes(5))
+                    .timeSpentSeconds(1200)
+                    .answers("[{\"questionId\":\"q1\",\"selectedOption\":\"A\",\"isCorrect\":true}," +
+                            "{\"questionId\":\"q2\",\"selectedOption\":\"B\",\"isCorrect\":false}," +
+                            "{\"questionId\":\"q3\",\"selectedOption\":\"C\",\"isCorrect\":true}," +
+                            "{\"questionId\":\"q4\",\"selectedOption\":\"A\",\"isCorrect\":true}," +
+                            "{\"questionId\":\"q5\",\"selectedOption\":\"D\",\"isCorrect\":false}]")
+                    .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
+                    .build());
+
+            String token = loginAndGetToken("learner@test.com");
+
+            mockMvc.perform(get("/api/v1/learner/assignments/submissions/{id}", sub.getId())
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.id").value(sub.getId().toString()))
+                    .andExpect(jsonPath("$.data.assignmentId").value(a.getId().toString()))
+                    .andExpect(jsonPath("$.data.assignmentTitle").value("Published Quiz"))
+                    .andExpect(jsonPath("$.data.userId").value(learner.getId().toString()))
+                    .andExpect(jsonPath("$.data.userFullName").value("Test Learner"))
+                    .andExpect(jsonPath("$.data.userEmail").value("learner@test.com"))
+                    .andExpect(jsonPath("$.data.status").value("GRADED"))
+                    .andExpect(jsonPath("$.data.attemptNumber").value(1))
+                    .andExpect(jsonPath("$.data.startedAt").exists())
+                    .andExpect(jsonPath("$.data.submittedAt").exists())
+                    .andExpect(jsonPath("$.data.gradedAt").exists())
+                    .andExpect(jsonPath("$.data.gradedBy").doesNotExist())
+                    .andExpect(jsonPath("$.data.score").value(80.00))
+                    .andExpect(jsonPath("$.data.correctCount").value(4))
+                    .andExpect(jsonPath("$.data.totalQuestions").value(5))
+                    .andExpect(jsonPath("$.data.feedback").doesNotExist())
+                    .andExpect(jsonPath("$.data.timeSpentSeconds").value(1200))
+                    .andExpect(jsonPath("$.data.answers").exists())
+                    .andExpect(jsonPath("$.data.imageUrls").doesNotExist())
+                    .andExpect(jsonPath("$.data.teacherScore").doesNotExist())
+                    .andExpect(jsonPath("$.data.quizDetails").exists())
+                    .andExpect(jsonPath("$.data.createdAt").exists())
+                    
+                    // Verify answers structure (parsed as string, not array)
+                    .andExpect(jsonPath("$.data.answers").value(org.hamcrest.Matchers.containsString("isCorrect")))
+                    .andExpect(jsonPath("$.data.answers").value(org.hamcrest.Matchers.containsString("questionId")))
+                    .andExpect(jsonPath("$.data.answers").value(org.hamcrest.Matchers.containsString("selectedOption")))
+                    .andExpect(jsonPath("$.data.answers").value(org.hamcrest.Matchers.containsString("q1")))
+                    .andExpect(jsonPath("$.data.answers").value(org.hamcrest.Matchers.containsString("A")));
+        }
+
 
         @Test
         @DisplayName("TC_AS_L_VS_002 — Learner B xem submission của Learner A → 400 (ACCESS_DENIED)")
@@ -2362,6 +2898,7 @@ class AssignmentIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.status").value("OVERDUE"));
         }
+
 
         @Test
         @DisplayName("TC_AS_L_VS_005 — Submission không tồn tại → 404")

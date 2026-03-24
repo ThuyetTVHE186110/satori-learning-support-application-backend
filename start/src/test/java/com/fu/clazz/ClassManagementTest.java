@@ -217,6 +217,34 @@ class ClassManagementTest {
             assertThat(content.get(0).path("name").asText()).isEqualTo("Class C"); // newest
             assertThat(content.get(1).path("name").asText()).isEqualTo("Class B"); // middle
             assertThat(content.get(2).path("name").asText()).isEqualTo("Class A"); // oldest
+
+            // Verify each class content structure
+            for (var classNode : content) {
+                assertThat(classNode.has("id")).isTrue();
+                assertThat(classNode.has("name")).isTrue();
+                assertThat(classNode.has("teacherId")).isTrue();
+                assertThat(classNode.has("teacherName")).isTrue();
+                assertThat(classNode.has("courseId")).isTrue();
+                assertThat(classNode.has("courseName")).isTrue();
+                assertThat(classNode.has("courseLevel")).isTrue();
+                assertThat(classNode.has("courseStatus")).isTrue();
+                assertThat(classNode.has("isActive")).isTrue();
+                assertThat(classNode.has("memberCount")).isTrue();
+                
+                // Verify specific values for Class A
+                if ("Class A".equals(classNode.path("name").asText())) {
+                    assertThat(classNode.path("id").asText()).isEqualTo(classA.getId().toString());
+                    assertThat(classNode.path("name").asText()).isEqualTo("Class A");
+                    assertThat(classNode.path("teacherId").asText()).isEqualTo(teacher.getId().toString());
+                    assertThat(classNode.path("teacherName").asText()).isEqualTo("Test Teacher");
+                    assertThat(classNode.path("courseId").asText()).isEqualTo(course.getId().toString());
+                    assertThat(classNode.path("courseName").asText()).isEqualTo("Japanese N5");
+                    assertThat(classNode.path("courseLevel").asText()).isEqualTo("N5");
+                    assertThat(classNode.path("courseStatus").asText()).isEqualTo("ACTIVE");
+                    assertThat(classNode.path("isActive").asBoolean()).isTrue();
+                    assertThat(classNode.path("memberCount").asInt()).isEqualTo(0);
+                }
+            }
         }
 
         @Test
@@ -248,6 +276,13 @@ class ClassManagementTest {
             var content = objectMapper.readTree(body).path("data").path("content");
             content.forEach(item -> {
                 assertThat(item.path("name").asText()).startsWith("T1 Active");
+                
+                // Verify each class content structure
+                assertThat(item.has("name")).isTrue();
+                assertThat(item.has("courseId")).isTrue();
+                assertThat(item.has("courseName")).isTrue();
+                assertThat(item.has("memberCount")).isTrue();
+                assertThat(item.has("isActive")).isTrue();
             });
         }
 
@@ -450,6 +485,7 @@ class ClassManagementTest {
                 assertThat(item.has("userId")).isTrue();
                 assertThat(item.has("fullName")).isTrue();
                 assertThat(item.has("email")).isTrue();
+                assertThat(item.has("joinedAt")).isTrue();
                 assertThat(item.path("email").asText()).isNotEqualTo("removed@test.com");
                 assertThat(item.has("role")).isTrue();
             });
@@ -640,6 +676,29 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.code").value("CLASS_NAME_EXISTS"));
         }
 
+        @Test
+        @DisplayName("TC_CLM_CC_003 — Cannot create class with end date in the past")
+        void tc_clm_cc_003() throws Exception {
+            saveManager("manager@test.com");
+            User teacher = saveTeacher("teacher@test.com");
+            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
+
+            // Try to create class with end date in the past
+            LocalDate pastEndDate = LocalDate.now().minusDays(10);
+            String requestBody = String.format(
+                    "{\"name\":\"Past Due Class\",\"description\":\"Test class with past end date\",\"teacherId\":\"%s\",\"courseId\":\"%s\",\"maxStudents\":20,\"startDate\":\"%s\",\"endDate\":\"%s\"}",
+                    teacher.getId(), course.getId(), LocalDate.now().toString(), pastEndDate.toString()
+            );
+
+            mockMvc.perform(post("/api/v1/classes")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(requestBody)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("INVALID_END_DATE"));
+        }
 
         @Test
         @DisplayName("TC_CLM_CC_004 — endDate ≤ startDate → INVALID_DATE_RANGE")
@@ -854,13 +913,14 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.code").value("CLASS_INACTIVE"));
             
             // Check learner status becomes inactive after class deactivation
-            mockMvc.perform(get("/api/v1/classes/{classId}/members", clazz.getId())
-                            .param("page", "0").param("size", "10")
-                            .header("Authorization", "Bearer " + mgrToken))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content.length()").value(1))
-                    .andExpect(jsonPath("$.data.content[0].userId").value(learner.getId().toString()))
-                    .andExpect(jsonPath("$.data.content[0].status").value("INACTIVE"));
+            User learnerUser = userRepository.findById(learner.getId())
+                    .orElseThrow(() -> new AssertionError("Learner not found in database"));
+            // Verify learner's user status becomes inactive when class is deactivated
+            assertThat(learnerUser.getStatus()).isEqualTo(UserStatus.INACTIVE);
+            // Verify class is actually deactivated
+            Clazz deactivatedClass = classRepository.findById(clazz.getId())
+                    .orElseThrow(() -> new AssertionError("Class not found in database"));
+            assertThat(deactivatedClass.getIsActive()).isFalse();
         }
 
         @Test
@@ -896,16 +956,12 @@ class ClassManagementTest {
                             .header("Authorization", "Bearer " + mgrToken))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.isActive").value(false));
-            
-            // Verify learner becomes inactive after class deactivation
-            mockMvc.perform(get("/api/v1/classes/{classId}/members", clazz.getId())
-                            .param("page", "0").param("size", "10")
-                            .header("Authorization", "Bearer " + mgrToken))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content.length()").value(1))
-                    .andExpect(jsonPath("$.data.content[0].userId").value(learner.getId().toString()))
-                    .andExpect(jsonPath("$.data.content[0].status").value("INACTIVE"));
 
+            // Check learner status becomes inactive after class deactivation
+            User learnerUser = userRepository.findById(learner.getId())
+                    .orElseThrow(() -> new AssertionError("Learner not found in database"));
+            // Verify learner's user status becomes inactive when class is deactivated
+            assertThat(learnerUser.getStatus()).isEqualTo(UserStatus.INACTIVE);
             // Reactivate
             mockMvc.perform(put("/api/v1/classes/{classId}", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content("{\"isActive\":true}")
@@ -927,17 +983,12 @@ class ClassManagementTest {
                             .header("Authorization", "Bearer " + mgrToken))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true));
-            
-            // Check existing learner status becomes active after class reactivation
-            mockMvc.perform(get("/api/v1/classes/{classId}/members", clazz.getId())
-                            .param("page", "0").param("size", "10")
-                            .header("Authorization", "Bearer " + mgrToken))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content.length()").value(2))
-                    // Check first learner (original) is now active again
-                    .andExpect(jsonPath("$.data.content[?(@.userId=='" + learner.getId() + "')].status").value("ACTIVE"))
-                    // Check new learner is active
-                    .andExpect(jsonPath("$.data.content[?(@.userId=='" + newLearner.getId() + "')].status").value("ACTIVE"));
+
+            // Check learner status becomes active after class reactivation
+            User learnerActiveUser = userRepository.findById(learner.getId())
+                    .orElseThrow(() -> new AssertionError("Learner not found in database"));
+            // Verify learner's user status becomes inactive when class is deactivated
+            assertThat(learnerActiveUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
         }
 
         @Test
@@ -1766,7 +1817,7 @@ class ClassManagementTest {
         }
 
         @Test
-        @DisplayName("TC_CLM_AL_013 — Eligible-learners excludes SUSPENDED and PENDING_ACTIVATION accounts")
+        @DisplayName("TC_CLM_AL_013 — Eligible-learners excludes SUSPENDED, ACTIVE and PENDING_ACTIVATION accounts")
         void tc_clm_al_013() throws Exception {
             // Only ACTIVE and INACTIVE learners must appear; SUSPENDED must be excluded
             saveManager("manager@test.com");
@@ -1790,7 +1841,9 @@ class ClassManagementTest {
             var content = objectMapper.readTree(body).path("data").path("content");
             content.forEach(item -> {
                 String status = item.path("status").asText();
-                assertThat(status).isIn("ACTIVE", "INACTIVE");
+                assertThat(status).isIn("INACTIVE");
+                assertThat(item.has("email")).isTrue();
+                assertThat(item.has("fullName")).isTrue();
                 assertThat(status).isNotEqualTo("SUSPENDED");
                 assertThat(status).isNotEqualTo("PENDING_ACTIVATION");
             });
@@ -1905,5 +1958,6 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("FORBIDDEN"));
         }
+
     }
 }
