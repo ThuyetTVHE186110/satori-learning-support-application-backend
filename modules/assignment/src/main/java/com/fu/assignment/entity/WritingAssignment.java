@@ -41,15 +41,6 @@ public class WritingAssignment {
     private String prompt;
 
 
-    // ── Translation-specific (only for TRANSLATION type) ──────────────────────
-    /**
-     * Đoạn văn cần dịch (chỉ dùng cho TRANSLATION).
-     * Learner đọc đoạn này và dịch sang chiều translation_direction.
-     */
-    @Column(name = "source_text", columnDefinition = "TEXT")
-    private String sourceText;
-
-
     // ── Audit ─────────────────────────────────────────────────────────────────
     @Column(name = "created_at", updatable = false)
     @Builder.Default

@@ -27,4 +27,7 @@ public class AssignmentSummaryResponse {
     private Long ungradedCount;
     private LocalDateTime createdAt;
     private Boolean hasSubmissions;
+
+    private UUID classId;
+    private String className;
 }
