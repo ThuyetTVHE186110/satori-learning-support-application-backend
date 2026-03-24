@@ -132,7 +132,7 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
      */
     @Query("SELECT u FROM User u WHERE u.deletedAt IS NULL " +
             "AND u.role = 'LEARNER' " +
-            "AND u.status IN ('ACTIVE', 'INACTIVE') " +
+            "AND u.status IN ('INACTIVE') " +
             "AND (:#{#keyword == null || #keyword.length() == 0} = true OR " +
             "     LOWER(u.firstName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
             "     LOWER(u.lastName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
@@ -144,4 +144,7 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
             @Param("excludedUserIds") java.util.List<UUID> excludedUserIds,
             Pageable pageable
     );
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("UPDATE User u SET u.status = :status, u.updatedAt = CURRENT_TIMESTAMP WHERE u.id IN :ids AND u.role = 'LEARNER'")
+    void updateStatusByUserIdIn(@Param("ids") java.util.Collection<java.util.UUID> ids, @Param("status") UserStatus status);
 }
