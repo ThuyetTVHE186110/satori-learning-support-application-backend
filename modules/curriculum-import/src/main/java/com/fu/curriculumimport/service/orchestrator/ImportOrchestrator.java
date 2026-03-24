@@ -285,15 +285,15 @@ public class ImportOrchestrator {
                             ExtractionResult reExtracted = reExtractWithFeedback(
                                     docChunk, contentType, jlptLevel, ragContext, reExtractionFeedback);
 
-                            // Merge strategy: keep grounded items from original, add new items
-                            // from re-extraction. This prevents data loss when re-extraction
-                            // produces fewer items than the original (common when the LLM
-                            // becomes more conservative on retry).
-                            if (reExtracted.getConfidence() > result.getConfidence()) {
+                            // Replace strategy: use re-extraction when confidence is equal or higher.
+                            // Per-section extraction (confidence=0.92) re-produces the same items
+                            // with slightly different formatting (e.g. subscript digits vs regular),
+                            // causing mergeNewItems to add duplicates. Replace avoids this.
+                            if (reExtracted.getConfidence() >= result.getConfidence()) {
                                 allResults.set(i, reExtracted);
                             } else {
-                                // Even if re-extraction has lower confidence, merge any new
-                                // grammar/vocab items that weren't in the original
+                                // Only merge when re-extraction has lower confidence — preserves
+                                // original grounded items while adding genuinely new ones.
                                 mergeNewItems(result, reExtracted);
                             }
                             totalTokens.addAndGet(reExtracted.getTokensUsed());

@@ -56,24 +56,28 @@ public final class GrammarPromptBuilder {
                 → X là giải thích PHỤ, đưa vào detailedExplanationVi của Y.
               • detailedExplanationVi = [giải thích chính] + [giải thích phụ nguyên văn từ sách]
 
-            ═══ QUY TẮC CHỐNG TRÙNG DẠNG MỞ RỘNG (CRITICAL) ═══
-            Khi sách viết một mẫu TỔNG QUÁT (ví dụ: "Câu か", "Danh từ も"),
-            TUYỆT ĐỐI KHÔNG tạo thêm grammar point là dạng mở rộng/ví dụ cụ thể
-            của mẫu tổng quát đó.
+            ═══ QUY TẮC PATTERN — CHÍNH XÁC NHƯ TIÊU ĐỀ (CRITICAL) ═══
+            Trường "pattern" PHẢI KHỚP CHÍNH XÁC với tiêu đề mục trong sách.
+            KHÔNG mở rộng, KHÔNG rút gọn, KHÔNG đổi tên.
 
-            ❌ SAI — tạo dạng mở rộng:
-              Sách: "3. Câu か" → LLM tạo thêm "Danh từ は Danh từ ですか" (SAI! đây chỉ là ví dụ cụ thể của "Câu か")
-              Sách: "4. Danh từ も" → LLM tạo "Danh từ も Danh từ です" (SAI! sách chỉ dạy trợ từ "も", phần "です" thuộc mẫu câu khác)
+            ❌ SAI — mở rộng tiêu đề:
+              Tiêu đề: "3. Câu か" → LLM viết "Danh từ は Danh từ ですか"
+              (SAI! đây là cụ thể hóa, tiêu đề dùng "Câu か" thì pattern = "Câu か")
 
-            ✅ ĐÚNG — dùng CHÍNH XÁC pattern từ tiêu đề sách:
-              Sách: "3. Câu か" → pattern = "Câu か" (HOẶC "Câu + か")
-              Sách: "4. Danh từ も" → pattern = "Danh từ も" (KHÔNG thêm phần sau)
+            ❌ SAI — rút gọn tiêu đề:
+              Tiêu đề: "3. Danh từ は Danh từ ですか" → LLM viết "Câu か"
+              (SAI! tiêu đề dùng dạng đầy đủ thì pattern phải giữ nguyên dạng đầy đủ)
+
+            ✅ ĐÚNG — sao chép NGUYÊN VĂN tiêu đề:
+              Tiêu đề: "3. Câu か" → pattern = "Câu か"
+              Tiêu đề: "3. Danh từ は Danh từ ですか" → pattern = "Danh từ は Danh từ ですか"
+              Tiêu đề: "4. Danh từ も" → pattern = "Danh từ も"
 
             QUY TẮC:
-              • Trường "pattern" PHẢI khớp với tiêu đề/mẫu câu trong sách, KHÔNG mở rộng.
-              • Nếu sách dùng "Câu" → pattern dùng "Câu", KHÔNG thay bằng "Danh từ は Danh từ".
-              • Nếu sách dùng "Danh từ も" → pattern dùng "Danh từ も", KHÔNG thêm "Danh từ です".
-              • "Câu" = bất kỳ câu nào, KHÔNG được cụ thể hóa thành một mẫu câu riêng.
+              • pattern = tiêu đề mục (bỏ số thứ tự "1.", "2."... ở đầu).
+              • KHÔNG thay "Danh từ は Danh từ ですか" bằng "Câu か" hay ngược lại.
+              • KHÔNG thêm phần mới vào sau pattern (ví dụ: "Danh từ も" → KHÔNG thêm "です").
+              • KHÔNG bỏ bớt thành phần (ví dụ: "Danh từ は Danh từ ですか" → KHÔNG bỏ "Danh từ は Danh từ").
 
             ═══ QUY TẮC TRÍCH XUẤT ═══
             1. grammarPoint: Tên điểm ngữ pháp cụ thể, ví dụ:
@@ -240,12 +244,14 @@ public final class GrammarPromptBuilder {
             Bạn sẽ nhận MỘT MỤC ngữ pháp duy nhất (đã được tách sẵn theo số thứ tự).
             Nhiệm vụ: trích xuất CHÍNH XÁC MỘT grammar point từ nội dung này.
 
-            ═══ QUY TẮC PATTERN — DÙNG CHÍNH XÁC NHƯ SÁCH (CRITICAL) ═══
-            Trường "pattern" PHẢI khớp với tiêu đề/mẫu câu trong sách, KHÔNG mở rộng.
-            • Nếu tiêu đề mục là "Câu か" → pattern = "Câu か", KHÔNG viết "Danh từ は Danh từ ですか".
-            • Nếu tiêu đề mục là "Danh từ も" → pattern = "Danh từ も", KHÔNG thêm "Danh từ です" phía sau.
-            • "Câu" = bất kỳ câu nào — KHÔNG cụ thể hóa thành một mẫu câu riêng.
-            • KHÔNG tạo dạng mở rộng hay ví dụ cụ thể của một mẫu tổng quát.
+            ═══ QUY TẮC PATTERN — CHÍNH XÁC NHƯ TIÊU ĐỀ (CRITICAL) ═══
+            Trường "pattern" PHẢI KHỚP CHÍNH XÁC với tiêu đề mục được cung cấp.
+            KHÔNG mở rộng, KHÔNG rút gọn, KHÔNG đổi tên.
+            • pattern = tiêu đề mục (bỏ số thứ tự ở đầu), sao chép NGUYÊN VĂN.
+            • Tiêu đề "Câu か" → pattern = "Câu か", KHÔNG viết "Danh từ は Danh từ ですか".
+            • Tiêu đề "Danh từ は Danh từ ですか" → pattern = "Danh từ は Danh từ ですか", KHÔNG rút gọn thành "Câu か".
+            • Tiêu đề "Danh từ も" → pattern = "Danh từ も", KHÔNG thêm phần sau.
+            • KHÔNG tạo dạng mở rộng hay rút gọn của tiêu đề.
 
             ═══ QUY TẮC SAO CHÉP NGUYÊN VĂN (CRITICAL — ĐỌC RẤT KỸ) ═══
             • detailedExplanationVi: SAO CHÉP NGUYÊN VĂN 100% giải thích tiếng Việt từ input.
