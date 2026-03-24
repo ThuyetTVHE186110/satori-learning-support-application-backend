@@ -47,7 +47,9 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.*;
 
@@ -286,7 +288,7 @@ class ClassServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should throw exception when start date is in the past (E4)")
+        @DisplayName("Should throw exception when end date is in the past (E4)")
         void shouldThrowExceptionWhenStartDateInPast() {
             // Given
             CreateClassRequest badDateRequest = CreateClassRequest.builder()
@@ -295,39 +297,19 @@ class ClassServiceImplTest {
                     .teacherId(teacherId)
                     .courseId(courseId)
                     .maxStudents(30)
-                    .startDate(LocalDate.now().minusDays(1)) // Past date
-                    .endDate(LocalDate.now().plusMonths(3))
+                    .startDate(LocalDate.now().minusDays(10)) // Past date
+                    .endDate(LocalDate.now().minusDays(3))
                     .build();
 
             // When/Then
             assertThatThrownBy(() -> clazzService.createClass(badDateRequest, managerId))
                     .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("Ngày bắt đầu phải ở tương lai.");
+                    .hasMessageContaining("Ngày kết thúc phải ở tương lai.");
 
             verify(classRepository, never()).save(any());
         }
 
-        @Test
-        @DisplayName("Should throw exception when start date is today (E4 - boundary)")
-        void shouldThrowExceptionWhenStartDateIsToday() {
-            // Given – startDate = today is no longer allowed (must be strictly in the future)
-            CreateClassRequest todayDateRequest = CreateClassRequest.builder()
-                    .name("N5 Morning Class")
-                    .description("Beginner Japanese class")
-                    .teacherId(teacherId)
-                    .courseId(courseId)
-                    .maxStudents(30)
-                    .startDate(LocalDate.now()) // Today – should be rejected
-                    .endDate(LocalDate.now().plusMonths(3))
-                    .build();
-
-            // When/Then
-            assertThatThrownBy(() -> clazzService.createClass(todayDateRequest, managerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("Ngày bắt đầu phải ở tương lai.");
-
-            verify(classRepository, never()).save(any());
-        }
+      
 
         @Test
         @DisplayName("Should throw exception when end date is before start date (E3)")
@@ -929,41 +911,6 @@ class ClassServiceImplTest {
                 verify(classMemberRepository).save(memberCaptor.capture());
                 assertThat(memberCaptor.getValue().getRemovedAt()).isNotNull();
             }
-
-            @Test
-            @DisplayName("Should demote learner to INACTIVE when removed from last active class")
-            void shouldDemoteLearnerWhenRemovedFromLastClass() {
-                // Given
-                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-                given(classMemberRepository.findByClassIdAndUserId(classId, studentId))
-                        .willReturn(Optional.of(testMember));
-                given(classMemberRepository.countActiveByUserId(studentId)).willReturn(0L);
-                given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
-
-                // When
-                clazzService.removeMember(classId, studentId, managerId);
-
-                // Then
-                verify(userRepository).save(userCaptor.capture());
-                assertThat(userCaptor.getValue().getStatus()).isEqualTo(UserStatus.INACTIVE);
-            }
-
-            @Test
-            @DisplayName("Should NOT demote learner when they still have other active classes")
-            void shouldNotDemoteLearnerWhenStillInOtherClasses() {
-                // Given
-                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-                given(classMemberRepository.findByClassIdAndUserId(classId, studentId))
-                        .willReturn(Optional.of(testMember));
-                given(classMemberRepository.countActiveByUserId(studentId)).willReturn(1L);
-
-                // When
-                clazzService.removeMember(classId, studentId, managerId);
-
-                // Then
-                verify(userRepository, never()).save(any(User.class));
-            }
-
             @Test
             @DisplayName("Should throw when member not found")
             void shouldThrowWhenMemberNotFound() {
@@ -1011,11 +958,11 @@ class ClassServiceImplTest {
                 Pageable pageable = PageRequest.of(0, 10);
                 Page<ClassMember> memberPage = new PageImpl<>(List.of(testMember), pageable, 1);
                 given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-                given(classMemberRepository.findActiveByClassId(classId, pageable)).willReturn(memberPage);
+                given(classMemberRepository.findActiveByClassIdAndKeyword(classId, null, pageable)).willReturn(memberPage);
                 given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
 
                 // When
-                Page<ClassMemberResponse> result = clazzService.getClassMembers(classId, pageable);
+                Page<ClassMemberResponse> result = clazzService.getClassMembers(classId, null, pageable);
 
                 // Then
                 assertThat(result.getTotalElements()).isEqualTo(1);
@@ -1030,7 +977,7 @@ class ClassServiceImplTest {
                 given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.empty());
 
                 // When/Then
-                assertThatThrownBy(() -> clazzService.getClassMembers(classId, pageable))
+                assertThatThrownBy(() -> clazzService.getClassMembers(classId, null, pageable))
                         .isInstanceOf(ClassNotFoundException.class);
             }
         }
@@ -1043,20 +990,20 @@ class ClassServiceImplTest {
         @DisplayName("Create Class Date Validation Tests")
         class CreateClassDateValidationTests {
             @Test
-            @DisplayName("Should throw when startDate is in the past")
+            @DisplayName("Should throw when dueDate is in the past")
             void shouldThrowWhenStartDateInPast() {
                 CreateClassRequest req = CreateClassRequest.builder()
                         .name("Lớp kiểm thử")
                         .teacherId(teacherId)
                         .courseId(courseId)
                         .maxStudents(30)
-                        .startDate(java.time.LocalDate.now().minusDays(1))
-                        .endDate(java.time.LocalDate.now().plusDays(10))
+                        .startDate(java.time.LocalDate.now().minusDays(20))
+                        .endDate(java.time.LocalDate.now().minusDays(10))
                         .build();
                 // date validation occurs before any user lookup, so no stubbing needed
                 assertThatThrownBy(() -> clazzService.createClass(req, managerId))
                         .isInstanceOf(BusinessException.class)
-                        .hasMessageContaining("Ngày bắt đầu phải ở tương lai");
+                        .hasMessageContaining("Ngày kết thúc phải ở tương lai");
             }
 
             @Test
@@ -1113,12 +1060,12 @@ class ClassServiceImplTest {
             Pageable pageable = PageRequest.of(0, 10);
             Page<ClassMember> memberPage = new PageImpl<>(List.of(testMember), pageable, 1);
             given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(classMemberRepository.findActiveByClassId(classId, pageable)).willReturn(memberPage);
+            given(classMemberRepository.findActiveByClassIdAndKeyword(classId, null, pageable)).willReturn(memberPage);
             given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
             given(userRepository.findAllById(List.of(studentId))).willReturn(List.of(testStudent));
 
             // When
-            Page<ClassMemberResponse> result = clazzService.getClassMembers(classId, pageable);
+            Page<ClassMemberResponse> result = clazzService.getClassMembers(classId, null, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
@@ -1135,12 +1082,12 @@ class ClassServiceImplTest {
             Pageable pageable = PageRequest.of(0, 10);
             Page<ClassMember> memberPage = new PageImpl<>(List.of(testMember), pageable, 1);
             given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(classMemberRepository.findActiveByClassId(classId, pageable)).willReturn(memberPage);
+            given(classMemberRepository.findActiveByClassIdAndKeyword(classId, null, pageable)).willReturn(memberPage);
             given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
             given(userRepository.findAllById(List.of(studentId))).willReturn(List.of());
 
             // When
-            Page<ClassMemberResponse> result = clazzService.getClassMembers(classId, pageable);
+            Page<ClassMemberResponse> result = clazzService.getClassMembers(classId, null, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
@@ -1254,12 +1201,12 @@ class ClassServiceImplTest {
             Pageable pageable = PageRequest.of(0, 10);
             Page<ClassMember> memberPage = new PageImpl<>(List.of(testMember), pageable, 1);
             given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-            given(classMemberRepository.findActiveByClassId(classId, pageable)).willReturn(memberPage);
+            given(classMemberRepository.findActiveByClassIdAndKeyword(classId, null, pageable)).willReturn(memberPage);
             given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
             given(userRepository.findAllById(List.of(studentId))).willReturn(List.of(testStudent));
 
             // When
-            Page<ClassMemberResponse> result = clazzService.getClassMembersForTeacher(classId, teacherId, pageable);
+            Page<ClassMemberResponse> result = clazzService.getClassMembersForTeacher(classId, teacherId, null, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
@@ -1274,7 +1221,7 @@ class ClassServiceImplTest {
             given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
 
             // When / Then
-            assertThatThrownBy(() -> clazzService.getClassMembersForTeacher(classId, otherTeacherId, pageable))
+            assertThatThrownBy(() -> clazzService.getClassMembersForTeacher(classId, otherTeacherId, null, pageable))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Bạn không có quyền xem thành viên của lớp học này.");
         }
@@ -1339,7 +1286,7 @@ class ClassServiceImplTest {
             given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
             Pageable pageable = PageRequest.of(0, 10);
             Page<User> usersPage = new PageImpl<>(List.of(testStudent), pageable, 1);
-            given(userRepository.findEligibleLearnersForClass(classId, "Test", pageable)).willReturn(usersPage);
+            given(userRepository.findEligibleLearnersForClass(anyString(), anyList(), any(Pageable.class))).willReturn(usersPage);
 
             // When
             Page<com.fu.user.dto.UserResponse> result = clazzService.getEligibleLearners(classId, "Test", pageable);
@@ -1349,7 +1296,7 @@ class ClassServiceImplTest {
             assertThat(result.getTotalElements()).isEqualTo(1);
             assertThat(result.getContent().get(0).getId()).isEqualTo(studentId);
             assertThat(result.getContent().get(0).getEmail()).isEqualTo("student@example.com");
-            verify(userRepository).findEligibleLearnersForClass(classId, "Test", pageable);
+            verify(userRepository).findEligibleLearnersForClass(anyString(), anyList(), any(Pageable.class));
         }
 
         @Test

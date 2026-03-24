@@ -63,8 +63,8 @@ public class ClassServiceImpl implements ClassService {
         log.info("Tạo lớp học: {} bởi quản lý: {}", request.getName(), managerId);
 
         // Validate date range
-        if (request.getStartDate() != null && !request.getStartDate().isAfter(java.time.LocalDate.now())) {
-            throw new BusinessException("INVALID_START_DATE", "Ngày bắt đầu phải ở tương lai.");
+        if (request.getEndDate() != null && !request.getEndDate().isAfter(java.time.LocalDate.now())) {
+            throw new BusinessException("INVALID_END_DATE", "Ngày kết thúc phải ở tương lai.");
         }
 
         if (request.getStartDate() != null && request.getEndDate() != null && !request.getEndDate().isAfter(request.getStartDate())) {
@@ -225,28 +225,24 @@ public class ClassServiceImpl implements ClassService {
         classMemberRepository.save(member);
         log.info("Xóa thành viên thành công khỏi lớp học: {}", classId);
 
-        // UC-3.1: Check if the user has any remaining active class memberships
-        // If they were removed from their last class, demote role status to INACTIVE
-        long activeCount = classMemberRepository.countActiveByUserId(userId);
-        if (activeCount == 0) {
-            userRepository.findById(userId).ifPresent(user -> {
-                if (user.getRole() == UserRole.LEARNER && user.getStatus() == UserStatus.ACTIVE) {
-                    user.setStatus(UserStatus.INACTIVE);
-                    userRepository.save(user);
-                    log.info("Learner {} demoted to INACTIVE as they have no remaining active class memberships.", userId);
-                }
-            });
-        }
+        // If they were removed from class, demote role status to INACTIVE
+        userRepository.findById(userId).ifPresent(user -> {
+            if (user.getRole() == UserRole.LEARNER && user.getStatus() == UserStatus.ACTIVE) {
+                user.setStatus(UserStatus.INACTIVE);
+                userRepository.save(user);
+                log.info("Learner {} demoted to INACTIVE as they have no remaining active class memberships.", userId);
+            }
+        });
     }
 
     @Override
-    public Page<ClassMemberResponse> getClassMembers(UUID classId, Pageable pageable) {
-        log.debug("Lấy danh sách thành viên của lớp: {}", classId);
+    public Page<ClassMemberResponse> getClassMembers(UUID classId, String keyword, Pageable pageable) {
+        log.debug("Lấy danh sách thành viên của lớp: {} với từ khóa: {}", classId, keyword);
 
         // Verify class exists
         findClassOrThrow(classId);
 
-        Page<ClassMember> membersPage = classMemberRepository.findActiveByClassId(classId, pageable);
+        Page<ClassMember> membersPage = classMemberRepository.findActiveByClassIdAndKeyword(classId, keyword, pageable);
 
         // Batch fetch user info to avoid N+1 queries
         List<UUID> userIds = membersPage.getContent().stream().map(ClassMember::getUserId).toList();
@@ -278,15 +274,15 @@ public class ClassServiceImpl implements ClassService {
     }
 
     @Override
-    public Page<ClassMemberResponse> getClassMembersForTeacher(UUID classId, UUID teacherId, Pageable pageable) {
-        log.debug("Giáo viên {} xem thành viên lớp: {}", teacherId, classId);
+    public Page<ClassMemberResponse> getClassMembersForTeacher(UUID classId, UUID teacherId, String keyword, Pageable pageable) {
+        log.debug("Giáo viên {} xem thành viên lớp: {} với từ khóa: {}", teacherId, classId, keyword);
         Clazz clazz = findClassOrThrow(classId);
 
         if (!clazz.getTeacherId().equals(teacherId)) {
             throw new BusinessException("ACCESS_DENIED", "Bạn không có quyền xem thành viên của lớp học này.");
         }
 
-        return getClassMembers(classId, pageable);
+        return getClassMembers(classId, keyword, pageable);
     }
 
     @Override
@@ -295,8 +291,8 @@ public class ClassServiceImpl implements ClassService {
 
         // Verify class exists
         findClassOrThrow(classId);
-
-        Page<User> usersPage = userRepository.findEligibleLearnersForClass(classId, keyword, pageable);
+        List<UUID> excludedIds = classMemberRepository.findUserIdsInActiveClasses();
+        Page<User> usersPage = userRepository.findEligibleLearnersForClass(keyword, excludedIds, pageable);
 
         return usersPage.map(user -> com.fu.user.dto.UserResponse.builder().id(user.getId()).email(user.getEmail()).firstName(user.getFirstName()).lastName(user.getLastName()).displayName(user.getDisplayName()).fullName(user.getFullName()).avatarUrl(user.getAvatarUrl()).phoneNumber(user.getPhoneNumber()).dateOfBirth(user.getDateOfBirth()).role(user.getRole()).status(user.getStatus()).createdAt(user.getCreatedAt()).updatedAt(user.getUpdatedAt()).lastLoginAt(user.getLastLoginAt()).build());
     }
@@ -332,7 +328,6 @@ public class ClassServiceImpl implements ClassService {
      */
     private ClassMemberResponse addMemberToClass(Clazz clazz, UUID userId) {
         Optional<ClassMember> existing = classMemberRepository.findByClassIdAndUserId(clazz.getId(), userId);
-
         ClassMember member;
         if (existing.isPresent()) {
             member = existing.get();
