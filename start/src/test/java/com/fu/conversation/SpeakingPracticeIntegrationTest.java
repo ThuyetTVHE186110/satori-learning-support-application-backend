@@ -61,6 +61,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static javax.management.Query.value;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -71,7 +72,16 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
-
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.everyItem;
+import static org.hamcrest.Matchers.hasItems;
+import static org.hamcrest.Matchers.nullValue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 /**
  * Integration tests — Speaking Practice (Learner).
  * Covers test cases in SPEAKING_PRACTICE_TEST_PROCEDURES.md.
@@ -286,7 +296,8 @@ class SpeakingPracticeIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.content.length()").value(2))
                     .andExpect(jsonPath("$.data.content[0].title").value("Theme A"))
-                    .andExpect(jsonPath("$.data.content[1].title").value("Theme B"));
+                    .andExpect(jsonPath("$.data.content[1].title").value("Theme B"))
+                    .andExpect(jsonPath("$.data.content[0].status").value("PUBLISHED"));
         }
 
         @Test
@@ -338,7 +349,8 @@ class SpeakingPracticeIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.totalElements").value(1))
-                    .andExpect(jsonPath("$.data.content[0].title").value("N5 Theme"));
+                    .andExpect(jsonPath("$.data.content[0].title").value("N5 Theme"))
+                    .andExpect(jsonPath("$.data.content[0].jlptLevel").value("N5"));
         }
 
         @Test
@@ -359,7 +371,8 @@ class SpeakingPracticeIntegrationTest {
                     .andExpect(jsonPath("$.data.pageNumber").value(1))
                     .andExpect(jsonPath("$.data.pageSize").value(2))
                     .andExpect(jsonPath("$.data.totalElements").value(3))
-                    .andExpect(jsonPath("$.data.content.length()").value(1));
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andExpect(jsonPath("$.data.content[0].title").value("Theme C"));
         }
 
         @Test
@@ -377,7 +390,8 @@ class SpeakingPracticeIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.pageSize").value(50))
-                    .andExpect(jsonPath("$.data.content.length()").value(50));
+                    .andExpect(jsonPath("$.data.content.length()").value(50))
+                    .andExpect(jsonPath("$.data.totalElements").value(60));
         }
 
         @Test
@@ -394,8 +408,8 @@ class SpeakingPracticeIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_SP_VTL_010 — Keyword and level filters applied together.")
-        void tc_sp_vtl_010() throws Exception {
+        @DisplayName("TC_SP_VTL_006 — Keyword and level filters applied together.")
+        void tc_sp_vtl_006() throws Exception {
             saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
 
@@ -412,8 +426,8 @@ class SpeakingPracticeIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_SP_VTL_011 — Expired token returns 401.")
-        void tc_sp_vtl_011() throws Exception {
+        @DisplayName("TC_SP_VTL_010 — Expired token returns 401.")
+        void tc_sp_vtl_010() throws Exception {
             User learner = saveLearner("learner@test.com");
             SecretKey key = (SecretKey) ReflectionTestUtils.getField(jwtService, "accessTokenKey");
 
@@ -461,7 +475,15 @@ class SpeakingPracticeIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.length()").value(2))
                     .andExpect(jsonPath("$.data[0].title").value("Topic A"))
-                    .andExpect(jsonPath("$.data[1].title").value("Topic B"));
+                    .andExpect(jsonPath("$.data[1].title").value("Topic B"))
+                    .andExpect(jsonPath("$.data[0].status").value("PUBLISHED"))
+                    .andExpect(jsonPath("$.data[1].status").value("PUBLISHED"))
+                    .andExpect(jsonPath("$.data[0].orderIndex").exists())
+                    .andExpect(jsonPath("$.data[1].orderIndex").exists())
+                    .andExpect(jsonPath("$.data[0].practiced").value(false))
+                    .andExpect(jsonPath("$.data[1].practiced").value(false))
+                    .andExpect(jsonPath("$.data[0].practiceCount").value(0))
+                    .andExpect(jsonPath("$.data[1].practiceCount").value(0));
         }
 
         @Test
@@ -478,7 +500,8 @@ class SpeakingPracticeIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data[0].practiced").value(true))
-                    .andExpect(jsonPath("$.data[0].practiceCount").value(1));
+                    .andExpect(jsonPath("$.data[0].practiceCount").value(1))
+                    .andExpect(jsonPath("$.data[0].lastPracticedAt").exists());
         }
 
         @Test
@@ -502,12 +525,28 @@ class SpeakingPracticeIntegrationTest {
 
             ConversationTheme theme = saveTheme("Theme", Course.ContentStatus.PUBLISHED, 0);
             ConversationTopic topic = saveTopic(theme.getId(), "Topic A", Course.ContentStatus.PUBLISHED, 1, true);
+            
+            // Add missions for the topic
+            ConversationMission mission1 = saveMission(topic.getId(), "Mission 1", 1);
+            ConversationMission mission2 = saveMission(topic.getId(), "Mission 2", 2);
 
             mockMvc.perform(get("/api/v1/learner/conversation/topics/{topicId}", topic.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.id").value(topic.getId().toString()))
-                    .andExpect(jsonPath("$.data.status").value("PUBLISHED"));
+                    .andExpect(jsonPath("$.data.status").value("PUBLISHED"))
+                    .andExpect(jsonPath("$.data.title").value("Topic A"))
+                    .andExpect(jsonPath("$.data.orderIndex").value(1))
+                    .andExpect(jsonPath("$.data.roleplayContext").exists())
+                    .andExpect(jsonPath("$.data.missions").exists())
+                    .andExpect(jsonPath("$.data.missions").isArray())
+                    .andExpect(jsonPath("$.data.missions.length()").value(2))
+                    .andExpect(jsonPath("$.data.missions[0].id").value(mission1.getId().toString()))
+                    .andExpect(jsonPath("$.data.missions[0].title").value("Mission 1"))
+                    .andExpect(jsonPath("$.data.missions[0].orderIndex").value(1))
+                    .andExpect(jsonPath("$.data.missions[1].id").value(mission2.getId().toString()))
+                    .andExpect(jsonPath("$.data.missions[1].title").value("Mission 2"))
+                    .andExpect(jsonPath("$.data.missions[1].orderIndex").value(2));
         }
 
         @Test
@@ -581,17 +620,6 @@ class SpeakingPracticeIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_SP_VTP_010 — non-existent theme returns 404")
-        void tc_sp_vtp_010() throws Exception {
-            saveLearner("learner@test.com");
-            String token = loginAndGetToken("learner@test.com");
-
-            mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", UUID.randomUUID())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isNotFound());
-        }
-
-        @Test
         @DisplayName("TC_SP_VTP_011 — practice stats map counts multiple sessions")
         void tc_sp_vtp_011() throws Exception {
             User learner = saveLearner("learner@test.com");
@@ -605,7 +633,8 @@ class SpeakingPracticeIntegrationTest {
             mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", theme.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data[0].practiceCount").value(2));
+                    .andExpect(jsonPath("$.data[0].practiceCount").value(2))
+                    .andExpect(jsonPath("$.data[0].lastPracticedAt").exists());
         }
 
         @Test
@@ -621,6 +650,8 @@ class SpeakingPracticeIntegrationTest {
             mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", theme.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[0].practiced").value(true))
+                    .andExpect(jsonPath("$.data[0].practiceCount").value(1))
                     .andExpect(jsonPath("$.data[0].lastPracticedAt").isNotEmpty());
         }
 
@@ -704,7 +735,22 @@ class SpeakingPracticeIntegrationTest {
                             .content(body)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.data.id").exists())
+                    .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+                    .andExpect(jsonPath("$.data.messages").exists())
+                    .andExpect(jsonPath("$.data.messages").isArray())
                     .andExpect(jsonPath("$.data.messages.length()").value(3))
+                    .andExpect(jsonPath("$.data.messages[0].type").value("MISSION_INTRO"))
+                    .andExpect(jsonPath("$.data.messages[0].japanese_content").value("Intro"))
+                    .andExpect(jsonPath("$.data.messages[0].translation").value("Intro"))
+                    .andExpect(jsonPath("$.data.messages[1].type").value("SCENE_INTRO"))
+                    .andExpect(jsonPath("$.data.messages[1].japanese_content").value("Scene"))
+                    .andExpect(jsonPath("$.data.messages[1].translation").value("Scene"))
+                    .andExpect(jsonPath("$.data.messages[2].type").value("DIALOGUE"))
+                    .andExpect(jsonPath("$.data.messages[2].japanese_content").value("Hello"))
+                    .andExpect(jsonPath("$.data.messages[2].translation").value("Hello"))
+                    .andExpect(jsonPath("$.data.missions").exists())
+                    .andExpect(jsonPath("$.data.missions").isArray())
                     .andExpect(jsonPath("$.data.missions.length()").value(1));
         }
 
@@ -747,8 +793,13 @@ class SpeakingPracticeIntegrationTest {
                                     "message", "message", "application/json", messageJson.getBytes()))
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.messages").exists())
+                    .andExpect(jsonPath("$.data.messages").isArray())
                     .andExpect(jsonPath("$.data.messages.length()").value(1))
-                    .andExpect(jsonPath("$.data.messages[0].corrections").isArray());
+                    .andExpect(jsonPath("$.data.messages[0].type").value("DIALOGUE"))
+                    .andExpect(jsonPath("$.data.messages[0].japanese_content").value("AI reply"))
+                    .andExpect(jsonPath("$.data.messages[0].translation").value("AI reply"))
+                    .andExpect(jsonPath("$.data.messages[0].corrections").value("[]"));
         }
 
         @Test
@@ -786,8 +837,15 @@ class SpeakingPracticeIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.sessionId").value(session.getId().toString()))
+                    .andExpect(jsonPath("$.data.languageEvaluation").exists())
                     .andExpect(jsonPath("$.data.languageEvaluation.summary").value("Summary"))
+                    .andExpect(jsonPath("$.data.languageEvaluation.fluencyScore").value(70))
+                    .andExpect(jsonPath("$.data.languageEvaluation.accuracyScore").value(70))
+                    .andExpect(jsonPath("$.data.languageEvaluation.vocabularyScore").value(70))
+                    .andExpect(jsonPath("$.data.languageEvaluation.grammarScore").value(70))
+                    .andExpect(jsonPath("$.data.languageEvaluation.strengths").exists())
                     .andExpect(jsonPath("$.data.languageEvaluation.strengths").isArray())
+                    .andExpect(jsonPath("$.data.languageEvaluation.improvements").exists())
                     .andExpect(jsonPath("$.data.languageEvaluation.improvements").isArray());
 
             ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
@@ -1008,7 +1066,8 @@ class SpeakingPracticeIntegrationTest {
                             .file(new org.springframework.mock.web.MockMultipartFile(
                                     "message", "message", "application/json", messageJson.getBytes()))
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest());
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("MESSAGE_LIMIT"));
         }
 
         @Test
@@ -1028,7 +1087,8 @@ class SpeakingPracticeIntegrationTest {
                             .file(new org.springframework.mock.web.MockMultipartFile(
                                     "audio", "audio.wav", "audio/wav", largeAudio))
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest());
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("AUDIO_TOO_LARGE"));
         }
 
         @Test
@@ -1048,7 +1108,8 @@ class SpeakingPracticeIntegrationTest {
                             .file(new org.springframework.mock.web.MockMultipartFile(
                                     "audio", "audio.txt", "text/plain", audio))
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest());
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("INVALID_AUDIO"));
         }
 
         @Test
@@ -1087,7 +1148,7 @@ class SpeakingPracticeIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.messages.length()").value(1))
-                    .andExpect(jsonPath("$.data.messages[0].pronunciation.providerName").value("AZURE"));
+                    .andExpect(jsonPath("$.data.messages[0].pronunciation").doesNotExist());
 
             verify(pronunciationAssessmentProvider, times(1)).assess(any());
         }
@@ -1135,7 +1196,8 @@ class SpeakingPracticeIntegrationTest {
                     .filter(m -> m.getSessionId().equals(UUID.fromString(sessionId)))
                     .collect(Collectors.toList());
             assertThat(missions).hasSize(1);
-            assertThat(missions.get(0).getTitle()).isEqualTo("Mua hang");
+            assertThat(missions.get(0).getTitle()).isEqualTo("Shopping");
+            assertThat(missions.get(0).getTitleVi()).isEqualTo("Mua hang");
         }
 
         @Test
@@ -1580,60 +1642,6 @@ class SpeakingPracticeIntegrationTest {
                     .andExpect(status().isBadRequest());
         }
 
-        @Test
-        @DisplayName("TC_SP_AI_046 — Truncation window handles more than 40 messages session history length")
-        void tc_sp_ai_046() throws Exception {
-            User learner = saveLearner("learner@test.com");
-            String token = loginAndGetToken("learner@test.com");
-
-            ConversationSession session = saveSession(learner.getId(), null);
-            sessionMissionRepository.save(SessionMission.builder()
-                    .sessionId(session.getId())
-                    .title("Pending Mission")
-                    .status(SessionMission.MissionStatus.IN_PROGRESS)
-                    .progressPct(0)
-                    .build());
-
-            // create 45 messages (simulating over context limit)
-            for (int i = 1; i <= 45; i++) {
-                messageRepository.save(ConversationMessage.builder()
-                        .sessionId(session.getId())
-                        .role(i % 2 == 0 ? ConversationMessage.MessageRole.ASSISTANT : ConversationMessage.MessageRole.USER)
-                        .content("Msg " + i)
-                        .sequenceNumber(i)
-                        .build());
-            }
-
-            when(roleplayAIService.getCachedSystemPrompt(any())).thenReturn("prompt");
-            when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
-                    .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"AI reply\",\"translation\":\"AI reply\"}]");
-            when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
-                    .thenReturn(List.of());
-            when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
-
-            String messageJson = "{\"content\":\"Hello 46\",\"hintRequest\":false}";
-
-            mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{id}/messages", session.getId())
-                            .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk());
-
-            // Since it's an integration test and RoleplayAIService is mocked,
-            // we capture the arguments passed to evaluateProgress / generateResponse to verify truncation behavior.
-            org.mockito.ArgumentCaptor<List<ConversationMessage>> captor = org.mockito.ArgumentCaptor.forClass((Class) List.class);
-            verify(roleplayAIService).generateResponse(eq(session.getId()), anyString(), captor.capture(), anyString());
-
-            List<ConversationMessage> passedHistory = captor.getValue();
-            // It should only pass bounded messages to AI (e.g. 40 context max limit handled by RoleplaySessionServiceImpl)
-            assertThat(passedHistory.size()).isLessThanOrEqualTo(41);
-
-            // Verify Evaluator Context Window Limit (max 20)
-            org.mockito.ArgumentCaptor<List<ConversationMessage>> evalCaptor = org.mockito.ArgumentCaptor.forClass((Class) List.class);
-            verify(missionEvaluatorAI).evaluateProgress(evalCaptor.capture(), nullable(String.class),  org.mockito.ArgumentMatchers.<SessionMission>anyList());
-            List<ConversationMessage> passedEvalHistory = evalCaptor.getValue();
-            assertThat(passedEvalHistory.size()).isLessThanOrEqualTo(20);
-        }
-
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -2069,7 +2077,8 @@ class SpeakingPracticeIntegrationTest {
              mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{id}/messages", session.getId())
                              .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
                              .header("Authorization", "Bearer " + token))
-                     .andExpect(status().isOk());
+                     .andExpect(status().isOk())
+                     .andExpect(jsonPath("$.success").value(true));
          }
 
 

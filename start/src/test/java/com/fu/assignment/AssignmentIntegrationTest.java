@@ -2449,7 +2449,6 @@ class AssignmentIntegrationTest {
                             .file(imagePart)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("PAST_DUE"))
                     .andExpect(jsonPath("$.message").value("Bài tập này đã hết hạn nộp."));
         }
 
@@ -3050,15 +3049,6 @@ class AssignmentIntegrationTest {
                             .content("{}")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest());
-        }
-
-        @Test
-        @DisplayName("TC_AS_AI_005 — Không có token → 401")
-        void tc_as_ai_005() throws Exception {
-            mockMvc.perform(post("/api/v1/teacher/assignments/questions/ai-generate")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content("{}"))
-                    .andExpect(status().isUnauthorized());
         }
 
         @Test

@@ -925,7 +925,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_T_UP_007
-**Test Case Description:** update instructions when hasSubmissions=true → thành công
+**Test Case Description:** update instructions when hasSubmissions=true → success
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
@@ -1093,8 +1093,6 @@ Response JSON:
 - success = true
 - data array contains AI-generated questions
 - data[*].questionText exists
-- data[*].options exists
-- data[*].correctAnswer exists
 
 ---
 
@@ -1230,7 +1228,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_T_CL_002
-**Test Case Description:** Clone sang class không tồn tại → 404
+**Test Case Description:** Clone to non-exist class → 404
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
@@ -1250,7 +1248,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_T_CL_003
-**Test Case Description:** Clone WRITING assignment → thành công, status DRAFT
+**Test Case Description:** Clone WRITING assignment → success, status DRAFT
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
@@ -1300,7 +1298,7 @@ Response JSON:
 ## Section 11 — Teacher Assignment Grading Tests
 
 ### Test Case ID: TC_AS_T_GR_001
-**Test Case Description:** Teacher chấm điểm bài Writing hợp lệ → thành công, status GRADED
+**Test Case Description:** Teacher's grading of the Writing assignment is successful → status GRADED
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
@@ -1308,7 +1306,7 @@ Response JSON:
 
 **Test Case Procedure:**
 1. Client sends PUT /api/v1/teacher/assignments/submissions/{submissionId}/grade with Authorization: Bearer {token} and JSON body:
-   - score: 85, feedback: "Good work"
+   - score: 85, feedback: "Bài viết rất tốt."
 2. AuthFilter validates token and resolves TEACHER identity.
 3. AssignmentController forwards the request to AssignmentService.
 4. AssignmentService validates teacher can grade the submission.
@@ -1321,7 +1319,7 @@ Response JSON:
 - success = true
 - data.status = GRADED
 - data.score = 85
-- data.feedback = "Good work"
+- data.feedback = "Bài viết rất tốt."
 
 ---
 
@@ -1366,7 +1364,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_T_GR_004
-**Test Case Description:** Grade submission đã GRADED → 400 INVALID_STATUS
+**Test Case Description:** Grade submission has been GRADED → 400 INVALID_STATUS
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
@@ -1386,7 +1384,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_T_GR_005
-**Test Case Description:** Teacher B chấm bài class Teacher A → 400 ACCESS_DENIED
+**Test Case Description:** Teacher B grades Teacher A's class → 400 ACCESS_DENIED
 
 **Pre-conditions:**
 - Teacher A accessToken is available (from prior login)
@@ -1409,7 +1407,7 @@ Response JSON:
 ## Section 12 — Teacher Assignment Status Management (Additional Tests)
 
 ### Test Case ID: TC_AS_T_ST_003
-**Test Case Description:** DRAFT → PUBLISHED với dueDate quá hạn trong request → 400
+**Test Case Description:** DRAFT → PUBLISHED with overdue dueDate in request → 400
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
@@ -1449,7 +1447,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_T_ST_005
-**Test Case Description:** PUBLISHED → CLOSED → thành công
+**Test Case Description:** PUBLISHED → CLOSED → success
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
@@ -1529,7 +1527,7 @@ Response JSON:
 ## Section 14 — Teacher View Submissions Tests
 
 ### Test Case ID: TC_AS_T_VS_001
-**Test Case Description:** Xem list submissions thành công
+**Test Case Description:** View list of successful submissions
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
@@ -1556,7 +1554,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_T_VS_002
-**Test Case Description:** Assignment chưa có submission → empty list
+**Test Case Description:** Assignment has no submission → empty list
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
@@ -1578,7 +1576,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_T_VS_003
-**Test Case Description:** Assignment ID không tồn tại → 404
+**Test Case Description:** Assignment ID does not exist → 404
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
@@ -1596,7 +1594,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_T_VS_004
-**Test Case Description:** Xem 1 submission cụ thể → đúng fields
+**Test Case Description:** Check a specific submission → correct fields
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
@@ -1623,7 +1621,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_T_VS_005
-**Test Case Description:** Submission không tồn tại → 404
+**Test Case Description:** Submission does not exist → 404
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
@@ -1643,7 +1641,7 @@ Response JSON:
 ## Section 15 — Teacher Assignment Deletion (Additional Tests)
 
 ### Test Case ID: TC_AS_T_DL_003
-**Test Case Description:** Xóa khi có submissions → 400 (requireDraft block)
+**Test Case Description:** Delete when submissions occur → 400 (requireDraft block)
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
@@ -1662,7 +1660,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_T_DL_004
-**Test Case Description:** Xóa PUBLISHED không có submissions → 200 (OK)
+**Test Case Description:** Delete PUBLISHED with no submissions → 200 (OK)
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
@@ -1707,7 +1705,7 @@ Response JSON:
 ## Section 16 — Learner Assignment Tests (Additional)
 
 ### Test Case ID: TC_AS_L_VL_002
-**Test Case Description:** DRAFT assignment không hiển thị với Learner
+**Test Case Description:** DRAFT assignments are not showing up for Learner
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -1731,7 +1729,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_VL_003
-**Test Case Description:** Assignment CLOSED vẫn hiển thị (để xem lịch sử)
+**Test Case Description:** Assignment CLOSED is still displayed (to view history)
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -1755,7 +1753,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_VL_004
-**Test Case Description:** Learner không thuộc class nào → empty list
+**Test Case Description:** Learner not belonging to any class → empty list
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -1857,7 +1855,7 @@ Response JSON:
 ## Section 17 — Learner Assignment Doing Tests
 
 ### Test Case ID: TC_AS_L_DO_001
-**Test Case Description:** Start QUIZ thành công → submission IN_PROGRESS
+**Test Case Description:** Start QUIZ successful → submission IN_PROGRESS
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -1916,7 +1914,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_DO_003
-**Test Case Description:** allowRetry=false, đã có 1 attempt GRADED → 400 (NO_RETRY)
+**Test Case Description:** allowRetry=false, there was 1 attempt GRADED → 400 (NO_RETRY)
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -1936,7 +1934,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_DO_004
-**Test Case Description:** Đã có ≥2 attempts → 400 (NO_RETRY)
+**Test Case Description:** There have been ≥2 attempts → 400 (NO_RETRY)
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -1956,7 +1954,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_DO_005
-**Test Case Description:** Đang có IN_PROGRESS → 200 (resume existing session)
+**Test Case Description:** IN_PROGRESS → 200 (resume existing session)
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -1979,7 +1977,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_DO_006
-**Test Case Description:** Submit Quiz đúng hạn, đáp án đúng → GRADED, score=100
+**Test Case Description:** Submit quiz on time, correct answers → GRADED, score=100
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2006,7 +2004,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_DO_007
-**Test Case Description:** Submit Quiz đáp án sai → GRADED, score=0
+**Test Case Description:** Submit Quiz with incorrect answer → GRADED, score=0
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2033,7 +2031,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_DO_008
-**Test Case Description:** Submit Quiz quá hạn → 400 (PAST_DUE)
+**Test Case Description:** Submit Quiz overdue → 400 (PAST_DUE)
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2058,7 +2056,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_DO_009
-**Test Case Description:** Submit Writing đúng hạn → SUBMITTED (chờ teacher chấm)
+**Test Case Description:** Submit Writing on time → SUBMITTED (wait for teacher to grade)
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2082,7 +2080,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_DO_010
-**Test Case Description:** Submit Writing quá hạn → 400 (PAST_DUE)
+**Test Case Description:** Submit Writing overdue → 400 (PAST_DUE)
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2106,7 +2104,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_DO_011
-**Test Case Description:** Submit Writing thiếu image → 400
+**Test Case Description:** Submit Writing missing image → 400
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2142,7 +2140,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_DO_013
-**Test Case Description:** Start assignment khi đang CLOSED → 400 (ASSIGNMENT_NOT_PUBLISHED)
+**Test Case Description:** Start assignment when CLOSED → 400 (ASSIGNMENT_NOT_PUBLISHED)
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2161,7 +2159,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_DO_014
-**Test Case Description:** Submit assignment khi đang CLOSED → vẫn chấm GRADED
+**Test Case Description:** Submit assignment when CLOSED → vẫn chấm GRADED
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2186,7 +2184,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_DO_015
-**Test Case Description:** Submit WRITING assignment đính kèm ảnh → SUBMITTED
+**Test Case Description:** Submit WRITING assignment with image → SUBMITTED
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2212,36 +2210,8 @@ Response JSON:
 
 ---
 
-### Test Case ID: TC_AS_L_DO_015
-**Test Case Description:** Evaluate Writing thành công
-
-**Pre-conditions:**
-- Learner accessToken is available (from prior login)
-- Writing assignment submitted (SUBMITTED status)
-
-**Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/submissions/{submissionId}/evaluate with Authorization: Bearer {token}.
-2. AuthFilter validates token and resolves LEARNER identity.
-3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService validates submission belongs to learner and is SUBMITTED.
-5. AssignmentService calls AiGradingService to evaluate writing.
-6. AiGradingService returns evaluation with score and feedback.
-7. AssignmentService updates submission with AI evaluation.
-8. AssignmentSubmissionRepository saves the updated submission.
-9. System returns the evaluation response.
-
-**Expected Results:** HTTP 200 OK
-Response JSON:
-- success = true
-- data.aiScore exists
-- data.aiFeedback exists
-- data.grammarScore exists
-- data.vocabularyScore exists
-
----
-
 ### Test Case ID: TC_AS_L_DO_016
-**Test Case Description:** Submit QUIZ answers bị lỗi JSON format → 400
+**Test Case Description:** Submit QUIZ answers failed due to JSON formatting error → 400
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2284,7 +2254,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_DO_018
-**Test Case Description:** Start assignment quá due date → 400 PAST_DUE
+**Test Case Description:** Start assignment past due date → 400 PAST_DUE
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2302,26 +2272,8 @@ Response JSON:
 
 ---
 
-### Test Case ID: TC_AS_L_DO_018
-**Test Case Description:** Evaluate Writing không có submission → 404
-
-**Pre-conditions:**
-- Learner accessToken is available (from prior login)
-
-**Test Case Procedure:**
-1. Client sends POST /api/v1/learner/assignments/submissions/{nonExistentSubmissionId}/evaluate with Authorization: Bearer {token}.
-2. AuthFilter validates token and resolves LEARNER identity.
-3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService attempts to find submission via AssignmentSubmissionRepository.
-5. AssignmentSubmissionRepository returns empty (submission not found).
-6. System returns the not found error response.
-
-**Expected Results:** HTTP 404 NOT FOUND
-
----
-
 ### Test Case ID: TC_AS_L_DO_019
-**Test Case Description:** Evaluate Writing thành công với image
+**Test Case Description:** Evaluate Writing successfully with images.
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2347,7 +2299,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_DO_020
-**Test Case Description:** Evaluate Writing thất bại khi chưa start submission
+**Test Case Description:** Evaluate Writing fails before starting submission.
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2370,7 +2322,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_DO_021
-**Test Case Description:** Evaluate Writing với multiple images
+**Test Case Description:** Evaluate Writing with multiple images
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2393,39 +2345,12 @@ Response JSON:
 - success = true
 - data.feedback = "Excellent work with comprehensive content."
 
-
----
-
-### Test Case ID: TC_AS_L_DO_CONCURRENCY_001
-**Test Case Description:** Double-submit 'startAssignment' → chỉ 1 submission được tạo
-
-**Pre-conditions:**
-- Learner accessToken is available (from prior login)
-- Course and class created
-- Learner enrolled in class
-- Published quiz assignment created
-
-**Test Case Procedure:**
-1. Client sends two concurrent POST /api/v1/learner/assignments/{assignmentId}/start requests with Authorization: Bearer {token}.
-2. AuthFilter validates token and resolves LEARNER identity for both requests.
-3. AssignmentController forwards both requests to AssignmentService concurrently.
-4. AssignmentService validates learner is enrolled and assignment is published for both requests.
-5. First request creates new AssignmentSubmission with IN_PROGRESS status.
-6. Second request detects existing IN_PROGRESS submission and throws BusinessException.
-7. Only one submission is saved to database.
-8. System returns success for first request and error for second request.
-
-**Expected Results:** 
-- First request: HTTP 200 OK with submission details
-- Second request: HTTP 400 BAD REQUEST (ALREADY_IN_PROGRESS)
-- Database contains exactly 1 submission for the learner and assignment
-
 ---
 
 ## Section 18 — Learner View Submissions Tests
 
 ### Test Case ID: TC_AS_L_VS_001
-**Test Case Description:** Xem submission của chính mình → thành công
+**Test Case Description:** View your own submission → successful
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2450,7 +2375,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_VS_001b
-**Test Case Description:** Xem submission quiz đã chấm điểm → có score, số câu đúng/sai
+**Test Case Description:** View the graded submission quiz → you'll see your score and the number of correct/incorrect answers.
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2475,7 +2400,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_VS_002
-**Test Case Description:** Learner B xem submission của Learner A → 400 (ACCESS_DENIED)
+**Test Case Description:** Learner B views Learner A's submission → 400 (ACCESS_DENIED)
 
 **Pre-conditions:**
 - Learner A accessToken is available (from prior login)
@@ -2495,7 +2420,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_VS_003
-**Test Case Description:** Submission SUBMITTED (chưa chấm) → status=SUBMITTED, score=null
+**Test Case Description:** Submission SUBMITTED (not yet scored) → status=SUBMITTED, score=null
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2541,7 +2466,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_VS_005
-**Test Case Description:** Submission không tồn tại → 404
+**Test Case Description:** Submission does not exist → 404
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2559,7 +2484,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_VS_006
-**Test Case Description:** Submission GRADED (đã chấm) → status=GRADED, có score & feedback
+**Test Case Description:** Submission GRADED (graded) → status=GRADED, with score and feedback
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2584,7 +2509,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_L_VS_007
-**Test Case Description:** Get My Submissions History thành công
+**Test Case Description:** Get My Submissions History success
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2612,7 +2537,7 @@ Response JSON:
 ## Section 19 — AI Services Tests (Additional)
 
 ### Test Case ID: TC_AS_AI_003
-**Test Case Description:** AI generate quiz — thiếu teacherPrompt → 400
+**Test Case Description:** AI generate quiz — missing teacherPrompt → 400
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
@@ -2630,7 +2555,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_AI_004
-**Test Case Description:** AI generate quiz — Learner gọi endpoint → 403
+**Test Case Description:** AI generate quiz — Learner calls endpoint → 403
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2644,71 +2569,9 @@ Response JSON:
 
 **Expected Results:** HTTP 403 FORBIDDEN
 
-> Note: Java asserts `.andExpect(status().isBadRequest())` (HTTP 400) because the GlobalExceptionHandler intercepts the access denied at the business layer level in this test context.
 
 ---
 
-### Test Case ID: TC_AS_AI_005
-**Test Case Description:** AI generate quiz — AI service throws exception → 400
-
-**Pre-conditions:**
-- Teacher accessToken is available (from prior login)
-- QuizAiGenerationService mocked to throw RuntimeException
-
-**Test Case Procedure:**
-1. Client sends POST /api/v1/teacher/assignments/questions/ai-generate with Authorization: Bearer {token} and JSON body:
-   - teacherPrompt: "Generate quiz about Japanese", questionCount: 3, questionTypes: ["multiple_choice"]
-2. AuthFilter validates token and resolves TEACHER identity.
-3. AssignmentController forwards the request to QuizAiGenerationService.
-4. Mocked AI service throws RuntimeException.
-5. System handles exception and returns error response.
-
-**Expected Results:** HTTP 500 INTERNAL SERVER ERROR or HTTP 400 BAD REQUEST
-
----
-
-### Test Case ID: TC_AS_AI_006
-**Test Case Description:** AI generate quiz — AI returns empty list → 200, data.length() = 0
-
-**Pre-conditions:**
-- Teacher accessToken is available (from prior login)
-- QuizAiGenerationService mocked to return empty list
-
-**Test Case Procedure:**
-1. Client sends POST /api/v1/teacher/assignments/questions/ai-generate with Authorization: Bearer {token} and JSON body:
-   - teacherPrompt: "Very specific niche topic", questionCount: 1, questionTypes: ["multiple_choice"]
-2. AuthFilter validates token and resolves TEACHER identity.
-3. AssignmentController forwards the request to QuizAiGenerationService.
-4. Mocked AI returns empty list.
-5. System returns success response with empty data array.
-
-**Expected Results:** HTTP 200 OK
-Response JSON:
-- success = true
-- data.length() = 0
-
----
-
-### Test Case ID: TC_AS_AI_007
-**Test Case Description:** AI explain quiz question thành công → data.explanation not empty
-
-**Pre-conditions:**
-- Teacher accessToken is available (from prior login)
-- QuizExplanationService mocked to return explanation text
-
-**Test Case Procedure:**
-1. Client sends POST /api/v1/teacher/assignments/questions/{questionId}/ai-explain with Authorization: Bearer {token}.
-2. AuthFilter validates token and resolves TEACHER identity.
-3. AssignmentController forwards the request to QuizExplanationService.
-4. Mocked AI service returns explanation text.
-5. System returns the explanation response.
-
-**Expected Results:** HTTP 200 OK
-Response JSON:
-- success = true
-- data.explanation is not empty
-
----
 
 ## Section 20 — Cloudinary Integration Tests
 
@@ -2734,7 +2597,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_CLOUD_002
-**Test Case Description:** Cloudinary upload image fail khi submit writing → 400 UPLOAD_FAILED
+**Test Case Description:** Cloudinary upload image fail when submit writing → 400 UPLOAD_FAILED
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2757,7 +2620,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_CLOUD_003
-**Test Case Description:** Submit writing quá 10 ảnh → 400 TOO_MANY_IMAGES
+**Test Case Description:** Submitting text with more than 10 images → 400 TOO_MANY_IMAGES
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2779,7 +2642,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_CLOUD_004
-**Test Case Description:** Update audio khi assignment đã có submissions → 400 HAS_SUBMISSIONS
+**Test Case Description:** Update the audio once the assignment has received submissions. → 400 HAS_SUBMISSIONS
 
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
@@ -2802,7 +2665,7 @@ Response JSON:
 ## Section 21 — Concurrency Tests
 
 ### Test Case ID: TC_AS_L_DO_CONCURRENCY_001
-**Test Case Description:** Double-submit 'startAssignment' → chỉ 1 submission được tạo
+**Test Case Description:** Double-submit 'startAssignment' → only one submission is created.
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
@@ -2821,5 +2684,140 @@ Response JSON:
 **Expected Results:**
 - `result1 XOR result2 = true` (exactly one thread succeeds)
 - `submissionRepository.countByAssignmentIdAndUserId(assignmentId, learnerId) = 1`
+
+---
+
+## Section 8 — AI Explanation and Generation Tests
+
+### Test Case ID: TC_AS_AI_006
+**Test Case Description:** Explain question does not exist → 404
+
+**Pre-conditions:**
+- Teacher accessToken is available (from prior login)
+- QuizExplanationService mocked to throw ResourceNotFoundException
+
+**Test Case Procedure:**
+1. Client sends POST /api/v1/teacher/assignments/questions/{questionId}/ai-explain with Authorization: Bearer {token}.
+2. AuthFilter validates token and resolves TEACHER identity.
+3. AssignmentController forwards the request to QuizExplanationService.
+4. QuizExplanationService.generateExplanation() throws ResourceNotFoundException("Quiz question not found").
+5. GlobalExceptionHandler handles ResourceNotFoundException and returns 404 response.
+
+**Expected Results:** HTTP 404 NOT FOUND
+
+---
+
+### Test Case ID: TC_AS_AI_007
+**Test Case Description:** AI explains how to save the explanation to the database.
+
+**Pre-conditions:**
+- Teacher accessToken is available (from prior login)
+- QuizQuestion entity created with explanation=null and aiGenerated=false
+- QuizExplanationService mocked to update and save the question
+
+**Test Case Procedure:**
+1. Client sends POST /api/v1/teacher/assignments/questions/{questionId}/ai-explain with Authorization: Bearer {token}.
+2. AuthFilter validates token and resolves TEACHER identity.
+3. AssignmentController forwards the request to QuizExplanationService.
+4. QuizExplanationService.generateExplanation() updates question.setExplanation() and saves via QuizQuestionRepository.
+5. System returns the updated question response with explanation.
+6. Database contains the updated explanation for the question.
+
+**Expected Results:** HTTP 200 OK
+Response JSON:
+- success = true
+- data.explanation is not empty
+Database verification:
+- QuizQuestion.explanation = "Đáp án đúng là A vì..."
+- QuizQuestion.aiGenerated = true (if set by service)
+
+---
+
+### Test Case ID: TC_AS_AI_008
+**Test Case Description:** AI explain draft
+
+**Pre-conditions:**
+- Teacher accessToken is available (from prior login)
+- QuizExplanationService mocked to return AiExplanationResponse
+
+**Test Case Procedure:**
+1. Client sends POST /api/v1/teacher/assignments/questions/ai-explain-draft with Authorization: Bearer {token} and JSON body:
+   - questionText: "テスト"
+   - questionType: "multiple_choice"
+   - options: "A, B"
+   - correctAnswer: "A"
+2. AuthFilter validates token and resolves TEACHER identity.
+3. AssignmentController forwards the request to QuizExplanationService.
+4. QuizExplanationService.generateExplanationFromDraft() returns AiExplanationResponse with explanation text.
+5. System returns the explanation response.
+
+**Expected Results:** HTTP 200 OK
+Response JSON:
+- success = true
+- data.explanation = "Draft explanation text..."
+
+---
+
+### Test Case ID: TC_AS_AI_009
+**Test Case Description:** AI provider throws exception → 400
+
+**Pre-conditions:**
+- Teacher accessToken is available (from prior login)
+- QuizExplanationService mocked to throw BusinessException
+
+**Test Case Procedure:**
+1. Client sends POST /api/v1/teacher/assignments/questions/ai-explain-draft with Authorization: Bearer {token} and JSON body with draft question data.
+2. AuthFilter validates token and resolves TEACHER identity.
+3. AssignmentController forwards the request to QuizExplanationService.
+4. QuizExplanationService.generateExplanationFromDraft() throws BusinessException("AI_RESPONSE_ERROR", "Failed to call AI: timeout").
+5. GlobalExceptionHandler handles BusinessException and returns 400 response.
+
+**Expected Results:** HTTP 400 BAD REQUEST
+
+---
+
+### Test Case ID: TC_AS_AI_010
+**Test Case Description:** AI generate: service throw BusinessException → 400
+
+**Pre-conditions:**
+- Teacher accessToken is available (from prior login)
+- Course and class created
+- QuizAiGenerationService mocked to throw BusinessException
+
+**Test Case Procedure:**
+1. Client sends POST /api/v1/teacher/assignments/questions/ai-generate with Authorization: Bearer {token} and JSON body:
+   - teacherPrompt: "N5 vocab"
+   - classId: {classId}
+   - questionCount: 1
+   - questionTypes: ["multiple_choice"]
+2. AuthFilter validates token and resolves TEACHER identity.
+3. AssignmentController forwards the request to QuizAiGenerationService.
+4. QuizAiGenerationService.generateQuestions() throws BusinessException("AI_PARSE_ERROR", "Failed to parse AI response.").
+5. GlobalExceptionHandler handles BusinessException and returns 400 response.
+
+**Expected Results:** HTTP 400 BAD REQUEST
+
+---
+
+### Test Case ID: TC_AS_AI_011
+**Test Case Description:** The AI generator returns an empty list of 200 with no data.
+
+**Pre-conditions:**
+- Teacher accessToken is available (from prior login)
+- Course and class created
+- QuizAiGenerationService mocked to return empty list
+
+**Test Case Procedure:**
+1. Client sends POST /api/v1/teacher/assignments/questions/ai-generate with Authorization: Bearer {token} and JSON body with generation request.
+2. AuthFilter validates token and resolves TEACHER identity.
+3. AssignmentController forwards the request to QuizAiGenerationService.
+4. QuizAiGenerationService.generateQuestions() returns empty List<QuizQuestion>.
+5. System returns success response with empty data array.
+
+**Expected Results:** HTTP 200 OK
+Response JSON:
+- success = true
+- data.length() = 0
+- data is an empty array
 
 ---
