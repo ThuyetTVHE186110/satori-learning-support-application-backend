@@ -206,7 +206,27 @@ public class DocumentAiLayoutClient {
                 log.debug("Document AI: sending pages {}-{} of {} ({} KB)",
                         start + 1, end, totalPages, batchPdfBytes.length / 1024);
                 List<OcrTextResult> batchResults = processBatch(batchPdfBytes, start + 1, end);
-                allResults.addAll(batchResults);
+
+                // IMPORTANT: always add exactly (end - start) entries to keep allResults
+                // index-aligned with page numbers. If the batch failed (empty list) or
+                // returned fewer results than expected, pad with empty placeholders so
+                // OcrClient sees them as "no text" and queues them for Vision fallback.
+                // Without this guard a single failed batch shifts every subsequent page's
+                // index, silently discarding content and mapping wrong text to wrong pages.
+                if (batchResults.size() == end - start) {
+                    allResults.addAll(batchResults);
+                } else {
+                    int expected = end - start;
+                    allResults.addAll(batchResults);
+                    int missing = expected - batchResults.size();
+                    if (missing > 0) {
+                        log.warn("Document AI batch {}-{}: returned {} results, expected {} — " +
+                                "padding {} empty placeholders to preserve page-index alignment " +
+                                "(Vision fallback will handle these pages)",
+                                start + 1, end, batchResults.size(), expected, missing);
+                        for (int i = 0; i < missing; i++) allResults.add(OcrTextResult.empty());
+                    }
+                }
             }
 
             return allResults;

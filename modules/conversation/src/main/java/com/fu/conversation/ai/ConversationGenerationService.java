@@ -82,7 +82,7 @@ public class ConversationGenerationService {
             """;
 
     private static final String GENERATE_USER_CONTEXT_SYSTEM_PROMPT = """
-            You are a Korean language learning assistant.
+            You are a Japanese language learning assistant.
             Given a conversation topic scenario described by a learner, generate helpful context
             including vocabulary hints, grammar points, and useful expressions for practicing that scenario.
 

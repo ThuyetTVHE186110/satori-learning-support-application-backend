@@ -575,12 +575,16 @@ public class ImportOrchestrator {
                 futures.add(future);
             }
 
-            // Wait for batch to complete (with 5 minute timeout per batch)
+            // Wait for batch to complete with a configurable per-batch timeout.
+            // Per-section grammar extraction: up to 6 sections × ~30 s per chunk,
+            // batch size 3 → worst-case ~3 min + OpenAI retries → needs >5 min headroom.
+            int batchTimeoutMinutes = ragProperties.getBatchTimeoutMinutes();
             try {
                 CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                        .get(5, TimeUnit.MINUTES);
+                        .get(batchTimeoutMinutes, TimeUnit.MINUTES);
             } catch (TimeoutException e) {
-                log.error("[{}] Batch starting at chunk {} timed out after 5 minutes", importId, batchStart);
+                log.error("[{}] Batch starting at chunk {} timed out after {} minutes",
+                        importId, batchStart, batchTimeoutMinutes);
                 futures.forEach(f -> f.cancel(true));
             } catch (ExecutionException e) {
                 log.error("[{}] Batch execution error: {}", importId, e.getMessage());
