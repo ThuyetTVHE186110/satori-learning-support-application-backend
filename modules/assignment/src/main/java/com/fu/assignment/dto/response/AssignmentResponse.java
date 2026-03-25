@@ -46,4 +46,7 @@ public class AssignmentResponse {
     private WritingAssignmentResponse writingContent;          // For WRITING / TRANSLATION
     private List<AssignmentTargetResponse> targets;
     private Long submissionCount;
+
+    private UUID classId;
+    private String className;
 }

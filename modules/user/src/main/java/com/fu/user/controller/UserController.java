@@ -27,20 +27,19 @@ import java.util.UUID;
  * Implements UC-01 to UC-05 from business requirements.
  * 
  * Access Control:
- * - ADMIN: Full access to all users (LEARNER, TEACHER, MANAGER) including deleted users
- * - MANAGER: Limited access to LEARNER and TEACHER only (active users only)
+ * - ADMIN: Full access to all user management operations
  */
 @RestController
 @RequestMapping("/api/v1/users")
 @RequiredArgsConstructor
+@PreAuthorize("hasRole('ADMIN')")
 public class UserController {
 
     private final UserService userService;
 
     /**
      * UC-02: Create User
-     * Manager creates LEARNER/TEACHER.
-     * Admin creates LEARNER/TEACHER/MANAGER.
+     * Admin creates LEARNER/TEACHER/CONTENT_MANAGER/OPERATION_MANAGER.
      * 
      * POST /api/v1/users
      * 
@@ -48,7 +47,6 @@ public class UserController {
      * @return Created user with HTTP 201, or error with deleted user info
      */
     @PostMapping
-    @PreAuthorize("hasAnyRole('MANAGER', 'ADMIN')")
     public ResponseEntity<ApiResponse<UserResponse>> createUser(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @Valid @RequestBody CreateUserRequest request) {
@@ -67,7 +65,6 @@ public class UserController {
      * GET /api/v1/users/{id}
      */
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('MANAGER', 'ADMIN')")
     public ResponseEntity<ApiResponse<UserResponse>> getUserById(@PathVariable("id") UUID id) {
         UserResponse response = userService.getUserById(id);
         return ResponseEntity.ok(ApiResponse.success(response));
@@ -81,7 +78,6 @@ public class UserController {
      * GET /api/v1/users/{id}/details
      */
     @GetMapping("/{id}/details")
-    @PreAuthorize("hasAnyRole('MANAGER', 'ADMIN')")
     public ResponseEntity<ApiResponse<UserDetailResponse>> getUserDetail(@AuthenticationPrincipal CustomUserDetails currentUser, @PathVariable("id") UUID id) {
         UserRole currentUserRole = UserRole.valueOf(currentUser.getRole());
         UserDetailResponse response = userService.getUserDetailById(currentUserRole,id);
@@ -91,7 +87,6 @@ public class UserController {
     /**
      * UC-01: View User List
      * Returns paginated list of users with optional search and filters.
-     * - Manager: sees LEARNER/TEACHER only (active users, no deleted)
      * - Admin: sees all users including deleted users
      * Default sort: createdAt DESC
      * 
@@ -106,7 +101,6 @@ public class UserController {
      * @param status Filter by status (ACTIVE, INACTIVE)
      */
     @GetMapping
-    @PreAuthorize("hasAnyRole('MANAGER', 'ADMIN')")
     public ResponseEntity<ApiResponse<PageResponse<UserResponse>>> getAllUsers(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @RequestParam(name = "page", defaultValue = AppConstants.DEFAULT_PAGE_NUMBER) int page,
@@ -164,13 +158,11 @@ public class UserController {
 
     /**
      * UC-04: Update User Information
-     * Manager updates LEARNER/TEACHER details.
      * Admin updates all users.
      * 
      * PUT /api/v1/users/{id}
      */
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('MANAGER', 'ADMIN')")
     public ResponseEntity<ApiResponse<UserResponse>> updateUser(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable("id") UUID id,
@@ -183,13 +175,11 @@ public class UserController {
 
     /**
      * UC-05: Delete User (Soft Delete)
-     * Manager soft-deletes LEARNER/TEACHER.
      * Admin can delete all users.
      * 
      * DELETE /api/v1/users/{id}
      */
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('MANAGER', 'ADMIN')")
     public ResponseEntity<ApiResponse<Void>> deleteUser(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable("id") UUID id) {
@@ -200,15 +190,14 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success("Xóa người dùng thành công", null));
     }
 
-    // ==================== Admin/Manager Operations ====================
+    // ==================== Admin Operations ====================
 
     /**
-     * Admin/Manager: Restore a deleted user
+     * Admin: Restore a deleted user
      * 
      * POST /api/v1/users/restore
      */
     @PostMapping("/restore")
-    @PreAuthorize("hasAnyRole('MANAGER', 'ADMIN')")
     public ResponseEntity<ApiResponse<UserResponse>> restoreUser(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @Valid @RequestBody RestoreUserRequest request) {

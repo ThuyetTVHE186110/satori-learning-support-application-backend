@@ -23,6 +23,8 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
     @Query("SELECT a FROM Assignment a WHERE a.id = :id AND a.deletedAt IS NULL")
     Optional<Assignment> findByIdAndNotDeleted(@Param("id") UUID id);
 
+    List<Assignment> findAllByStatusAndDeletedAtIsNull(AssignmentStatus status);
+
     /**
      * Get counts by status for a specific class.
      */
@@ -65,12 +67,16 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
               AND (CAST(:type AS text) = '' OR CAST(a.assignment_type AS text) = CAST(:type AS text))
             ORDER BY
               CASE
-                  WHEN sub.status IS NULL OR sub.status = 'IN_PROGRESS' THEN 0
-                  WHEN sub.status = 'OVERDUE'   THEN 1
+                  -- 1. NOT_STARTED / IN_PROGRESS (Within deadline)
+                  WHEN (sub.status IS NULL OR sub.status = 'IN_PROGRESS') AND a.due_date >= CURRENT_TIMESTAMP THEN 0
+                  -- 2. OVERDUE (Explicit status OR past deadline and not submitted/graded)
+                  WHEN sub.status = 'OVERDUE' OR ((sub.status IS NULL OR sub.status = 'IN_PROGRESS') AND a.due_date < CURRENT_TIMESTAMP) THEN 1
+                  -- 3. SUBMITTED / GRADED
                   ELSE 2
               END ASC,
               CASE
-                  WHEN sub.status IS NULL OR sub.status = 'IN_PROGRESS' THEN a.due_date
+                  -- Sorting within Group 0: Closest due date first (ASC)
+                  WHEN (sub.status IS NULL OR sub.status = 'IN_PROGRESS') AND a.due_date >= CURRENT_TIMESTAMP THEN a.due_date
               END ASC,
               a.due_date DESC
             """,

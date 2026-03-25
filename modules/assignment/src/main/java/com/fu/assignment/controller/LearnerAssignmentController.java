@@ -1,8 +1,6 @@
 package com.fu.assignment.controller;
 
-import com.cloudinary.Api;
 import com.fu.assignment.dto.request.SubmitAssignmentRequest;
-import com.fu.assignment.dto.request.SubmitWritingRequest;
 import com.fu.assignment.dto.request.WritingEvaluationRequest;
 import com.fu.assignment.dto.response.*;
 import com.fu.assignment.service.AssignmentService;
@@ -84,10 +82,9 @@ public class LearnerAssignmentController {
     @Operation(summary = "Submit answers for a WRITING or TRANSLATION assignment (supports image uploads)")
     public ApiResponse<SubmissionResponse> submitWritingAssignment(
             @PathVariable UUID assignmentId,
-            @RequestPart(value = "data") SubmitWritingRequest request,
             @RequestPart(value = "images", required = false) MultipartFile[] images,
             @AuthenticationPrincipal UserDetails userDetails) {
-        return ApiResponse.success(assignmentService.submitWriting(assignmentId, request, images, getUserId(userDetails)));
+        return ApiResponse.success(assignmentService.submitWriting(assignmentId, images, getUserId(userDetails)));
     }
 
     @PostMapping("/{assignmentId}/cancel")

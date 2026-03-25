@@ -34,7 +34,7 @@ INSERT INTO user_management.users (
     CURRENT_TIMESTAMP
 ) ON CONFLICT (email) DO NOTHING;
 
--- ==================== MANAGER USER ====================
+-- ====================CONTENT MANAGER USER ====================
 INSERT INTO user_management.users (
     id, email, password_hash,
     first_name, last_name, display_name,
@@ -42,19 +42,38 @@ INSERT INTO user_management.users (
     email_verified_at, created_at, updated_at
 ) VALUES (
     'a0000000-0000-0000-0000-000000000002',
-    'manager@test.satori.com',
+    'content-manager@test.satori.com',
     '$2a$12$wXFj.DR15CKPFTyhwFL.XuV8JvVqvnTPSIK3E8w0WTNC5omj9Lzp2', -- Password123!
-    'Manager',
+    'Content Manager',
     'Test',
-    'Test Manager',
-    'MANAGER',
+    'Test Content Manager',
+    'CONTENT_MANAGER',
     'ACTIVE',
     'LOCAL',
     CURRENT_TIMESTAMP,
     CURRENT_TIMESTAMP,
     CURRENT_TIMESTAMP
 ) ON CONFLICT (email) DO NOTHING;
-
+-- ====================OPERATION MANAGER USER ====================
+INSERT INTO user_management.users (
+    id, email, password_hash,
+    first_name, last_name, display_name,
+    role, status, auth_provider,
+    email_verified_at, created_at, updated_at
+) VALUES (
+             'a0000000-0000-0000-0000-000000000010',
+             'operation-manager@test.satori.com',
+             '$2a$12$wXFj.DR15CKPFTyhwFL.XuV8JvVqvnTPSIK3E8w0WTNC5omj9Lzp2', -- Password123!
+             'Operation Manager',
+             'Test',
+             'Test Operation Manager',
+             'OPERATION_MANAGER',
+             'ACTIVE',
+             'LOCAL',
+             CURRENT_TIMESTAMP,
+             CURRENT_TIMESTAMP,
+             CURRENT_TIMESTAMP
+         ) ON CONFLICT (email) DO NOTHING;
 -- ==================== TEACHER USER ====================
 INSERT INTO user_management.users (
     id, email, password_hash,

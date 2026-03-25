@@ -42,7 +42,7 @@ import static org.mockito.Mockito.*;
  * Unit tests for UserServiceImpl.
  * Tests updated User Management use cases with new features:
  * - firstName/lastName instead of fullName
- * - Role-based permissions (ADMIN vs MANAGER)
+ * - Role-based permissions (ADMIN only)
  * - DeletedUserExistsException for restore flow
  * - Password generation with strict requirements
  * - Admin can view/restore deleted users
@@ -72,18 +72,20 @@ class UserServiceImplTest {
     // Test fixtures
     private User testLearner;
     private User testTeacher;
-    private User testManager;
+    private User testContentManager;
+    private User testOperationManager;
     private User testAdmin;
     private UserResponse learnerResponse;
     private CreateUserRequest createRequest;
     private UUID adminId;
-    private UUID managerId;
+    private UUID contentManagerId;
+    private UUID operationManagerId;
 
     @BeforeEach
     void setUp() {
         adminId = UUID.randomUUID();
-        managerId = UUID.randomUUID();
-        
+        contentManagerId = UUID.randomUUID();
+        operationManagerId = UUID.randomUUID();
         // Test learner
         testLearner = User.builder()
                 .email("learner@example.com")
@@ -97,7 +99,7 @@ class UserServiceImplTest {
                 .failedLoginAttempts(0)
                 .build();
         ReflectionTestUtils.setField(testLearner, "id", UUID.randomUUID());
-        
+
         // Test teacher
         testTeacher = User.builder()
                 .email("teacher@example.com")
@@ -109,19 +111,29 @@ class UserServiceImplTest {
                 .authProvider(AuthProvider.LOCAL)
                 .build();
         ReflectionTestUtils.setField(testTeacher, "id", UUID.randomUUID());
-        
-        // Test manager
-        testManager = User.builder()
+
+        // Test content manager
+        testContentManager = User.builder()
                 .email("manager@example.com")
                 .passwordHash("hashedPassword")
                 .firstName("Manager")
                 .lastName("User")
-                .role(UserRole.MANAGER)
+                .role(UserRole.CONTENT_MANAGER)
                 .status(UserStatus.ACTIVE)
                 .authProvider(AuthProvider.LOCAL)
                 .build();
-        ReflectionTestUtils.setField(testManager, "id", managerId);
-        
+        ReflectionTestUtils.setField(testContentManager, "id", contentManagerId);
+        // Test operation manager
+        testOperationManager = User.builder()
+                .email("manager@example.com")
+                .passwordHash("hashedPassword")
+                .firstName("Manager")
+                .lastName("User")
+                .role(UserRole.OPERATION_MANAGER)
+                .status(UserStatus.ACTIVE)
+                .authProvider(AuthProvider.LOCAL)
+                .build();
+        ReflectionTestUtils.setField(testOperationManager, "id", operationManagerId);
         // Test admin
         testAdmin = User.builder()
                 .email("admin@example.com")
@@ -133,7 +145,7 @@ class UserServiceImplTest {
                 .authProvider(AuthProvider.LOCAL)
                 .build();
         ReflectionTestUtils.setField(testAdmin, "id", adminId);
-        
+
         // Create request with firstName/lastName
         createRequest = CreateUserRequest.builder()
                 .email("new@example.com")
@@ -143,7 +155,7 @@ class UserServiceImplTest {
                 .phoneNumber("0123456789")
                 .dateOfBirth(LocalDate.of(2000, 1, 1))
                 .build();
-        
+
         learnerResponse = UserResponse.builder()
                 .id((UUID) ReflectionTestUtils.getField(testLearner, "id"))
                 .email(testLearner.getEmail())
@@ -160,8 +172,8 @@ class UserServiceImplTest {
     class CreateUserTests {
 
         @Test
-        @DisplayName("Should create learner successfully by manager")
-        void shouldCreateLearnerByManager() {
+        @DisplayName("Should create learner successfully by admin")
+        void shouldCreateLearnerByAdmin() {
             // Given
             User newUser = User.builder()
                     .email(createRequest.getEmail())
@@ -169,27 +181,27 @@ class UserServiceImplTest {
                     .lastName(createRequest.getLastName())
                     .role(UserRole.LEARNER)
                     .build();
-            
+
             given(userRepository.findByEmail(createRequest.getEmail())).willReturn(Optional.empty());
             given(userMapper.toEntity(createRequest)).willReturn(newUser);
             given(passwordEncoder.encode(anyString())).willReturn("hashedPassword");
             given(userRepository.save(any(User.class))).willReturn(testLearner);
             given(userMapper.toResponse(testLearner)).willReturn(learnerResponse);
             doNothing().when(emailService).sendWelcomeEmailWithCredentials(anyString(), anyString(), anyString(), anyString());
-            
+
             // When
-            UserResponse result = userService.createUser(createRequest, managerId, UserRole.MANAGER);
-            
+            UserResponse result = userService.createUser(createRequest, adminId, UserRole.ADMIN);
+
             // Then
             assertThat(result).isNotNull();
             assertThat(result.getEmail()).isEqualTo(testLearner.getEmail());
             assertThat(result.getFirstName()).isEqualTo("John");
             assertThat(result.getLastName()).isEqualTo("Doe");
-            
+
             verify(userRepository).findByEmail(createRequest.getEmail());
             verify(userRepository).save(userCaptor.capture());
             verify(emailService).sendWelcomeEmailWithCredentials(anyString(), anyString(), anyString(), anyString());
-            
+
             User savedUser = userCaptor.getValue();
             assertThat(savedUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
             assertThat(savedUser.getPasswordHash()).isNotNull();
@@ -197,55 +209,55 @@ class UserServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should allow admin to create manager")
+        @DisplayName("Should allow admin to create content manager")
         void shouldAllowAdminToCreateManager() {
             // Given
             CreateUserRequest managerRequest = CreateUserRequest.builder()
                     .email("newmanager@example.com")
                     .firstName("New")
                     .lastName("Manager")
-                    .role(UserRole.MANAGER)
+                    .role(UserRole.CONTENT_MANAGER)
                     .build();
-            
+
             User newManager = User.builder()
                     .email(managerRequest.getEmail())
                     .firstName(managerRequest.getFirstName())
                     .lastName(managerRequest.getLastName())
-                    .role(UserRole.MANAGER)
+                    .role(UserRole.CONTENT_MANAGER)
                     .build();
-            
+
             given(userRepository.findByEmail(managerRequest.getEmail())).willReturn(Optional.empty());
             given(userMapper.toEntity(managerRequest)).willReturn(newManager);
             given(passwordEncoder.encode(anyString())).willReturn("hashedPassword");
-            given(userRepository.save(any(User.class))).willReturn(testManager);
-            given(userMapper.toResponse(testManager)).willReturn(any());
-            
+            given(userRepository.save(any(User.class))).willReturn(testContentManager);
+            given(userMapper.toResponse(testContentManager)).willReturn(any());
+
             // When
-            assertThatNoException().isThrownBy(() -> 
-                userService.createUser(managerRequest, adminId, UserRole.ADMIN)
+            assertThatNoException().isThrownBy(() ->
+                    userService.createUser(managerRequest, adminId, UserRole.ADMIN)
             );
-            
+
             // Then
             verify(userRepository).save(any(User.class));
         }
 
         @Test
-        @DisplayName("Should reject manager trying to create manager")
-        void shouldRejectManagerCreatingManager() {
+        @DisplayName("Should reject operation manager trying to create user")
+        void shouldRejectManagerCreatingUser() {
             // Given
-            CreateUserRequest managerRequest = CreateUserRequest.builder()
-                    .email("newmanager@example.com")
+            CreateUserRequest learnerRequest = CreateUserRequest.builder()
+                    .email("newlearner@example.com")
                     .firstName("New")
-                    .lastName("Manager")
-                    .role(UserRole.MANAGER)
+                    .lastName("Learner")
+                    .role(UserRole.LEARNER)
                     .build();
-            
+
             // When/Then
-            assertThatThrownBy(() -> 
-                userService.createUser(managerRequest, managerId, UserRole.MANAGER)
+            assertThatThrownBy(() ->
+                    userService.createUser(learnerRequest, operationManagerId, UserRole.OPERATION_MANAGER)
             )
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Manager chỉ có thể tạo tài khoản Learner hoặc Teacher");
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Bạn không có quyền tạo tài khoản");
         }
 
         @Test
@@ -258,13 +270,13 @@ class UserServiceImplTest {
                     .lastName("Admin")
                     .role(UserRole.ADMIN)
                     .build();
-            
+
             // When/Then
-            assertThatThrownBy(() -> 
-                userService.createUser(adminRequest, adminId, UserRole.ADMIN)
+            assertThatThrownBy(() ->
+                    userService.createUser(adminRequest, adminId, UserRole.ADMIN)
             )
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Chỉ có một ADMIN duy nhất trong hệ thống");
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Không thể tạo tài khoản ADMIN");
         }
 
         @Test
@@ -286,16 +298,16 @@ class UserServiceImplTest {
 
             // When/Then
             assertThatThrownBy(() ->
-                userService.createUser(createRequest, managerId, UserRole.MANAGER)
+                    userService.createUser(createRequest, adminId, UserRole.ADMIN)
             )
-            .isInstanceOf(DeletedUserExistsException.class)
-            .satisfies(ex -> {
-                DeletedUserExistsException deletedEx = (DeletedUserExistsException) ex;
-                assertThat(deletedEx.getDeletedUserInfo()).isNotNull();
-                assertThat(deletedEx.getDeletedUserInfo().getEmail()).isEqualTo(createRequest.getEmail());
-                assertThat(deletedEx.getDeletedUserInfo().getStatus()).isEqualTo(UserStatus.DELETED);
-                assertThat(deletedEx.getDeletedUserInfo().getMessage()).contains("đã tồn tại");
-            });
+                    .isInstanceOf(DeletedUserExistsException.class)
+                    .satisfies(ex -> {
+                        DeletedUserExistsException deletedEx = (DeletedUserExistsException) ex;
+                        assertThat(deletedEx.getDeletedUserInfo()).isNotNull();
+                        assertThat(deletedEx.getDeletedUserInfo().getEmail()).isEqualTo(createRequest.getEmail());
+                        assertThat(deletedEx.getDeletedUserInfo().getStatus()).isEqualTo(UserStatus.DELETED);
+                        assertThat(deletedEx.getDeletedUserInfo().getMessage()).contains("đã tồn tại");
+                    });
 
             verify(userRepository, never()).save(any(User.class));
             verify(emailService, never()).sendWelcomeEmailWithCredentials(anyString(), anyString(), anyString(), anyString());
@@ -327,15 +339,15 @@ class UserServiceImplTest {
 
             // When/Then – must throw, NOT silently restore
             assertThatThrownBy(() ->
-                    userService.createUser(learnerCreate, managerId, UserRole.MANAGER)
+                    userService.createUser(learnerCreate, adminId, UserRole.ADMIN)
             ).isInstanceOf(DeletedUserExistsException.class)
-             .satisfies(ex -> {
-                 DeletedUserExistsException d = (DeletedUserExistsException) ex;
-                 assertThat(d.getDeletedUserInfo()).isNotNull();
-                 assertThat(d.getDeletedUserInfo().getEmail()).isEqualTo(learnerCreate.getEmail());
-                 assertThat(d.getDeletedUserInfo().getRole()).isEqualTo(UserRole.LEARNER);
-                 assertThat(d.getDeletedUserInfo().getStatus()).isEqualTo(UserStatus.DELETED);
-             });
+                    .satisfies(ex -> {
+                        DeletedUserExistsException d = (DeletedUserExistsException) ex;
+                        assertThat(d.getDeletedUserInfo()).isNotNull();
+                        assertThat(d.getDeletedUserInfo().getEmail()).isEqualTo(learnerCreate.getEmail());
+                        assertThat(d.getDeletedUserInfo().getRole()).isEqualTo(UserRole.LEARNER);
+                        assertThat(d.getDeletedUserInfo().getStatus()).isEqualTo(UserStatus.DELETED);
+                    });
 
             // Sanity: no save or email sent
             verify(userRepository, never()).save(any(User.class));
@@ -361,13 +373,13 @@ class UserServiceImplTest {
 
             // When/Then: createUser should throw DeletedUserExistsException because manager cannot restore admin
             assertThatThrownBy(() ->
-                    userService.createUser(createRequest, managerId, UserRole.MANAGER)
+                    userService.createUser(createRequest, adminId, UserRole.ADMIN)
             ).isInstanceOf(DeletedUserExistsException.class)
-             .satisfies(ex -> {
-                 DeletedUserExistsException d = (DeletedUserExistsException) ex;
-                 assertThat(d.getDeletedUserInfo()).isNotNull();
-                 assertThat(d.getDeletedUserInfo().getRole()).isEqualTo(UserRole.ADMIN);
-             });
+                    .satisfies(ex -> {
+                        DeletedUserExistsException d = (DeletedUserExistsException) ex;
+                        assertThat(d.getDeletedUserInfo()).isNotNull();
+                        assertThat(d.getDeletedUserInfo().getRole()).isEqualTo(UserRole.ADMIN);
+                    });
 
             verify(userRepository, never()).save(any(User.class));
             verify(emailService, never()).sendWelcomeEmailWithCredentials(anyString(), anyString(), anyString(), anyString());
@@ -379,34 +391,18 @@ class UserServiceImplTest {
     class SearchUsersTests {
 
         @Test
-        @DisplayName("Manager should only see learners and teachers")
-        void managerShouldOnlySeeLearnerAndTeacher() {
+        @DisplayName("Content Manager should not see users")
+        void managerShouldNotSeeUsers() {
             // Given
             UserFilterRequest filter = UserFilterRequest.builder().build();
             Pageable pageable = PageRequest.of(0, 10);
-            Page<User> page = new PageImpl<>(Arrays.asList(testLearner, testTeacher));
-            
-            given(userRepository.searchUsersByRoles(
-                    eq(null),
-                    eq(null),
-                    eq(null),
-                    eq(Arrays.asList(UserRole.LEARNER, UserRole.TEACHER)),
-                    eq(pageable)
-            )).willReturn(page);
-            given(userMapper.toResponse(any(User.class))).willReturn(learnerResponse);
-            
-            // When
-            Page<UserResponse> result = userService.searchUsers(filter, pageable, UserRole.MANAGER);
-            
-            // Then
-            assertThat(result).hasSize(2);
-            verify(userRepository).searchUsersByRoles(
-                    eq(null),
-                    eq(null),
-                    eq(null),
-                    eq(Arrays.asList(UserRole.LEARNER, UserRole.TEACHER)),
-                    eq(pageable)
-            );
+
+            // When/Then
+            assertThatThrownBy(() ->
+                    userService.searchUsers(filter, pageable, UserRole.CONTENT_MANAGER)
+            )
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Bạn không có quyền thực hiện thao tác này");
         }
 
         @Test
@@ -415,8 +411,8 @@ class UserServiceImplTest {
             // Given
             UserFilterRequest filter = UserFilterRequest.builder().build();
             Pageable pageable = PageRequest.of(0, 10);
-            Page<User> page = new PageImpl<>(Arrays.asList(testLearner, testTeacher, testManager));
-            
+            Page<User> page = new PageImpl<>(Arrays.asList(testLearner, testTeacher, testAdmin));
+
             given(userRepository.searchUsers(
                     eq(null),
                     eq(null),
@@ -424,10 +420,10 @@ class UserServiceImplTest {
                     eq(pageable)
             )).willReturn(page);
             given(userMapper.toResponse(any(User.class))).willReturn(learnerResponse);
-            
+
             // When
             Page<UserResponse> result = userService.searchUsers(filter, pageable, UserRole.ADMIN);
-            
+
             // Then
             assertThat(result).hasSize(3);
             verify(userRepository).searchUsers(
@@ -444,8 +440,8 @@ class UserServiceImplTest {
     class UpdateUserTests {
 
         @Test
-        @DisplayName("Manager should update learner successfully")
-        void managerShouldUpdateLearner() {
+        @DisplayName("Admin should update learner successfully")
+        void adminShouldUpdateLearner() {
             // Given
             UUID learnerId = (UUID) ReflectionTestUtils.getField(testLearner, "id");
             UpdateUserRequest request = UpdateUserRequest.builder()
@@ -453,14 +449,14 @@ class UserServiceImplTest {
                     .lastName("Name")
                     .phoneNumber("0987654321")
                     .build();
-            
+
             given(userRepository.findById(learnerId)).willReturn(Optional.of(testLearner));
             given(userRepository.save(any(User.class))).willReturn(testLearner);
             given(userMapper.toResponse(testLearner)).willReturn(learnerResponse);
-            
+
             // When
-            UserResponse result = userService.updateUser(learnerId, request, managerId, UserRole.MANAGER);
-            
+            UserResponse result = userService.updateUser(learnerId, request, adminId, UserRole.ADMIN);
+
             // Then
             assertThat(result).isNotNull();
             verify(userRepository).save(userCaptor.capture());
@@ -470,42 +466,23 @@ class UserServiceImplTest {
         }
 
         @Test
-        @DisplayName("Manager should not update manager/admin")
-        void managerShouldNotUpdateManager() {
-            // Given
-            UUID managerId2 = (UUID) ReflectionTestUtils.getField(testManager, "id");
-            UpdateUserRequest request = UpdateUserRequest.builder()
-                    .firstName("Updated")
-                    .build();
-            
-            given(userRepository.findById(managerId2)).willReturn(Optional.of(testManager));
-            
-            // When/Then
-            assertThatThrownBy(() -> 
-                userService.updateUser(managerId2, request, managerId, UserRole.MANAGER)
-            )
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Manager không có quyền chỉnh sửa tài khoản Manager/Admin");
-        }
-
-        @Test
         @DisplayName("Admin should update manager successfully")
         void adminShouldUpdateManager() {
             // Given
-            UUID managerId2 = (UUID) ReflectionTestUtils.getField(testManager, "id");
+            UUID managerId2 = (UUID) ReflectionTestUtils.getField(testContentManager, "id");
             UpdateUserRequest request = UpdateUserRequest.builder()
                     .firstName("Updated Manager")
                     .build();
-            
-            given(userRepository.findById(managerId2)).willReturn(Optional.of(testManager));
-            given(userRepository.save(any(User.class))).willReturn(testManager);
-            given(userMapper.toResponse(testManager)).willReturn(any());
-            
+
+            given(userRepository.findById(managerId2)).willReturn(Optional.of(testContentManager));
+            given(userRepository.save(any(User.class))).willReturn(testContentManager);
+            given(userMapper.toResponse(testContentManager)).willReturn(any());
+
             // When
             assertThatNoException().isThrownBy(() ->
-                userService.updateUser(managerId2, request, adminId, UserRole.ADMIN)
+                    userService.updateUser(managerId2, request, adminId, UserRole.ADMIN)
             );
-            
+
             // Then
             verify(userRepository).save(any(User.class));
         }
@@ -523,7 +500,7 @@ class UserServiceImplTest {
             assertThatThrownBy(() ->
                     userService.updateUser(learnerId, request, adminId, UserRole.ADMIN)
             ).isInstanceOf(BusinessException.class)
-             .hasMessageContaining("Không thể cập nhật trạng thái thành DELETED");
+                    .hasMessageContaining("Không thể cập nhật trạng thái thành DELETED");
 
             verify(userRepository, never()).save(any(User.class));
         }
@@ -534,52 +511,37 @@ class UserServiceImplTest {
     class DeleteUserTests {
 
         @Test
-        @DisplayName("Manager should delete learner successfully")
-        void managerShouldDeleteLearner() {
+        @DisplayName("Admin should delete learner successfully")
+        void adminShouldDeleteLearner() {
             // Given
             UUID learnerId = (UUID) ReflectionTestUtils.getField(testLearner, "id");
             given(userRepository.findById(learnerId)).willReturn(Optional.of(testLearner));
             given(userRepository.save(any(User.class))).willReturn(testLearner);
-            
+
             // When
-            userService.deleteUser(learnerId, managerId, UserRole.MANAGER);
-            
+            userService.deleteUser(learnerId, adminId, UserRole.ADMIN);
+
             // Then
             verify(userRepository).save(userCaptor.capture());
             User deleted = userCaptor.getValue();
             assertThat(deleted.getStatus()).isEqualTo(UserStatus.DELETED);
             assertThat(deleted.getDeletedAt()).isNotNull();
-            assertThat(deleted.getDeletedBy()).isEqualTo(managerId);
-        }
-
-        @Test
-        @DisplayName("Manager should not delete manager")
-        void managerShouldNotDeleteManager() {
-            // Given
-            UUID managerId2 = (UUID) ReflectionTestUtils.getField(testManager, "id");
-            given(userRepository.findById(managerId2)).willReturn(Optional.of(testManager));
-            
-            // When/Then
-            assertThatThrownBy(() -> 
-                userService.deleteUser(managerId2, managerId, UserRole.MANAGER)
-            )
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Manager không có quyền xóa tài khoản Manager/Admin");
+            assertThat(deleted.getDeletedBy()).isEqualTo(adminId);
         }
 
         @Test
         @DisplayName("Admin should delete manager successfully")
         void adminShouldDeleteManager() {
             // Given
-            UUID managerId2 = (UUID) ReflectionTestUtils.getField(testManager, "id");
-            given(userRepository.findById(managerId2)).willReturn(Optional.of(testManager));
-            given(userRepository.save(any(User.class))).willReturn(testManager);
-            
+            UUID managerId2 = (UUID) ReflectionTestUtils.getField(testContentManager, "id");
+            given(userRepository.findById(managerId2)).willReturn(Optional.of(testContentManager));
+            given(userRepository.save(any(User.class))).willReturn(testContentManager);
+
             // When
             assertThatNoException().isThrownBy(() ->
-                userService.deleteUser(managerId2, adminId, UserRole.ADMIN)
+                    userService.deleteUser(managerId2, adminId, UserRole.ADMIN)
             );
-            
+
             // Then
             verify(userRepository).save(userCaptor.capture());
             User deleted = userCaptor.getValue();
@@ -603,16 +565,16 @@ class UserServiceImplTest {
                     .status(UserStatus.INACTIVE)
                     .deletedAt(LocalDateTime.now().minusDays(1))
                     .build();
-            
+
             Pageable pageable = PageRequest.of(0, 10);
             Page<User> page = new PageImpl<>(Arrays.asList(deletedUser1));
-            
+
             given(userRepository.findAllDeleted(pageable)).willReturn(page);
             given(userMapper.toResponse(any(User.class))).willReturn(learnerResponse);
-            
+
             // When
             Page<UserResponse> result = userService.getDeletedUsers(pageable);
-            
+
             // Then
             assertThat(result).hasSize(1);
             verify(userRepository).findAllDeleted(pageable);
@@ -630,10 +592,10 @@ class UserServiceImplTest {
                     .role(UserRole.LEARNER)
                     .status(UserStatus.INACTIVE)
                     .deletedAt(LocalDateTime.now().minusDays(1))
-                    .deletedBy(managerId)
+                    .deletedBy(adminId)
                     .build();
             ReflectionTestUtils.setField(deletedUser, "id", deletedUserId);
-            
+
             RestoreUserRequest request = RestoreUserRequest.builder()
                     .userId(deletedUserId)
                     .email("deleted@example.com")
@@ -641,21 +603,21 @@ class UserServiceImplTest {
                     .lastName("Name")
                     .role(UserRole.LEARNER)
                     .build();
-            
+
             given(userRepository.findById(deletedUserId)).willReturn(Optional.of(deletedUser));
             given(passwordEncoder.encode(anyString())).willReturn("newHashedPassword");
             given(userRepository.save(any(User.class))).willReturn(deletedUser);
             given(userMapper.toResponse(deletedUser)).willReturn(learnerResponse);
             doNothing().when(emailService).sendWelcomeEmailWithCredentials(anyString(), anyString(), anyString(), anyString());
-            
+
             // When
             UserResponse result = userService.restoreUser(request, adminId, UserRole.ADMIN);
-            
+
             // Then
             assertThat(result).isNotNull();
             verify(userRepository).save(userCaptor.capture());
             verify(emailService).sendWelcomeEmailWithCredentials(anyString(), anyString(), anyString(), anyString());
-            
+
             User restored = userCaptor.getValue();
             assertThat(restored.getFirstName()).isEqualTo("New");
             assertThat(restored.getLastName()).isEqualTo("Name");
@@ -677,15 +639,15 @@ class UserServiceImplTest {
                     .lastName("Name")
                     .role(UserRole.LEARNER)
                     .build();
-            
+
             given(userRepository.findById(userId)).willReturn(Optional.of(testLearner));
-            
+
             // When/Then
-            assertThatThrownBy(() -> 
-                userService.restoreUser(request, adminId, UserRole.ADMIN)
+            assertThatThrownBy(() ->
+                    userService.restoreUser(request, adminId, UserRole.ADMIN)
             )
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Tài khoản này chưa bị xóa");
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Tài khoản này chưa bị xóa");
         }
     }
 
@@ -700,7 +662,7 @@ class UserServiceImplTest {
             UUID learnerId = (UUID) ReflectionTestUtils.getField(testLearner, "id");
             given(userRepository.findById(learnerId)).willReturn(Optional.of(testLearner));
             given(userMapper.toResponse(testLearner)).willReturn(learnerResponse);
-            
+
             // When
             UserDetailResponse result = userService.getUserDetailById(UserRole.ADMIN, learnerId);
 
@@ -737,15 +699,14 @@ class UserServiceImplTest {
         }
 
         @Test
-        @DisplayName("Manager should not view manager detail")
-        void managerShouldNotViewManagerDetail() {
-            UUID managerId2 = (UUID) ReflectionTestUtils.getField(testManager, "id");
-            given(userRepository.findById(managerId2)).willReturn(Optional.of(testManager));
+        @DisplayName("Content Manager should not view user detail")
+        void managerShouldNotViewUserDetail() {
+            UUID learnerId = (UUID) ReflectionTestUtils.getField(testLearner, "id");
 
             assertThatThrownBy(() ->
-                    userService.getUserDetailById(UserRole.MANAGER, managerId2)
+                    userService.getUserDetailById(UserRole.CONTENT_MANAGER, learnerId)
             ).isInstanceOf(BusinessException.class)
-             .hasMessageContaining("không có quyền xem chi tiết tài khoản Manager/Admin");
+                    .hasMessageContaining("Bạn không có quyền xem chi tiết tài khoản này");
 
             verify(userMapper, never()).toResponse(any(User.class));
         }
@@ -762,10 +723,10 @@ class UserServiceImplTest {
             UUID userId = (UUID) ReflectionTestUtils.getField(testLearner, "id");
             given(userRepository.findById(userId)).willReturn(Optional.of(testLearner));
             given(userMapper.toResponse(testLearner)).willReturn(learnerResponse);
-            
+
             // When
             UserResponse result = userService.getMyProfile(userId);
-            
+
             // Then
             assertThat(result).isNotNull();
             assertThat(result.getEmail()).isEqualTo(testLearner.getEmail());
@@ -783,14 +744,14 @@ class UserServiceImplTest {
                     .phoneNumber("0987654321")
                     .gender(Gender.MALE)
                     .build();
-            
+
             given(userRepository.findById(userId)).willReturn(Optional.of(testLearner));
             given(userRepository.save(any(User.class))).willReturn(testLearner);
             given(userMapper.toResponse(testLearner)).willReturn(learnerResponse);
-            
+
             // When
             UserResponse result = userService.updateMyProfile(userId, request);
-            
+
             // Then
             assertThat(result).isNotNull();
             verify(userRepository).save(userCaptor.capture());

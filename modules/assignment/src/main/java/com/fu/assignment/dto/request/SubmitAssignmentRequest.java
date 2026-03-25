@@ -23,7 +23,4 @@ public class SubmitAssignmentRequest {
      */
     @NotEmpty(message = "Answers must not be empty")
     private String answers;
-
-    /** Total time spent on this attempt (seconds) */
-    private Integer timeSpentSeconds;
 }
