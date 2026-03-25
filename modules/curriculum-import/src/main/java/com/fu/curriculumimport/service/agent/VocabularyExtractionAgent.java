@@ -19,6 +19,8 @@ import org.springframework.stereotype.Service;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Specialized Vocabulary Extraction Agent.
@@ -215,6 +217,8 @@ public class VocabularyExtractionAgent {
                     }
                     if (v.getUsageNote() == null) v.setUsageNote("");
                     if (v.getSuffixNote() == null) v.setSuffixNote("");
+                    // Post-process: fix furigana-instead-of-kanji issues from LLM output
+                    fixFuriganaKanji(v);
                 });
             }
 
@@ -231,6 +235,90 @@ public class VocabularyExtractionAgent {
         } catch (JsonProcessingException e) {
             log.error("Failed to parse vocab response for chunk {}: {}", chunkIndex, e.getMessage());
             return ExtractionResult.empty(chunkIndex, ms);
+        }
+    }
+
+    // ── Post-processing: furigana/kanji fix ──────────────────────────────────
+
+    /** Pure hiragana (may include prolonged sound mark ー). */
+    private static final Pattern PURE_HIRAGANA = Pattern.compile(
+            "^[\\u3040-\\u309Fー]+$");
+
+    /** Pure kana — hiragana or katakana. */
+    private static final Pattern PURE_KANA = Pattern.compile(
+            "^[\\u3040-\\u30FFー]+$");
+
+    /** CJK ideographs (kanji). */
+    private static final Pattern HAS_KANJI = Pattern.compile("[\\u4E00-\\u9FFF]");
+
+    /**
+     * Glued "kana+kanji" pattern: 2+ kana chars followed by kanji portion.
+     * E.g. "かんこく韓国", "えいご英語", "アメリカじん人".
+     */
+    private static final Pattern KANA_GLUED_KANJI = Pattern.compile(
+            "^([\\u3040-\\u30FFー]{2,})([\\u4E00-\\u9FFF][\\u4E00-\\u9FFF\\u3040-\\u30FFー]*)$");
+
+    /**
+     * Fix common LLM mistakes with furigana/kanji in vocabulary items.
+     *
+     * <p>Cases handled:
+     * <ol>
+     *   <li><b>japaneseText is pure kana but kanjiWriting has kanji</b> —
+     *       swap: japaneseText=kanjiWriting, reading=old japaneseText</li>
+     *   <li><b>japaneseText contains glued furigana+kanji</b> (e.g. "かんこく韓国") —
+     *       split: japaneseText=kanji, reading=kana</li>
+     *   <li><b>japaneseText is pure kana, reading is same, kanjiWriting empty</b> —
+     *       no fix possible (genuinely kana-only word like わたし)</li>
+     * </ol>
+     */
+    static void fixFuriganaKanji(ExtractionResult.ExtractedVocabulary v) {
+        String jp = v.getJapaneseText();
+        if (jp == null || jp.isBlank()) return;
+
+        String kanji = v.getKanjiWriting();
+        String reading = v.getReading();
+
+        // Case 1: japaneseText is pure kana but kanjiWriting has actual kanji
+        // e.g. japaneseText="かんこく", kanjiWriting="韓国" → swap
+        if (PURE_KANA.matcher(jp).matches()
+                && kanji != null && !kanji.isBlank() && HAS_KANJI.matcher(kanji).find()) {
+            if (reading == null || reading.isBlank() || reading.equals(kanji)) {
+                v.setReading(jp);
+            }
+            v.setJapaneseText(kanji);
+            log.debug("fixFuriganaKanji: swapped japaneseText='{}' ← kanjiWriting='{}'", kanji, jp);
+            return;
+        }
+
+        // Case 2: japaneseText contains glued furigana+kanji (e.g. "かんこく韓国")
+        Matcher gluedMatch = KANA_GLUED_KANJI.matcher(jp);
+        if (gluedMatch.matches()) {
+            String kanaPart = gluedMatch.group(1);   // "かんこく" or "アメリカじん"
+            String kanjiPart = gluedMatch.group(2);   // "韓国" or "人"
+
+            // Extract leading katakana prefix shared between reading and word
+            int kataEnd = 0;
+            for (int i = 0; i < kanaPart.length(); ) {
+                int cp = kanaPart.codePointAt(i);
+                if ((cp >= 0x30A0 && cp <= 0x30FF) || cp == 'ー') {
+                    kataEnd = i + Character.charCount(cp);
+                    i = kataEnd;
+                } else {
+                    break;
+                }
+            }
+            String kataPrefix = kanaPart.substring(0, kataEnd);
+            String fixedWord = kataPrefix + kanjiPart;
+
+            if (reading == null || reading.isBlank() || reading.equals(jp)) {
+                v.setReading(kanaPart);
+            }
+            v.setJapaneseText(fixedWord);
+            if (HAS_KANJI.matcher(fixedWord).find()) {
+                v.setKanjiWriting(fixedWord);
+            }
+            log.debug("fixFuriganaKanji: split glued '{}' → japaneseText='{}', reading='{}'",
+                    jp, fixedWord, kanaPart);
         }
     }
 

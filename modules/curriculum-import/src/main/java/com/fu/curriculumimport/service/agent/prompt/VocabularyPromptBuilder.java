@@ -65,29 +65,43 @@ public final class VocabularyPromptBuilder {
             Nếu không xác định được → "stt": 0.
 
             ═══ QUY TẮC GHÉP FURIGANA / KANJI (CRITICAL — ĐỌC KỸ) ═══
-            OCR thường tách reading (hiragana) và kanji ra DÒNG RIÊNG hoặc Ô RIÊNG.
-            Ví dụ OCR trả về:
+            OCR/Document AI trả về furigana + kanji ở NHIỀU FORMAT KHÁC NHAU.
+            Dù format nào, quy tắc đều giống nhau: japaneseText = KANJI, reading = HIRAGANA.
+
+            FORMAT 1 — Dòng riêng:
               にほん          ← reading (hiragana)
               日本            ← kanji
               Nhật Bản        ← nghĩa tiếng Việt
-            hoặc:  かんこく 韓国  Hàn Quốc   (reading + kanji + nghĩa trên cùng dòng)
 
-            QUY TẮC BẮT BUỘC:
+            FORMAT 2 — Cùng dòng, có space:
+              かんこく 韓国  Hàn Quốc
+
+            FORMAT 3 — DÍNH LIỀN (phổ biến nhất từ Document AI):
+              かんこく韓国    ← hiragana DÍNH LIỀN kanji, không có space
+              えいご英語      ← えいご + 英語
+              にほんじん日本人 ← にほんじん + 日本人
+              アメリカじん人   ← アメリカじん + 人 (katakana + hiragana furigana + kanji)
+
+            QUY TẮC BẮT BUỘC (ÁP DỤNG CHO MỌI BẢNG, MỌI FORMAT):
             • Reading (hiragana) + kanji tương ứng = MỘT từ vựng DUY NHẤT:
-              - japaneseText = kanji nếu có (日本), nếu không có kanji thì dùng hiragana (にほん)
-              - reading = hiragana (にほん)
-              - kanjiWriting = kanji (日本)
+              - japaneseText = kanji nếu có (韓国), nếu không có kanji thì dùng hiragana
+              - reading = hiragana (かんこく)
+              - kanjiWriting = kanji (韓国)
+            • Khi gặp chuỗi dính [hiragana][kanji], PHẢI TÁCH:
+              かんこく韓国 → japaneseText="韓国", reading="かんこく"
+              えいご英語   → japaneseText="英語", reading="えいご"
+              アメリカじん人 → japaneseText="アメリカ人", reading="アメリカじん"
             • TUYỆT ĐỐI KHÔNG tạo 2 entry riêng cho reading và kanji của cùng 1 từ.
-            • Cách nhận biết: nếu chuỗi hiragana đọc giống chuỗi kanji liền kề → cùng 1 từ.
-              Ví dụ: にほん → 日本, がくせい → 学生, せんせい → 先生
+            • TUYỆT ĐỐI KHÔNG dùng furigana (かんこく) làm japaneseText khi đã có kanji (韓国).
+            • TUYỆT ĐỐI KHÔNG dùng chuỗi dính (かんこく韓国) nguyên vẹn làm japaneseText.
             • Nếu chỉ có hiragana không có kanji → japaneseText = hiragana, kanjiWriting = "".
-            • Nếu chỉ có katakana (ví dụ: アメリカ) → japaneseText = katakana, reading = katakana.
+            • Nếu chỉ có katakana (ví dụ: アメリカ, タイ) → japaneseText = katakana, reading = katakana.
 
             ❌ SAI:
-              Entry 1: japaneseText="にほん", meaningVi="Nhật Bản"
-              Entry 2: japaneseText="日本", meaningVi=""
+              japaneseText="かんこく", reading="かんこく"  ← dùng furigana thay vì kanji
+              japaneseText="かんこく韓国"                  ← dùng chuỗi dính nguyên vẹn
             ✅ ĐÚNG:
-              Entry 1: japaneseText="日本", reading="にほん", meaningVi="Nhật Bản", kanjiWriting="日本"
+              japaneseText="韓国", reading="かんこく", kanjiWriting="韓国"
 
             ═══ QUY TẮC TRÍCH TOÀN BỘ (CRITICAL) ═══
             • PHẢI trích TOÀN BỘ từ vựng có trong nội dung, KHÔNG ĐƯỢC BỎ SÓT.
@@ -102,18 +116,37 @@ public final class VocabularyPromptBuilder {
             • Câu ví dụ: lấy từ sách nếu có, nếu không tự tạo phù hợp với cấp JLPT.
             • Chỉ trả về JSON hợp lệ — không có markdown, không giải thích.
 
-            ═══ PATTERN BẢNG QUỐC GIA-NGÔN NGỮ ═══
-            Minna no Nihongo có bảng tham chiếu 4 cột:
-              Cột 0: tên quốc gia (国名) | Cột 1: quốc tịch (〜人) | Cột 2: trống | Cột 3: ngôn ngữ (〜語)
-              アメリカ ( Mỹ )            |                          |               | 英語 ( tiếng Anh )
-              かんこく                   | かんこくじん              |               | かんこく ご
+            ═══ PATTERN BẢNG QUỐC GIA-NGÔN NGỮ (ĐỌC TOÀN BỘ VÍ DỤ) ═══
+            Minna no Nihongo có bảng tham chiếu 3 cột (quốc gia / quốc tịch / ngôn ngữ).
+            Mỗi cột là TỪ RIÊNG BIỆT — trích cả ba thành 3 entry riêng.
+            Ngoặc tròn ( ) chứa nghĩa tiếng Việt inline.
+            KHÔNG dùng tên ngôn ngữ làm nghĩa của quốc gia.
 
-            QUY TẮC QUAN TRỌNG:
-            • Cột 0 (quốc gia) và Cột 3 (ngôn ngữ) là CÁC TỪ RIÊNG BIỆT — trích cả hai.
-            • KHÔNG dùng tên ngôn ngữ (Cột 3) làm nghĩa của quốc gia (Cột 0).
-            • Nếu Cột 1 (quốc tịch) khác trống, trích thành MỤC RIÊNG.
-            • Mỗi mục có entry riêng trong mảng "vocabulary".
-            • Ngoặc tròn nửa chiều rộng word ( meaning ) là nghĩa tiếng Việt inline.
+            ── VÍ DỤ INPUT → OUTPUT (BẮT BUỘC LÀM THEO) ──────────────
+            Input row: | かんこく韓国 (Hàn Quốc) | かんこくじん韓国人 | かんこくご韓国語 (tiếng Hàn Quốc) |
+            Output (3 entries):
+              {"japaneseText":"韓国","reading":"かんこく","kanjiWriting":"韓国","meaningVi":"Hàn Quốc","partOfSpeech":"noun"}
+              {"japaneseText":"韓国人","reading":"かんこくじん","kanjiWriting":"韓国人","meaningVi":"người Hàn Quốc","partOfSpeech":"noun"}
+              {"japaneseText":"韓国語","reading":"かんこくご","kanjiWriting":"韓国語","meaningVi":"tiếng Hàn Quốc","partOfSpeech":"noun"}
+
+            Input row: | アメリカ (Mỹ) | アメリカじん人 | えいご英語 (tiếng Anh) |
+            Output (3 entries):
+              {"japaneseText":"アメリカ","reading":"アメリカ","kanjiWriting":"","meaningVi":"Mỹ","partOfSpeech":"noun"}
+              {"japaneseText":"アメリカ人","reading":"アメリカじん","kanjiWriting":"アメリカ人","meaningVi":"người Mỹ","partOfSpeech":"noun"}
+              {"japaneseText":"英語","reading":"えいご","kanjiWriting":"英語","meaningVi":"tiếng Anh","partOfSpeech":"noun"}
+
+            Input row: | タイ (Thái Lan) | タイじん人 | タイ語 (tiếng Thái) |
+            Output (3 entries):
+              {"japaneseText":"タイ","reading":"タイ","kanjiWriting":"","meaningVi":"Thái Lan","partOfSpeech":"noun"}
+              {"japaneseText":"タイ人","reading":"タイじん","kanjiWriting":"タイ人","meaningVi":"người Thái","partOfSpeech":"noun"}
+              {"japaneseText":"タイ語","reading":"タイご","kanjiWriting":"","meaningVi":"tiếng Thái","partOfSpeech":"noun"}
+
+            QUY TẮC TÁCH furigana+kanji dính liền (áp dụng cho MỌI ô trong bảng):
+              かんこく韓国 → japaneseText="韓国", reading="かんこく"
+              アメリカじん人 → japaneseText="アメリカ人", reading="アメリカじん"
+              えいご英語 → japaneseText="英語", reading="えいご"
+            ⚠ KHÔNG dùng furigana (かんこく) làm japaneseText. PHẢI dùng kanji (韓国).
+            Katakana-only (アメリカ, タイ) → japaneseText = katakana, kanjiWriting = "".
             """;
 
     /** Suffix appended to the system prompt on re-extraction attempts. */

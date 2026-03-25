@@ -403,6 +403,20 @@ public class ContentValidationAgent {
                     "Ensure the text is in Japanese"));
         }
 
+        // japaneseText should use kanji when available, not furigana
+        if (!isBlank(vocab.getJapaneseText()) && !isBlank(vocab.getKanjiWriting())) {
+            String jp = vocab.getJapaneseText().trim();
+            String kw = vocab.getKanjiWriting().trim();
+            boolean jpIsPureKana = HIRAGANA.matcher(jp).find()
+                    && !jp.chars().anyMatch(c -> c >= 0x4E00 && c <= 0x9FFF);
+            boolean kwHasKanji = kw.chars().anyMatch(c -> c >= 0x4E00 && c <= 0x9FFF);
+            if (jpIsPureKana && kwHasKanji && !jp.equals(kw)) {
+                issues.add(issue(id, "japaneseText", IssueSeverity.WARNING,
+                        "japaneseText '" + jp + "' is furigana but kanjiWriting '" + kw + "' has kanji — use kanji as japaneseText",
+                        "Set japaneseText to the kanji form: " + kw));
+            }
+        }
+
         // Reading should be in hiragana
         if (isBlank(vocab.getReading())) {
             issues.add(issue(id, "reading", IssueSeverity.WARNING,

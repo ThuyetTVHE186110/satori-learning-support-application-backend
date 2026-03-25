@@ -46,6 +46,17 @@ public class MnNTableParser {
      */
     private static final Pattern KANA_SPACE_KANJI = Pattern.compile(
             "^([\\u3040-\\u30FFー]+)\\s+([\\u4E00-\\u9FFF].*)$");
+
+    /**
+     * Matches "kana+kanji" glued together (no space), as produced by Document AI.
+     * E.g. "かんこく韓国", "えいご英語", "にほんじん日本人".
+     * Group 1 = pure hiragana reading, Group 2 = kanji portion (may include trailing kana).
+     *
+     * <p>Also handles mixed katakana+hiragana+kanji like "アメリカじん人":
+     * Group 1 = kana prefix (アメリカじん), Group 2 = kanji portion (人).
+     */
+    private static final Pattern KANA_GLUED_KANJI = Pattern.compile(
+            "^([\\u3040-\\u30FFー]{2,})([\\u4E00-\\u9FFF][\\u4E00-\\u9FFF\\u3040-\\u30FFー]*)$");
     private static final Pattern ROMAJI      = Pattern.compile("^[a-zA-Z\\s\\-']+$");
     private static final Pattern POS_TAG     = Pattern.compile("^\\(([^)]{1,30})\\)(.*)$");
 
@@ -404,6 +415,36 @@ public class MnNTableParser {
                 reading = kanaPart;
             }
             rawJapanese = kanjiPart;
+        }
+
+        // ── Split "kana+kanji" glued together (no space) ─────────────────
+        // Document AI often produces "かんこく韓国", "えいご英語", "アメリカじん人"
+        // where furigana is concatenated directly before kanji without separator.
+        if (!kanaKanjiMatch.matches()) {
+            var gluedMatch = KANA_GLUED_KANJI.matcher(rawJapanese);
+            if (gluedMatch.matches()) {
+                String kanaPart = gluedMatch.group(1);   // "アメリカじん" or "かんこく"
+                String kanjiPart = gluedMatch.group(2);   // "人" or "韓国"
+
+                // Extract leading katakana prefix from kanaPart — this prefix is
+                // shared between reading and word (e.g. "アメリカ" in "アメリカじん人").
+                int kataEnd = 0;
+                for (int ci = 0; ci < kanaPart.length(); ) {
+                    int cp = kanaPart.codePointAt(ci);
+                    if ((cp >= 0x30A0 && cp <= 0x30FF) || cp == 'ー') {
+                        kataEnd = ci + Character.charCount(cp);
+                        ci = kataEnd;
+                    } else {
+                        break;
+                    }
+                }
+                String kataPrefix = kanaPart.substring(0, kataEnd); // "アメリカ" or ""
+
+                if (reading.isBlank()) {
+                    reading = kanaPart; // "アメリカじん" or "かんこく"
+                }
+                rawJapanese = kataPrefix + kanjiPart; // "アメリカ人" or "韓国"
+            }
         }
 
         // When the kanji/word column is empty but the reading (kana) column
