@@ -130,10 +130,13 @@ public class ImportPersistenceService {
      *
      * @param importEntity the parent import
      * @param results      list of extraction results from all chunks
+     * @return map of groupKey → saved lessonId (same groupKey logic used internally).
+     *         Used by the embedding stage to write lesson_id into vector metadata
+     *         without re-deriving it from unreliable lesson-number lookups.
      */
     @Transactional
-    public void persistExtractedContent(CurriculumImport importEntity,
-                                         List<ExtractionResult> results) {
+    public Map<String, UUID> persistExtractedContent(CurriculumImport importEntity,
+                                                      List<ExtractionResult> results) {
         Course course = null;
         if (importEntity.getCourseId() != null) {
             course = courseRepository.findById(importEntity.getCourseId()).orElse(null);
@@ -149,6 +152,10 @@ public class ImportPersistenceService {
                     : "chunk-" + result.getChunkIndex();
             lessonGroups.computeIfAbsent(groupKey, k -> new ArrayList<>()).add(result);
         }
+
+        // groupKey → saved lessonId — returned to the embedding stage so it can write
+        // lesson_id into vector metadata without any secondary lookup.
+        Map<String, UUID> groupKeyToLessonId = new LinkedHashMap<>();
 
         int lessonsCount = 0;
         int vocabCount   = 0;
@@ -337,6 +344,9 @@ public class ImportPersistenceService {
                     continue;
                 }
                 lessonsCount++;
+                // Record groupKey → lessonId so the embedding stage can attach lesson_id
+                // to vector metadata without any secondary lookup.
+                groupKeyToLessonId.put(entry.getKey(), savedLesson.getId());
 
                 // Batch link vocabulary to lesson (50 items per transaction)
                 for (int b = 0; b < persistedVocab.size(); b += batchSize) {
@@ -373,6 +383,8 @@ public class ImportPersistenceService {
         importEntity.setVocabularyCreated(vocabCount);
         importEntity.setGrammarPointsCreated(grammarCount);
         updateImportProgress(importEntity);
+
+        return groupKeyToLessonId;
     }
 
     /**
@@ -387,18 +399,49 @@ public class ImportPersistenceService {
     @Transactional
     public void softDeleteLessonsByImportId(UUID importId, UUID managerId) {
         List<com.fu.course.entity.Lesson> lessons = lessonRepository.findByImportIdAndNotDeleted(importId);
-        int joinRecordsRemoved = 0;
-        for (com.fu.course.entity.Lesson lesson : lessons) {
-            // Clean up join tables before soft-deleting the lesson
-            lessonVocabularyRepository.deleteByLessonId(lesson.getId());
-            lessonGrammarRepository.deleteByLessonId(lesson.getId());
-            joinRecordsRemoved++;
+        if (lessons.isEmpty()) return;
 
+        // Batch delete join table records in 2 queries (was N+2 per lesson)
+        List<UUID> lessonIds = lessons.stream()
+                .map(com.fu.course.entity.Lesson::getId)
+                .toList();
+        lessonVocabularyRepository.deleteByLessonIdIn(lessonIds);
+        lessonGrammarRepository.deleteByLessonIdIn(lessonIds);
+
+        // Soft-delete all lessons
+        for (com.fu.course.entity.Lesson lesson : lessons) {
             lesson.softDelete(managerId);
-            lessonRepository.save(lesson);
         }
-        log.info("Soft-deleted {} lessons (cleaned up join records for {}) for import {}",
-                lessons.size(), joinRecordsRemoved, importId);
+        lessonRepository.saveAll(lessons);
+
+        log.info("Soft-deleted {} lessons (batch-cleaned join records) for import {}",
+                lessons.size(), importId);
+    }
+
+    /**
+     * Trả về Map từ lessonNumber → lessonId cho tất cả lesson đang hoạt động của course.
+     * Dùng trong ImportOrchestrator để gán lessonId vào metadata khi embed lesson chunks.
+     * Trả về Map rỗng nếu courseId null hoặc không tìm thấy lesson nào.
+     *
+     * @param courseId UUID của course
+     * @return Map&lt;lessonNumber, lessonId&gt;
+     */
+    public Map<Integer, UUID> getLessonIdsByNumber(UUID courseId) {
+        if (courseId == null) return Map.of();
+        try {
+            // Lesson.orderIndex tương đương với ImportChunk.lessonNumber (1-based)
+            return lessonRepository.findByCourseIdAndNotDeleted(courseId)
+                    .stream()
+                    .filter(l -> l.getOrderIndex() != null)
+                    .collect(java.util.stream.Collectors.toMap(
+                            com.fu.course.entity.Lesson::getOrderIndex,
+                            com.fu.course.entity.Lesson::getId,
+                            (existing, replacement) -> existing // giữ lesson đầu tiên nếu trùng số
+                    ));
+        } catch (Exception e) {
+            log.warn("Không thể lấy lesson IDs theo number cho course {}: {}", courseId, e.getMessage());
+            return Map.of();
+        }
     }
 
     // ── Grammar pattern subsumption + normalization for dedup ─────────────────

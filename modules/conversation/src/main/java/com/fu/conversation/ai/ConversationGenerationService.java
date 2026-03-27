@@ -33,13 +33,13 @@ import java.util.stream.Collectors;
 public class ConversationGenerationService {
 
     private static final String GENERATE_TOPICS_SYSTEM_PROMPT = """
-            You are a Korean language teacher assistant helping design conversation practice topics.
+            You are a Japanese language teacher assistant helping design conversation practice topics.
             Given a conversation theme (with its associated vocabulary and grammar), generate specific sub-topics for learners to practice.
 
             Always respond with a valid JSON array. Do not include markdown code fences.
             Each topic object must have:
             - title (String): Topic title in English/Vietnamese
-            - titleJapanese (String): Topic title in Korean
+            - titleJapanese (String): Topic title in Japanese
             - description (String): 2-3 sentence description
             - descriptionVi (String): Vietnamese description
             - scenario (String): Detailed roleplay scenario in English (who learner plays, who AI plays, context)
@@ -63,14 +63,14 @@ public class ConversationGenerationService {
             """;
 
     private static final String GENERATE_THEMES_SYSTEM_PROMPT = """
-            You are a Korean language teacher assistant helping design conversation practice themes.
+            You are a Japanese language teacher assistant helping design conversation practice themes.
             Themes are course-agnostic: they represent broad real-world situations suitable
-            for any Korean learner at the given JLPT level.
+            for any Japanese learner at the given JLPT level.
 
             Always respond with a valid JSON array. Do not include markdown code fences.
             Each theme object must have these fields:
             - title (String): Theme title in Vietnamese/English
-            - titleJapanese (String): Theme title in Korean
+            - titleJapanese (String): Theme title in Japanese
             - description (String): Brief description of the theme (2-3 sentences)
             - descriptionVi (String): Vietnamese description
             - category (String): One of: daily_life, travel, business, school, shopping, restaurant, health, culture
@@ -88,7 +88,7 @@ public class ConversationGenerationService {
 
             Respond with a valid JSON object. Do not include markdown code fences.
             The object must have:
-            - vocabularyHints (Array<String>): 8-10 relevant Korean vocabulary words with meanings
+            - vocabularyHints (Array<String>): 8-10 relevant Japanese vocabulary words with meanings
             - grammarPoints (Array<String>): 3-5 relevant grammar patterns
             - usefulExpressions (Array<String>): 5-8 useful expressions for this scenario
             - practiceQuestions (Array<String>): 3-4 example questions to practice in this scenario
@@ -117,7 +117,7 @@ public class ConversationGenerationService {
 
     /**
      * Generate conversation theme suggestions (course-agnostic).
-     * Themes represent broad real-world situations for any Korean learner.
+     * Themes represent broad real-world situations for any Japanese learner.
      *
      * @param jlptLevel optional JLPT level to target
      * @param category  optional category hint (e.g. "restaurant", "travel")
@@ -181,7 +181,7 @@ public class ConversationGenerationService {
         StringBuilder contextBuilder = new StringBuilder();
         contextBuilder.append("Theme: ").append(theme.getTitle()).append("\n");
         if (theme.getTitleJapanese() != null) {
-            contextBuilder.append("Theme (Korean): ").append(theme.getTitleJapanese()).append("\n");
+            contextBuilder.append("Theme (Japanese): ").append(theme.getTitleJapanese()).append("\n");
         }
         if (theme.getDescription() != null) {
             contextBuilder.append("Description: ").append(theme.getDescription()).append("\n");

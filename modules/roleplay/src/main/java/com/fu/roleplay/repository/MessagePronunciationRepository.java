@@ -1,6 +1,6 @@
 package com.fu.roleplay.repository;
 
-import com.fu.roleplay.dto.entity.MessagePronunciation;
+import com.fu.roleplay.entity.MessagePronunciation;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 

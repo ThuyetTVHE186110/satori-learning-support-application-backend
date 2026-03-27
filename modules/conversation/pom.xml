@@ -26,6 +26,11 @@
             <groupId>com.fu</groupId>
             <artifactId>course</artifactId>
         </dependency>
+        <!-- Để dùng EmbeddingService + ChatbotFilter + RagContext cho chatbot RAG -->
+        <dependency>
+            <groupId>com.fu</groupId>
+            <artifactId>curriculum-import</artifactId>
+        </dependency>
 
         <!-- Spring AI for conversation topic generation -->
         <dependency>

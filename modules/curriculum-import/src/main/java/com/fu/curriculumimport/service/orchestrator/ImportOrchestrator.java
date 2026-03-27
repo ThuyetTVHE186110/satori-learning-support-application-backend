@@ -35,6 +35,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 /**
  * Import Orchestrator — Full Agentic RAG Pipeline Coordinator.
@@ -327,7 +328,12 @@ public class ImportOrchestrator {
             importEntity.updateProgress("PERSISTING", new BigDecimal("85"));
             persistenceService.updateImportProgress(importEntity);
 
-            persistenceService.persistExtractedContent(importEntity, allResults);
+            // persistExtractedContent returns groupKey → lessonId so the embedding stage
+            // can write lesson_id into vector metadata without any secondary lookup.
+            // This works for both lesson-aware chunking (lessonTitle groupKey) and
+            // character-based chunking (chunk-N groupKey), where lessonNumber is absent.
+            Map<String, UUID> groupKeyToLessonId =
+                    persistenceService.persistExtractedContent(importEntity, allResults);
 
             // === STAGE 7: EMBEDDING (after persistence — no orphan risk) ===
             checkCancelled(cancelFlag, importId);
@@ -335,15 +341,33 @@ public class ImportOrchestrator {
             importEntity.updateProgress("EMBEDDING", new BigDecimal("92"));
             persistenceService.updateImportProgress(importEntity);
 
+            UUID courseId = importEntity.getCourseId();
+
             int embeddingsCreated = 0;
             if (ragProperties.isEmbeddingEnabled()) {
                 for (ExtractionResult result : allResults) {
                     checkCancelled(cancelFlag, importId);
+                    // Derive the same groupKey used by persistExtractedContent to look up
+                    // the lesson that was just saved for this result's chunk group.
+                    String groupKey = (result.getLessonTitle() != null && !result.getLessonTitle().isBlank())
+                            ? result.getLessonTitle()
+                            : "chunk-" + result.getChunkIndex();
+                    UUID lessonId = groupKeyToLessonId.get(groupKey);
                     embeddingsCreated += embeddingService.storeVocabularyEmbeddings(
-                            result.getVocabulary(), importId);
+                            result.getVocabulary(), importId, lessonId, courseId);
                     embeddingsCreated += embeddingService.storeGrammarEmbeddings(
-                            result.getGrammarPoints(), importId);
+                            result.getGrammarPoints(), importId, lessonId, courseId);
                 }
+            }
+            // === STAGE 7b: EMBED LESSON CHUNKS cho chatbot RAG ===
+            // Embed GRAMMAR_EXPLANATION, DIALOG, EXAMPLE chunks → chatbot có thể tìm kiếm
+            // trong nội dung bài học, không chỉ vocab/grammar đã extract.
+            if (ragProperties.isEmbeddingEnabled()) {
+                // Build lessonTitle → lessonId from the same map for chunk-level embedding.
+                Map<String, UUID> lessonTitleToId = groupKeyToLessonId.entrySet().stream()
+                        .filter(e -> !e.getKey().startsWith("chunk-"))
+                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (a, b) -> a));
+                embeddingsCreated += embedChatbotChunks(dbChunks, importEntity, jlptLevel, lessonTitleToId);
             }
             importEntity.setEmbeddingsCreated(embeddingsCreated);
 
@@ -698,8 +722,16 @@ public class ImportOrchestrator {
 
         // Propagate lesson metadata from the source chunk so the persistence layer
         // can group sub-chunks of the same lesson and generate correct titles.
+        // lessonTitle and lessonNumber are propagated independently:
+        // - lessonTitle drives grouping and lesson creation
+        // - lessonNumber must always be set so Lesson.orderIndex gets the structural
+        //   lesson number (1, 2, 3…) instead of falling back to chunkIndex.
+        //   Without this, getLessonIdsByNumber returns {chunkIndex → lessonId} and
+        //   the embedding lookup by lessonNumber misses every entry.
         if (docChunk.getLessonTitle() != null) {
             result.setLessonTitle(docChunk.getLessonTitle());
+        }
+        if (docChunk.getLessonNumber() != null) {
             result.setLessonNumber(docChunk.getLessonNumber());
         }
 
@@ -941,6 +973,54 @@ public class ImportOrchestrator {
                 .vocabulary(Collections.emptyList())
                 .grammarPoints(Collections.emptyList())
                 .build();
+    }
+
+    /**
+     * Embed các ImportChunk có section_type hữu ích cho chatbot vào content_embeddings.
+     * Section types được embed: GRAMMAR_EXPLANATION, DIALOG, EXAMPLE.
+     * VOCABULARY và GRAMMAR_PATTERN đã được embed riêng qua storeVocabularyEmbeddings/storeGrammarEmbeddings.
+     * Non-fatal: lỗi chỉ log, không ảnh hưởng pipeline chính.
+     *
+     * @param dbChunks     danh sách ImportChunk đã persist
+     * @param importEntity entity CurriculumImport hiện tại
+     * @param jlptLevel    cấp độ JLPT của import
+     */
+    private int embedChatbotChunks(List<ImportChunk> dbChunks,
+                                    CurriculumImport importEntity,
+                                    String jlptLevel,
+                                    Map<String, UUID> lessonTitleToId) {
+        if (dbChunks == null || dbChunks.isEmpty()) return 0;
+
+        UUID courseId = importEntity.getCourseId();
+        Set<String> chatbotSectionTypes = Set.of(
+                "GRAMMAR_EXPLANATION", "DIALOG", "EXAMPLE");
+
+        List<ImportChunk> chatbotChunks = dbChunks.stream()
+                .filter(c -> c.getSectionType() != null
+                        && chatbotSectionTypes.contains(c.getSectionType())
+                        && c.getContent() != null
+                        && !c.getContent().isBlank())
+                .toList();
+
+        if (chatbotChunks.isEmpty()) {
+            log.debug("[{}] Không có lesson chunk nào cần embed cho chatbot", importEntity.getId());
+            return 0;
+        }
+
+        log.info("[{}] Embedding {} lesson chunks cho chatbot (GRAMMAR_EXPLANATION/DIALOG/EXAMPLE)...",
+                importEntity.getId(), chatbotChunks.size());
+
+        int embedded = 0;
+        for (ImportChunk chunk : chatbotChunks) {
+            UUID lessonId = chunk.getLessonTitle() != null
+                    ? lessonTitleToId.get(chunk.getLessonTitle())
+                    : null;
+            embeddingService.embedLessonChunk(chunk, courseId, lessonId, jlptLevel);
+            embedded++;
+        }
+
+        log.info("[{}] Đã embed {} lesson chunks cho chatbot RAG", importEntity.getId(), embedded);
+        return embedded;
     }
 
     /**

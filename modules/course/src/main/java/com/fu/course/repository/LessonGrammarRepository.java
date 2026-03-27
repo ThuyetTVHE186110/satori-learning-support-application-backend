@@ -2,8 +2,11 @@ package com.fu.course.repository;
 
 import com.fu.course.entity.LessonGrammar;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -18,6 +21,10 @@ public interface LessonGrammarRepository extends JpaRepository<LessonGrammar, UU
     boolean existsByLessonIdAndGrammarPointId(UUID lessonId, UUID grammarPointId);
 
     void deleteByLessonId(UUID lessonId);
+
+    @Modifying
+    @Query("DELETE FROM LessonGrammar lg WHERE lg.lesson.id IN :lessonIds")
+    void deleteByLessonIdIn(Collection<UUID> lessonIds);
 
     long countByLessonId(UUID lessonId);
 }
