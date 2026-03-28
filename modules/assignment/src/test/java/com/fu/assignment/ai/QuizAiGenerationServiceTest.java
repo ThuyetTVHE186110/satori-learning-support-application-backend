@@ -167,6 +167,7 @@ class QuizAiGenerationServiceTest {
             AiQuizGenerationRequest request = AiQuizGenerationRequest.builder()
                     .teacherPrompt("Bài 1")
                     .classId(classId)
+                    .questionCount(1)
                     .build();
 
             given(chatClient.prompt().system(anyString()).user(anyString()).options(any()).call().content())

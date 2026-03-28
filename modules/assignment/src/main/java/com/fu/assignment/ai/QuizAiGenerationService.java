@@ -21,10 +21,12 @@ import com.fu.course.repository.LessonRepository;
 import com.fu.course.repository.VocabularyRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -33,7 +35,7 @@ import java.util.ArrayList;
 import java.util.UUID;
 
 /**
- * AI service to generate quiz questions from a PDF/DOCX file or raw text.
+ * AI service to generate quiz questions from a raw text.
  * <p>
  * Uses Spring AI's {@link ChatClient} for AI interaction.
  * Uses {@link BeanOutputConverter} only for schema generation (prompt formatting),
@@ -44,79 +46,6 @@ import java.util.UUID;
 @Slf4j
 public class QuizAiGenerationService {
 
-    private static final String SYSTEM_PROMPT = """
-            You are an expert Japanese language quiz creator for Vietnamese learners.
-            The target audience is Vietnamese students studying Japanese, so the "questionText" field MUST be written in Vietnamese.
-            
-            CRITICAL RULE: You MUST create questions STRICTLY based on the TEACHER'S PROMPT provided below.
-            - Follow the precise instructions about topics, vocabulary, grammar, or scenarios given by the teacher.
-            - Do not include questions that are irrelevant to the teacher's request.
-            - If SOURCE CONTEXT (Vocabulary/Grammar) is provided, you MUST construct the questions primarily using those exact words and grammar patterns.
-            
-            ═══════════════════════════════════════════════════════════════
-            FORMATTING RULES (Custom Syntax - STRICTLY NO HTML):
-            ═══════════════════════════════════════════════════════════════
-            
-            The fields "questionText", and "options" MUST Use MARKDOWN for text formatting, combined with CUSTOM syntax for furigana and underline.
-            
-            **CRITICAL RULE**: ABSOLUTELY NO HTML tags are allowed. Any output containing <tags> will be rejected.
-            
-            ALLOWED FORMATTING:
-            - Furigana: [Kanji]{Reading}
-            - Underline: ++text++
-            - Markdown: **bold**, *italic*, ____ (four underscores for blank)
-            - Do NOT use ANY HTML tags (like <ruby>, <rt>, <u>, <b>, <i>, <span>, <br>, <p>).
-            
-            1. FURIGANA (reading aid) — use [Kanji]{Reading} ONLY for Kanji:
-            - **MANDATORY**: EVERY SINGLE KANJI character in "questionText", and "options" MUST have furigana using [Kanji]{Reading} syntax.
-            - **CRITICAL**: ABSOLUTELY DO NOT add furigana to Hiragana, Katakana, or any non-Kanji characters. 
-            - WRONG: [いきます]{いきます} (Hiragana only) -> Just write: いきます
-            - WRONG: [ビール]{びーる} (Katakana only) -> Just write: ビール
-            - CORRECT: [日本語]{にほんご}をべんきょうします。
-            - RULE: If the text inside [ ] does NOT contain any kanji (漢字), do NOT use [ ]{ } syntax at all.
-            - IMPORTANT: You MUST write "わたしは[学生]{がくせい}です" (using kanji for gakusei) instead of writing just hiragana, and when you use Kanji, you MUST wrap it in [ ]{ }.
-            
-            2. UNDERLINE — use ++text++ (Double plus signs) to underline key words or phrases:
-               Example: ++~てください++ を使って文を作ってください。
-            
-            3. BOLD — use **text** (Markdown bold) for emphasis:
-               Example: **Chú ý**: Hãy chọn đáp án đúng nhất.
-            
-            4. ITALIC — use *text* (Markdown italic) for linguistic notes, hints, or context cues:
-               Example: *(Thể lịch sự)*
-            
-            5. Option text — options MUST use "text" for the vocabulary kanji/kana (**MANDATORY**: wrap all Kanji in [ ]{ } syntax), and "text_reading" for the furigana interpretation (only provide text_reading if text contains Kanji).
-               Example option: {"text": "[食]{た}べる", "text_reading": "たべる"}
-            6. explanation — MUST be plain text (see below).
-            
-            EXPLANATION GUIDELINES (High Quality):
-            - Keep the explanation concise yet comprehensive (3-5 sentences).
-            - Clearly identify the grammar pattern, vocabulary meaning, or situational context used in the question.
-            - Explain the logical reasoning behind the correct answer.
-            - If applicable, briefly contrast the correct choice with distractors (wrong options) to prevent common student mistakes.
-            - Maintain a polite, educational, and encouraging tone.
-            
-            
-            Example questionText:
-            "Chọn đáp án đúng nhất: [昨日]{きのう}、[写真]{しゃしん}を ++[撮]{と}りました++。"
-            
-            ═══════════════════════════════════════════════════════════════
-            QUESTION TYPE FORMAT RULES (MANDATORY EXACT JSON STRUCTURE):
-            ═══════════════════════════════════════════════════════════════
-            
-            1. "multiple_choice":
-               - "options": Must be a JSON object: {"type": "multiple_choice", "shuffle": true, "options": [{"id": "A", "text": "...", "text_reading": "..."}, {"id": "B", ...}, {"id": "C", ...}, {"id": "D", ...}]}
-               - "correctAnswer": Must be the string ID of the correct option (e.g., "A", "B", "C", or "D").
-               - "correctAnswers": null
-            
-            ═══════════════════════════════════════════════════════════════
-            EXPLANATION RULES (MANDATORY — PLAIN TEXT ONLY):
-            ═══════════════════════════════════════════════════════════════
-            - "explanation": MUST explain why the correct answer is correct. 1-2 sentences and must be Vietnamese. 
-            - **STRICTLY PLAIN TEXT**: Do NOT use **bold**, *italic*, [ ]{ }, ++ ++, or any other Markdown/HTML tags in these fields.
-            - If you leave explanation as empty string "" or null, the question is INVALID.
-            """;
-
     @Value("${spring.ai.openai.chat.options.model}")
     private String model;
 
@@ -125,6 +54,12 @@ public class QuizAiGenerationService {
 
     @Value("${spring.ai.openai.chat.options.max-tokens}")
     private int maxTokens;
+
+    @Value("classpath:prompts/quiz-generation-system.st")
+    private Resource systemPromptResource;
+
+    @Value("classpath:prompts/quiz-generation-user.st")
+    private Resource userPromptResource;
 
     private final ObjectMapper objectMapper;
     private final AssignmentMapper assignmentMapper;
@@ -172,18 +107,27 @@ public class QuizAiGenerationService {
 
     private List<AiQuizQuestionDto> callAi(AiQuizGenerationRequest request) {
         String contextStr = extractContextForPrompt(request);
-        String userPrompt = buildUserPrompt(request, contextStr);
         String formatInstruction = outputConverter.getFormat();
         log.info("Requesting AI: {} questions, types={}", request.getQuestionCount(), request.getQuestionTypes());
 
-        String fullUserMessage = userPrompt + "\n\n" + formatInstruction;
+        PromptTemplate systemTemplate = new PromptTemplate(systemPromptResource);
+        PromptTemplate userTemplate = new PromptTemplate(userPromptResource);
 
         String rawContent;
         String finishReason = "unknown";
         try {
             var response = chatClient.prompt()
-                    .system(SYSTEM_PROMPT)
-                    .user(fullUserMessage)
+                    .system(systemTemplate.render(Map.of("lb", "{", "rb", "}")))
+                    .user(userTemplate.render(Map.of(
+                            "context", contextStr != null ? contextStr : "No extra context provided.",
+                            "teacherPrompt", request.getTeacherPrompt(),
+                            "questionCount", request.getQuestionCount(),
+                            "questionTypes", request.getQuestionTypes(),
+                            "jlptLevel", request.getJlptLevel(),
+                            "formatInstruction", formatInstruction,
+                            "lb", "{",
+                            "rb", "}"
+                    )))
                     .options(OpenAiChatOptions.builder()
                             .model(model)
                             .temperature(temperature)
@@ -516,29 +460,5 @@ public class QuizAiGenerationService {
                 .options(OpenAiChatOptions.builder().temperature(0.0).build()) // Ép temperature về 0
                 .call()
                 .content();
-    }
-
-    private String buildUserPrompt(AiQuizGenerationRequest request, String contextStr) {
-        StringBuilder sb = new StringBuilder();
-
-        if (contextStr != null && !contextStr.isBlank()) {
-            sb.append("=== SOURCE CONTEXT ===\n");
-            sb.append(contextStr);
-            sb.append("=== END OF SOURCE CONTEXT ===\n\n");
-            sb.append("CRITICAL: You MUST predominantly use the vocabulary and grammar listed in the SOURCE CONTEXT above to construct the questions.\n\n");
-        }
-
-        sb.append("Teacher's instruction: ").append(request.getTeacherPrompt()).append("\n");
-        sb.append("Number of questions to generate: ").append(request.getQuestionCount()).append("\n");
-        sb.append("Question types to use: ").append(request.getQuestionTypes()).append("\n");
-
-        if (request.getJlptLevel() != null) {
-            sb.append("Target JLPT level: ").append(request.getJlptLevel()).append("\n");
-        }
-        sb.append("\nREMINDER:\n");
-        sb.append("- Every question MUST have non-empty 'explanation' fields.\n");
-        sb.append("- 'questionText', option 'text', and 'correctAnswer' MUST use [漢字]{kanji} for ALL kanji.\n");
-        sb.append("- Use ++text++ for underlines, **bold** (Markdown) for emphasis, ____ (four underscores) for blanks. Do NOT use ANY HTML tags.\n");
-        return sb.toString();
     }
 }

@@ -127,6 +127,11 @@ public class AssignmentServiceImpl implements AssignmentService {
             log.warn("Assignment {} update blocked: Audio content changed but assignment has submissions.", assignmentId);
             throw new BusinessException("HAS_SUBMISSIONS", "Bài tập đã có học viên nộp bài. Không thể cập nhật nội dung bài tập đã giao." + "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
         }
+        // If submissions exist, throw ONLY if questions ACTUALLY changed
+        if (hasSubmissions && hasQuizQuestionsChanged(request.getQuestions(), assignmentId)) {
+            log.warn("Assignment {} update blocked: Quiz questions changed but assignment has submissions.", assignmentId);
+            throw new BusinessException("HAS_SUBMISSIONS", "Bài tập đã có học viên nộp bài. Không thể cập nhật nội dung đề bài (câu hỏi). " + "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
+        }
         if (!hasSubmissions) {
             if (audioFile != null && !audioFile.isEmpty()) {
                 // Delete old audio from Cloudinary before uploading the new one
@@ -161,11 +166,6 @@ public class AssignmentServiceImpl implements AssignmentService {
             assignment.setQuestionCount(qCount);
         }
 
-        // If submissions exist, throw ONLY if questions ACTUALLY changed
-        if (hasSubmissions && hasQuizQuestionsChanged(request.getQuestions(), assignmentId)) {
-            log.warn("Assignment {} update blocked: Quiz questions changed but assignment has submissions.", assignmentId);
-            throw new BusinessException("HAS_SUBMISSIONS", "Bài tập đã có học viên nộp bài. Không thể cập nhật nội dung đề bài (câu hỏi). " + "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
-        }
 
         // Save assignment
         Assignment savedAssignment = assignmentRepository.save(assignment);
@@ -217,6 +217,7 @@ public class AssignmentServiceImpl implements AssignmentService {
             // Remove orphan links (questions removed from the form)
             for (AssignmentQuestion oldLink : existingLinks) {
                 if (!incomingQuestionIds.contains(oldLink.getQuestionId())) {
+
                     assignmentQuestionRepository.delete(oldLink);
                 }
             }
@@ -295,7 +296,6 @@ public class AssignmentServiceImpl implements AssignmentService {
         // Save or update writing content — only when no submissions
         if (!hasSubmissions) {
             WritingAssignment content = writingAssignmentRepository.findByAssignmentId(savedId).orElse(WritingAssignment.builder().assignmentId(savedId).createdAt(LocalDateTime.now()).build());
-
             content.setPrompt(request.getPrompt());
             writingAssignmentRepository.save(content);
         }
@@ -548,7 +548,6 @@ public class AssignmentServiceImpl implements AssignmentService {
             throw new BusinessException("INVALID_STATUS", "Chỉ có thể chấm điểm bài nộp ở trạng thái SUBMITTED.");
         }
 
-        submission.setTeacherScore(request.getTeacherScore());
         submission.setFeedback(request.getFeedback());
         submission.setScore(request.getTeacherScore());
         submission.setStatus(SubmissionStatus.GRADED);
@@ -583,7 +582,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     public LearnerAssignmentResponse startAssignment(UUID assignmentId, UUID learnerId) {
         Assignment assignment = findAssignmentOrThrow(assignmentId);
 
-        if (assignment.getStatus() != AssignmentStatus.PUBLISHED) {
+        if (assignment.getStatus() == AssignmentStatus.DRAFT) {
             throw new BusinessException("ASSIGNMENT_NOT_PUBLISHED", "Bài tập này hiện không khả dụng.");
         }
 
@@ -634,10 +633,6 @@ public class AssignmentServiceImpl implements AssignmentService {
         // Resolve active submission by assignmentId and learnerId
         AssignmentSubmission submission = submissionRepository.findActiveByAssignmentIdAndUserId(assignmentId, learnerId).orElseThrow(() -> new BusinessException("NO_ACTIVE_SUBMISSION", "Không tìm thấy bài nộp đang làm. Vui lòng bắt đầu bài tập trước."));
 
-        if (!submission.getUserId().equals(learnerId)) {
-            throw new BusinessException("ACCESS_DENIED", "Không thể nộp bài thay cho học viên khác.");
-        }
-
         Assignment assignment = findAssignmentOrThrow(assignmentId);
         if (!assignment.isQuiz()) {
             throw new BusinessException("INVALID_TYPE", "Vui lòng sử dụng submitWriting cho bài tập không phải dạng QUIZ.");
@@ -669,7 +664,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         boolean hasImages = images != null && images.length > 0 && java.util.Arrays.stream(images).anyMatch(f -> f != null && !f.isEmpty());
 
         if (!hasImages) {
-            throw new BusinessException("INVALID_INPUT", "Phải cung cấp bài viết hoặc ít nhất một hình ảnh.");
+            throw new BusinessException("INVALID_INPUT", "Phải cung cấp ít nhất một hình ảnh.");
         }
 
         if (hasImages && images.length > MAX_SUBMISSION_IMAGES) {
@@ -680,10 +675,6 @@ public class AssignmentServiceImpl implements AssignmentService {
         List<AssignmentSubmission> active = submissionRepository.findByAssignmentIdAndUserIdOrderByAttemptDesc(assignmentId, learnerId);
 
         AssignmentSubmission submission = active.stream().filter(s -> s.getStatus() == SubmissionStatus.IN_PROGRESS).findFirst().orElseThrow(() -> new BusinessException("NO_ACTIVE_SUBMISSION", "Không tìm thấy bài nộp đang làm. Vui lòng bắt đầu bài tập trước."));
-
-        if (!submission.getUserId().equals(learnerId)) {
-            throw new BusinessException("ACCESS_DENIED", "Không thể nộp bài thay cho học viên khác.");
-        }
 
         Assignment assignment = findAssignmentOrThrow(assignmentId);
         if (assignment.isQuiz()) {
@@ -778,7 +769,7 @@ public class AssignmentServiceImpl implements AssignmentService {
 
     private void deleteSubmittedImages(AssignmentSubmission submission) {
         List<String> imageUrls = parseImageUrls(submission.getImageUrls());
-        if (imageUrls != null || imageUrls.isEmpty()) {
+        if (imageUrls != null && !imageUrls.isEmpty()) {
             for (String s : imageUrls) {
                 String publicId = cloudinaryService.extractPublicId(s);
                 if (publicId != null) {
