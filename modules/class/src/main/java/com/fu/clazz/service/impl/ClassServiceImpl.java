@@ -93,6 +93,15 @@ public class ClassServiceImpl implements ClassService {
         clazz.setCourseId(course.getId());
         clazz.setCreatedBy(managerId);
         clazz.setUpdatedBy(managerId);
+        if (request.getMaxStudents() == null) {
+            clazz.setMaxStudents(8);
+        } else {
+            clazz.setMaxStudents(request.getMaxStudents());
+        }
+        // Start date after today, class is not active
+        if (request.getStartDate().isAfter(LocalDate.now())) {
+            clazz.setIsActive(false);
+        }
         // Save class
         Clazz savedClazz = classRepository.save(clazz);
         log.info("Tạo lớp học thành công với ID: {}", savedClazz.getId());
@@ -139,9 +148,14 @@ public class ClassServiceImpl implements ClassService {
             }
         }
 
+        boolean oldIsActive = clazz.getIsActive();
         // Update class (only non-null fields are mapped)
         classMapper.updateEntity(clazz, request);
         clazz.setUpdatedBy(managerId);
+
+        if (oldIsActive && (clazz.getIsActive() != null && !clazz.getIsActive())) {
+            deactivateMembers(classId);
+        }
 
         Clazz updatedClazz = classRepository.save(clazz);
         log.info("Cập nhật lớp học thành công: {}", classId);
@@ -182,6 +196,9 @@ public class ClassServiceImpl implements ClassService {
 
         Clazz deletedClazz = classRepository.save(clazz);
         log.info("Xóa lớp học thành công: {}", classId);
+
+        // Deactivate all members when class is deleted
+        deactivateMembers(classId);
 
         return toResponseWithMemberCount(deletedClazz);
     }
@@ -295,6 +312,18 @@ public class ClassServiceImpl implements ClassService {
         Page<User> usersPage = userRepository.findEligibleLearnersForClass(keyword, excludedIds, pageable);
 
         return usersPage.map(user -> com.fu.user.dto.UserResponse.builder().id(user.getId()).email(user.getEmail()).firstName(user.getFirstName()).lastName(user.getLastName()).displayName(user.getDisplayName()).fullName(user.getFullName()).avatarUrl(user.getAvatarUrl()).phoneNumber(user.getPhoneNumber()).dateOfBirth(user.getDateOfBirth()).role(user.getRole()).status(user.getStatus()).createdAt(user.getCreatedAt()).updatedAt(user.getUpdatedAt()).lastLoginAt(user.getLastLoginAt()).build());
+    }
+
+    /**
+     * Deactivate all members of a class.
+     * Business rule: A learner is set to INACTIVE if their class is deleted or deactivated.
+     */
+    private void deactivateMembers(UUID classId) {
+        List<UUID> memberIds = classMemberRepository.findActiveUserIdsByClassId(classId);
+        if (!memberIds.isEmpty()) {
+            log.info("Deactivating {} members from class {}", memberIds.size(), classId);
+            userRepository.updateStatusByUserIdIn(memberIds, UserStatus.INACTIVE);
+        }
     }
 
     // =====================================================

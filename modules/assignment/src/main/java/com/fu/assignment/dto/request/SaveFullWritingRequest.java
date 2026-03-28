@@ -49,12 +49,6 @@ public class SaveFullWritingRequest implements AssignmentMetadataRequest {
     @NotBlank(message = "Prompt is required")
     @Size(max = 5000)
     private String prompt;
-    // ── Translation-specific ──────────────────────────────────────────────────
-
-    /**
-     * Source text to translate (only for TRANSLATION type)
-     */
-    private String sourceText;
 
 }
 

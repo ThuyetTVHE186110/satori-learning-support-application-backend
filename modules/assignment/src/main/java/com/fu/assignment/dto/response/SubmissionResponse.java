@@ -38,8 +38,6 @@ public class SubmissionResponse {
     private Integer totalQuestions;
     private String feedback;
 
-    private Integer timeSpentSeconds;
-
     // Answers (JSON) — only returned to learner (own submission) or teacher/manager
     private String answers;
 

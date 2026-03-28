@@ -23,6 +23,8 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
     @Query("SELECT a FROM Assignment a WHERE a.id = :id AND a.deletedAt IS NULL")
     Optional<Assignment> findByIdAndNotDeleted(@Param("id") UUID id);
 
+    List<Assignment> findAllByStatusAndDeletedAtIsNull(AssignmentStatus status);
+
     /**
      * Get counts by status for a specific class.
      */

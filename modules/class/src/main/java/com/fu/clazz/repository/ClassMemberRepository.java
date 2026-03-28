@@ -1,8 +1,6 @@
 package com.fu.clazz.repository;
 
 import com.fu.clazz.entity.ClassMember;
-import com.fu.clazz.entity.Clazz;
-import com.fu.user.entity.User;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -75,4 +73,6 @@ public interface ClassMemberRepository extends JpaRepository<ClassMember, UUID> 
     @Query("SELECT COUNT(m) FROM ClassMember m JOIN Clazz c ON m.classId = c.id " +
            "WHERE m.userId = :userId AND m.removedAt IS NULL AND c.isActive = true AND c.deletedAt IS NULL")
     long countActiveByUserId(@Param("userId") UUID userId);
+    @Query("SELECT m.userId FROM ClassMember m WHERE m.classId = :classId AND m.removedAt IS NULL")
+    java.util.List<UUID> findActiveUserIdsByClassId(@Param("classId") UUID classId);
 }

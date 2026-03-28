@@ -236,7 +236,7 @@ public class CourseServiceImpl implements CourseService {
 
         Course course = findCourseOrThrow(courseId);
         course.softDelete(managerId);
-
+        course.setStatus(CourseStatus.DELETED);
         courseRepository.save(course);
         log.info("Course soft-deleted successfully: {}", courseId);
     }

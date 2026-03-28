@@ -35,14 +35,5 @@ public class CreateQuizQuestionRequest {
 
     private String explanation;
 
-    private java.util.UUID vocabularyId;
-    private java.util.UUID grammarId;
-    private java.util.UUID lessonId;
-
     private com.fu.course.entity.Course.JlptLevel jlptLevel;
-
-
-    private String[] tags;
-
-    private String imageUrl;
 }
