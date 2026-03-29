@@ -20,6 +20,7 @@ DECLARE
     v_quiz3_id    UUID := 'b0000000-0000-0000-0000-000000000004';
     v_quiz4_id    UUID := 'b0000000-0000-0000-0000-000000000005';
     v_writing2_id UUID := 'b0000000-0000-0000-0000-000000000006';
+    v_translation1_id UUID := 'b0000000-0000-0000-0000-000000000010';
     v_quiz5_id    UUID := 'b0000000-0000-0000-0000-000000000007';
     v_quiz6_id    UUID := 'b0000000-0000-0000-0000-000000000008';
     v_writing3_id UUID := 'b0000000-0000-0000-0000-000000000009';
@@ -190,6 +191,15 @@ INSERT INTO assignment.writing_assignments (assignment_id, prompt)
 VALUES (v_writing3_id, 'Hãy viết một đoạn văn ngắn (khoảng 100 chữ) về một chủ đề bạn yêu thích, sử dụng các cấu trúc ngữ pháp N5 đã học.')
 ON CONFLICT (assignment_id) DO NOTHING;
 
+-- Assignment 10: New Translation (Overdue - CLOSED)
+INSERT INTO assignment.assignments (id, title, description, assignment_type, class_id, due_date, status, has_submissions, created_by)
+VALUES (v_translation1_id, 'Luyện dịch: Chuyến du lịch Nhật Bản', 'Dịch đoạn văn từ tiếng Việt sang tiếng Nhật.', 'TRANSLATION', v_class_id, CURRENT_TIMESTAMP - INTERVAL '3 days', 'CLOSED', TRUE, v_teacher_id)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO assignment.writing_assignments (assignment_id, prompt)
+VALUES (v_translation1_id, 'Hãy dịch câu sau sang tiếng Nhật: "Mùa hè năm ngoái, tôi đã đi du lịch ở Tokyo cùng với gia đình. Đồ ăn Nhật rất ngon."')
+ON CONFLICT (assignment_id) DO NOTHING;
+
 -- 5. Create Submissions
 -- Learner 1: Graded Quiz
 INSERT INTO assignment.assignment_submissions (id, assignment_id, user_id, status, started_at, submitted_at, score, correct_count, total_questions, time_spent_seconds, answers, graded_by, graded_at)
@@ -201,6 +211,11 @@ ON CONFLICT DO NOTHING;
 -- Learner 1: In Progress Writing
 INSERT INTO assignment.assignment_submissions (id, assignment_id, user_id, status, started_at, time_spent_seconds)
 VALUES (uuid_generate_v4(), v_writing1_id, v_learner1_id, 'IN_PROGRESS', CURRENT_TIMESTAMP - INTERVAL '30 minutes', 120)
+ON CONFLICT DO NOTHING;
+
+-- Learner 1: In Progress Translation (Overdue Assignment)
+INSERT INTO assignment.assignment_submissions (id, assignment_id, user_id, status, started_at, time_spent_seconds)
+VALUES (uuid_generate_v4(), v_translation1_id, v_learner1_id, 'IN_PROGRESS', CURRENT_TIMESTAMP - INTERVAL '4 days', 300)
 ON CONFLICT DO NOTHING;
 
 -- Learner 2: Submitted Writing (Waiting for Grade)
@@ -228,7 +243,8 @@ VALUES (v_quiz1_id, v_class_id, v_teacher_id),
        (v_quiz5_id, v_class_id, v_teacher_id),
        (v_quiz6_id, v_class_id, v_teacher_id),
        (v_writing2_id, v_class_id, v_teacher_id),
-       (v_writing3_id, v_class_id, v_teacher_id)
+       (v_writing3_id, v_class_id, v_teacher_id),
+       (v_translation1_id, v_class_id, v_teacher_id)
 ON CONFLICT DO NOTHING;
 
 RAISE NOTICE 'Mock data for Assignment module seeded successfully.';
