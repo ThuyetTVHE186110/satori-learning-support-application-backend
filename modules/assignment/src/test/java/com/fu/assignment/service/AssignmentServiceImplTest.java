@@ -70,6 +70,7 @@ class AssignmentServiceImplTest {
     @Mock private CloudinaryService cloudinaryService;
     @Mock private SubmissionService submissionService;
     @Mock private AiGradingService aiGradingService;
+    @Mock private AssignmentScheduleManager scheduleManager;
 
     @InjectMocks
     private AssignmentServiceImpl assignmentService;
@@ -579,7 +580,7 @@ class AssignmentServiceImplTest {
             assertThat(result).isNotNull();
             verify(submissionRepository).save(submissionCaptor.capture());
             AssignmentSubmission graded = submissionCaptor.getValue();
-            assertThat(graded.getTeacherScore()).isEqualByComparingTo(BigDecimal.valueOf(8.5));
+            assertThat(graded.getScore()).isEqualByComparingTo(BigDecimal.valueOf(8.5));
             assertThat(graded.getStatus()).isEqualTo(SubmissionStatus.GRADED);
             assertThat(graded.getGradedBy()).isEqualTo(teacherId);
         }

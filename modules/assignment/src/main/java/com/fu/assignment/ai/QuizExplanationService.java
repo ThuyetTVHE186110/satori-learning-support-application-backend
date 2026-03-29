@@ -10,14 +10,19 @@ import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -30,37 +35,17 @@ import java.util.UUID;
 @Slf4j
 public class QuizExplanationService {
 
-    private static final String SYSTEM_PROMPT = """
-            You are a professional and dedicated Japanese language teacher.
-            Your task is to provide a high-quality explanation for why a specific answer is correct in a Japanese language quiz.
-            
-            CORE RULES:
-            1. You MUST respond strictly with a valid JSON object.
-            2. JSON Structure:
-               {
-                 "explanation": "Detailed explanation in Vietnamese",
-               }
-            3. OUTPUT LANGUAGE:  The 'explanation' field MUST be written in VIETNAMESE.
-            
-            EXPLANATION GUIDELINES (High Quality):
-            - Keep the explanation concise yet comprehensive (3-5 sentences).
-            - Clearly identify the grammar pattern, vocabulary meaning, or situational context used in the question.
-            - Explain the logical reasoning behind the correct answer.
-            - If applicable, briefly contrast the correct choice with distractors (wrong options) to prevent common student mistakes.
-            - Maintain a polite, educational, and encouraging tone.
-            
-            FORMATTING RULES (STRICT):
-            - Use PLAIN TEXT ONLY.
-            - DO NOT use Markdown (no **bold**, *italic*, etc.).
-            - DO NOT use HTML tags (no <ruby>, <rt>, <b>, <i>, etc.).
-            - DO NOT use special decorative characters.
-            """;
-
     @Value("${spring.ai.openai.chat.options.model:gpt-4o-mini}")
     private String model;
 
     @Value("${spring.ai.openai.chat.options.temperature:0.7}")
     private double temperature;
+
+    @Value("classpath:prompts/quiz-explanation-system.st")
+    private Resource systemPromptResource;
+
+    @Value("classpath:prompts/quiz-explanation-user.st")
+    private Resource userPromptResource;
 
     private final QuizQuestionRepository questionRepository;
     private final ChatClient chatClient;
@@ -81,10 +66,10 @@ public class QuizExplanationService {
         QuizQuestion question = questionRepository.findById(questionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Quiz question not found: " + questionId));
 
-        String userPrompt = buildPrompt(question);
+        Map<String, Object> params = buildParams(question);
         log.info("Generating AI explanation for question {}", questionId);
 
-        String rawResponse = callOpenAi(userPrompt);
+        String rawResponse = callOpenAi(params);
 
         parseAndApply(rawResponse, question);
         question.setUpdatedBy(requestedBy);
@@ -99,24 +84,31 @@ public class QuizExplanationService {
      * Generate AI explanation for a draft question from the frontend form.
      */
     public AiExplanationResponse generateExplanationFromDraft(AiExplanationRequest request) {
-        String userPrompt = buildPrompt(request);
+        Map<String, Object> params = buildParams(request);
         log.info("Generating AI explanation for draft question from form");
 
-        String rawResponse = callOpenAi(userPrompt);
+        String rawResponse = callOpenAi(params);
         return parseResponse(rawResponse);
     }
 
     // ── AI API Call (using ChatClient) ────────────────────────────────────────
 
-    private String callOpenAi(String userPrompt) {
+    private String callOpenAi(Map<String, Object> params) {
         try {
+            Map<String, Object> templateModel = new java.util.HashMap<>(params);
             String formatInstruction = outputConverter.getFormat();
+            templateModel.put("formatInstruction", formatInstruction);
+            templateModel.put("lb", "{");
+            templateModel.put("rb", "}");
+
+            PromptTemplate systemTemplate = new PromptTemplate(systemPromptResource);
+            PromptTemplate userTemplate = new PromptTemplate(userPromptResource);
             
             return chatClient.prompt()
-                    .system(SYSTEM_PROMPT)
-                    .user(userPrompt + "\n\n" + formatInstruction)
+                    .system(systemTemplate.render(Map.of("lb", "{", "rb", "}")))
+                    .user(userTemplate.render(templateModel))
                     .options(OpenAiChatOptions.builder()
-                            .model(model)
+                            .model(this.model)
                             .temperature(temperature)
                             .build())
                     .call()
@@ -131,8 +123,8 @@ public class QuizExplanationService {
 
     // ── Private Helpers ───────────────────────────────────────────────────────
 
-    private String buildPrompt(QuizQuestion question) {
-        return buildPromptContent(
+    private Map<String, Object> buildParams(QuizQuestion question) {
+        return buildParamsContent(
                 question.getQuestionText(),
                 question.getQuestionType(),
                 question.getOptions(),
@@ -141,8 +133,8 @@ public class QuizExplanationService {
         );
     }
 
-    private String buildPrompt(AiExplanationRequest request) {
-        return buildPromptContent(
+    private Map<String, Object> buildParams(AiExplanationRequest request) {
+        return buildParamsContent(
                 request.getQuestionText(),
                 request.getQuestionType(),
                 request.getOptions(),
@@ -151,24 +143,14 @@ public class QuizExplanationService {
         );
     }
 
-    private String buildPromptContent(String text, String type, String options, String ans, String ansJsonb) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("QUESTION: ").append(text).append("\n");
-
-        sb.append("QUESTION TYPE: ").append(type).append("\n");
-
-        if (options != null && !options.equals("[]") && !options.isBlank()) {
-            sb.append("OPTIONS: ").append(options).append("\n");
-        }
-        if (ans != null && !ans.isBlank()) {
-            sb.append("CORRECT ANSWER: ").append(ans).append("\n");
-        }
-        if (ansJsonb != null && !ansJsonb.isBlank()) {
-            sb.append("CORRECT ANSWERS (JSONB): ").append(ansJsonb).append("\n");
-        }
-
-        sb.append("\nPlease explain why the correct answer is correct.");
-        return sb.toString();
+    private Map<String, Object> buildParamsContent(String text, String type, String options, String ans, String ansJsonb) {
+        return Map.of(
+                "questionText", text != null ? text : "",
+                "questionType", type != null ? type : "multiple_choice",
+                "options", options != null ? options : "[]",
+                "correctAnswer", ans != null ? ans : "",
+                "correctAnswers", ansJsonb != null ? ansJsonb : "[]"
+        );
     }
 
     private void parseAndApply(String rawResponse, QuizQuestion question) {

@@ -231,7 +231,7 @@ public class TeacherAssignmentController {
      * @return empty success response
      */
     @DeleteMapping("/{id}")
-    @Operation(summary = "Delete an assignment (soft delete, DRAFT only)")
+    @Operation(summary = "Delete an assignment (soft delete)")
     public ApiResponse<Void> deleteAssignment(@PathVariable UUID id,
                                               @AuthenticationPrincipal UserDetails userDetails) {
         assignmentService.deleteAssignment(id, getUserId(userDetails));

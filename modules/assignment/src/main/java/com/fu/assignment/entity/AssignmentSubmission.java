@@ -91,11 +91,6 @@ public class AssignmentSubmission {
     @Column(name = "image_urls", columnDefinition = "jsonb")
     @JdbcTypeCode(SqlTypes.JSON)
     private String imageUrls;
-
-    /** Teacher-given score for WRITING/TRANSLATION */
-    @Column(name = "teacher_score", precision = 5, scale = 2)
-    private BigDecimal teacherScore;
-
     // ── Common Feedback & Grading ─────────────────────────────────────────────
 
     /** General feedback (used for both quiz and writing) */
