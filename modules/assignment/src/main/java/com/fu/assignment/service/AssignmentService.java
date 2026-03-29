@@ -3,6 +3,7 @@ package com.fu.assignment.service;
 import com.fu.assignment.dto.request.*;
 import com.fu.assignment.dto.response.*;
 import com.fu.assignment.entity.AssignmentType;
+import com.fu.assignment.entity.SubmissionStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -87,7 +88,7 @@ public interface AssignmentService {
 
     // ── Submissions — Learner Flow ────────────────────────────────────────────
 
-    Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, String title, AssignmentType type, Pageable pageable);
+    Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, String title, AssignmentType type, SubmissionStatus status, Pageable pageable);
 
 
     /** Start or Resume assignment → returns full assignment details + current session */

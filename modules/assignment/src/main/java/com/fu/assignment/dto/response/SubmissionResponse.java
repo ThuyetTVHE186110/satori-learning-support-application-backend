@@ -44,8 +44,6 @@ public class SubmissionResponse {
     // Writing submissions
     private List<String> imageUrls;
 
-    // Teacher grading
-    private BigDecimal teacherScore;
     // Detailed feedback for quiz
     private List<QuizSubmissionDetailResponse> quizDetails;
 
