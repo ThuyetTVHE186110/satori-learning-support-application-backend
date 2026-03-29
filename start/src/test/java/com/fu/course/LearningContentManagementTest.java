@@ -260,7 +260,8 @@ class LearningContentManagementTest {
 
             mockMvc.perform(get("/api/v1/manager/lessons/{id}", UUID.randomUUID()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.success").value(false));
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
         }
     }
 
@@ -349,7 +350,8 @@ class LearningContentManagementTest {
 
             mockMvc.perform(get("/api/v1/manager/curriculum-imports/{id}", UUID.randomUUID()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.success").value(false));
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
         }
     }
 
@@ -409,7 +411,8 @@ class LearningContentManagementTest {
 
             mockMvc.perform(post("/api/v1/manager/curriculum-imports/{id}/rollback", UUID.randomUUID()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.success").value(false));
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
         }
     }
 
@@ -503,7 +506,8 @@ class LearningContentManagementTest {
 
             mockMvc.perform(post("/api/v1/manager/lessons").contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false));
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
         }
 
         @Test
@@ -623,6 +627,82 @@ class LearningContentManagementTest {
             mockMvc.perform(delete("/api/v1/manager/grammar-points/{id}", gp.getId()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true));
+        }
+    }
+    
+    @Nested
+    @DisplayName("10. Security & RBAC (SR)")
+    class SecurityTests {
+        @Test
+        @DisplayName("TC_LCM_SR_001 – Access without token")
+        void tc_lcm_sr_001() throws Exception {
+            mockMvc.perform(get("/api/v1/manager/lessons"))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+        }
+
+        @Test
+        @DisplayName("TC_LCM_SR_002 – Access with invalid token")
+        void tc_lcm_sr_002() throws Exception {
+            mockMvc.perform(get("/api/v1/manager/lessons").header("Authorization", "Bearer invalid_token"))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+        }
+
+        @Test
+        @DisplayName("TC_LCM_SR_003 – Access with LEARNER role")
+        void tc_lcm_sr_003() throws Exception {
+            saveLearner("learner@test.com");
+            String token = loginAndGetToken("learner@test.com", "ValidPass@1");
+            Course course = saveCourse("N5");
+
+            mockMvc.perform(post("/api/v1/manager/lessons")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        }
+    }
+
+    @Nested
+    @DisplayName("11. Public / Learner Facing API (PB)")
+    class PublicApiTests {
+        @Test
+        @DisplayName("TC_LCM_PB_001 – View published lessons")
+        void tc_lcm_pb_001() throws Exception {
+            Course course = saveCourse("Public Course");
+            saveLessonWithStatus(course, "Published", Lesson.LessonType.VOCABULARY, Lesson.ContentStatus.PUBLISHED, 0);
+            saveLessonWithStatus(course, "Draft", Lesson.LessonType.VOCABULARY, Lesson.ContentStatus.DRAFT, 1);
+
+            mockMvc.perform(get("/api/v1/courses/{id}/lessons", course.getId()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.length()").value(1))
+                    .andExpect(jsonPath("$.data[0].title").value("Published"));
+        }
+
+        @Test
+        @DisplayName("TC_LCM_PB_002 – View published lesson detail")
+        void tc_lcm_pb_002() throws Exception {
+            Course course = saveCourse("Public Course");
+            Lesson lesson = saveLessonWithStatus(course, "Detail", Lesson.LessonType.VOCABULARY, Lesson.ContentStatus.PUBLISHED, 0);
+
+            mockMvc.perform(get("/api/v1/courses/{courseId}/lessons/{lessonId}", course.getId(), lesson.getId()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.id").value(lesson.getId().toString()));
+        }
+
+        @Test
+        @DisplayName("TC_LCM_PB_003 – Draft lesson not in public list")
+        void tc_lcm_pb_003() throws Exception {
+            Course course = saveCourse("Public Course");
+            Lesson draft = saveLessonWithStatus(course, "Draft", Lesson.LessonType.VOCABULARY, Lesson.ContentStatus.DRAFT, 0);
+
+            mockMvc.perform(get("/api/v1/courses/{id}/lessons", course.getId()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.length()").value(0));
         }
     }
 }
