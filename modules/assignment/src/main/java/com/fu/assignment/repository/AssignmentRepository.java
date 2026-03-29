@@ -38,19 +38,19 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
     List<Object[]> countByStatusForClass(@Param("classId") UUID classId);
 
     /**
-     * Find learner assignments sorted by urgency:
-     * 1. NOT_STARTED / IN_PROGRESS — closest due date first (ascending)
-     * 2. OVERDUE — most recently expired first (descending)
-     * 3. SUBMITTED / GRADED — most recent first (descending)
-     *
-     * Uses EXISTS instead of JOIN on assignment_targets to avoid duplicates
-     * (which would require DISTINCT and conflict with CASE-based ORDER BY in PostgreSQL).
+     * Find learner assignments sorted by urgency and filtered by submission status.
+     * 
+     * Logic for Filtering by Status (Virtual Logic):
+     * - NOT_STARTED: No submission exists AND not past due.
+     * - IN_PROGRESS: Current submission is IN_PROGRESS AND not past due.
+     * - OVERDUE: Submission is explicitly OVERDUE OR past due date without finished submission.
+     * - SUBMITTED/GRADED: Matches the status exactly.
      */
     @Query(value = """
             SELECT a.*
             FROM assignment.assignments a
             LEFT JOIN LATERAL (
-                SELECT s.status
+                SELECT CAST(s.status AS text) as status
                 FROM assignment.assignment_submissions s
                 WHERE s.assignment_id = a.id AND s.user_id = :learnerId
                 ORDER BY s.attempt_number DESC
@@ -65,6 +65,13 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
               AND a.status IN ('PUBLISHED', 'CLOSED')
               AND (CAST(:title AS text) = '' OR LOWER(a.title) LIKE LOWER(CONCAT('%', CAST(:title AS text), '%')))
               AND (CAST(:type AS text) = '' OR CAST(a.assignment_type AS text) = CAST(:type AS text))
+              AND (
+                  CAST(:status AS text) = ''
+                  OR (CAST(:status AS text) = 'NOT_STARTED' AND sub.status IS NULL AND a.due_date >= CURRENT_TIMESTAMP)
+                  OR (CAST(:status AS text) = 'IN_PROGRESS' AND sub.status = 'IN_PROGRESS' AND a.due_date >= CURRENT_TIMESTAMP)
+                  OR (CAST(:status AS text) = 'OVERDUE' AND (sub.status = 'OVERDUE' OR ((sub.status IS NULL OR sub.status = 'IN_PROGRESS') AND a.due_date < CURRENT_TIMESTAMP)))
+                  OR (CAST(:status AS text) NOT IN ('NOT_STARTED', 'IN_PROGRESS', 'OVERDUE') AND sub.status = CAST(:status AS text))
+              )
             ORDER BY
               CASE
                   -- 1. NOT_STARTED / IN_PROGRESS (Within deadline)
@@ -83,6 +90,13 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
             countQuery = """
             SELECT COUNT(*)
             FROM assignment.assignments a
+            LEFT JOIN LATERAL (
+                SELECT CAST(s.status AS text) as status
+                FROM assignment.assignment_submissions s
+                WHERE s.assignment_id = a.id AND s.user_id = :learnerId
+                ORDER BY s.attempt_number DESC
+                LIMIT 1
+            ) sub ON TRUE
             WHERE EXISTS (
                 SELECT 1 FROM assignment.assignment_targets t
                 WHERE t.assignment_id = a.id
@@ -92,6 +106,13 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
               AND a.status IN ('PUBLISHED', 'CLOSED')
               AND (CAST(:title AS text) = '' OR LOWER(a.title) LIKE LOWER(CONCAT('%', CAST(:title AS text), '%')))
               AND (CAST(:type AS text) = '' OR CAST(a.assignment_type AS text) = CAST(:type AS text))
+              AND (
+                  CAST(:status AS text) = ''
+                  OR (CAST(:status AS text) = 'NOT_STARTED' AND sub.status IS NULL AND a.due_date >= CURRENT_TIMESTAMP)
+                  OR (CAST(:status AS text) = 'IN_PROGRESS' AND sub.status = 'IN_PROGRESS' AND a.due_date >= CURRENT_TIMESTAMP)
+                  OR (CAST(:status AS text) = 'OVERDUE' AND (sub.status = 'OVERDUE' OR ((sub.status IS NULL OR sub.status = 'IN_PROGRESS') AND a.due_date < CURRENT_TIMESTAMP)))
+                  OR (CAST(:status AS text) NOT IN ('NOT_STARTED', 'IN_PROGRESS', 'OVERDUE') AND sub.status = CAST(:status AS text))
+              )
             """,
             nativeQuery = true)
     Page<Assignment> findLearnerAssignmentsSorted(
@@ -99,5 +120,6 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
             @Param("classIds") List<UUID> classIds,
             @Param("title") String title,
             @Param("type") String type,
+            @Param("status") String status,
             Pageable pageable);
 }

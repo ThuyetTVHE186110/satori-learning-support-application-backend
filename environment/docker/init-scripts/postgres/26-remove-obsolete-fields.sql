@@ -13,7 +13,9 @@ ALTER TABLE assignment.writing_assignments
 
 -- Drop column from assignment.assignment_submissions
 ALTER TABLE assignment.assignment_submissions
-    DROP COLUMN IF EXISTS time_spent_seconds;
+    DROP COLUMN IF EXISTS time_spent_seconds,
+    DROP COLUMN IF EXISTS ai_auto_score,
+    DROP COLUMN IF EXISTS teacher_score;
 
 -- Drop associated indexes
 DROP INDEX IF EXISTS assignment.idx_quiz_questions_lesson_id;
