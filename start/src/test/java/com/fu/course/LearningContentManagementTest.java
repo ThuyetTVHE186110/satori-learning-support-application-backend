@@ -97,11 +97,11 @@ class LearningContentManagementTest {
     }
 
     private Vocabulary saveVocabulary(String japaneseText, JlptLevel level) {
-        return vocabularyRepository.save(Vocabulary.builder().japaneseText(japaneseText).jlptLevel(level).build());
+        return vocabularyRepository.save(Vocabulary.builder().japaneseText(japaneseText).meaningVi("Meaning").jlptLevel(level).build());
     }
 
     private GrammarPoint saveGrammarPoint(String pattern, JlptLevel level) {
-        return grammarPointRepository.save(GrammarPoint.builder().pattern(pattern).jlptLevel(level).build());
+        return grammarPointRepository.save(GrammarPoint.builder().pattern(pattern).meaningVi("Meaning").jlptLevel(level).build());
     }
 
     private CurriculumImport saveImport(UUID courseId, ImportStatus status, UUID managerId) {
@@ -543,9 +543,9 @@ class LearningContentManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
-            String body = "{\"japaneseText\":\"猫\",\"jlptLevel\":\"N5\"}";
+            String body = "{\"japaneseText\":\"猫\",\"jlptLevel\":\"N5\",\"meaningVi\":\"Con mèo\"}";
 
-            mockMvc.perform(post("/api/v1/manager/vocabulary").contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
+            mockMvc.perform(post("/api/v1/manager/vocabulary").characterEncoding("UTF-8").contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true));
         }
@@ -559,7 +559,7 @@ class LearningContentManagementTest {
 
             String body = "{\"meaningVi\":\"Con mèo\",\"reading\":\"ねこ\"}";
 
-            mockMvc.perform(put("/api/v1/manager/vocabulary/{id}", v.getId()).contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
+            mockMvc.perform(put("/api/v1/manager/vocabulary/{id}", v.getId()).characterEncoding("UTF-8").contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.meaningVi").value("Con mèo"));
@@ -587,9 +587,9 @@ class LearningContentManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
-            String body = "{\"pattern\":\"〜てから\",\"jlptLevel\":\"N4\"}";
+            String body = "{\"pattern\":\"〜てから\",\"jlptLevel\":\"N4\",\"meaningVi\":\"Sau khi...\"}";
 
-            mockMvc.perform(post("/api/v1/manager/grammar-points").contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
+            mockMvc.perform(post("/api/v1/manager/grammar-points").characterEncoding("UTF-8").contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true));
         }
@@ -603,7 +603,7 @@ class LearningContentManagementTest {
 
             String body = "{\"meaningVi\":\"Sau khi...\"}";
 
-            mockMvc.perform(put("/api/v1/manager/grammar-points/{id}", gp.getId()).contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
+            mockMvc.perform(put("/api/v1/manager/grammar-points/{id}", gp.getId()).characterEncoding("UTF-8").contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.meaningVi").value("Sau khi..."));
