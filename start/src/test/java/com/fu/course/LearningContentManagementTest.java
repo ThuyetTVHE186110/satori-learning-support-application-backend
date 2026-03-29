@@ -10,6 +10,7 @@ import com.fu.course.entity.Vocabulary;
 import com.fu.course.repository.*;
 import com.fu.curriculumimport.entity.CurriculumImport;
 import com.fu.curriculumimport.entity.CurriculumImport.ImportStatus;
+import com.fu.assignment.repository.QuizQuestionRepository;
 import com.fu.curriculumimport.repository.CurriculumImportRepository;
 import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import com.fu.curriculumimport.service.orchestrator.ImportOrchestrator;
@@ -57,6 +58,7 @@ class LearningContentManagementTest {
     @Autowired private LessonVocabularyRepository lessonVocabularyRepository;
     @Autowired private LessonGrammarRepository lessonGrammarRepository;
     @Autowired private CurriculumImportRepository curriculumImportRepository;
+    @Autowired private QuizQuestionRepository quizQuestionRepository;
     @Autowired private UserRepository userRepository;
     @Autowired private UserSessionRepository sessionRepository;
     @Autowired private PasswordEncoder passwordEncoder;
@@ -110,26 +112,28 @@ class LearningContentManagementTest {
 
     @BeforeEach
     void setUp() {
+        quizQuestionRepository.deleteAll();
         lessonVocabularyRepository.deleteAll();
         lessonGrammarRepository.deleteAll();
         lessonRepository.deleteAll();
         vocabularyRepository.deleteAll();
         grammarPointRepository.deleteAll();
-        courseRepository.deleteAll();
         curriculumImportRepository.deleteAll();
+        courseRepository.deleteAll();
         sessionRepository.deleteAll();
         userRepository.deleteAll();
     }
 
     @AfterEach
     void tearDown() {
+        quizQuestionRepository.deleteAll();
         lessonVocabularyRepository.deleteAll();
         lessonGrammarRepository.deleteAll();
         lessonRepository.deleteAll();
         vocabularyRepository.deleteAll();
         grammarPointRepository.deleteAll();
-        courseRepository.deleteAll();
         curriculumImportRepository.deleteAll();
+        courseRepository.deleteAll();
         sessionRepository.deleteAll();
         userRepository.deleteAll();
     }
@@ -543,7 +547,7 @@ class LearningContentManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
-            String body = "{\"japaneseText\":\"猫\",\"jlptLevel\":\"N5\"}";
+            String body = "{\"japaneseText\":\"猫_TC_LCM_VO_001\",\"jlptLevel\":\"N5\"}";
 
             mockMvc.perform(post("/api/v1/manager/vocabulary").contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
@@ -555,7 +559,7 @@ class LearningContentManagementTest {
         void tc_lcm_vo_002() throws Exception {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Vocabulary v = saveVocabulary("猫", JlptLevel.N5);
+            Vocabulary v = saveVocabulary("猫_TC_LCM_VO_002", JlptLevel.N5);
 
             String body = "{\"meaningVi\":\"Con mèo\",\"reading\":\"ねこ\"}";
 
@@ -570,7 +574,7 @@ class LearningContentManagementTest {
         void tc_lcm_vo_003() throws Exception {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Vocabulary v = saveVocabulary("猫", JlptLevel.N5);
+            Vocabulary v = saveVocabulary("猫_TC_LCM_VO_003", JlptLevel.N5);
 
             mockMvc.perform(delete("/api/v1/manager/vocabulary/{id}", v.getId()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
