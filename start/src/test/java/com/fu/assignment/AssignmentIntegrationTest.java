@@ -223,7 +223,7 @@ class AssignmentIntegrationTest {
                 .assignmentId(assignmentId).userId(learnerId)
                 .status(SubmissionStatus.IN_PROGRESS)
                 .attemptNumber(1).startedAt(LocalDateTime.now())
-                .correctCount(0).totalQuestions(1).timeSpentSeconds(0)
+                .correctCount(0).totalQuestions(1)
                 .answers("[]").createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
                 .build());
     }
@@ -1762,7 +1762,7 @@ class AssignmentIntegrationTest {
                     .status(SubmissionStatus.SUBMITTED).attemptNumber(1)
                     .startedAt(LocalDateTime.now().minusMinutes(10))
                     .submittedAt(LocalDateTime.now().minusMinutes(1))
-                    .correctCount(0).totalQuestions(1).timeSpentSeconds(600)
+                    .correctCount(0).totalQuestions(1)
                     .answers("[]").createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
                     .build());
             String token = loginAndGetToken("teacher@test.com");
@@ -1797,7 +1797,7 @@ class AssignmentIntegrationTest {
                     .status(SubmissionStatus.SUBMITTED).attemptNumber(1)
                     .startedAt(LocalDateTime.now().minusMinutes(10))
                     .submittedAt(LocalDateTime.now().minusMinutes(1))
-                    .correctCount(0).totalQuestions(1).timeSpentSeconds(600)
+                    .correctCount(0).totalQuestions(1)
                     .answers("[]").createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
                     .build());
             String token = loginAndGetToken("teacher@test.com");
@@ -1853,7 +1853,7 @@ class AssignmentIntegrationTest {
                     .startedAt(LocalDateTime.now().minusMinutes(10))
                     .submittedAt(LocalDateTime.now().minusMinutes(5))
                     .gradedAt(LocalDateTime.now().minusMinutes(1))
-                    .correctCount(0).totalQuestions(1).timeSpentSeconds(600)
+                    .correctCount(0).totalQuestions(1)
                     .answers("[]").createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
                     .build());
             String token = loginAndGetToken("teacher@test.com");
@@ -1883,7 +1883,7 @@ class AssignmentIntegrationTest {
                     .status(SubmissionStatus.SUBMITTED).attemptNumber(1)
                     .startedAt(LocalDateTime.now().minusMinutes(10))
                     .submittedAt(LocalDateTime.now().minusMinutes(1))
-                    .correctCount(0).totalQuestions(1).timeSpentSeconds(600)
+                    .correctCount(0).totalQuestions(1)
                     .answers("[]").createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
                     .build());
             String tokenB = loginAndGetToken("teacherB@test.com");
@@ -2264,7 +2264,7 @@ class AssignmentIntegrationTest {
                     .status(SubmissionStatus.GRADED).attemptNumber(1)
                     .startedAt(LocalDateTime.now().minusMinutes(10))
                     .submittedAt(LocalDateTime.now().minusMinutes(5))
-                    .correctCount(1).totalQuestions(1).timeSpentSeconds(60)
+                    .correctCount(1).totalQuestions(1)
                     .answers("[]").score(BigDecimal.valueOf(100))
                     .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
                     .build());
@@ -2289,7 +2289,7 @@ class AssignmentIntegrationTest {
                         .status(SubmissionStatus.GRADED).attemptNumber(i)
                         .startedAt(LocalDateTime.now().minusMinutes(20))
                         .submittedAt(LocalDateTime.now().minusMinutes(10))
-                        .correctCount(1).totalQuestions(1).timeSpentSeconds(60)
+                        .correctCount(1).totalQuestions(1)
                         .answers("[]").score(BigDecimal.valueOf(10))
                         .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
                         .build());
@@ -2785,7 +2785,6 @@ class AssignmentIntegrationTest {
                     .startedAt(LocalDateTime.now().minusMinutes(30))
                     .submittedAt(LocalDateTime.now().minusMinutes(10))
                     .gradedAt(LocalDateTime.now().minusMinutes(5))
-                    .timeSpentSeconds(1200)
                     .answers("[{\"questionId\":\"q1\",\"selectedOption\":\"A\",\"isCorrect\":true}," +
                             "{\"questionId\":\"q2\",\"selectedOption\":\"B\",\"isCorrect\":false}," +
                             "{\"questionId\":\"q3\",\"selectedOption\":\"C\",\"isCorrect\":true}," +
@@ -2815,7 +2814,6 @@ class AssignmentIntegrationTest {
                     .andExpect(jsonPath("$.data.correctCount").value(4))
                     .andExpect(jsonPath("$.data.totalQuestions").value(5))
                     .andExpect(jsonPath("$.data.feedback").doesNotExist())
-                    .andExpect(jsonPath("$.data.timeSpentSeconds").value(1200))
                     .andExpect(jsonPath("$.data.answers").exists())
                     .andExpect(jsonPath("$.data.imageUrls").doesNotExist())
                     .andExpect(jsonPath("$.data.teacherScore").doesNotExist())
@@ -2862,7 +2860,7 @@ class AssignmentIntegrationTest {
                     .status(SubmissionStatus.SUBMITTED).attemptNumber(1)
                     .startedAt(LocalDateTime.now().minusMinutes(10))
                     .submittedAt(LocalDateTime.now().minusMinutes(1))
-                    .correctCount(0).totalQuestions(1).timeSpentSeconds(600)
+                    .correctCount(0).totalQuestions(1)
                     .answers("[]").createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
                     .build());
             String token = loginAndGetToken("learner@test.com");
@@ -2887,7 +2885,7 @@ class AssignmentIntegrationTest {
                     .status(SubmissionStatus.OVERDUE).attemptNumber(1)
                     .startedAt(LocalDateTime.now().minusDays(8))
                     .submittedAt(LocalDateTime.now().minusDays(1))
-                    .correctCount(0).totalQuestions(1).timeSpentSeconds(60)
+                    .correctCount(0).totalQuestions(1)
                     .answers("[]").createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
                     .build());
             String token = loginAndGetToken("learner@test.com");
@@ -2926,7 +2924,7 @@ class AssignmentIntegrationTest {
                     .gradedAt(LocalDateTime.now())
                     .score(BigDecimal.valueOf(95.5))
                     .feedback("よくできました！")
-                    .correctCount(0).totalQuestions(1).timeSpentSeconds(300)
+                    .correctCount(0).totalQuestions(1)
                     .answers("[]").createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
                     .build());
             String token = loginAndGetToken("learner@test.com");

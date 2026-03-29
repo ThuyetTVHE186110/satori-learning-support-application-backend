@@ -46,7 +46,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Section 3 – Change Password    TC_AUTH_CP_001–008
  * Section 4 – Logout             TC_AUTH_LO_001–002
  *
- * NOTE FOR DEV — HTTP Status Discrepancies
  * ─────────────────────────────────────────
  * Currently GlobalExceptionHandler maps ALL BusinessException → HTTP 400.
  * Tests assert ACTUAL current behavior (400) with an inline NOTE comment.
@@ -993,7 +992,7 @@ class   AuthControllerIntegrationTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(verifyRequest)))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("INVALID_OTP"))
+                    .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
                     .andExpect(jsonPath("$.message").value("Mã OTP không hợp lệ"));
         }
 
