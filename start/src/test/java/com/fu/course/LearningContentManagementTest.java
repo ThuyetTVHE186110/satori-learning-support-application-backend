@@ -549,7 +549,7 @@ class LearningContentManagementTest {
 
             String body = "{\"japaneseText\":\"猫_TC_LCM_VO_001\",\"jlptLevel\":\"N5\"}";
 
-            mockMvc.perform(post("/api/v1/manager/vocabulary").contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
+            mockMvc.perform(post("/api/v1/manager/vocabulary").contentType(MediaType.APPLICATION_JSON) .characterEncoding("UTF-8").content(body).header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true));
         }
