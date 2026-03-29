@@ -220,7 +220,7 @@ Response JSON:
 **Expected Results:** HTTP 404 NOT FOUND
 Response JSON:
 - success = false
-- code = "RESOURCE_NOT_FOUND"
+- code = "NOT_FOUND"
 
 ---
 
@@ -371,7 +371,7 @@ Response JSON:
 **Expected Results:** HTTP 404 NOT FOUND
 Response JSON:
 - success = false
-- code = "RESOURCE_NOT_FOUND"
+- code = "NOT_FOUND"
 
 ---
 
@@ -463,7 +463,7 @@ Response JSON:
 **Expected Results:** HTTP 404 NOT FOUND
 Response JSON:
 - success = false
-- code = "RESOURCE_NOT_FOUND"
+- code = "NOT_FOUND"
 
 ---
 

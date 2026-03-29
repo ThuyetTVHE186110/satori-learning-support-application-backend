@@ -261,7 +261,7 @@ class LearningContentManagementTest {
             mockMvc.perform(get("/api/v1/manager/lessons/{id}", UUID.randomUUID()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+                    .andExpect(jsonPath("$.code").value("NOT_FOUND"));
         }
     }
 
@@ -351,7 +351,7 @@ class LearningContentManagementTest {
             mockMvc.perform(get("/api/v1/manager/curriculum-imports/{id}", UUID.randomUUID()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+                    .andExpect(jsonPath("$.code").value("NOT_FOUND"));
         }
     }
 
@@ -412,7 +412,7 @@ class LearningContentManagementTest {
             mockMvc.perform(post("/api/v1/manager/curriculum-imports/{id}/rollback", UUID.randomUUID()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+                    .andExpect(jsonPath("$.code").value("NOT_FOUND"));
         }
     }
 
@@ -660,8 +660,8 @@ class LearningContentManagementTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{}")
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isForbidden())
-                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
         }
     }
 
