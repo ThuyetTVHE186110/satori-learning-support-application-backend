@@ -3,6 +3,7 @@ package com.fu.conversation.ai.advisor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.common.ai.PromptTemplateLoader;
+import com.fu.common.ai.PromptUtils;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -72,14 +73,9 @@ public class RelevanceCheckAdvisor implements BaseAdvisor {
         }
 
         try {
-            // Compute max similarity of retrieved items to help the evaluator judge quality
-            double maxSim = 0.0;
-            Object ragObj2 = request.context().get(RetrievalAdvisor.RAG_CONTEXT_KEY);
-            if (ragObj2 instanceof RagContext rc) {
-                maxSim = rc.getSimilarItems().stream()
-                        .mapToDouble(RagContext.SimilarItem::getSimilarity)
-                        .max().orElse(0.0);
-            }
+            double maxSim = rag.getSimilarItems().stream()
+                    .mapToDouble(RagContext.SimilarItem::getSimilarity)
+                    .max().orElse(0.0);
 
             String checkPrompt = promptLoader.render("prompts/relevance-check.st", Map.of(
                     "question", question,
@@ -96,29 +92,29 @@ public class RelevanceCheckAdvisor implements BaseAdvisor {
                     .call()
                     .content();
 
-            JsonNode node = objectMapper.readTree(cleanJson(raw));
+            JsonNode node = objectMapper.readTree(PromptUtils.cleanMarkdownFences(raw, "{}"));
             boolean isRetrievalRequired = node.path("isRetrievalRequired").asBoolean(true);
             boolean isRelevant = node.path("isRelevant").asBoolean(true);
             double confidence = node.path("confidence").asDouble(0.7);
             String reasoning = node.path("reasoning").asText("");
 
-            log.debug("RelevanceCheck: required={}, relevant={}, confidence={:.2f}, reason='{}'",
-                    isRetrievalRequired, isRelevant, confidence, reasoning);
+            log.debug("RelevanceCheck: required={}, relevant={}, confidence={}, reason='{}'",
+                    isRetrievalRequired, isRelevant, String.format("%.2f", confidence), reasoning);
 
-            // Store relevance result in context for potential downstream use
-            request.context().put("relevance_check_passed", isRelevant && confidence >= ragProperties.getRelevanceThreshold());
+            // relevance_check_passed = true  → context is present and believed relevant
+            // relevance_check_passed = false → context was stripped; GroundingAdvisor must skip
+            boolean shouldStrip = !isRetrievalRequired
+                    || (!isRelevant && confidence >= ragProperties.getRelevanceThreshold());
+            request.context().put("relevance_check_passed", !shouldStrip);
 
-            // If retrieval not required or context not relevant → strip RAG augmentation
-            if (!isRetrievalRequired || (!isRelevant && confidence >= ragProperties.getRelevanceThreshold())) {
+            if (shouldStrip) {
                 log.info("RelevanceCheck: stripping irrelevant RAG context (relevant={}, confidence={})",
                         isRelevant, confidence);
 
-                // Rebuild the system message without RAG context
                 String systemText = request.prompt().getSystemMessage() != null
                         ? request.prompt().getSystemMessage().getText() : "";
 
-                // Remove the RAG augmentation block
-                int ragStart = systemText.indexOf("\n**[Nội dung tham khảo từ giáo trình]:**");
+                int ragStart = systemText.indexOf(RetrievalAdvisor.RAG_SYSTEM_MESSAGE_MARKER);
                 if (ragStart >= 0) {
                     String cleanedSystem = systemText.substring(0, ragStart)
                             + "\n**Lưu ý:** Không tìm thấy nội dung phù hợp trong giáo trình cho câu hỏi này.";
@@ -143,14 +139,5 @@ public class RelevanceCheckAdvisor implements BaseAdvisor {
 
     private String truncate(String text, int maxChars) {
         return text.length() <= maxChars ? text : text.substring(0, maxChars) + "\n...[truncated]";
-    }
-
-    private String cleanJson(String raw) {
-        if (raw == null) return "{}";
-        String cleaned = raw.trim();
-        if (cleaned.startsWith("```")) {
-            cleaned = cleaned.replaceAll("^```[a-z]*\\n?", "").replaceAll("```$", "").trim();
-        }
-        return cleaned;
     }
 }

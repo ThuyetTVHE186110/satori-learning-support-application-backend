@@ -147,4 +147,33 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
     @org.springframework.data.jpa.repository.Modifying
     @Query("UPDATE User u SET u.status = :status, u.updatedAt = CURRENT_TIMESTAMP WHERE u.id IN :ids AND u.role = 'LEARNER'")
     void updateStatusByUserIdIn(@Param("ids") java.util.Collection<java.util.UUID> ids, @Param("status") UserStatus status);
+
+    /**
+     * Fetch the single active class enrollment for a learner.
+     * Business rule: 1 learner → at most 1 active class → 1 course at any time.
+     *
+         * Returns at most one row: (class_id, class_name, course_id,
+         *                           course_name, start_date, end_date, status).
+     * Cross-schema JOIN: user_management (class_members, classes) → learning_content (courses).
+     */
+    @Query(value = """
+            SELECT
+                c.id                                                    AS class_id,
+                c.name                                                  AS class_name,
+                c.course_id                                             AS course_id,
+                co.name                                                 AS course_name,
+                c.start_date                                            AS start_date,
+                c.end_date                                              AS end_date,
+                                CASE WHEN c.is_active THEN 'ACTIVE' ELSE 'INACTIVE' END AS status
+            FROM user_management.class_members cm
+            JOIN user_management.classes c   ON c.id  = cm.class_id
+            JOIN learning_content.courses co ON co.id = c.course_id
+            WHERE cm.user_id    = :userId
+              AND cm.removed_at IS NULL
+              AND c.deleted_at  IS NULL
+              AND c.is_active   = true
+              AND co.deleted_at IS NULL
+            LIMIT 1
+            """, nativeQuery = true)
+    java.util.List<Object[]> findActiveEnrollment(@Param("userId") UUID userId);
 }

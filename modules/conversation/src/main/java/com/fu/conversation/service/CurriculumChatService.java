@@ -31,4 +31,5 @@ public interface CurriculumChatService {
 
     /** Reopen a COMPLETED or ABANDONED session so learner can continue chatting. */
     ChatSessionResponse reopenSession(UUID sessionId, UUID userId);
+
 }

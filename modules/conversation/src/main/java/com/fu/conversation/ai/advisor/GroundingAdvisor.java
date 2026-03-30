@@ -3,6 +3,7 @@ package com.fu.conversation.ai.advisor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.common.ai.PromptTemplateLoader;
+import com.fu.common.ai.PromptUtils;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -102,7 +103,7 @@ public class GroundingAdvisor implements BaseAdvisor {
                     .call()
                     .content();
 
-            JsonNode node = objectMapper.readTree(cleanJson(raw));
+            JsonNode node = objectMapper.readTree(PromptUtils.cleanMarkdownFences(raw, "{}"));
             boolean isSupported = node.path("isSupported").asBoolean(true);
             double confidence = node.path("confidence").asDouble(0.8);
             String reasoning = node.path("reasoning").asText("");
@@ -161,14 +162,5 @@ public class GroundingAdvisor implements BaseAdvisor {
 
     private String truncate(String text, int maxChars) {
         return text.length() <= maxChars ? text : text.substring(0, maxChars) + "\n...[truncated]";
-    }
-
-    private String cleanJson(String raw) {
-        if (raw == null) return "{}";
-        String cleaned = raw.trim();
-        if (cleaned.startsWith("```")) {
-            cleaned = cleaned.replaceAll("^```[a-z]*\\n?", "").replaceAll("```$", "").trim();
-        }
-        return cleaned;
     }
 }

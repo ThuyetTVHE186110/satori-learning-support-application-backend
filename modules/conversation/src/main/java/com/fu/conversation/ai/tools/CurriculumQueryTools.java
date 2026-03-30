@@ -100,6 +100,11 @@ public class CurriculumQueryTools {
             Integer lessonNumber,
             ToolContext toolContext) {
 
+        if (query == null || query.isBlank()) {
+            log.warn("searchCurriculum: called with blank query — aborting");
+            return "Vui lòng cung cấp từ khóa hoặc câu hỏi cụ thể để tìm kiếm trong giáo trình.";
+        }
+
         UUID courseId = getUuid(toolContext, CTX_COURSE_ID);
         UUID lessonId = resolveLesson(toolContext, courseId, lessonNumber);
 
@@ -195,10 +200,10 @@ public class CurriculumQueryTools {
     private String translateQuery(String query) {
         if (query == null || query.isBlank()) return null;
         try {
-            long total = query.chars().filter(c -> !Character.isWhitespace(c) && c > 32).count();
+            long total = query.codePoints().filter(cp -> !Character.isWhitespace(cp) && cp > 32).count();
             if (total == 0) return null;
-            long cjk = query.chars().filter(c ->
-                    (c >= 0x3000 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF)
+            long cjk = query.codePoints().filter(cp ->
+                    (cp >= 0x3000 && cp <= 0x9FFF) || (cp >= 0xF900 && cp <= 0xFAFF)
             ).count();
             double ratio = (double) cjk / total;
 

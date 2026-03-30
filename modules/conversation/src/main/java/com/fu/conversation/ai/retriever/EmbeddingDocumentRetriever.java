@@ -7,8 +7,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.rag.Query;
 import org.springframework.ai.rag.retrieval.search.DocumentRetriever;
-import org.springframework.stereotype.Component;
-
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,7 +29,11 @@ import java.util.stream.Collectors;
  * (contentType, similarity, lesson_title, lesson_number, …) needed by
  * {@code CurriculumChatServiceImpl.buildSourcesFromDocuments()}.
  */
-@Component
+/**
+ * Retained for potential future use with {@code RetrievalAugmentationAdvisor}.
+ * The active RAG pipeline uses {@link com.fu.conversation.ai.advisor.RetrievalAdvisor}
+ * directly, which performs richer query analysis and bilingual retrieval.
+ */
 @Slf4j
 public class EmbeddingDocumentRetriever implements DocumentRetriever {
 

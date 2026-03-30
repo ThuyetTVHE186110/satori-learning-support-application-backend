@@ -10,6 +10,8 @@ import org.springframework.stereotype.Repository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -35,11 +37,17 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, UUID> 
     @Query("UPDATE ChatSession s SET s.status = :status WHERE s.id = :id")
     void updateStatus(@Param("id") UUID id, @Param("status") String status);
 
+    /**
+     * Increment message counters and stamp updatedAt so that
+     * {@code toSessionResponse()} can expose it as {@code lastMessageAt}
+     * without an extra query.
+     */
     @Modifying
     @Query("""
             UPDATE ChatSession s
             SET s.messageCount = s.messageCount + 2,
-                s.userMessageCount = s.userMessageCount + 1
+                s.userMessageCount = s.userMessageCount + 1,
+                s.updatedAt = CURRENT_TIMESTAMP
             WHERE s.id = :id
             """)
     void incrementMessageCount(@Param("id") UUID id);
@@ -61,6 +69,34 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, UUID> 
               AND c.is_active = true
             """, nativeQuery = true)
     boolean isEnrolledInCourse(@Param("userId") UUID userId, @Param("courseId") UUID courseId);
+
+    /**
+     * Resolve the single active course for a learner.
+     * Business rule: 1 learner → at most 1 active class → 1 course at any point in time.
+     * Returns one row of (course_id, course_name, jlpt_level, lesson_count), or empty list.
+     * Used by createSession() to auto-resolve courseId when frontend does not supply it,
+     * and by GET /active-course to tell the frontend which course the learner is studying.
+     */
+    @Query(value = """
+            SELECT
+                co.id           AS course_id,
+                co.name         AS course_name,
+                co.jlpt_level   AS jlpt_level,
+                COUNT(l.id)     AS lesson_count
+            FROM user_management.class_members cm
+            JOIN user_management.classes c   ON c.id  = cm.class_id
+            JOIN learning_content.courses co ON co.id = c.course_id
+            LEFT JOIN learning_content.lessons l
+                ON l.course_id = co.id AND l.deleted_at IS NULL
+            WHERE cm.user_id    = :userId
+              AND cm.removed_at IS NULL
+              AND c.deleted_at  IS NULL
+              AND c.is_active   = true
+              AND co.deleted_at IS NULL
+            GROUP BY co.id, co.name, co.jlpt_level
+            LIMIT 1
+            """, nativeQuery = true)
+    List<Object[]> findActiveCourse(@Param("userId") UUID userId);
 
     /** Course name for system-prompt injection. Returns null on miss (handled in service). */
     @Query(value = "SELECT name FROM learning_content.courses WHERE id = :courseId",
@@ -100,4 +136,21 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, UUID> 
     @Query(value = "SELECT * FROM ai_conversation.conversation_sessions WHERE id = :id AND deleted_at IS NULL",
            nativeQuery = true)
     Optional<ChatSession> findByIdNotDeleted(@Param("id") UUID id);
+
+    /**
+     * Mark all ACTIVE sessions created before {@code cutoff} as ABANDONED.
+     * Called nightly by {@link com.fu.conversation.scheduler.ChatSessionCleanupScheduler}.
+     *
+     * @param cutoff sessions older than this timestamp are abandoned
+     * @return number of rows updated
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE ai_conversation.conversation_sessions
+               SET status = CAST('ABANDONED' AS session_status)
+             WHERE status = CAST('ACTIVE' AS session_status)
+               AND created_at < :cutoff
+               AND deleted_at IS NULL
+            """, nativeQuery = true)
+    int markAbandonedBefore(@Param("cutoff") LocalDateTime cutoff);
 }
