@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -49,13 +50,23 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, UUID> 
 
     /**
      * Atomic CTE INSERT of a USER + ASSISTANT message pair.
-     * Uses a CTE to assign consecutive sequence_numbers without a race condition.
+     *
+     * The {@code locked} CTE acquires a row-level lock on the session row so that
+     * two concurrent exchanges for the same session cannot both read the same
+     * MAX(sequence_number) before either inserts, which would produce duplicate
+     * sequence numbers.  The lock is released when the calling transaction commits.
+     *
      * Explicit {@code ::message_role} cast is required because PostgreSQL cannot infer
      * the target column type from a UNION ALL SELECT literal.
      */
     @Modifying
     @Query(value = """
-            WITH next_seq AS (
+            WITH locked AS (
+                SELECT id FROM ai_conversation.conversation_sessions
+                WHERE id = :sessionId
+                FOR UPDATE
+            ),
+            next_seq AS (
                 SELECT COALESCE(MAX(sequence_number), 0) AS last_seq
                 FROM ai_conversation.conversation_messages
                 WHERE session_id = :sessionId

@@ -137,7 +137,10 @@ public class ConversationGenerationService {
             sb.append("Preferred category: ").append(category).append("\n");
         }
         if (hint != null && !hint.isBlank()) {
-            sb.append("Additional guidance: ").append(hint).append("\n");
+            // Delimit and cap to reduce prompt injection surface
+            String safeHint = hint.strip();
+            if (safeHint.length() > 500) safeHint = safeHint.substring(0, 500);
+            sb.append("Additional guidance: [").append(safeHint).append("]\n");
         }
         sb.append("\nGenerate ").append(count).append(" conversation theme(s) in JSON array format.");
 

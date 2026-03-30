@@ -4,9 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
+import com.fu.conversation.ai.advisor.GroundingAdvisor;
+import com.fu.conversation.ai.advisor.RelevanceCheckAdvisor;
+import com.fu.conversation.ai.advisor.RetrievalAdvisor;
 import com.fu.conversation.ai.memory.CurriculumChatMemoryRepository;
-import com.fu.conversation.ai.retriever.EmbeddingDocumentRetriever;
 import com.fu.conversation.ai.tools.CurriculumQueryTools;
+import com.fu.conversation.config.ChatProperties;
+import com.fu.conversation.service.ChatRateLimiter;
 import com.fu.conversation.dto.response.ChatHistoryItemResponse;
 import com.fu.conversation.dto.response.ChatMessageResponse;
 import com.fu.conversation.dto.response.ChatSessionResponse;
@@ -20,13 +24,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
-import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
-import org.springframework.ai.rag.generation.augmentation.ContextualQueryAugmenter;
+import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -40,15 +43,12 @@ import java.util.stream.Collectors;
 @Slf4j
 public class CurriculumChatServiceImpl implements CurriculumChatService {
 
-    private static final String CHAT_MODEL  = "gpt-4o-mini";
-    private static final double TEMPERATURE = 0.3;
-
-    // Advisor execution order: memory first (lower order = higher priority),
-    // then RAG retrieval so CompressionQueryTransformer can see injected history.
+    // Advisor execution order — lower = runs first in before(), last in after()
     private static final int MEMORY_ADVISOR_ORDER    = 10;
-    private static final int RETRIEVAL_ADVISOR_ORDER = 20;
 
     private final ChatClient chatClient;
+    private final ChatProperties chatProperties;
+    private final ChatRateLimiter chatRateLimiter;
     private final CurriculumQueryTools curriculumQueryTools;
     private final PromptTemplateLoader promptLoader;
     private final ChatHistoryManager historyManager;
@@ -57,14 +57,20 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
     private final ObjectMapper objectMapper;
 
     public CurriculumChatServiceImpl(OpenAiChatModel chatModel,
+                                      ChatProperties chatProperties,
+                                      ChatRateLimiter chatRateLimiter,
                                       CurriculumChatMemoryRepository chatMemoryRepository,
-                                      EmbeddingDocumentRetriever documentRetriever,
+                                      RetrievalAdvisor retrievalAdvisor,
+                                      RelevanceCheckAdvisor relevanceCheckAdvisor,
+                                      GroundingAdvisor groundingAdvisor,
                                       ChatHistoryManager historyManager,
                                       ChatSessionRepository chatSessionRepository,
                                       ChatMessageRepository chatMessageRepository,
                                       ObjectMapper objectMapper,
                                       PromptTemplateLoader promptLoader,
                                       CurriculumQueryTools curriculumQueryTools) {
+        this.chatProperties = chatProperties;
+        this.chatRateLimiter = chatRateLimiter;
         this.curriculumQueryTools = curriculumQueryTools;
         this.historyManager = historyManager;
         this.chatSessionRepository = chatSessionRepository;
@@ -72,7 +78,7 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
         this.objectMapper = objectMapper;
         this.promptLoader = promptLoader;
 
-        // ── Memory advisor — injects sliding-window history into every prompt ──
+        // ── Memory advisor (order=10): injects sliding-window history into every prompt ──
         ChatMemory chatMemory = MessageWindowChatMemory.builder()
                 .chatMemoryRepository(chatMemoryRepository)
                 .maxMessages(40)
@@ -82,19 +88,10 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
                 .order(MEMORY_ADVISOR_ORDER)
                 .build();
 
-        // ── Retrieval advisor — pre-retrieves RAG context and injects it into
-        //    the system message; also stores retrieved Documents in
-        //    ChatClientResponse.context() under DOCUMENT_CONTEXT for source refs. ──
-        RetrievalAugmentationAdvisor retrievalAdvisor = RetrievalAugmentationAdvisor.builder()
-                .documentRetriever(documentRetriever)
-                .queryAugmenter(ContextualQueryAugmenter.builder()
-                        .allowEmptyContext(true) // LLM can still answer when no docs found
-                        .build())
-                .order(RETRIEVAL_ADVISOR_ORDER)
-                .build();
-
+        // ── Custom RAG advisor chain (Self-RAG + CRAG):
+        //    RetrievalAdvisor (100) → RelevanceCheckAdvisor (200) → GroundingAdvisor (300)
         this.chatClient = ChatClient.builder(chatModel)
-                .defaultAdvisors(memoryAdvisor, retrievalAdvisor)
+                .defaultAdvisors(memoryAdvisor, retrievalAdvisor, relevanceCheckAdvisor, groundingAdvisor)
                 .build();
     }
 
@@ -104,15 +101,35 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
     @Transactional
     public ChatSessionResponse createSession(UUID userId, UUID courseId,
                                               UUID lessonId, String jlptLevel) {
-        if (!chatSessionRepository.isEnrolledInCourse(userId, courseId)) {
+        // Auto-resolve courseId when frontend does not supply it.
+        // Business rule: 1 learner → at most 1 active class → 1 course at any time.
+        if (courseId == null) {
+            List<Object[]> rows = chatSessionRepository.findActiveCourse(userId);
+            if (rows.isEmpty()) {
+                throw new BusinessException("NOT_ENROLLED",
+                        "Bạn chưa tham gia lớp học nào. Vui lòng đăng ký khóa học trước.");
+            }
+            courseId = UUID.fromString(rows.get(0)[0].toString());
+        } else if (!chatSessionRepository.isEnrolledInCourse(userId, courseId)) {
             throw new BusinessException("NOT_ENROLLED",
                     "Bạn chưa tham gia lớp học nào thuộc khóa học này.");
         }
 
+        // Resolve human-readable names once at creation and cache in JSONB context.
+        // This avoids two cross-schema queries on every subsequent chat() call.
+        String courseName = Optional.ofNullable(chatSessionRepository.findCourseNameById(courseId))
+                .orElse("Khóa học");
+        String lessonTitle = (lessonId != null)
+                ? Optional.ofNullable(chatSessionRepository.findLessonTitleById(lessonId))
+                          .orElse("Bài học")
+                : null;
+
         Map<String, Object> ctx = new HashMap<>();
-        ctx.put("courseId", courseId.toString());
-        if (lessonId  != null) ctx.put("lessonId",  lessonId.toString());
-        if (jlptLevel != null) ctx.put("jlptLevel", jlptLevel);
+        ctx.put("courseId",   courseId.toString());
+        ctx.put("courseName", courseName);
+        if (lessonId    != null) ctx.put("lessonId",    lessonId.toString());
+        if (lessonTitle != null) ctx.put("lessonTitle", lessonTitle);
+        if (jlptLevel   != null) ctx.put("jlptLevel",  jlptLevel);
         ctx.put("sessionType", "CURRICULUM_QA");
 
         ChatSession session = ChatSession.builder()
@@ -133,20 +150,30 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
                 .lessonId(lessonId)
                 .jlptLevel(jlptLevel)
                 .messageCount(0)
-                .createdAt(LocalDateTime.now())
+                .createdAt(session.getCreatedAt())
                 .build();
     }
 
+    /**
+     * Send a message to the chatbot.
+     *
+     * <p>Not annotated {@code @Transactional}: holding a DB connection open for the
+     * duration of multiple LLM API calls (3–10 s each) would exhaust the HikariCP pool
+     * under concurrent load. The only write operation — {@code saveExchange} — runs in
+     * its own transaction inside {@link ChatHistoryManager}.
+     */
     @Override
-    @Transactional
     public ChatMessageResponse chat(UUID sessionId, UUID userId, String question) {
-        // 1. Load + verify session
+        // 1. Rate limit check — throws BusinessException if over quota
+        chatRateLimiter.checkRateLimit(userId);
+
+        // 2. Load + verify session (single SELECT, no transaction needed)
         SessionContext session = loadAndVerifySession(sessionId, userId);
 
-        // 2. Build system prompt
+        // 3. Build system prompt from cached JSONB fields (no DB queries)
         String systemPrompt = buildBaseSystemPrompt(session);
 
-        // 3. Build tool context — courseId/lessonId passed to tools per-call via ToolContext
+        // 4. Build tool context — courseId/lessonId passed to tools per-call via ToolContext
         Map<String, Object> toolCtx = new HashMap<>();
         toolCtx.put(CurriculumQueryTools.CTX_COURSE_ID, session.courseId());
         if (session.lessonId() != null) {
@@ -155,27 +182,26 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
 
         ChatClientResponse chatClientResponse;
         try {
-            // 4. Call AI with advisor chain:
-            //    MessageChatMemoryAdvisor (order=10) → injects history from DB
-            //    RetrievalAugmentationAdvisor (order=20) → pre-retrieves docs, augments system msg
-            //       EmbeddingDocumentRetriever reads courseId/lessonId from Query.context()
-            //       which the advisor auto-populates from ChatClientRequest.context() (advisor params)
-            //    LLM invokes CurriculumQueryTools as needed (searchCurriculum / countContent)
+            // Advisor chain (lowest order runs first in before(), last in after()):
+            //   Memory(10)     → injects sliding-window history
+            //   Retrieval(100) → query analysis + bilingual vector search + quality gate
+            //   Relevance(200) → Self-RAG [IsRelevant]: strips context if irrelevant
+            //   Grounding(300) → CRAG [IsSupported]: appends disclaimer if hallucinated
             final UUID lessonId = session.lessonId();
             chatClientResponse = chatClient.prompt()
                     .system(systemPrompt)
                     .user(question)
                     .advisors(a -> {
                         a.param(ChatMemory.CONVERSATION_ID, sessionId.toString());
-                        a.param("courseId", session.courseId());
+                        a.param(RetrievalAdvisor.PARAM_COURSE_ID, session.courseId());
                         if (lessonId != null) {
-                            a.param("lessonId", lessonId);
+                            a.param(RetrievalAdvisor.PARAM_LESSON_ID, lessonId);
                         }
                     })
                     .options(OpenAiChatOptions.builder()
-                            .model(CHAT_MODEL)
-                            .temperature(TEMPERATURE)
-                            .maxTokens(1024)
+                            .model(chatProperties.getModel())
+                            .temperature(chatProperties.getTemperature())
+                            .maxTokens(chatProperties.getMaxResponseTokens())
                             .build())
                     .tools(curriculumQueryTools)
                     .toolContext(toolCtx)
@@ -188,16 +214,24 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
                     "Hệ thống AI đang gặp sự cố, vui lòng thử lại sau.");
         }
 
-        String aiResponse = chatClientResponse.chatResponse()
-                .getResult().getOutput().getText();
+        String aiResponse = Optional.ofNullable(chatClientResponse.chatResponse())
+                .map(r -> r.getResult())
+                .map(g -> g.getOutput())
+                .map(m -> m.getText())
+                .orElse(null);
 
-        // 6. Extract retrieved documents from advisor context for source references
+        if (aiResponse == null || aiResponse.isBlank()) {
+            log.error("AI trả về phản hồi null/rỗng cho session {}", sessionId);
+            throw new BusinessException("CHAT_ERROR",
+                    "Hệ thống AI không trả về phản hồi hợp lệ, vui lòng thử lại sau.");
+        }
+
+        // Extract retrieved documents stored by RetrievalAdvisor for source references
         @SuppressWarnings("unchecked")
         List<Document> retrievedDocs = (List<Document>) chatClientResponse.context()
                 .getOrDefault(RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT, List.of());
 
-        // 7. Persist exchange — MessageChatMemoryAdvisor.after() calls saveAll() which is
-        //    a no-op; we persist explicitly here for the atomic CTE insert + counter update.
+        // Persist exchange — saveExchange runs in its own @Transactional
         UUID aiMessageId = historyManager.saveExchange(sessionId, question, aiResponse);
 
         log.debug("Chat: session={} responseTokens≈{} ragDocs={}",
@@ -287,6 +321,9 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
                 ? UUID.fromString((String) ctx.get("lessonId")) : null;
         String jlptLevel = (String) ctx.getOrDefault("jlptLevel", null);
 
+        // updatedAt is stamped by incrementMessageCount after each exchange
+        LocalDateTime lastMessageAt = entity.getMessageCount() > 0 ? entity.getUpdatedAt() : null;
+
         return ChatSessionResponse.builder()
                 .sessionId(entity.getId())
                 .status(entity.getStatus())
@@ -295,7 +332,7 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
                 .jlptLevel(jlptLevel)
                 .messageCount(entity.getMessageCount())
                 .createdAt(entity.getCreatedAt())
-                .lastMessageAt(null)
+                .lastMessageAt(lastMessageAt)
                 .build();
     }
 
@@ -314,13 +351,16 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
                 ? UUID.fromString((String) ctx.get("courseId")) : null;
         UUID lessonId = ctx.containsKey("lessonId")
                 ? UUID.fromString((String) ctx.get("lessonId")) : null;
-        String jlptLevel = (String) ctx.getOrDefault("jlptLevel", "N5");
+        String jlptLevel  = (String) ctx.getOrDefault("jlptLevel", "N5");
+        String courseName = (String) ctx.getOrDefault("courseName", "Khóa học");
+        String lessonTitle = lessonId != null ? (String) ctx.getOrDefault("lessonTitle", null) : null;
 
         if (courseId == null) {
             throw new BusinessException("INVALID_SESSION",
                     "Phiên chat thiếu thông tin khóa học.");
         }
-        return new SessionContext(sessionId, entity.getUserId(), courseId, lessonId, jlptLevel);
+        return new SessionContext(sessionId, entity.getUserId(),
+                courseId, lessonId, jlptLevel, courseName, lessonTitle);
     }
 
     private void verifyOwnership(UUID sessionId, UUID userId) {
@@ -331,28 +371,20 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
     }
 
     private String buildBaseSystemPrompt(SessionContext session) {
-        String courseName = Optional.ofNullable(
-                chatSessionRepository.findCourseNameById(session.courseId()))
-                .orElse("Khóa học");
-        String lessonCtx = session.lessonId() != null
-                ? "- Bài học: " + Optional.ofNullable(
-                        chatSessionRepository.findLessonTitleById(session.lessonId()))
-                        .orElse("Bài học")
+        String lessonCtx = session.lessonTitle() != null
+                ? "- Bài học: " + session.lessonTitle()
                 : "";
-
         return promptLoader.render("prompts/curriculum-chat-system.st", Map.of(
                 "jlptLevel",    session.jlptLevel() != null ? session.jlptLevel() : "N5",
-                "courseName",   courseName,
+                "courseName",   session.courseName(),
                 "lessonContext", lessonCtx));
     }
 
     /**
-     * Build source references from {@link Document} objects returned by
-     * {@link RetrievalAugmentationAdvisor} via
-     * {@code chatClientResponse.context().get(DOCUMENT_CONTEXT)}.
+     * Build source references from {@link Document} objects stored by
+     * {@link RetrievalAdvisor} under {@link RetrievalAugmentationAdvisor#DOCUMENT_CONTEXT}.
      *
-     * <p>Metadata keys in each Document are populated by
-     * {@link com.fu.conversation.ai.retriever.EmbeddingDocumentRetriever}:
+     * <p>Metadata keys populated by {@link RetrievalAdvisor#toDocuments}:
      * {@code contentType}, {@code similarity}, plus all keys from
      * {@link com.fu.curriculumimport.service.embedding.RagContext.SimilarItem#getMetadata()}.
      */
@@ -374,9 +406,15 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
                             int bracketIdx = text.indexOf(" [");
                             int cutAt = dashIdx > 0 ? dashIdx : (bracketIdx > 0 ? bracketIdx : text.length());
                             japaneseText = text.substring(0, Math.min(cutAt, text.length())).trim();
-                            meaningVi    = dashIdx > 0
-                                    ? text.substring(dashIdx + 10).split("\\.", 2)[0].trim()
-                                    : null;
+                            if (dashIdx > 0) {
+                                int meaningStart = dashIdx + 10; // " - Nghĩa: " is 10 chars
+                                String rest = meaningStart < text.length()
+                                        ? text.substring(meaningStart) : "";
+                                String extracted = rest.split("\\.", 2)[0].trim();
+                                meaningVi = extracted.isEmpty() ? null : extracted;
+                            } else {
+                                meaningVi = null;
+                            }
                         }
                         case "GRAMMAR" -> {
                             int meaningIdx = text.indexOf(". Nghĩa: ");
@@ -427,7 +465,10 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
     private Map<String, Object> fromJson(String json) {
         if (json == null || json.isBlank()) return Map.of();
         try { return objectMapper.readValue(json, Map.class); }
-        catch (Exception e) { return Map.of(); }
+        catch (Exception e) {
+            log.warn("fromJson: failed to parse session context JSON: {}", e.getMessage());
+            return Map.of();
+        }
     }
 
     private String toJson(Object obj) {
@@ -436,5 +477,6 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
     }
 
     private record SessionContext(UUID sessionId, UUID userId,
-                                  UUID courseId, UUID lessonId, String jlptLevel) {}
+                                  UUID courseId, UUID lessonId, String jlptLevel,
+                                  String courseName, String lessonTitle) {}
 }
