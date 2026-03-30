@@ -19,8 +19,8 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class LoginRequest {
 
-    @NotBlank(message = "Hãy nhập email")
-    @Email(message = "Hãy nhập đúng email")
+//    @NotBlank(message = "Hãy nhập email")
+//    @Email(message = "Hãy nhập đúng email")
     private String email;
 
     @NotBlank(message = "Hãy nhập mật khẩu")

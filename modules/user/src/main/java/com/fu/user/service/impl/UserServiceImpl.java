@@ -8,22 +8,26 @@ import com.fu.user.entity.AuthProvider;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
-import com.fu.user.exception.DeletedUserExistsException;
 import com.fu.user.mapper.UserMapper;
 import com.fu.user.repository.UserRepository;
 import com.fu.user.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.poi.ss.usermodel.*;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.InputStream;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
+import java.util.regex.Pattern;
+
 
 /**
  * Implementation of UserService.
@@ -50,6 +54,12 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class UserServiceImpl implements UserService {
+
+    private static final String EMAIL_REGEX = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$";
+    // Phone — 10 digits only
+    private static final String PHONE_REGEX = "^\\d{10}$";
+    // Full name (Unicode letters, spaces, hyphens, apostrophes)
+    private static final String FULLNAME_REGEX = "^[\\p{L}\\s'\\-]+$";
 
     private final UserRepository userRepository;
     private final UserMapper userMapper;
@@ -89,28 +99,9 @@ public class UserServiceImpl implements UserService {
 
         if (existingUserOpt.isPresent()) {
             User existingUser = existingUserOpt.get();
-            // If DELETED status → always throw DeletedUserExistsException (409 Conflict)
-            // so frontend can prompt the user to restore instead of silently re-creating.
-            if (existingUser.getDeletedAt() != null) {
-                log.warn("Email already exists with DELETED status: {}", request.getEmail());
-                DeletedUserInfo deletedInfo = DeletedUserInfo.builder()
-                        .userId(existingUser.getId())
-                        .email(existingUser.getEmail())
-                        .firstName(existingUser.getFirstName())
-                        .lastName(existingUser.getLastName())
-                        .displayName(existingUser.getDisplayName())
-                        .role(existingUser.getRole())
-                        .status(existingUser.getStatus())
-                        .deletedAt(existingUser.getDeletedAt())
-                        .deletedBy(existingUser.getDeletedBy())
-                        .message("Email này đã tồn tại trong hệ thống nhưng đã bị xóa. Bạn có muốn khôi phục tài khoản này không?")
-                        .build();
-                throw new DeletedUserExistsException(deletedInfo);
-            } else {
-                // Email exists with non-DELETED status → error
-                log.warn("Email already exists with status {}: {}", existingUser.getStatus(), request.getEmail());
-                throw new BusinessException("EMAIL_EXISTS", "Email này đã được sử dụng. Vui lòng nhập email khác");
-            }
+
+            log.warn("Email already exists with status {}: {}", existingUser.getStatus(), request.getEmail());
+            throw new BusinessException("EMAIL_EXISTS", "Email này đã được sử dụng. Vui lòng nhập email khác");
         }
 
         // Create new user
@@ -144,7 +135,7 @@ public class UserServiceImpl implements UserService {
      */
     @Override
     public UserDetailResponse getUserDetailById(UserRole userRole, UUID id) {
-        if(userRole != UserRole.ADMIN) {
+        if (userRole != UserRole.ADMIN) {
             throw new BusinessException("FORBIDDEN", "Bạn không có quyền xem chi tiết tài khoản này");
         }
         log.debug("Fetching detailed user information for id: {}", id);
@@ -443,6 +434,178 @@ public class UserServiceImpl implements UserService {
         return userMapper.toResponse(updatedUser);
     }
 
+    @Override
+    @Transactional
+    public ImportUsersResult importUsersFromExcel(MultipartFile file, UUID adminID) {
+        List<UserResponse> created = new ArrayList<>();
+        List<UserResponse> updated = new ArrayList<>();
+        List<ImportRowError> errors = new ArrayList<>();
+        List<User> usersToImport = new ArrayList<>();
+        // collect new-user/rawPassword pairs; emails sent AFTER saveAll succeeds
+        Map<User, String> newUserPasswords = new LinkedHashMap<>();
+
+        try (InputStream inputStream = file.getInputStream();
+             Workbook workbook = WorkbookFactory.create(inputStream)
+        ) {
+            int sheetCount = Math.min(2, workbook.getNumberOfSheets());
+
+            // parse all rows, collect valid & deduplicated rows ────────────
+            // Each entry: [sheetIndex, rowNumber, email, fullName, phoneNumber]
+            record RowData(int sheetIndex, int rowNumber, String email, String fullName, String phone) {
+            }
+            List<RowData> validRows = new ArrayList<>();
+            Set<String> seenEmails = new HashSet<>();
+
+            int totalRows = 0;
+            for (int i = 0; i < sheetCount; i++) {
+                Sheet sheet = workbook.getSheetAt(i);
+                for (Row row : sheet) {
+                    if (row.getRowNum() == 0) continue; // skip header
+                    totalRows++;
+                    int rowNum = row.getRowNum() + 1; // 1-based for reporting
+
+                    String fullName, phoneNumber, email;
+                    if (i == 0) {
+                        fullName = getCellValueAsString(row.getCell(8));
+                        phoneNumber = getCellValueAsString(row.getCell(9));
+                        email = getCellValueAsString(row.getCell(10));
+                    } else {
+                        fullName = getCellValueAsString(row.getCell(1));
+                        phoneNumber = getCellValueAsString(row.getCell(2));
+                        email = getCellValueAsString(row.getCell(3));
+                    }
+                    if (!(StringUtils.hasText(email) || StringUtils.hasText(fullName) || StringUtils.hasText(phoneNumber))) {
+                        // skip completely empty rows without error
+                        continue;
+                    }
+                    // Validate row data
+                    Optional<String> validationError = validateRow(email, fullName, phoneNumber);
+                    if (validationError.isPresent()) {
+                        errors.add(ImportRowError.builder()
+                                .rowNumber(rowNum)
+                                .sheetIndex(i)
+                                .email(email)
+                                .fullName(fullName)
+                                .phoneNumber(phoneNumber)
+                                .errorMessage(validationError.get())
+                                .build());
+                        continue;
+                    }
+
+                    String normalizedEmail = email.trim().toLowerCase();
+                    if (!seenEmails.add(normalizedEmail)) {
+                        errors.add(ImportRowError.builder()
+                                .rowNumber(rowNum)
+                                .sheetIndex(i)
+                                .email(email)
+                                .fullName(fullName)
+                                .phoneNumber(phoneNumber)
+                                .errorMessage("Email trùng lặp trong file")
+                                .build());
+                        continue;
+                    }
+
+                    validRows.add(new RowData(i, rowNum, normalizedEmail, fullName.trim(), phoneNumber.trim()));
+                }
+            }
+
+            // ── fetch all existing users by email ──────────────────
+            Set<String> allEmails = new HashSet<>();
+            for (RowData r : validRows) allEmails.add(r.email());
+            Map<String, User> existingByEmail = new HashMap<>();
+            for (User u : userRepository.findByEmailIn(allEmails)) {
+                existingByEmail.put(u.getEmail().toLowerCase(), u);
+            }
+
+            // ── build usersToImport using the in-memory map (zero DB calls) ─
+            for (RowData rd : validRows) {
+                String[] nameParts = rd.fullName().split("\\s+");
+                String lastName = nameParts[nameParts.length - 1];
+                String firstName = nameParts.length > 1
+                        ? String.join(" ", Arrays.copyOf(nameParts, nameParts.length - 1))
+                        : "";
+
+                User user = existingByEmail.get(rd.email());
+                boolean isNewUser = (user == null);
+                boolean isChanged = false;
+
+                if (!isNewUser) {
+                    // Existing user — update profile only
+                    if (!user.getFirstName().equals(firstName) || !user.getLastName().equals(lastName) || !user.getPhoneNumber().equals(rd.phone())) {
+                        isChanged = true;
+                        user.setLastName(lastName);
+                        user.setFirstName(firstName);
+                        user.setPhoneNumber(rd.phone());
+                    }
+                    if (isChanged) {
+                        user.setUpdatedBy(adminID);
+                        usersToImport.add(user);
+                    }
+                } else {
+                    // New user — build entity, defer email until after save
+                    String password = generateRandomPassword();
+                    user = User.builder()
+                            .email(rd.email())
+                            .firstName(firstName)
+                            .lastName(lastName)
+                            .phoneNumber(rd.phone())
+                            .role(rd.sheetIndex() == 0 ? UserRole.LEARNER : UserRole.TEACHER)
+                            .status(UserStatus.INACTIVE)
+                            .authProvider(AuthProvider.LOCAL)
+                            .emailVerifiedAt(LocalDateTime.now())
+                            .createdBy(adminID)
+                            .passwordHash(passwordEncoder.encode(password))
+                            .build();
+                    // store password so we can email AFTER save succeeds
+                    newUserPasswords.put(user, password);
+                    usersToImport.add(user);
+                }
+
+            }
+
+            // save first, then send emails — rollback keeps DB consistent on failure
+            List<User> savedUsers = userRepository.saveAll(usersToImport);
+
+            // Convert to responses and split into created/updated
+            for (User savedUser : savedUsers) {
+                UserResponse response = userMapper.toResponse(savedUser);
+                // A user was created if they were in the newUserPasswords map
+                if (newUserPasswords.containsKey(savedUser)) {
+                    created.add(response);
+                } else {
+                    updated.add(response);
+                }
+            }
+
+            // only send welcome emails after DB commit is guaranteed
+            newUserPasswords.forEach((newUser, rawPassword) ->
+                    emailService.sendWelcomeEmailWithCredentials(
+                            newUser.getEmail(),
+                            newUser.getFullName(),
+                            newUser.getEmail(),
+                            rawPassword
+                    )
+            );
+
+            return ImportUsersResult.builder()
+                    .created(created)
+                    .updated(updated)
+                    .errors(errors)
+                    .totalRows(totalRows)
+                    .createdCount(created.size())
+                    .updatedCount(updated.size())
+                    .errorCount(errors.size())
+                    .build();
+
+        } catch (BusinessException e) {
+            throw e; // re-throw cleanly without wrapping
+        } catch (Exception e) {
+            log.error("Error importing users from Excel file", e);
+            throw new BusinessException("IMPORT_FAILED",
+                    "Đã xảy ra lỗi khi nhập người dùng từ file Excel. Vui lòng thử lại sau");
+        }
+    }
+
     // ==================== Private Helper Methods ====================
 
     /**
@@ -470,7 +633,7 @@ public class UserServiceImpl implements UserService {
         if (creatorRole != UserRole.ADMIN) {
             throw new BusinessException("FORBIDDEN", "Bạn không có quyền tạo tài khoản");
         }
-        if(targetRole == UserRole.ADMIN){
+        if (targetRole == UserRole.ADMIN) {
             throw new BusinessException("FORBIDDEN", "Không thể tạo tài khoản ADMIN");
         }
     }
@@ -581,6 +744,65 @@ public class UserServiceImpl implements UserService {
             characters[j] = temp;
         }
         return new String(characters);
+    }
+
+    /**
+     * Validate a single row from the Excel file.
+     * Returns an Optional error message if validation fails.
+     */
+    private Optional<String> validateRow(String email, String fullName, String phoneNumber) {
+        if (!StringUtils.hasText(email)) {
+            return Optional.of("Email không được để trống");
+        }
+        if (!Pattern.matches(EMAIL_REGEX, email.trim())) {
+            return Optional.of("Email không đúng định dạng");
+        }
+        if (email.length() > 255) {
+            return Optional.of("Email không được vượt quá 255 ký tự");
+        }
+
+        if (!StringUtils.hasText(fullName)) {
+            return Optional.of("Họ tên không được để trống");
+        }
+        if (!Pattern.matches(FULLNAME_REGEX, fullName.trim())) {
+            return Optional.of("Họ tên không được chứa số hoặc ký tự đặc biệt");
+        }
+        if (fullName.trim().length() > 100) {
+            return Optional.of("Họ tên không được vượt quá 100 ký tự");
+        }
+
+        if (!StringUtils.hasText(phoneNumber)) {
+            return Optional.of("Số điện thoại không được để trống");
+        }
+        if (!Pattern.matches(PHONE_REGEX, phoneNumber.trim())) {
+            return Optional.of("Số điện thoại phải đúng 10 chữ số");
+        }
+
+        return Optional.empty();
+    }
+
+    /**
+     * Get cell value as string, handling different cell types (string, numeric, boolean, formula).
+     */
+    private String getCellValueAsString(Cell cell) {
+        if (cell == null) return "";
+
+        switch (cell.getCellType()) {
+            case STRING:
+                return cell.getStringCellValue();
+            case NUMERIC:
+                if (DateUtil.isCellDateFormatted(cell)) {
+                    return cell.getDateCellValue().toString();
+                }
+                // Tránh trường hợp số bị biến thành 1.0E7 (khoa học)
+                return String.format("%.0f", cell.getNumericCellValue());
+            case BOOLEAN:
+                return String.valueOf(cell.getBooleanCellValue());
+            case FORMULA:
+                return cell.getCellFormula();
+            default:
+                return "";
+        }
     }
 
 }

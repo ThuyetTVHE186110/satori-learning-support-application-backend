@@ -58,6 +58,11 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public LoginResponse login(LoginRequest request, String ipAddress, String userAgent) {
         log.info("Login attempt for email: {}", request.getEmail());
+        // Validate email format
+        if (request.getEmail() == null || request.getEmail().isBlank() || !Pattern.matches(EMAIL_REGEX, request.getEmail().trim())) {
+            throw new BusinessException("INVALID_INCREDENTIALS",
+                    "Sai email hoặc mật khẩu. Hãy thử lại");
+        }
 
         // Find user by email
         User user = userRepository.findByEmail(request.getEmail())
