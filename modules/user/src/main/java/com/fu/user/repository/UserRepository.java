@@ -11,6 +11,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -21,6 +23,12 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
      * Find user by email (for login, uniqueness check)
      */
     Optional<User> findByEmail(String email);
+
+    /**
+     * Batch fetch users by a set of emails.
+     * Used by Excel import to replace N+1 findByEmail calls with a single IN query.
+     */
+    List<User> findByEmailIn(Collection<String> emails);
 
     /**
      * Find active user by email (not soft-deleted)
@@ -144,7 +152,11 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
             @Param("excludedUserIds") java.util.List<UUID> excludedUserIds,
             Pageable pageable
     );
+
     @org.springframework.data.jpa.repository.Modifying
     @Query("UPDATE User u SET u.status = :status, u.updatedAt = CURRENT_TIMESTAMP WHERE u.id IN :ids AND u.role = 'LEARNER'")
     void updateStatusByUserIdIn(@Param("ids") java.util.Collection<java.util.UUID> ids, @Param("status") UserStatus status);
+
+    @Query("SELECT u FROM User u WHERE u.email = :email AND u.deletedAt IS NULL")
+    Optional<User> findByEmailAndNotDeleted(@Param("email") String email);
 }

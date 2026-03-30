@@ -133,8 +133,6 @@ class AuthServiceImplTest {
             request.setPassword("Password123!");
             request.setDeviceInfo(deviceInfo);
 
-            given(userRepository.findByEmail(null)).willReturn(Optional.empty());
-
             assertThatThrownBy(() ->
                 authService.login(request, "127.0.0.1", "Chrome")
             )
@@ -142,6 +140,7 @@ class AuthServiceImplTest {
             .hasMessageContaining("Sai email hoặc mật khẩu");
 
             verify(userRepository, never()).save(any(User.class));
+            verify(userRepository, never()).findByEmail(any());
         }
 
         // UTCID02 — email is blank (whitespace only)
@@ -153,8 +152,6 @@ class AuthServiceImplTest {
             request.setPassword("Password123!");
             request.setDeviceInfo(deviceInfo);
 
-            given(userRepository.findByEmail("   ")).willReturn(Optional.empty());
-
             assertThatThrownBy(() ->
                 authService.login(request, "127.0.0.1", "Chrome")
             )
@@ -162,6 +159,7 @@ class AuthServiceImplTest {
             .hasMessageContaining("Sai email hoặc mật khẩu");
 
             verify(userRepository, never()).save(any(User.class));
+            verify(userRepository, never()).findByEmail(any());
         }
 
         // UTCID03 — email has invalid format (missing @)
@@ -173,8 +171,6 @@ class AuthServiceImplTest {
             request.setPassword("Password123!");
             request.setDeviceInfo(deviceInfo);
 
-            given(userRepository.findByEmail("learner1test.satori.com")).willReturn(Optional.empty());
-
             assertThatThrownBy(() ->
                 authService.login(request, "127.0.0.1", "Chrome")
             )
@@ -182,6 +178,7 @@ class AuthServiceImplTest {
             .hasMessageContaining("Sai email hoặc mật khẩu");
 
             verify(userRepository, never()).save(any(User.class));
+            verify(userRepository, never()).findByEmail(any());
         }
 
         // UTCID05 — password is null

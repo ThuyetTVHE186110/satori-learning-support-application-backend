@@ -1,5 +1,7 @@
 package com.fu.user.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fu.user.entity.AuthProvider;
 import com.fu.user.entity.Gender;
 import com.fu.user.entity.UserRole;
@@ -22,7 +24,7 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 public class UserResponse {
-
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private UUID id;
     private String email;
 
