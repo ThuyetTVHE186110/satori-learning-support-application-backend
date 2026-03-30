@@ -286,6 +286,17 @@ public class ImportOrchestrator {
                             ExtractionResult reExtracted = reExtractWithFeedback(
                                     docChunk, contentType, jlptLevel, ragContext, reExtractionFeedback);
 
+                            // Propagate lesson metadata — agents don't set these fields.
+                            // Without this, the re-extracted result has lessonTitle=null and
+                            // persistExtractedContent() groups it as "chunk-N" orphan, preventing
+                            // grammar/vocab from being linked to the correct lesson.
+                            if (docChunk.getLessonTitle() != null) {
+                                reExtracted.setLessonTitle(docChunk.getLessonTitle());
+                            }
+                            if (docChunk.getLessonNumber() != null) {
+                                reExtracted.setLessonNumber(docChunk.getLessonNumber());
+                            }
+
                             // Replace strategy: use re-extraction when confidence is equal or higher.
                             // Per-section extraction (confidence=0.92) re-produces the same items
                             // with slightly different formatting (e.g. subscript digits vs regular),
@@ -345,6 +356,11 @@ public class ImportOrchestrator {
 
             int embeddingsCreated = 0;
             if (ragProperties.isEmbeddingEnabled()) {
+                // lessonNumber → lessonId for ALL active lessons of this course.
+                // Used as fallback when groupKey-based lookup yields null (character-based
+                // chunking has no lessonTitle, so groupKey = "chunk-N" is not in groupKeyToLessonId).
+                Map<Integer, UUID> lessonNumberToId = persistenceService.getLessonIdsByNumber(courseId);
+
                 for (ExtractionResult result : allResults) {
                     checkCancelled(cancelFlag, importId);
                     // Derive the same groupKey used by persistExtractedContent to look up
@@ -353,6 +369,11 @@ public class ImportOrchestrator {
                             ? result.getLessonTitle()
                             : "chunk-" + result.getChunkIndex();
                     UUID lessonId = groupKeyToLessonId.get(groupKey);
+                    // Fallback: character-based chunks have groupKey="chunk-N" which is never
+                    // in groupKeyToLessonId.  Try lessonNumber → lessonId instead.
+                    if (lessonId == null && result.getLessonNumber() != null) {
+                        lessonId = lessonNumberToId.get(result.getLessonNumber());
+                    }
                     embeddingsCreated += embeddingService.storeVocabularyEmbeddings(
                             result.getVocabulary(), importId, lessonId, courseId);
                     embeddingsCreated += embeddingService.storeGrammarEmbeddings(
@@ -367,7 +388,10 @@ public class ImportOrchestrator {
                 Map<String, UUID> lessonTitleToId = groupKeyToLessonId.entrySet().stream()
                         .filter(e -> !e.getKey().startsWith("chunk-"))
                         .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (a, b) -> a));
-                embeddingsCreated += embedChatbotChunks(dbChunks, importEntity, jlptLevel, lessonTitleToId);
+                // lessonNumber fallback is re-used here: chunks from previous imports or cross-import
+                // lesson titles won't be in lessonTitleToId but their lessonNumber is stored on ImportChunk.
+                Map<Integer, UUID> lessonNumberToId = persistenceService.getLessonIdsByNumber(courseId);
+                embeddingsCreated += embedChatbotChunks(dbChunks, importEntity, jlptLevel, lessonTitleToId, lessonNumberToId);
             }
             importEntity.setEmbeddingsCreated(embeddingsCreated);
 
@@ -988,7 +1012,8 @@ public class ImportOrchestrator {
     private int embedChatbotChunks(List<ImportChunk> dbChunks,
                                     CurriculumImport importEntity,
                                     String jlptLevel,
-                                    Map<String, UUID> lessonTitleToId) {
+                                    Map<String, UUID> lessonTitleToId,
+                                    Map<Integer, UUID> lessonNumberToId) {
         if (dbChunks == null || dbChunks.isEmpty()) return 0;
 
         UUID courseId = importEntity.getCourseId();
@@ -1011,12 +1036,23 @@ public class ImportOrchestrator {
                 importEntity.getId(), chatbotChunks.size());
 
         int embedded = 0;
+        int missingLessonId = 0;
         for (ImportChunk chunk : chatbotChunks) {
             UUID lessonId = chunk.getLessonTitle() != null
                     ? lessonTitleToId.get(chunk.getLessonTitle())
                     : null;
+            // Fallback: lesson was created in a previous import or the title doesn't match
+            // any entry in the current run's lessonTitleToId (e.g. cross-import re-process).
+            if (lessonId == null && chunk.getLessonNumber() != null) {
+                lessonId = lessonNumberToId.get(chunk.getLessonNumber());
+            }
+            if (lessonId == null) missingLessonId++;
             embeddingService.embedLessonChunk(chunk, courseId, lessonId, jlptLevel);
             embedded++;
+        }
+        if (missingLessonId > 0) {
+            log.warn("[{}] {} lesson chunk(s) embedded without lesson_id — chatbot lesson filter will miss them",
+                    importEntity.getId(), missingLessonId);
         }
 
         log.info("[{}] Đã embed {} lesson chunks cho chatbot RAG", importEntity.getId(), embedded);

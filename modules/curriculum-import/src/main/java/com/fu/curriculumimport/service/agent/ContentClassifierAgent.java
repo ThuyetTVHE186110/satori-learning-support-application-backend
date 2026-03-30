@@ -2,7 +2,7 @@ package com.fu.curriculumimport.service.agent;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fu.common.ai.PromptFragment;
+import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.service.ingestion.MnNSectionSplitter;
 import com.fu.curriculumimport.util.LlmResponseUtils;
@@ -36,40 +36,14 @@ public class ContentClassifierAgent {
 
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
+    private final PromptTemplateLoader promptLoader;
 
-    public ContentClassifierAgent(OpenAiChatModel chatModel, ObjectMapper objectMapper) {
+    public ContentClassifierAgent(OpenAiChatModel chatModel, ObjectMapper objectMapper,
+                                   PromptTemplateLoader promptLoader) {
         this.chatClient = ChatClient.builder(chatModel).build();
         this.objectMapper = objectMapper;
+        this.promptLoader = promptLoader;
     }
-
-    private static final String SYSTEM_PROMPT =
-            "You are a Japanese language textbook content classifier.\n" +
-            "Analyze the given text and classify what type of educational content it contains.\n\n" +
-            PromptFragment.JSON_ONLY;
-
-    private static final String CLASSIFICATION_PROMPT = """
-            Classify the following Japanese language textbook content from pages %d-%d.
-            
-            Text:
-            ---
-            %s
-            ---
-            
-            Return JSON with this EXACT structure:
-            {
-              "contentType": "VOCABULARY" | "GRAMMAR" | "MIXED" | "CONVERSATION" | "EXERCISE" | "OTHER",
-              "confidence": 0.0-1.0,
-              "reasoning": "Brief explanation of classification"
-            }
-            
-            Classification rules:
-            - VOCABULARY: Word lists, vocabulary tables (>70%% vocabulary content)
-            - GRAMMAR: Grammar rules, conjugation tables, sentence patterns (>70%% grammar)
-            - MIXED: Balanced mix of vocabulary and grammar
-            - CONVERSATION: Dialogue practice, conversation examples
-            - EXERCISE: Drills, quizzes, practice problems
-            - OTHER: Non-educational content (TOC, index, copyright)
-            """;
 
     // ── Heuristic classification patterns ──────────────────────────────────
 
@@ -104,6 +78,19 @@ public class ContentClassifierAgent {
      * @return classification result (never calls LLM)
      */
     public ClassificationResult heuristicClassify(DocumentChunk chunk) {
+        // Fast-path 0: GRAMMAR_PATTERN (文型 / Mẫu câu) must be skipped BEFORE content heuristics.
+        // In the MnN Vietnamese edition, Mẫu câu contains ONLY Vietnamese translations of sentence
+        // patterns (no Japanese). The GRAMMAR_PATTERN_INDICATOR regex below would still match the
+        // "Mẫu câu" header keyword and misroute it to GRAMMAR, causing hallucinated extraction.
+        // Returning OTHER here prevents any extraction agent from processing this section.
+        if (MnNSectionSplitter.GRAMMAR_PATTERN.equals(chunk.getSectionType())) {
+            return ClassificationResult.builder()
+                    .contentType(ClassificationResult.ContentType.OTHER)
+                    .confidence(0.95)
+                    .reasoning("Structural: GRAMMAR_PATTERN (Mẫu câu) — Vietnamese-only translations, not extractable")
+                    .build();
+        }
+
         // Fast-path 1: trust structural section type from MnNSectionSplitter
         ClassificationResult.ContentType structuralType = mapSectionType(chunk.getSectionType());
         if (structuralType != null) {
@@ -188,12 +175,14 @@ public class ContentClassifierAgent {
 
         // LLM path: chunk sectionType is null or UNKNOWN
         try {
-            String userPrompt = String.format(CLASSIFICATION_PROMPT,
-                    chunk.getPageStart(), chunk.getPageEnd(),
-                    truncateForClassification(chunk.getContent()));
+            String systemPrompt = promptLoader.load("prompts/content-classifier-system.st");
+            String userPrompt = promptLoader.render("prompts/content-classifier-user.st", java.util.Map.of(
+                    "pageStart", String.valueOf(chunk.getPageStart()),
+                    "pageEnd", String.valueOf(chunk.getPageEnd()),
+                    "content", truncateForClassification(chunk.getContent())));
 
             String response = chatClient.prompt()
-                    .system(SYSTEM_PROMPT)
+                    .system(systemPrompt)
                     .user(userPrompt)
                     .call()
                     .content();
@@ -218,11 +207,16 @@ public class ContentClassifierAgent {
         if (sectionType == null || MnNSectionSplitter.UNKNOWN.equals(sectionType)) return null;
         return switch (sectionType) {
             case MnNSectionSplitter.VOCABULARY          -> ClassificationResult.ContentType.VOCABULARY;
-            // Only GRAMMAR_EXPLANATION should produce grammar points.
-            // GRAMMAR_PATTERN (Phần II: 文型) only has pattern names + translated examples —
-            // redundant with GRAMMAR_EXPLANATION which has full explanations. Skip it.
+            // GRAMMAR_EXPLANATION (文法ノート / IV. Giải thích ngữ pháp) is the sole source of
+            // correct grammar: it contains Japanese patterns, conjugation rules, and bilingual
+            // examples (e.g. "Danh từ₁は Danh từ₂ です" with ① わたしはマイク・ミラーです。).
             case MnNSectionSplitter.GRAMMAR_EXPLANATION -> ClassificationResult.ContentType.GRAMMAR;
-            case MnNSectionSplitter.GRAMMAR_PATTERN     -> ClassificationResult.ContentType.EXERCISE;
+            // GRAMMAR_PATTERN (文型 / Mẫu câu) in the MnN Vietnamese edition (II. Phần dịch)
+            // contains ONLY Vietnamese translations of the sentence patterns — no Japanese text.
+            // Routing this to GRAMMAR causes GrammarExtractionAgent to hallucinate Japanese
+            // patterns from Vietnamese-only input. Return null → falls through to LLM/heuristic,
+            // which will classify it as OTHER (no Japanese signal → not extractable).
+            case MnNSectionSplitter.GRAMMAR_PATTERN     -> null;
             // DIALOG may contain useful vocab but should NOT extract grammar (duplicates).
             case MnNSectionSplitter.DIALOG              -> ClassificationResult.ContentType.VOCABULARY;
             case MnNSectionSplitter.EXAMPLE             -> ClassificationResult.ContentType.EXERCISE;

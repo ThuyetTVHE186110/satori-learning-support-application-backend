@@ -7,6 +7,9 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
 import java.util.Optional;
 import java.util.UUID;
 
@@ -68,4 +71,33 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, UUID> 
     @Query(value = "SELECT title FROM learning_content.lessons WHERE id = :lessonId",
            nativeQuery = true)
     String findLessonTitleById(@Param("lessonId") UUID lessonId);
+
+    // ── Session listing & reopen ─────────────────────────────────────────────
+
+    /**
+     * Paginated list of sessions for a user filtered by session type.
+     * Native query required for PostgreSQL enum cast on session_type.
+     */
+    @Query(value = """
+            SELECT * FROM ai_conversation.conversation_sessions
+            WHERE user_id = :userId
+              AND session_type = CAST(:sessionType AS session_type)
+              AND deleted_at IS NULL
+            ORDER BY created_at DESC
+            """,
+            countQuery = """
+            SELECT COUNT(*) FROM ai_conversation.conversation_sessions
+            WHERE user_id = :userId
+              AND session_type = CAST(:sessionType AS session_type)
+              AND deleted_at IS NULL
+            """,
+            nativeQuery = true)
+    Page<ChatSession> findByUserIdAndSessionType(@Param("userId") UUID userId,
+                                                  @Param("sessionType") String sessionType,
+                                                  Pageable pageable);
+
+    /** Find session by ID regardless of status (for reopen). Excludes soft-deleted. */
+    @Query(value = "SELECT * FROM ai_conversation.conversation_sessions WHERE id = :id AND deleted_at IS NULL",
+           nativeQuery = true)
+    Optional<ChatSession> findByIdNotDeleted(@Param("id") UUID id);
 }

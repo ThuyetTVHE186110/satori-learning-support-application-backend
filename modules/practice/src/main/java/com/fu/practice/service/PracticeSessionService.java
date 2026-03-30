@@ -22,6 +22,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
@@ -349,6 +352,72 @@ public class PracticeSessionService {
                 .collect(Collectors.toList());
     }
 
+    // ── Session History & Redo ─────────────────────────────────────────────
+
+    /**
+     * Danh sách phiên luyện tập của user (trừ ABANDONED).
+     * Nếu lessonId != null, lọc theo bài học.
+     */
+    @Transactional(readOnly = true)
+    public Page<PracticeSessionSummaryResponse> listSessions(UUID userId, UUID lessonId, Pageable pageable) {
+        Page<PracticeSession> page;
+        if (lessonId != null) {
+            page = sessionRepository.findByUserIdAndLessonIdAndStatusNot(
+                    userId, lessonId, PracticeStatus.ABANDONED, pageable);
+        } else {
+            page = sessionRepository.findByUserIdAndStatusNot(
+                    userId, PracticeStatus.ABANDONED, pageable);
+        }
+        return page.map(this::toSessionSummaryResponse);
+    }
+
+    /**
+     * Lấy chi tiết tất cả câu hỏi trong một phiên (bao gồm đáp án, feedback).
+     */
+    @Transactional(readOnly = true)
+    public List<PracticeItemDetailResponse> getSessionItems(UUID sessionId, UUID userId) {
+        PracticeSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new BusinessException("SESSION_NOT_FOUND",
+                        "Không tìm thấy phiên luyện tập."));
+
+        if (!session.getUserId().equals(userId)) {
+            throw new BusinessException("SESSION_ACCESS_DENIED",
+                    "Bạn không có quyền truy cập phiên luyện tập này.");
+        }
+
+        List<PracticeItem> items = itemRepository.findBySessionIdOrderByItemIndex(sessionId);
+        return items.stream()
+                .map(this::toItemDetailResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Làm lại phiên luyện tập đã hoàn thành — tạo phiên mới với cùng cấu hình.
+     */
+    public StartPracticeResponse redoSession(UUID sessionId, UUID userId) {
+        PracticeSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new BusinessException("SESSION_NOT_FOUND",
+                        "Không tìm thấy phiên luyện tập."));
+
+        if (!session.getUserId().equals(userId)) {
+            throw new BusinessException("SESSION_ACCESS_DENIED",
+                    "Bạn không có quyền truy cập phiên luyện tập này.");
+        }
+
+        if (session.getStatus() != PracticeStatus.COMPLETED) {
+            throw new BusinessException("INVALID_STATUS",
+                    "Chỉ có thể làm lại phiên đã hoàn thành.");
+        }
+
+        StartPracticeRequest request = StartPracticeRequest.builder()
+                .lessonId(session.getLessonId())
+                .sessionType(session.getSessionType())
+                .itemCount(session.getTotalItems())
+                .build();
+
+        return startSession(userId, request);
+    }
+
     // ── Private helpers ────────────────────────────────────────────────────
 
     /**
@@ -594,6 +663,42 @@ public class PracticeSessionService {
                 .vocabMastery(p.getVocabMastery())
                 .grammarMastery(p.getGrammarMastery())
                 .lastPracticedAt(p.getLastPracticedAt())
+                .build();
+    }
+
+    private PracticeSessionSummaryResponse toSessionSummaryResponse(PracticeSession s) {
+        return PracticeSessionSummaryResponse.builder()
+                .sessionId(s.getId())
+                .lessonId(s.getLessonId())
+                .courseId(s.getCourseId())
+                .sessionType(s.getSessionType().name())
+                .status(s.getStatus().name())
+                .score(s.getScore())
+                .correctItems(s.getCorrectItems())
+                .totalItems(s.getTotalItems())
+                .createdAt(s.getCreatedAt())
+                .completedAt(s.getCompletedAt())
+                .build();
+    }
+
+    private PracticeItemDetailResponse toItemDetailResponse(PracticeItem item) {
+        List<OptionDto> options = parseOptionsForDisplay(item.getOptions(), true);
+        return PracticeItemDetailResponse.builder()
+                .itemId(item.getId())
+                .itemIndex(item.getItemIndex())
+                .itemType(item.getItemType().name())
+                .question(item.getQuestion())
+                .questionJapanese(item.getQuestionJapanese())
+                .options(options)
+                .correctAnswer(item.getCorrectAnswer())
+                .userAnswer(item.getUserAnswer())
+                .isCorrect(item.getIsCorrect())
+                .score(item.getScore())
+                .hint(item.getHint())
+                .explanation(item.getExplanation())
+                .aiFeedback(item.getAiFeedback())
+                .refContentId(item.getRefContentId())
+                .refContentType(item.getRefContentType())
                 .build();
     }
 }

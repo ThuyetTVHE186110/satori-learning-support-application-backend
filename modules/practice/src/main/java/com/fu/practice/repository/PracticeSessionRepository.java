@@ -26,6 +26,11 @@ public interface PracticeSessionRepository extends JpaRepository<PracticeSession
     Page<PracticeSession> findByUserIdAndLessonId(UUID userId, UUID lessonId, Pageable pageable);
 
     /**
+     * Lấy phiên của user theo bài học, trừ trạng thái chỉ định (ví dụ: trừ ABANDONED).
+     */
+    Page<PracticeSession> findByUserIdAndLessonIdAndStatusNot(UUID userId, UUID lessonId, PracticeStatus status, Pageable pageable);
+
+    /**
      * Lấy tất cả phiên đã hoàn thành của user theo bài học, để tính mastery.
      */
     @Query("SELECT ps FROM PracticeSession ps WHERE ps.userId = :userId AND ps.lessonId = :lessonId AND ps.status = 'COMPLETED'")

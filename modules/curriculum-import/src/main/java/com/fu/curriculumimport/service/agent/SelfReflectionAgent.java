@@ -3,7 +3,7 @@ package com.fu.curriculumimport.service.agent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fu.common.ai.PromptFragment;
+import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.curriculumimport.config.AgenticRagProperties;
 import com.fu.curriculumimport.service.agent.ReflectionResult.ItemReflection;
 import com.fu.curriculumimport.service.agent.ReflectionResult.ReflectionVerdict;
@@ -50,77 +50,16 @@ public class SelfReflectionAgent {
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
     private final AgenticRagProperties ragProperties;
+    private final PromptTemplateLoader promptLoader;
 
     public SelfReflectionAgent(OpenAiChatModel chatModel, ObjectMapper objectMapper,
-                                AgenticRagProperties ragProperties) {
+                                AgenticRagProperties ragProperties,
+                                PromptTemplateLoader promptLoader) {
         this.chatClient = ChatClient.builder(chatModel).build();
         this.objectMapper = objectMapper;
         this.ragProperties = ragProperties;
+        this.promptLoader = promptLoader;
     }
-
-    private static final String SYSTEM_PROMPT =
-            "You are a quality assurance expert for Japanese language learning content extraction.\n" +
-            "Your task is to evaluate whether the extracted content is:\n" +
-            "1. RELEVANT to the source material (not invented or from external knowledge)\n" +
-            "2. SUPPORTED by the source text (factually accurate extraction, not hallucinated)\n" +
-            "3. USEFUL for language learning at the specified JLPT level\n\n" +
-            "Evaluate FAIRLY. Items that clearly appear in the source text should score 0.8+.\n" +
-            "Only flag items as unsupported when they are clearly hallucinated or fabricated.\n" +
-            "Missing English translations or romaji are NOT grounds for rejection — only flag " +
-            "items with WRONG Japanese text, WRONG readings, or FABRICATED meanings.\n" +
-            "The source text may be a SECTION of a larger lesson — items extracted from " +
-            "adjacent sections (vocabulary table, grammar explanation) are still RELEVANT.\n" +
-            PromptFragment.JSON_ONLY;
-
-    private static final String REFLECTION_PROMPT = """
-            TASK: Critically evaluate the following AI extraction against the original source text.
-            
-            === ORIGINAL SOURCE TEXT (pages %d-%d) ===
-            %s
-            === END SOURCE TEXT ===
-            
-            === EXTRACTED CONTENT ===
-            %s
-            === END EXTRACTED CONTENT ===
-            
-            TARGET JLPT LEVEL: %s
-            
-            For EACH extracted item, evaluate these Self-RAG reflection tokens:
-            - [IsRelevant]: Does this item come from the source text, not from external knowledge?
-            - [IsSupported]: Are the meanings, readings, and explanations factually correct per the source?
-            - [IsUseful]: Is this item appropriate for %s-level learners?
-            
-            Return JSON:
-            {
-              "overallVerdict": "APPROVED" | "MOSTLY_APPROVED" | "NEEDS_IMPROVEMENT" | "REJECTED",
-              "overallScore": 0.0-1.0,
-              "overallReasoning": "Brief explanation of overall quality",
-              "recommendsReExtraction": true/false,
-              "reExtractionSuggestion": "What to fix if re-extraction needed",
-              "itemReflections": [
-                {
-                  "itemIdentifier": "日本語 or ～ている",
-                  "contentType": "VOCABULARY" | "GRAMMAR",
-                  "isRelevant": true/false,
-                  "isSupported": true/false,
-                  "isUseful": true/false,
-                  "score": 0.0-1.0,
-                  "reasoning": "Why this assessment"
-                }
-              ]
-            }
-            
-            IMPORTANT GUIDELINES:
-            - An item is RELEVANT if it appears in the source text OR is a standard vocabulary/grammar
-              item for this lesson (the source may be a section of a larger lesson page).
-            - An item is NOT SUPPORTED only if the meaning/reading is clearly WRONG or fabricated.
-              Missing English translations, missing romaji, or incomplete explanations are NOT
-              grounds for marking unsupported — only factual errors matter.
-            - An item is USEFUL if it's appropriate for the target JLPT level.
-            - Score: 1.0 = perfect, 0.8+ = good (minor issues only), 0.5-0.8 = needs improvement, <0.5 = reject
-            - Default to 0.8 for items that are clearly present in the source with correct meanings.
-            - Only score below 0.5 for items with WRONG Japanese text or FABRICATED meanings.
-            """;
 
     /**
      * Perform self-reflection on an extraction result against its source chunk.
@@ -151,14 +90,16 @@ public class SelfReflectionAgent {
                     : chunk.getContent();
             String sourceContent = truncateForReflection(rawSource);
 
-            String userPrompt = String.format(REFLECTION_PROMPT,
-                    chunk.getPageStart(), chunk.getPageEnd(),
-                    sourceContent,
-                    extractedSummary,
-                    jlptLevel, jlptLevel);
+            String systemPrompt = promptLoader.load("prompts/self-reflection-system.st");
+            String userPrompt = promptLoader.render("prompts/self-reflection-user.st", java.util.Map.of(
+                    "pageStart", String.valueOf(chunk.getPageStart()),
+                    "pageEnd", String.valueOf(chunk.getPageEnd()),
+                    "sourceContent", sourceContent,
+                    "extractedSummary", extractedSummary,
+                    "jlptLevel", jlptLevel));
 
             String response = chatClient.prompt()
-                    .system(SYSTEM_PROMPT)
+                    .system(systemPrompt)
                     .user(userPrompt)
                     .options(OpenAiChatOptions.builder().maxTokens(8192).build())
                     .call()

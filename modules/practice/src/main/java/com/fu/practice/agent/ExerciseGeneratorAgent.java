@@ -1,8 +1,16 @@
 package com.fu.practice.agent;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
+
+import java.io.IOException;
+import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.common.exception.BusinessException;
 import com.fu.course.entity.GrammarPoint;
 import com.fu.course.entity.Vocabulary;
@@ -18,6 +26,7 @@ import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -39,18 +48,21 @@ public class ExerciseGeneratorAgent {
     private final VocabularyRepository vocabularyRepository;
     private final GrammarPointRepository grammarPointRepository;
     private final ObjectMapper objectMapper;
+    private final PromptTemplateLoader promptLoader;
 
     public ExerciseGeneratorAgent(
             OpenAiChatModel openAiChatModel,
             EmbeddingService embeddingService,
             VocabularyRepository vocabularyRepository,
             GrammarPointRepository grammarPointRepository,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            PromptTemplateLoader promptLoader) {
         this.chatClient = ChatClient.builder(openAiChatModel).build();
         this.embeddingService = embeddingService;
         this.vocabularyRepository = vocabularyRepository;
         this.grammarPointRepository = grammarPointRepository;
         this.objectMapper = objectMapper;
+        this.promptLoader = promptLoader;
     }
 
     /**
@@ -169,47 +181,21 @@ public class ExerciseGeneratorAgent {
 
     private String buildPrompt(int count, PracticeSessionType type,
                                String jlptLevel, String contentSummary, String ragContext) {
-        return String.format("""
-                Bạn là giáo viên tiếng Nhật chuyên nghiệp. Tạo %d câu hỏi luyện tập %s cho cấp độ %s.
-
-                %s
-                %s
-
-                YÊU CẦU LOẠI CÂU HỎI: %s
-                - MULTIPLE_CHOICE: 4 lựa chọn (1 đúng, 3 sai). Dùng từ trong "ngữ cảnh bổ sung" làm lựa chọn sai.
-                - FILL_BLANK: điền vào chỗ trống, options = []
-                - TRANSLATION: dịch câu, options = []
-                - SENTENCE_ORDER: sắp xếp từ thành câu, options = danh sách từ cần sắp xếp
-                - MATCHING: ghép cặp, 4 options (1 đúng, 3 sai)
-
-                Trả về JSON array THUẦN (không có markdown fence, không có text thêm).
-                Mỗi phần tử có cấu trúc:
-                {
-                  "question": "câu hỏi bằng tiếng Việt hoặc tiếng Nhật",
-                  "questionJapanese": "câu hỏi bằng tiếng Nhật nếu cần (null nếu không)",
-                  "options": [{"text": "...", "isCorrect": true/false}],
-                  "correctAnswer": "đáp án đúng",
-                  "hint": "gợi ý ngắn (null nếu không có)",
-                  "explanation": "giải thích bằng tiếng Việt",
-                  "refContentId": "uuid-của-vocab-hoặc-grammar-hoặc-null",
-                  "refContentType": "VOCABULARY hoặc GRAMMAR hoặc null"
-                }
-                """,
-                count, describeType(type), jlptLevel != null ? jlptLevel : "N5",
-                contentSummary, ragContext, type.name());
+        return promptLoader.render("prompts/exercise-generator-system.st", Map.of(
+                "count", String.valueOf(count),
+                "typeDescription", describeType(type),
+                "jlptLevel", jlptLevel != null ? jlptLevel : "N5",
+                "contentSummary", contentSummary,
+                "ragContext", ragContext,
+                "sessionType", type.name()));
     }
 
     private String buildSimplePrompt(int count, PracticeSessionType type,
                                      String jlptLevel, String contentSummary) {
-        return String.format("""
-                Tạo %d câu hỏi trắc nghiệm tiếng Nhật từ nội dung sau. Cấp độ %s.
-
-                %s
-
-                Trả về JSON array, mỗi phần tử:
-                {"question":"...","questionJapanese":null,"options":[{"text":"...","isCorrect":true},{"text":"...","isCorrect":false},{"text":"...","isCorrect":false},{"text":"...","isCorrect":false}],"correctAnswer":"...","hint":null,"explanation":"...","refContentId":null,"refContentType":null}
-                """,
-                count, jlptLevel != null ? jlptLevel : "N5", contentSummary);
+        return promptLoader.render("prompts/exercise-generator-simple.st", Map.of(
+                "count", String.valueOf(count),
+                "jlptLevel", jlptLevel != null ? jlptLevel : "N5",
+                "contentSummary", contentSummary));
     }
 
     private String describeType(PracticeSessionType type) {
@@ -265,9 +251,37 @@ public class ExerciseGeneratorAgent {
             @JsonProperty("refContentId") String refContentId,
             @JsonProperty("refContentType") String refContentType
     ) {
+        @JsonDeserialize(using = OptionItemDeserializer.class)
         public record OptionItem(
                 @JsonProperty("text") String text,
                 @JsonProperty("isCorrect") boolean isCorrect
         ) {}
+    }
+
+    /**
+     * Tolerates both object form {"text":"...","isCorrect":true} and bare string form "..."
+     * (LLM occasionally omits the object wrapper; treat bare strings as incorrect options).
+     */
+    public static class OptionItemDeserializer extends StdDeserializer<GeneratedItem.OptionItem> {
+        public OptionItemDeserializer() { super(GeneratedItem.OptionItem.class); }
+
+        @Override
+        public GeneratedItem.OptionItem deserialize(JsonParser p, DeserializationContext ctx) throws IOException {
+            if (p.currentToken() == JsonToken.VALUE_STRING) {
+                return new GeneratedItem.OptionItem(p.getText(), false);
+            }
+            String text = null;
+            boolean isCorrect = false;
+            while (p.nextToken() != JsonToken.END_OBJECT) {
+                String field = p.getCurrentName();
+                p.nextToken();
+                switch (field) {
+                    case "text"      -> text = p.getText();
+                    case "isCorrect" -> isCorrect = p.getBooleanValue();
+                    default          -> p.skipChildren();
+                }
+            }
+            return new GeneratedItem.OptionItem(text, isCorrect);
+        }
     }
 }

@@ -3,6 +3,7 @@ package com.fu.conversation.service;
 import com.fu.conversation.dto.response.ChatHistoryItemResponse;
 import com.fu.conversation.dto.response.ChatMessageResponse;
 import com.fu.conversation.dto.response.ChatSessionResponse;
+import org.springframework.data.domain.Page;
 
 import java.util.List;
 import java.util.UUID;
@@ -24,4 +25,10 @@ public interface CurriculumChatService {
 
     /** Mark the session as COMPLETED. */
     void closeSession(UUID sessionId, UUID userId);
+
+    /** List all CURRICULUM_QA sessions for a user (paginated, newest first). */
+    Page<ChatSessionResponse> listSessions(UUID userId, int page, int size);
+
+    /** Reopen a COMPLETED or ABANDONED session so learner can continue chatting. */
+    ChatSessionResponse reopenSession(UUID sessionId, UUID userId);
 }

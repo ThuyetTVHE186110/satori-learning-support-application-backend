@@ -1,8 +1,12 @@
 package com.fu.conversation.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
+import com.fu.conversation.ai.memory.CurriculumChatMemoryRepository;
+import com.fu.conversation.ai.retriever.EmbeddingDocumentRetriever;
+import com.fu.conversation.ai.tools.CurriculumQueryTools;
 import com.fu.conversation.dto.response.ChatHistoryItemResponse;
 import com.fu.conversation.dto.response.ChatMessageResponse;
 import com.fu.conversation.dto.response.ChatSessionResponse;
@@ -12,16 +16,17 @@ import com.fu.conversation.repository.ChatMessageRepository;
 import com.fu.conversation.repository.ChatSessionRepository;
 import com.fu.conversation.service.ChatHistoryManager;
 import com.fu.conversation.service.CurriculumChatService;
-import com.fu.curriculumimport.service.embedding.ChatbotFilter;
-import com.fu.curriculumimport.service.embedding.EmbeddingService;
-import com.fu.curriculumimport.service.embedding.RagContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.client.ChatClientResponse;
+import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
+import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.memory.MessageWindowChatMemory;
+import org.springframework.ai.document.Document;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.rag.generation.augmentation.ContextualQueryAugmenter;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -38,42 +43,59 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
     private static final String CHAT_MODEL  = "gpt-4o-mini";
     private static final double TEMPERATURE = 0.3;
 
-    private static final String SYSTEM_PROMPT_TEMPLATE = """
-            Bạn là trợ lý học tiếng Nhật của hệ thống Satori, chuyên giải thích nội dung giáo trình cho học viên Việt Nam.
-
-            **Thông tin học viên:**
-            - Cấp độ: {jlptLevel}
-            - Khóa học: {courseName}
-            {lessonContext}
-
-            **Nguyên tắc trả lời:**
-            1. Trả lời bằng tiếng Việt, rõ ràng và súc tích
-            2. Khi nhắc đến từ/cụm từ tiếng Nhật, luôn kèm furigana: 食べる[たべる]
-            3. Đưa ví dụ cụ thể từ giáo trình nếu có
-            4. Nếu KHÔNG có thông tin trong [Nội dung tham khảo], trả lời: "Nội dung này chưa có trong giáo trình của bạn."
-            5. KHÔNG bịa đặt thông tin không có trong [Nội dung tham khảo]
-            6. Giải thích ngắn gọn, tránh lý thuyết dài dòng
-            """;
+    // Advisor execution order: memory first (lower order = higher priority),
+    // then RAG retrieval so CompressionQueryTransformer can see injected history.
+    private static final int MEMORY_ADVISOR_ORDER    = 10;
+    private static final int RETRIEVAL_ADVISOR_ORDER = 20;
 
     private final ChatClient chatClient;
-    private final EmbeddingService embeddingService;
+    private final CurriculumQueryTools curriculumQueryTools;
+    private final PromptTemplateLoader promptLoader;
     private final ChatHistoryManager historyManager;
     private final ChatSessionRepository chatSessionRepository;
     private final ChatMessageRepository chatMessageRepository;
     private final ObjectMapper objectMapper;
 
     public CurriculumChatServiceImpl(OpenAiChatModel chatModel,
-                                      EmbeddingService embeddingService,
+                                      CurriculumChatMemoryRepository chatMemoryRepository,
+                                      EmbeddingDocumentRetriever documentRetriever,
                                       ChatHistoryManager historyManager,
                                       ChatSessionRepository chatSessionRepository,
                                       ChatMessageRepository chatMessageRepository,
-                                      ObjectMapper objectMapper) {
-        this.chatClient = ChatClient.builder(chatModel).build();
-        this.embeddingService = embeddingService;
+                                      ObjectMapper objectMapper,
+                                      PromptTemplateLoader promptLoader,
+                                      CurriculumQueryTools curriculumQueryTools) {
+        this.curriculumQueryTools = curriculumQueryTools;
         this.historyManager = historyManager;
         this.chatSessionRepository = chatSessionRepository;
         this.chatMessageRepository = chatMessageRepository;
         this.objectMapper = objectMapper;
+        this.promptLoader = promptLoader;
+
+        // ── Memory advisor — injects sliding-window history into every prompt ──
+        ChatMemory chatMemory = MessageWindowChatMemory.builder()
+                .chatMemoryRepository(chatMemoryRepository)
+                .maxMessages(40)
+                .build();
+
+        MessageChatMemoryAdvisor memoryAdvisor = MessageChatMemoryAdvisor.builder(chatMemory)
+                .order(MEMORY_ADVISOR_ORDER)
+                .build();
+
+        // ── Retrieval advisor — pre-retrieves RAG context and injects it into
+        //    the system message; also stores retrieved Documents in
+        //    ChatClientResponse.context() under DOCUMENT_CONTEXT for source refs. ──
+        RetrievalAugmentationAdvisor retrievalAdvisor = RetrievalAugmentationAdvisor.builder()
+                .documentRetriever(documentRetriever)
+                .queryAugmenter(ContextualQueryAugmenter.builder()
+                        .allowEmptyContext(true) // LLM can still answer when no docs found
+                        .build())
+                .order(RETRIEVAL_ADVISOR_ORDER)
+                .build();
+
+        this.chatClient = ChatClient.builder(chatModel)
+                .defaultAdvisors(memoryAdvisor, retrievalAdvisor)
+                .build();
     }
 
     // ── Public API ──────────────────────────────────────────────────────────
@@ -121,53 +143,72 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
         // 1. Load + verify session
         SessionContext session = loadAndVerifySession(sessionId, userId);
 
-        // 2. RAG retrieval
-        ChatbotFilter filter = ChatbotFilter.forChatbot(session.courseId(), session.lessonId());
-        RagContext rag = embeddingService.retrieveContext(question, filter);
+        // 2. Build system prompt
+        String systemPrompt = buildBaseSystemPrompt(session);
 
-        boolean noContext = !rag.hasContext();
-        if (noContext) log.debug("Không có RAG context cho: '{}'", question);
+        // 3. Build tool context — courseId/lessonId passed to tools per-call via ToolContext
+        Map<String, Object> toolCtx = new HashMap<>();
+        toolCtx.put(CurriculumQueryTools.CTX_COURSE_ID, session.courseId());
+        if (session.lessonId() != null) {
+            toolCtx.put(CurriculumQueryTools.CTX_LESSON_ID, session.lessonId());
+        }
 
-        // 3. Build prompt + history
-        String systemPrompt = buildSystemPrompt(session, rag);
-        List<Message> history = historyManager.loadHistory(sessionId);
-
-        List<Message> messages = new ArrayList<>();
-        messages.add(new SystemMessage(systemPrompt));
-        messages.addAll(history);
-        messages.add(new UserMessage(question));
-
-        // 4. Call AI
-        String aiResponse;
+        ChatClientResponse chatClientResponse;
         try {
-            aiResponse = chatClient.prompt()
-                    .messages(messages)
+            // 4. Call AI with advisor chain:
+            //    MessageChatMemoryAdvisor (order=10) → injects history from DB
+            //    RetrievalAugmentationAdvisor (order=20) → pre-retrieves docs, augments system msg
+            //       EmbeddingDocumentRetriever reads courseId/lessonId from Query.context()
+            //       which the advisor auto-populates from ChatClientRequest.context() (advisor params)
+            //    LLM invokes CurriculumQueryTools as needed (searchCurriculum / countContent)
+            final UUID lessonId = session.lessonId();
+            chatClientResponse = chatClient.prompt()
+                    .system(systemPrompt)
+                    .user(question)
+                    .advisors(a -> {
+                        a.param(ChatMemory.CONVERSATION_ID, sessionId.toString());
+                        a.param("courseId", session.courseId());
+                        if (lessonId != null) {
+                            a.param("lessonId", lessonId);
+                        }
+                    })
                     .options(OpenAiChatOptions.builder()
                             .model(CHAT_MODEL)
                             .temperature(TEMPERATURE)
                             .maxTokens(1024)
                             .build())
+                    .tools(curriculumQueryTools)
+                    .toolContext(toolCtx)
                     .call()
-                    .content();
+                    .chatClientResponse();
+
         } catch (Exception e) {
             log.error("ChatClient lỗi cho session {}: {}", sessionId, e.getMessage());
             throw new BusinessException("CHAT_ERROR",
                     "Hệ thống AI đang gặp sự cố, vui lòng thử lại sau.");
         }
 
-        // 5. Persist exchange
+        String aiResponse = chatClientResponse.chatResponse()
+                .getResult().getOutput().getText();
+
+        // 6. Extract retrieved documents from advisor context for source references
+        @SuppressWarnings("unchecked")
+        List<Document> retrievedDocs = (List<Document>) chatClientResponse.context()
+                .getOrDefault(RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT, List.of());
+
+        // 7. Persist exchange — MessageChatMemoryAdvisor.after() calls saveAll() which is
+        //    a no-op; we persist explicitly here for the atomic CTE insert + counter update.
         UUID aiMessageId = historyManager.saveExchange(sessionId, question, aiResponse);
 
-        log.debug("Chat: session={}, responseTokens≈{}, sources={}, noContext={}",
-                sessionId, ChatHistoryManager.estimateTokens(aiResponse),
-                rag.getSimilarItems().size(), noContext);
+        log.debug("Chat: session={} responseTokens≈{} ragDocs={}",
+                sessionId, ChatHistoryManager.estimateTokens(aiResponse), retrievedDocs.size());
 
         return ChatMessageResponse.builder()
                 .sessionId(sessionId)
                 .messageId(aiMessageId)
                 .content(aiResponse)
-                .sources(buildSourceReferences(rag))
-                .noContextFound(noContext)
+                .sources(buildSourcesFromDocuments(retrievedDocs))
+                .noContextFound(retrievedDocs.isEmpty())
                 .timestamp(LocalDateTime.now())
                 .build();
     }
@@ -200,7 +241,63 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
         log.info("Đóng phiên chat: sessionId={}, userId={}", sessionId, userId);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public Page<ChatSessionResponse> listSessions(UUID userId, int page, int size) {
+        Page<ChatSession> sessions = chatSessionRepository.findByUserIdAndSessionType(
+                userId, "CURRICULUM_QA", PageRequest.of(page, size));
+        return sessions.map(this::toSessionResponse);
+    }
+
+    @Override
+    @Transactional
+    public ChatSessionResponse reopenSession(UUID sessionId, UUID userId) {
+        ChatSession session = chatSessionRepository.findByIdNotDeleted(sessionId)
+                .orElseThrow(() -> new ResourceNotFoundException("Phiên chat không tồn tại."));
+
+        if (!session.getUserId().equals(userId)) {
+            throw new BusinessException("FORBIDDEN",
+                    "Bạn không có quyền truy cập phiên chat này.");
+        }
+
+        String status = session.getStatus();
+        if ("ACTIVE".equals(status)) {
+            return toSessionResponse(session);
+        }
+        if (!"COMPLETED".equals(status) && !"ABANDONED".equals(status)) {
+            throw new BusinessException("INVALID_STATUS",
+                    "Không thể mở lại phiên chat với trạng thái: " + status);
+        }
+
+        chatSessionRepository.updateStatus(sessionId, "ACTIVE");
+        session.setStatus("ACTIVE");
+
+        log.info("Mở lại phiên chat: sessionId={}, userId={}, oldStatus={}",
+                sessionId, userId, status);
+        return toSessionResponse(session);
+    }
+
     // ── Private helpers ─────────────────────────────────────────────────────
+
+    private ChatSessionResponse toSessionResponse(ChatSession entity) {
+        Map<String, Object> ctx = fromJson(entity.getContext());
+        UUID courseId = ctx.containsKey("courseId")
+                ? UUID.fromString((String) ctx.get("courseId")) : null;
+        UUID lessonId = ctx.containsKey("lessonId")
+                ? UUID.fromString((String) ctx.get("lessonId")) : null;
+        String jlptLevel = (String) ctx.getOrDefault("jlptLevel", null);
+
+        return ChatSessionResponse.builder()
+                .sessionId(entity.getId())
+                .status(entity.getStatus())
+                .courseId(courseId)
+                .lessonId(lessonId)
+                .jlptLevel(jlptLevel)
+                .messageCount(entity.getMessageCount())
+                .createdAt(entity.getCreatedAt())
+                .lastMessageAt(null)
+                .build();
+    }
 
     private SessionContext loadAndVerifySession(UUID sessionId, UUID userId) {
         ChatSession entity = chatSessionRepository.findByIdAndStatus(sessionId, "ACTIVE")
@@ -233,7 +330,7 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
         }
     }
 
-    private String buildSystemPrompt(SessionContext session, RagContext rag) {
+    private String buildBaseSystemPrompt(SessionContext session) {
         String courseName = Optional.ofNullable(
                 chatSessionRepository.findCourseNameById(session.courseId()))
                 .orElse("Khóa học");
@@ -243,91 +340,84 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
                         .orElse("Bài học")
                 : "";
 
-        String prompt = SYSTEM_PROMPT_TEMPLATE
-                .replace("{jlptLevel}",    session.jlptLevel() != null ? session.jlptLevel() : "N5")
-                .replace("{courseName}",   courseName)
-                .replace("{lessonContext}", lessonCtx);
-
-        if (rag.hasContext()) {
-            StringBuilder sb = new StringBuilder(prompt);
-            sb.append("\n**[Nội dung tham khảo từ giáo trình]:**\n\n");
-            for (RagContext.SimilarItem item : rag.getSimilarItems()) {
-                String type = item.getContentType() != null ? item.getContentType() : "UNKNOWN";
-                String text = item.getTextContent() != null ? item.getTextContent() : "";
-                Map<String, String> meta = item.getMetadata() != null ? item.getMetadata() : Map.of();
-                String lessonInfo = meta.containsKey("lesson_title")
-                        ? " (Bài: " + meta.get("lesson_title") + ")" : "";
-
-                switch (type) {
-                    case "VOCABULARY" -> sb.append("📖 Từ vựng: ").append(text).append(lessonInfo).append("\n");
-                    case "GRAMMAR" -> sb.append("📝 Ngữ pháp: ").append(text).append(lessonInfo).append("\n");
-                    case "GRAMMAR_EXPLANATION" -> sb.append("📘 Giải thích ngữ pháp").append(lessonInfo)
-                            .append(":\n").append(text).append("\n");
-                    case "DIALOG" -> sb.append("💬 Hội thoại mẫu").append(lessonInfo)
-                            .append(":\n").append(text).append("\n");
-                    case "EXAMPLE" -> sb.append("✏️ Ví dụ").append(lessonInfo)
-                            .append(":\n").append(text).append("\n");
-                    default -> sb.append("- [").append(type).append("] ").append(text).append(lessonInfo).append("\n");
-                }
-                sb.append("\n");
-            }
-            sb.append("**Hãy sử dụng CHÍNH XÁC nội dung trên để trả lời. Không bịa đặt thông tin ngoài nội dung tham khảo.**\n");
-            return sb.toString();
-        }
-        return prompt + "\n**Lưu ý:** Không tìm thấy nội dung liên quan trong giáo trình. "
-                + "Hãy trả lời: \"Nội dung này chưa có trong giáo trình của bạn.\"";
+        return promptLoader.render("prompts/curriculum-chat-system.st", Map.of(
+                "jlptLevel",    session.jlptLevel() != null ? session.jlptLevel() : "N5",
+                "courseName",   courseName,
+                "lessonContext", lessonCtx));
     }
 
-    private List<ChatSourceReference> buildSourceReferences(RagContext rag) {
-        if (!rag.hasContext()) return List.of();
-        return rag.getSimilarItems().stream()
-                .map(item -> {
-                    Map<String, String> meta = item.getMetadata() != null
-                            ? item.getMetadata() : Map.of();
-                    String text = item.getTextContent() != null ? item.getTextContent() : "";
-                    String type = item.getContentType() != null ? item.getContentType() : "";
+    /**
+     * Build source references from {@link Document} objects returned by
+     * {@link RetrievalAugmentationAdvisor} via
+     * {@code chatClientResponse.context().get(DOCUMENT_CONTEXT)}.
+     *
+     * <p>Metadata keys in each Document are populated by
+     * {@link com.fu.conversation.ai.retriever.EmbeddingDocumentRetriever}:
+     * {@code contentType}, {@code similarity}, plus all keys from
+     * {@link com.fu.curriculumimport.service.embedding.RagContext.SimilarItem#getMetadata()}.
+     */
+    private List<ChatSourceReference> buildSourcesFromDocuments(List<Document> docs) {
+        if (docs == null || docs.isEmpty()) return List.of();
+        return docs.stream()
+                .map(doc -> {
+                    Map<String, Object> meta = doc.getMetadata() != null
+                            ? doc.getMetadata() : Map.of();
+                    String type = (String) meta.getOrDefault("contentType", "");
+                    String text = doc.getText() != null ? doc.getText() : "";
 
                     String japaneseText;
                     String meaningVi;
 
                     switch (type) {
                         case "VOCABULARY" -> {
-                            // Vocab format: "日本語 (reading) [POS] - Nghĩa: meaning ..."
-                            // Extract Japanese text (before first " - " or " [")
-                            int dashIdx = text.indexOf(" - Nghĩa: ");
+                            int dashIdx    = text.indexOf(" - Nghĩa: ");
                             int bracketIdx = text.indexOf(" [");
                             int cutAt = dashIdx > 0 ? dashIdx : (bracketIdx > 0 ? bracketIdx : text.length());
                             japaneseText = text.substring(0, Math.min(cutAt, text.length())).trim();
-                            meaningVi = dashIdx > 0 ? text.substring(dashIdx + 10).split("\\.", 2)[0].trim() : null;
+                            meaningVi    = dashIdx > 0
+                                    ? text.substring(dashIdx + 10).split("\\.", 2)[0].trim()
+                                    : null;
                         }
                         case "GRAMMAR" -> {
-                            // Grammar format: "Point: Pattern — Function. Nghĩa: meaning ..."
                             int meaningIdx = text.indexOf(". Nghĩa: ");
-                            int dashIdx = text.indexOf(" — ");
-                            int cutAt = dashIdx > 0 ? dashIdx : (meaningIdx > 0 ? meaningIdx : Math.min(80, text.length()));
+                            int dashIdx    = text.indexOf(" — ");
+                            int cutAt = dashIdx > 0 ? dashIdx
+                                    : (meaningIdx > 0 ? meaningIdx : Math.min(80, text.length()));
                             japaneseText = text.substring(0, cutAt).trim();
-                            meaningVi = meaningIdx > 0 ? text.substring(meaningIdx + 9).split("\\.", 2)[0].trim() : null;
+                            meaningVi    = meaningIdx > 0
+                                    ? text.substring(meaningIdx + 9).split("\\.", 2)[0].trim()
+                                    : null;
                         }
                         default -> {
-                            // GRAMMAR_EXPLANATION, DIALOG, EXAMPLE — use truncated text as preview
+                            // GRAMMAR_EXPLANATION, DIALOG, EXAMPLE — truncated preview
                             japaneseText = text.length() > 100 ? text.substring(0, 100) + "..." : text;
-                            meaningVi = null;
+                            meaningVi    = null;
                         }
                     }
 
                     Integer lessonNumber = null;
-                    try {
-                        if (meta.containsKey("lesson_number"))
-                            lessonNumber = Integer.parseInt(meta.get("lesson_number"));
-                    } catch (NumberFormatException ignored) {}
+                    Object lnObj = meta.get("lesson_number");
+                    if (lnObj instanceof Number n) {
+                        lessonNumber = n.intValue();
+                    } else if (lnObj instanceof String s) {
+                        try { lessonNumber = Integer.parseInt(s); }
+                        catch (NumberFormatException ignored) {}
+                    }
+
+                    double similarity = 0.0;
+                    Object simObj = meta.get("similarity");
+                    if (simObj instanceof Number n) similarity = n.doubleValue();
+
+                    String lessonTitle = meta.containsKey("lesson_title")
+                            ? (String) meta.get("lesson_title") : null;
 
                     return ChatSourceReference.builder()
                             .contentType(type)
                             .japaneseText(japaneseText)
                             .meaningVi(meaningVi)
-                            .lessonTitle(meta.getOrDefault("lesson_title", null))
+                            .lessonTitle(lessonTitle)
                             .lessonNumber(lessonNumber)
-                            .similarity(item.getSimilarity())
+                            .similarity(similarity)
                             .build();
                 })
                 .collect(Collectors.toList());

@@ -1,6 +1,7 @@
 package com.fu.practice.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.practice.entity.PracticeItem;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -24,10 +25,13 @@ public class SessionFeedbackAgent {
 
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
+    private final PromptTemplateLoader promptLoader;
 
-    public SessionFeedbackAgent(OpenAiChatModel openAiChatModel, ObjectMapper objectMapper) {
+    public SessionFeedbackAgent(OpenAiChatModel openAiChatModel, ObjectMapper objectMapper,
+                                 PromptTemplateLoader promptLoader) {
         this.chatClient = ChatClient.builder(openAiChatModel).build();
         this.objectMapper = objectMapper;
+        this.promptLoader = promptLoader;
     }
 
     /**
@@ -84,24 +88,11 @@ public class SessionFeedbackAgent {
                             item.getUserAnswer() != null ? item.getUserAnswer() : "(chưa trả lời)")));
         }
 
-        return String.format("""
-                Bạn là giáo viên tiếng Nhật. Viết nhận xét tổng kết phiên luyện tập.
-
-                Kết quả: %.1f/100 (%d câu đúng/%d câu)
-                %s
-
-                Trả về JSON THUẦN (không markdown):
-                {
-                  "summary": "nhận xét tổng quan 1-2 câu tiếng Việt",
-                  "strengths": ["điểm mạnh 1", "điểm mạnh 2"],
-                  "weaknesses": ["điểm cần cải thiện 1", "điểm cần cải thiện 2"],
-                  "nextLessonSuggestion": "gợi ý cho buổi học tiếp theo"
-                }
-                """,
-                score,
-                totalItems - wrongItems.size(),
-                totalItems,
-                wrongSummary);
+        return promptLoader.render("prompts/session-feedback-system.st", Map.of(
+                "score", String.format("%.1f", score),
+                "correctCount", String.valueOf(totalItems - wrongItems.size()),
+                "totalItems", String.valueOf(totalItems),
+                "wrongSummary", wrongSummary.toString()));
     }
 
     private String buildSimpleFeedback(double score) {

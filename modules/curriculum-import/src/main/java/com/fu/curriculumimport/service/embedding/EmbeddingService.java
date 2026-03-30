@@ -2,6 +2,7 @@ package com.fu.curriculumimport.service.embedding;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.course.repository.LessonRepository;
 import com.fu.curriculumimport.config.AgenticRagProperties;
 import com.fu.curriculumimport.entity.ImportChunk;
 import com.fu.curriculumimport.service.agent.ExtractionResult;
@@ -38,6 +39,7 @@ public class EmbeddingService {
     private final JdbcTemplate jdbcTemplate;
     private final AgenticRagProperties ragProperties;
     private final ObjectMapper objectMapper;
+    private final LessonRepository lessonRepository;
 
     /**
      * Retrieve RAG context by finding similar existing content.
@@ -108,6 +110,12 @@ public class EmbeddingService {
 
             String vectorStr = arrayToVectorString(embedding);
 
+            // Raise HNSW ef_search for this query to improve recall.
+            // Default ef_search=40 trades recall for speed; 100 gives ~99% recall
+            // with negligible latency increase at thousands-of-rows scale.
+            // Scoped to this transaction/connection — does not affect other queries.
+            jdbcTemplate.execute("SET LOCAL hnsw.ef_search = 100");
+
             // Build WHERE clause động theo filter
             StringBuilder where = new StringBuilder(
                     "WHERE 1 - (embedding <=> ?::vector) > ?");
@@ -116,15 +124,11 @@ public class EmbeddingService {
             params.add(vectorStr);   // ?#2 → WHERE  (embedding <=> ?::vector)
             params.add(filter.getSimilarityThreshold()); // ?#3 → WHERE > ?
 
-            // Filter theo lesson_id với fallback cho embeddings không có lesson_id.
-            // Ưu tiên: lesson_id khớp chính xác → course_id khớp + không có lesson_id (backward compat).
-            // Trường hợp 2 bao gồm các embedding cũ được tạo trước khi lesson_id được ghi vào metadata.
-            if (filter.getLessonId() != null && filter.getCourseId() != null) {
-                where.append(" AND (metadata->>'lesson_id' = ?"
-                        + " OR (metadata->>'course_id' = ? AND metadata->>'lesson_id' IS NULL))");
-                params.add(filter.getLessonId().toString());
-                params.add(filter.getCourseId().toString());
-            } else if (filter.getLessonId() != null) {
+            // Filter theo lesson_id / course_id.
+            // When lessonId is set: exact match only — the old "IS NULL fallback" returned ALL
+            // course embeddings that happened to lack a lesson_id, including content from other
+            // lessons, which poisoned lesson-scoped retrieval results.
+            if (filter.getLessonId() != null) {
                 where.append(" AND metadata->>'lesson_id' = ?");
                 params.add(filter.getLessonId().toString());
             } else if (filter.getCourseId() != null) {
@@ -202,6 +206,157 @@ public class EmbeddingService {
     }
 
     /**
+     * Vocabulary and grammar counts for a given lesson or course scope.
+     * Used by the COUNT query intent path to return exact numbers without hallucination.
+     */
+    public record ContentCount(int vocabularyCount, int grammarCount) {}
+
+    /**
+     * Count VOCABULARY and GRAMMAR embeddings in the given scope.
+     *
+     * Scope resolution (same as retrieval):
+     *   lessonId != null → count within that lesson
+     *   courseId != null → count within the entire course
+     *
+     * Note: counts embeddings, not DB entity rows, so a re-import with the same content_id
+     * does not inflate the count (ON CONFLICT deduplicates).
+     *
+     * @param courseId scope — course UUID
+     * @param lessonId scope — lesson UUID (null = entire course)
+     * @return ContentCount with vocabularyCount and grammarCount
+     */
+    public ContentCount countContent(UUID courseId, UUID lessonId) {
+        try {
+            ContentCount result = queryCount(courseId, lessonId);
+
+            // Fallback: if lessonId-scoped count returns 0 for both types, some embeddings
+            // may have been stored without lesson_id (common for GRAMMAR/VOCABULARY chunks
+            // that were processed before the lesson-id pipeline fix). In that case, fall
+            // back to course-level count so the user still gets a meaningful answer.
+            if (lessonId != null && result.vocabularyCount() == 0 && result.grammarCount() == 0) {
+                log.debug("countContent: lesson-scoped count returned 0 — falling back to course scope");
+                result = queryCount(courseId, null);
+            }
+
+            log.debug("countContent: vocab={}, grammar={} (lessonId={}, courseId={})",
+                    result.vocabularyCount(), result.grammarCount(), lessonId, courseId);
+            return result;
+
+        } catch (Exception e) {
+            log.warn("countContent failed: {}", e.getMessage());
+            return new ContentCount(0, 0);
+        }
+    }
+
+    /**
+     * Resolve a lesson UUID from its lesson number within a course.
+     *
+     * Uses the embedding metadata table (lesson_number + lesson_id columns written by
+     * embedLessonChunk) rather than querying learning_content.lessons directly, since
+     * chunks store the parsed "Bài N" number which maps directly to this field.
+     *
+     * @param courseId     the course to search within
+     * @param lessonNumber the 1-based lesson number (e.g. 2 for "Bài 2")
+     * @return the lesson UUID, or null if not found
+     */
+    public UUID resolveLessonByNumber(UUID courseId, int lessonNumber) {
+        if (courseId == null) return null;
+        try {
+            // Query the entity table directly — avoids returning stale lesson IDs from
+            // content_embeddings when multiple imports exist for the same course (old import
+            // embeddings linger until explicitly purged, causing non-deterministic LIMIT 1).
+            // ORDER BY createdAt DESC in the repo query returns the most recent active lesson.
+            List<com.fu.course.entity.Lesson> lessons =
+                    lessonRepository.findByCourseIdAndOrderIndexAndNotDeleted(courseId, lessonNumber);
+            if (!lessons.isEmpty()) {
+                return lessons.get(0).getId();
+            }
+        } catch (Exception e) {
+            log.warn("resolveLessonByNumber failed: courseId={} lessonNumber={}: {}",
+                    courseId, lessonNumber, e.getMessage());
+        }
+        return null;
+    }
+
+    private ContentCount queryCount(UUID courseId, UUID lessonId) {
+        StringBuilder where = new StringBuilder(
+                "WHERE content_type IN ('VOCABULARY', 'GRAMMAR')");
+        List<Object> params = new ArrayList<>();
+
+        if (lessonId != null) {
+            where.append(" AND metadata->>'lesson_id' = ?");
+            params.add(lessonId.toString());
+        } else if (courseId != null) {
+            where.append(" AND metadata->>'course_id' = ?");
+            params.add(courseId.toString());
+        }
+
+        String sql = "SELECT content_type, COUNT(*) AS cnt "
+                + "FROM progress.content_embeddings "
+                + where
+                + " GROUP BY content_type";
+
+        int vocab = 0, grammar = 0;
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, params.toArray());
+        for (var row : rows) {
+            String type = (String) row.get("content_type");
+            long cnt = ((Number) row.get("cnt")).longValue();
+            if ("VOCABULARY".equals(type)) vocab = (int) Math.min(cnt, Integer.MAX_VALUE);
+            else if ("GRAMMAR".equals(type)) grammar = (int) Math.min(cnt, Integer.MAX_VALUE);
+        }
+        return new ContentCount(vocab, grammar);
+    }
+
+    /**
+     * Bilingual retrieval: run two vector searches (original + translated query) and merge.
+     *
+     * Items are deduplicated by content_id; when the same item appears in both result sets
+     * the higher similarity score is kept. Final list is re-sorted by similarity desc and
+     * limited to {@code filter.topK}.
+     *
+     * This addresses the cross-lingual recall gap: Vietnamese user queries against
+     * Japanese-heavy curriculum chunks score only 0.40–0.50 without translation.
+     * Running a parallel Japanese-translated query recovers those chunks.
+     *
+     * @param query1 original user query (e.g. Vietnamese)
+     * @param query2 translated query (e.g. Japanese) — null/blank falls back to single query
+     * @param filter metadata filter (lesson, course, content types, jlpt level)
+     * @return merged RAG context sorted by similarity desc
+     */
+    public RagContext retrieveContextBilingual(String query1, String query2, ChatbotFilter filter) {
+        if (query2 == null || query2.isBlank() || query2.equals(query1)) {
+            return retrieveContext(query1, filter);
+        }
+
+        RagContext r1 = retrieveContext(query1, filter);
+        RagContext r2 = retrieveContext(query2, filter);
+
+        if (!r1.hasContext()) return r2;
+        if (!r2.hasContext()) return r1;
+
+        // Dedup by contentId, keeping the item with the highest similarity score
+        Map<UUID, RagContext.SimilarItem> merged = new LinkedHashMap<>();
+        for (RagContext.SimilarItem item : r1.getSimilarItems()) {
+            merged.put(item.getContentId(), item);
+        }
+        for (RagContext.SimilarItem item : r2.getSimilarItems()) {
+            merged.merge(item.getContentId(), item,
+                    (existing, incoming) -> existing.getSimilarity() >= incoming.getSimilarity()
+                            ? existing : incoming);
+        }
+
+        List<RagContext.SimilarItem> sorted = merged.values().stream()
+                .sorted(Comparator.comparingDouble(RagContext.SimilarItem::getSimilarity).reversed())
+                .limit(filter.getTopK())
+                .toList();
+
+        log.debug("Bilingual RAG: q1={} items, q2={} items → merged={} items (after dedup+limit)",
+                r1.getSimilarItems().size(), r2.getSimilarItems().size(), sorted.size());
+
+        return RagContext.builder().similarItems(sorted).build();
+    }
+
+    /**
      * Embed một ImportChunk vào content_embeddings để phục vụ chatbot RAG.
      * Chỉ nên gọi cho section_type: GRAMMAR_EXPLANATION, DIALOG, EXAMPLE.
      * Non-fatal: lỗi chỉ log warning, không throw exception.
@@ -238,7 +393,7 @@ public class EmbeddingService {
             Map<String, String> metadata = new HashMap<>();
             metadata.put("course_id", courseId != null ? courseId.toString() : "");
             if (lessonId != null) metadata.put("lesson_id", lessonId.toString());
-            metadata.put("jlpt_level", jlptLevel != null ? jlptLevel : "N5");
+            metadata.put("jlpt_level", jlptLevel);
             metadata.put("section_type", sectionType);
             if (chunk.getLessonNumber() != null)
                 metadata.put("lesson_number", chunk.getLessonNumber().toString());
@@ -320,7 +475,6 @@ public class EmbeddingService {
             List<String> batchTexts = texts.subList(batchStart, batchEnd);
 
             List<float[]> embeddings = generateEmbeddingsBatch(batchTexts);
-            if (embeddings == null) continue;
 
             for (int i = 0; i < embeddings.size(); i++) {
                 float[] embedding = embeddings.get(i);
@@ -333,7 +487,7 @@ public class EmbeddingService {
                                     .getBytes(StandardCharsets.UTF_8));
                     Map<String, String> metadata = new HashMap<>();
                     metadata.put("japaneseText", vocab.getJapaneseText());
-                    metadata.put("jlptLevel", vocab.getJlptLevel() != null ? vocab.getJlptLevel() : "N5");
+                    metadata.put("jlptLevel", vocab.getJlptLevel());
                     metadata.put("partOfSpeech", vocab.getPartOfSpeech() != null ? vocab.getPartOfSpeech() : "");
                     if (courseId != null) metadata.put("course_id", courseId.toString());
                     if (lessonId != null) metadata.put("lesson_id", lessonId.toString());
@@ -388,7 +542,6 @@ public class EmbeddingService {
             List<String> batchTexts = texts.subList(batchStart, batchEnd);
 
             List<float[]> embeddings = generateEmbeddingsBatch(batchTexts);
-            if (embeddings == null) continue;
 
             for (int i = 0; i < embeddings.size(); i++) {
                 float[] embedding = embeddings.get(i);
@@ -431,15 +584,21 @@ public class EmbeddingService {
 
             String vectorStr = arrayToVectorString(embedding);
 
+            // Preserve existing metadata on update — content_embeddings may already have
+            // course_id/lesson_id from the original import pipeline.  Using COALESCE ensures
+            // we never overwrite a populated metadata column with an empty object.
             jdbcTemplate.update(
                     """
                     INSERT INTO progress.content_embeddings
                         (id, content_type, content_id, embedding, text_content, metadata, chunk_index, import_id, token_count)
                     VALUES (uuid_generate_v4(), ?, ?, ?::vector, ?, '{}'::jsonb, 0, NULL, ?)
                     ON CONFLICT (content_type, content_id, chunk_index) DO UPDATE
-                    SET embedding = EXCLUDED.embedding,
+                    SET embedding    = EXCLUDED.embedding,
                         text_content = EXCLUDED.text_content,
-                        updated_at = CURRENT_TIMESTAMP
+                        metadata     = CASE WHEN content_embeddings.metadata = '{}'::jsonb
+                                            THEN EXCLUDED.metadata
+                                            ELSE content_embeddings.metadata END,
+                        updated_at   = CURRENT_TIMESTAMP
                     """,
                     contentType, entityId, vectorStr, richText, richText.length() / 4
             );

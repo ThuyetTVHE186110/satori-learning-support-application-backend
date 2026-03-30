@@ -12,6 +12,9 @@ import com.fu.curriculumimport.service.ingestion.OcrTextPreprocessor;
  * <p>Extracted from the agent so the class containing LLM-call logic stays concise.
  * All members are package-private static — no Spring dependency, fully testable without
  * application context.
+ *
+ * <p>Canonical prompt templates are also maintained in {@code prompts/grammar-extraction-system.st}
+ * and {@code prompts/grammar-extraction-per-section-system.st} for reference and future migration.
  */
 public final class GrammarPromptBuilder {
 

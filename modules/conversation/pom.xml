@@ -39,6 +39,13 @@
             <version>${spring-ai.version}</version>
         </dependency>
 
+        <!-- Spring AI RAG pipeline: RetrievalAugmentationAdvisor, DocumentRetriever,
+             TranslationQueryTransformer, CompressionQueryTransformer, ContextualQueryAugmenter -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-rag</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.mapstruct</groupId>
             <artifactId>mapstruct</artifactId>

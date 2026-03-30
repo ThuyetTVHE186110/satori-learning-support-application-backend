@@ -10,6 +10,7 @@ import com.fu.conversation.dto.response.ChatSessionResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -24,9 +25,11 @@ import java.util.UUID;
  * Base path: /api/v1/learner/curriculum-chat
  *
  * Endpoints:
+ *   GET    /sessions                     → Danh sách phiên chat
  *   POST   /sessions                     → Tạo phiên chat mới
  *   POST   /sessions/{id}/messages       → Gửi tin nhắn (chat)
  *   GET    /sessions/{id}/messages       → Lấy lịch sử chat
+ *   POST   /sessions/{id}/reopen        → Mở lại phiên chat đã đóng
  *   DELETE /sessions/{id}                → Đóng phiên chat
  */
 @RestController
@@ -84,6 +87,32 @@ public class CurriculumChatController {
         if (size > 100) size = 100; // Giới hạn tối đa 100 tin nhắn mỗi trang
         List<ChatHistoryItemResponse> history = chatService.getHistory(sessionId, userId, page, size);
         return ResponseEntity.ok(ApiResponse.success("Lấy lịch sử chat thành công.", history));
+    }
+
+    /**
+     * Danh sách tất cả phiên chat giáo trình của học viên (phân trang, mới nhất trước).
+     */
+    @GetMapping("/sessions")
+    public ResponseEntity<ApiResponse<Page<ChatSessionResponse>>> listSessions(
+            @AuthenticationPrincipal(expression = "id") UUID userId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+
+        if (size > 50) size = 50;
+        Page<ChatSessionResponse> sessions = chatService.listSessions(userId, page, size);
+        return ResponseEntity.ok(ApiResponse.success("Danh sách phiên chat.", sessions));
+    }
+
+    /**
+     * Mở lại phiên chat đã đóng để tiếp tục hội thoại.
+     */
+    @PostMapping("/sessions/{sessionId}/reopen")
+    public ResponseEntity<ApiResponse<ChatSessionResponse>> reopenSession(
+            @PathVariable UUID sessionId,
+            @AuthenticationPrincipal(expression = "id") UUID userId) {
+
+        ChatSessionResponse session = chatService.reopenSession(sessionId, userId);
+        return ResponseEntity.ok(ApiResponse.success("Đã mở lại phiên chat.", session));
     }
 
     /**

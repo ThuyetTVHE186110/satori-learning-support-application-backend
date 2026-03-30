@@ -2,12 +2,15 @@ package com.fu.practice.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.practice.entity.PracticeItem;
 import com.fu.practice.entity.PracticeItemType;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.stereotype.Service;
+
+import java.util.Map;
 
 /**
  * Agent đánh giá câu trả lời của học viên.
@@ -22,10 +25,13 @@ public class AnswerEvaluatorAgent {
 
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
+    private final PromptTemplateLoader promptLoader;
 
-    public AnswerEvaluatorAgent(OpenAiChatModel openAiChatModel, ObjectMapper objectMapper) {
+    public AnswerEvaluatorAgent(OpenAiChatModel openAiChatModel, ObjectMapper objectMapper,
+                                 PromptTemplateLoader promptLoader) {
         this.chatClient = ChatClient.builder(openAiChatModel).build();
         this.objectMapper = objectMapper;
+        this.promptLoader = promptLoader;
     }
 
     /**
@@ -72,25 +78,10 @@ public class AnswerEvaluatorAgent {
     }
 
     private String buildEvaluationPrompt(PracticeItem item, String userAnswer) {
-        return String.format("""
-                Bạn là giáo viên tiếng Nhật. Đánh giá câu trả lời của học viên.
-
-                Câu hỏi: %s
-                Đáp án mẫu: %s
-                Câu trả lời của học viên: %s
-
-                Quy tắc đánh giá:
-                - Chấp nhận câu trả lời nếu đúng về nghĩa, dù form chữ hoa/thường hoặc dấu câu nhẹ khác
-                - Với bài dịch: chấp nhận nếu nghĩa tương đương dù cách diễn đạt khác
-                - Với điền vào chỗ trống: cần đúng từ/cấu trúc ngữ pháp
-                - Với sắp xếp câu: cần đúng thứ tự
-
-                Trả về JSON THUẦN (không markdown):
-                {"isCorrect": true/false, "score": 0-100, "feedback": "nhận xét ngắn tiếng Việt", "correction": "câu/từ đúng nếu sai hoặc null"}
-                """,
-                item.getQuestion(),
-                item.getCorrectAnswer(),
-                userAnswer);
+        return promptLoader.render("prompts/answer-evaluator-system.st", Map.of(
+                "question", item.getQuestion(),
+                "correctAnswer", item.getCorrectAnswer(),
+                "userAnswer", userAnswer));
     }
 
     private EvaluationResult parseEvaluationResponse(String raw, PracticeItem item, String userAnswer) {
