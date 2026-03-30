@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -49,6 +50,9 @@ public class RagContext {
         private String contentType;
         private String textContent;
         private double similarity;
+        /** Parsed metadata từ JSONB: lesson_id, course_id, jlpt_level, lesson_title... */
+        @Builder.Default
+        private Map<String, String> metadata = Map.of();
     }
 
     /**
