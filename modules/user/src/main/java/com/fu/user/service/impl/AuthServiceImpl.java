@@ -207,8 +207,8 @@ public class AuthServiceImpl implements AuthService {
         log.info("Verify OTP for email: {}", request.getEmail());
 
         User user = userRepository.findActiveByEmail(request.getEmail())
-                .orElseThrow(() -> new BusinessException("INVALID_REQUEST",
-                        "Yêu cầu không hợp lệ"));
+                .orElseThrow(() -> new BusinessException("INVALID_OTP",
+                        "Mã OTP không hợp lệ"));
 
         // Verify OTP
         if (user.getPasswordResetToken() == null ||
