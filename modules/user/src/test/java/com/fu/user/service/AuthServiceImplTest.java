@@ -862,7 +862,62 @@ class AuthServiceImplTest {
             verify(userRepository, never()).save(any(User.class));
             verify(emailService, never()).sendPasswordChangedNotification(anyString(), anyString());
         }
+
+        // BR-63: logoutOtherDevices = true → revoke ALL sessions including current
+        @Test
+        @DisplayName("BR-63: Should revoke ALL sessions (incl. current) when logoutOtherDevices=true")
+        void shouldRevokeAllSessionsWhenLogoutOtherDevicesIsTrue() {
+            // Given
+            ChangePasswordRequest request = new ChangePasswordRequest();
+            request.setCurrentPassword("OldPassword123!");
+            request.setNewPassword("NewPassword456@");
+            request.setConfirmPassword("NewPassword456@");
+            request.setLogoutOtherDevices(true);
+
+            UUID currentSessionId = UUID.randomUUID();
+
+            given(userRepository.findById(userId)).willReturn(Optional.of(testUser));
+            given(passwordEncoder.matches("OldPassword123!", testUser.getPasswordHash())).willReturn(true);
+            given(passwordEncoder.matches("NewPassword456@", testUser.getPasswordHash())).willReturn(false);
+            given(passwordEncoder.encode("NewPassword456@")).willReturn("newHash");
+            given(userRepository.save(any(User.class))).willReturn(testUser);
+            doNothing().when(emailService).sendPasswordChangedNotification(anyString(), anyString());
+
+            // When
+            authService.changePassword(userId, request, currentSessionId);
+
+            // Then — phải gọi revokeALL (không dùng revokeOther)
+            verify(sessionRepository).revokeAllSessionsByUserId(eq(userId), any(LocalDateTime.class));
+            verify(sessionRepository, never()).revokeOtherSessionsByUserId(any(), any(), any());
+        }
+
+        // logoutOtherDevices = false → không revoke session nào
+        @Test
+        @DisplayName("Should NOT revoke any session when logoutOtherDevices=false")
+        void shouldNotRevokeSessionsWhenLogoutOtherDevicesIsFalse() {
+            // Given
+            ChangePasswordRequest request = new ChangePasswordRequest();
+            request.setCurrentPassword("OldPassword123!");
+            request.setNewPassword("NewPassword456@");
+            request.setConfirmPassword("NewPassword456@");
+            request.setLogoutOtherDevices(false);
+
+            given(userRepository.findById(userId)).willReturn(Optional.of(testUser));
+            given(passwordEncoder.matches("OldPassword123!", testUser.getPasswordHash())).willReturn(true);
+            given(passwordEncoder.matches("NewPassword456@", testUser.getPasswordHash())).willReturn(false);
+            given(passwordEncoder.encode("NewPassword456@")).willReturn("newHash");
+            given(userRepository.save(any(User.class))).willReturn(testUser);
+            doNothing().when(emailService).sendPasswordChangedNotification(anyString(), anyString());
+
+            // When
+            authService.changePassword(userId, request, UUID.randomUUID());
+
+            // Then — không revoke bất kỳ session nào
+            verify(sessionRepository, never()).revokeAllSessionsByUserId(any(), any());
+            verify(sessionRepository, never()).revokeOtherSessionsByUserId(any(), any(), any());
+        }
     }
+
 
     @Nested
     @DisplayName("UC-09: Google Authentication Tests")
