@@ -8,6 +8,6 @@ import com.fu.common.exception.BusinessException;
 public class CourseNameAlreadyExistsException extends BusinessException {
     
     public CourseNameAlreadyExistsException(String courseName) {
-        super("Course with name '" + courseName + "' already exists");
+        super("Khóa học với tên '" + courseName + "' đã tồn tại.");
     }
 }
