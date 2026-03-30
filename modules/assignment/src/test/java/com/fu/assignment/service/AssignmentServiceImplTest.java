@@ -981,7 +981,7 @@ class AssignmentServiceImplTest {
             Page<Assignment> page = new PageImpl<>(List.of(testQuizAssignment), pageable, 1);
             
             given(classMemberRepository.findActiveClassIdsByUserId(learnerId)).willReturn(List.of(classId));
-            given(assignmentRepository.findLearnerAssignmentsSorted(eq(learnerId), anyList(), nullable(String.class), nullable(String.class), eq(pageable))).willReturn(page);
+            given(assignmentRepository.findLearnerAssignmentsSorted(eq(learnerId), anyList(), nullable(String.class), nullable(String.class), nullable(String.class), eq(pageable))).willReturn(page);
             given(mapper.toLearnerSummaryResponse(any(Assignment.class))).willReturn(testLearnerSummaryResponse);
             
             UUID subId = UUID.randomUUID();
@@ -989,7 +989,7 @@ class AssignmentServiceImplTest {
             given(submissionRepository.findLatestStatusByAssignmentIdsAndUserId(anyList(), eq(learnerId))).willReturn(statuses);
 
             Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(
-                    learnerId, null, null, pageable);
+                    learnerId, null, null, null, pageable);
 
             assertThat(result.getTotalElements()).isEqualTo(1);
             LearnerAssignmentSummaryResponse r = result.getContent().get(0);
@@ -1004,12 +1004,12 @@ class AssignmentServiceImplTest {
             Page<Assignment> page = new PageImpl<>(List.of(testQuizAssignment), pageable, 1);
             
             given(classMemberRepository.findActiveClassIdsByUserId(learnerId)).willReturn(List.of(classId));
-            given(assignmentRepository.findLearnerAssignmentsSorted(eq(learnerId), anyList(), nullable(String.class), nullable(String.class), eq(pageable))).willReturn(page);
+            given(assignmentRepository.findLearnerAssignmentsSorted(eq(learnerId), anyList(), nullable(String.class), nullable(String.class), nullable(String.class), eq(pageable))).willReturn(page);
             given(mapper.toLearnerSummaryResponse(any(Assignment.class))).willReturn(testLearnerSummaryResponse);
             given(submissionRepository.findLatestStatusByAssignmentIdsAndUserId(anyList(), eq(learnerId))).willReturn(Collections.emptyList());
 
             Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(
-                    learnerId, null, null, pageable);
+                    learnerId, null, null, null, pageable);
 
             assertThat(result.getTotalElements()).isEqualTo(1);
             LearnerAssignmentSummaryResponse r = result.getContent().get(0);

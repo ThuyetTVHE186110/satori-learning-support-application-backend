@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -46,7 +47,7 @@ public class AuthServiceImpl implements AuthService {
 
     @Value("${app.security.otp-expiration-minutes:1}")
     private int otpExpirationMinutes;
-
+    private static final String EMAIL_REGEX = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$";
     private static final String OTP_CHARACTERS = "0123456789";
     private static final int OTP_LENGTH = 6;
     private static final int RESET_TOKEN_EXPIRATION_MINUTES = 5;
@@ -206,8 +207,8 @@ public class AuthServiceImpl implements AuthService {
         log.info("Verify OTP for email: {}", request.getEmail());
 
         User user = userRepository.findActiveByEmail(request.getEmail())
-                .orElseThrow(() -> new BusinessException("INVALID_REQUEST",
-                        "Yêu cầu không hợp lệ"));
+                .orElseThrow(() -> new BusinessException("INVALID_OTP",
+                        "Mã OTP không hợp lệ"));
 
         // Verify OTP
         if (user.getPasswordResetToken() == null ||
@@ -313,9 +314,9 @@ public class AuthServiceImpl implements AuthService {
         user.setLastPasswordChangeAt(LocalDateTime.now());
         userRepository.save(user);
 
-        // Revoke other sessions if requested
-        if (request.isLogoutOtherDevices() && currentSessionId != null) {
-            sessionRepository.revokeOtherSessionsByUserId(userId, currentSessionId, LocalDateTime.now());
+        // BR-63: Revoke ALL sessions (including current) when logoutOtherDevices = true
+        if (request.isLogoutOtherDevices()) {
+            sessionRepository.revokeAllSessionsByUserId(userId, LocalDateTime.now());
         }
 
         // Send password changed notification email
@@ -417,7 +418,7 @@ public class AuthServiceImpl implements AuthService {
     // ==================== Private Helper Methods ====================
 
     private LoginResponse createSessionAndGenerateTokens(User user, DeviceInfo deviceInfo,
-            String ipAddress, String userAgent) {
+                                                         String ipAddress, String userAgent) {
         // Detect device info from User-Agent and client-provided DeviceInfo
         // This properly distinguishes between Mobile App and Web Browser sessions
         Map<String, Object> detectedDeviceInfo = DeviceDetector.detectDevice(userAgent, deviceInfo);
