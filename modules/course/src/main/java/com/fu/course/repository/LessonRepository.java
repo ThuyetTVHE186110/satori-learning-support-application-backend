@@ -81,6 +81,9 @@ public interface LessonRepository extends JpaRepository<Lesson, UUID> {
     @Query("SELECT l FROM Lesson l WHERE l.importId = :importId AND LOWER(l.title) = LOWER(:title) AND l.deletedAt IS NULL")
     Optional<Lesson> findByImportIdAndTitleIgnoreCase(@Param("importId") UUID importId, @Param("title") String title);
 
+    @Query("SELECT l FROM Lesson l WHERE l.course.id = :courseId AND l.orderIndex = :orderIndex AND l.deletedAt IS NULL ORDER BY l.createdAt DESC")
+    List<Lesson> findByCourseIdAndOrderIndexAndNotDeleted(@Param("courseId") UUID courseId, @Param("orderIndex") int orderIndex);
+
     // ===== Exists checks =====
 
     boolean existsByTitleIgnoreCaseAndCourseId(String title, UUID courseId);

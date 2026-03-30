@@ -55,93 +55,100 @@ public class ScannedPdfIngestionService {
     /**
      * OCR-extract all pages of a scanned PDF and return structured chunks.
      *
+     * <p>Pipeline:
+     * <ol>
+     *   <li>Read raw PDF bytes (passed to Document AI as-is — no image conversion).</li>
+     *   <li>Render every page to JPEG with PDFBox (needed for Vision fallback and
+     *       vision-first Tier 2 extraction).</li>
+     *   <li>Single {@link OcrClient#extractTextBatch} call:
+     *       Document AI processes the full PDF in one request; Vision handles any
+     *       empty-result pages in batches.</li>
+     * </ol>
+     *
      * @param file validated scanned PDF MultipartFile
      * @return parsed document with page texts and overlapping text chunks
      */
     public DocumentParseResult parse(MultipartFile file) {
         log.info("Scanned-PDF ingestion start: {}", file.getOriginalFilename());
 
-        try (PDDocument document = Loader.loadPDF(new RandomAccessReadBuffer(file.getInputStream()))) {
+        byte[] pdfBytes;
+        try {
+            pdfBytes = file.getBytes();
+        } catch (IOException e) {
+            throw new InvalidImportFileException("Failed to read PDF bytes: " + e.getMessage());
+        }
+
+        try (PDDocument document = Loader.loadPDF(new RandomAccessReadBuffer(pdfBytes))) {
             int totalPages = document.getNumberOfPages();
             log.info("Rendering {} pages at {} DPI…", totalPages, ocrProps.getRenderDpi());
 
             PDFRenderer renderer = new PDFRenderer(document);
-            // Pre-sized array so batch results can be stored at the correct page index.
-            String[] pageTextArray = new String[totalPages];
-            Arrays.fill(pageTextArray, "");
-            StringBuilder fullText = new StringBuilder();
-            int totalLinesOcrd = 0;
-            // 0-based page index → structured table rows from OCR (may be empty for most pages)
-            Map<Integer, List<String>> pageTableRows = new HashMap<>();
-
             int renderFailures = 0;
-            int batchSize = ocrProps.getGoogleVisionBatchSize();
 
-            // Retain JPEG bytes per page for vision-first extraction (Tier 2).
+            // Retain JPEG bytes per page for Vision fallback (Tier 1) and
+            // vision-first extraction (Tier 2).
+            // null entries mark pages that failed to render.
             // Memory estimate: 200 pages × ~400 KB JPEG ≈ 80 MB — acceptable for typical textbooks.
+            List<byte[]> allJpegs = new ArrayList<>(totalPages);
             Map<Integer, byte[]> pageImageMap = new HashMap<>();
 
-            // Accumulate JPEG-encoded pages for the current batch.
-            // Pages are encoded to JPEG immediately after rendering so the large
-            // raw BufferedImage can be flushed before the next render, keeping
-            // heap usage to O(batchSize × JPEG_size) ≈ O(batchSize × 300 KB).
-            List<byte[]> batchJpeg   = new ArrayList<>(batchSize);
-            List<Integer> batchPages = new ArrayList<>(batchSize); // 0-based page indices
-
+            // ── Step 1: Render all pages ───────────────────────────────────────
             for (int i = 0; i < totalPages; i++) {
                 BufferedImage pageImage = null;
                 try {
                     pageImage = renderer.renderImageWithDPI(
                             i, ocrProps.getRenderDpi(), ImageType.RGB);
-                    // Encode to JPEG right away so we can flush the raw image.
                     byte[] jpeg = encodeToJpeg(pageImage);
-                    batchJpeg.add(jpeg);
-                    batchPages.add(i);
-                    pageImageMap.put(i, jpeg);  // retain for vision extraction
+                    allJpegs.add(jpeg);
+                    pageImageMap.put(i, jpeg);
                 } catch (Exception e) {
                     log.warn("Page {} render/encode failed ({}), skipping", i + 1, e.getMessage());
+                    allJpegs.add(null); // placeholder — OcrClient skips null entries
                     renderFailures++;
                 } finally {
                     // A4 @ 300 DPI ≈ 25 MB per BufferedImage — flush immediately after JPEG encode.
                     if (pageImage != null) pageImage.flush();
                 }
-
-                boolean lastPage = (i == totalPages - 1);
-                if (batchJpeg.size() == batchSize || (lastPage && !batchJpeg.isEmpty())) {
-                    List<OcrTextResult> ocrResults = ocrClient.extractTextBatch(batchJpeg);
-                    for (int j = 0; j < ocrResults.size(); j++) {
-                        int pageIdx = batchPages.get(j);
-                        OcrTextResult ocr = ocrResults.get(j);
-                        if (!ocr.hasText()) {
-                            log.warn("Page {} OCR produced no text (conf={})", pageIdx + 1, ocr.confidence());
-                        } else {
-                            if (ocr.confidence() < ocrProps.getMinConfidence()) {
-                                log.warn("Page {} low OCR confidence: {}", pageIdx + 1, ocr.confidence());
-                            }
-                            String normalizedText = FuriganaNormalizer.normalize(ocr.text());
-                            String cleanedText    = OcrTextPreprocessor.cleanOcrPage(normalizedText);
-                            pageTextArray[pageIdx] = cleanedText;
-                            fullText.append(cleanedText).append("\n\n");
-                            totalLinesOcrd += cleanedText.split("\n").length;
-                            if (ocr.hasTableData()) {
-                                pageTableRows.put(pageIdx, ocr.structuredTableRows());
-                            }
-                        }
-                    }
-                    batchJpeg.clear();
-                    batchPages.clear();
-                    // Hint GC to reclaim flushed BufferedImage from this batch.
-                    // JPEG bytes are still referenced by pageImageMap — do not null them.
-                    System.gc();
-                    log.debug("Batch OCR done: pages up to {} of {}", i + 1, totalPages);
-                }
             }
-
-            List<String> pageTexts = Arrays.asList(pageTextArray);
 
             if (renderFailures > 0) {
                 log.warn("{} of {} pages failed to render (missing image codecs?)",
                         renderFailures, totalPages);
+            }
+
+            // ── Step 2: OCR all pages in one call ─────────────────────────────
+            // Document AI receives the full PDF (one API call); Vision handles
+            // fallback pages internally in batches.
+            List<OcrTextResult> ocrResults = ocrClient.extractTextBatch(allJpegs, pdfBytes);
+
+            // ── Step 3: Collect results ────────────────────────────────────────
+            String[] pageTextArray = new String[totalPages];
+            Arrays.fill(pageTextArray, "");
+            StringBuilder fullText = new StringBuilder();
+            int totalLinesOcrd = 0;
+            Map<Integer, List<String>> pageTableRows = new HashMap<>();
+            Map<Integer, String> pageSectionHints = new HashMap<>();
+
+            for (int i = 0; i < ocrResults.size(); i++) {
+                OcrTextResult ocr = ocrResults.get(i);
+                if (!ocr.hasText()) {
+                    log.warn("Page {} OCR produced no text (conf={})", i + 1, ocr.confidence());
+                } else {
+                    if (ocr.confidence() < ocrProps.getMinConfidence()) {
+                        log.warn("Page {} low OCR confidence: {}", i + 1, ocr.confidence());
+                    }
+                    String normalizedText = FuriganaNormalizer.normalize(ocr.text());
+                    String cleanedText    = OcrTextPreprocessor.cleanOcrPage(normalizedText);
+                    pageTextArray[i] = cleanedText;
+                    fullText.append(cleanedText).append("\n\n");
+                    totalLinesOcrd += cleanedText.split("\n").length;
+                    if (ocr.hasTableData()) {
+                        pageTableRows.put(i, ocr.structuredTableRows());
+                    }
+                    if (ocr.hasSectionHint()) {
+                        pageSectionHints.put(i, ocr.sectionHint());
+                    }
+                }
             }
 
             if (fullText.isEmpty()) {
@@ -150,7 +157,8 @@ public class ScannedPdfIngestionService {
                                 + "Please check if the OCR service is running and the file is readable.");
             }
 
-            List<DocumentChunk> chunks = createChunks(pageTexts, pageTableRows, pageImageMap);
+            List<String> pageTexts = Arrays.asList(pageTextArray);
+            List<DocumentChunk> chunks = createChunks(pageTexts, pageTableRows, pageImageMap, pageSectionHints);
             log.info("Scanned-PDF ingestion done: {} pages, {} OCR lines, {} chunks",
                     totalPages, totalLinesOcrd, chunks.size());
 
@@ -182,13 +190,16 @@ public class ScannedPdfIngestionService {
      *   <li><b>Character-based fallback</b>: sliding-window when no lesson markers found.</li>
      * </ol>
      *
-     * @param pageTableRows 0-based page index → table rows from OCR (propagated to VOCABULARY chunks)
-     * @param pageImageMap  0-based page index → JPEG bytes (propagated to VOCABULARY + GRAMMAR chunks)
+     * @param pageTableRows    0-based page index → table rows from OCR (propagated to VOCABULARY chunks)
+     * @param pageImageMap     0-based page index → JPEG bytes (propagated to VOCABULARY + GRAMMAR chunks)
+     * @param pageSectionHints 0-based page index → MnN section type from Document AI layout blocks
      */
     private List<DocumentChunk> createChunks(List<String> pageTexts,
                                               Map<Integer, List<String>> pageTableRows,
-                                              Map<Integer, byte[]> pageImageMap) {
+                                              Map<Integer, byte[]> pageImageMap,
+                                              Map<Integer, String> pageSectionHints) {
         LinkedHashMap<Integer, Integer> boundaries = LessonBoundaryDetector.detectBoundaries(pageTexts);
+
         if (!boundaries.isEmpty()) {
             List<DocumentChunk> lessonChunks = LessonBoundaryDetector.createLessonChunks(
                     pageTexts, boundaries, "SCANNED");
@@ -203,6 +214,11 @@ public class ScannedPdfIngestionService {
 
             // Propagate page images to VOCABULARY + GRAMMAR chunks for vision-first extraction (Tier 2)
             propagatePageImages(sectionChunks, pageImageMap);
+
+            // Apply Document AI layout section hints to UNKNOWN chunks
+            if (!pageSectionHints.isEmpty()) {
+                applySectionHints(sectionChunks, pageSectionHints);
+            }
 
             log.info("Layer 2 (section-aware, scanned): {} lesson chunks → {} section chunks",
                     lessonChunks.size(), sectionChunks.size());
@@ -268,6 +284,46 @@ public class ScannedPdfIngestionService {
                         images.size(), sectionType, chunk.getChunkIndex(),
                         chunk.getPageStart(), chunk.getPageEnd());
             }
+        }
+    }
+
+    /**
+     * Apply Document AI layout section hints to UNKNOWN section chunks.
+     *
+     * <p>When MnNSectionSplitter cannot detect a section type from OCR text
+     * (returns UNKNOWN), the Document AI layout block analysis may still know
+     * the content type from structural signals like heading text or table presence.
+     * This method overrides UNKNOWN sectionTypes with the dominant hint for that
+     * chunk's page range.
+     *
+     * @param pageSectionHints 0-based page index → section type from Document AI
+     */
+    private void applySectionHints(List<DocumentChunk> chunks,
+                                    Map<Integer, String> pageSectionHints) {
+        int applied = 0;
+        for (DocumentChunk chunk : chunks) {
+            if (!MnNSectionSplitter.UNKNOWN.equals(chunk.getSectionType())
+                    && chunk.getSectionType() != null) {
+                continue; // MnNSectionSplitter already classified this chunk
+            }
+            // Find the dominant section hint across this chunk's page range (0-based)
+            String dominantHint = null;
+            for (int p = chunk.getPageStart(); p <= chunk.getPageEnd(); p++) {
+                String hint = pageSectionHints.get(p - 1); // convert to 0-based
+                if (hint != null) {
+                    dominantHint = hint; // last non-null hint wins (page order = content order)
+                }
+            }
+            if (dominantHint != null) {
+                chunk.setSectionType(dominantHint);
+                applied++;
+                log.debug("Applied Document AI section hint '{}' to UNKNOWN chunk {} (pages {}-{})",
+                        dominantHint, chunk.getChunkIndex(),
+                        chunk.getPageStart(), chunk.getPageEnd());
+            }
+        }
+        if (applied > 0) {
+            log.info("Document AI section hints applied to {} UNKNOWN chunks", applied);
         }
     }
 

@@ -121,8 +121,11 @@ public class ImportRetryScheduler {
                     .findByStatusOrderByQueuedAtAsc(status);
 
             for (CurriculumImport imp : imports) {
+                // Use configurable threshold to avoid false-positive retries on large imports.
+                // A 200-page document (OCR + AI) can legitimately run for 80+ minutes.
+                int thresholdMinutes = ragProperties.getStuckImportThresholdMinutes();
                 if (imp.getStartedAt() != null &&
-                        imp.getStartedAt().plusMinutes(30).isBefore(LocalDateTime.now())) {
+                        imp.getStartedAt().plusMinutes(thresholdMinutes).isBefore(LocalDateTime.now())) {
 
                     if (imp.getRetryCount() < imp.getMaxRetries()) {
                         log.warn("Import {} stuck in {} since {} — re-queuing for retry (attempt #{})",

@@ -2,7 +2,7 @@ package com.fu.roleplay.ai;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fu.roleplay.dto.entity.SessionMission;
+import com.fu.roleplay.entity.SessionMission;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
