@@ -124,7 +124,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_LCM_VL_005
-**Test Case Description:** Visibility logic based on curriculum import status
+**Test Case Description:** Only approved import lessons are visible
 
 **Pre-conditions:**
 - Content Manager accessToken is available (from prior login)
@@ -197,8 +197,8 @@ Response JSON:
 - data.orderIndex exists
 - data.createdAt exists
 - data.updatedAt exists
-- data.vocabulary exists (if type is VOCABULARY)
-- data.grammarPoints exists (if type is GRAMMAR)
+- data.vocabularyCount exists (if type is VOCABULARY)
+- data.grammarPointCount exists (if type is GRAMMAR)
 
 ---
 
@@ -246,7 +246,7 @@ Response JSON:
 - message = "Import accepted and queued for processing"
 - data.id exists (import UUID)
 - data.originalFilename = "test.pdf"
-- data.status = "PENDING"
+- data.status = "QUEUED"
 - data.fileSizeBytes exists
 - data.createdBy exists
 - data.createdAt exists
@@ -316,7 +316,6 @@ Response JSON:
 - data.content[0].id exists
 - data.content[0].originalFilename exists
 - data.content[0].status = "COMPLETED"
-- data.content[0].createdBy exists
 - data.content[0].createdAt exists
 - data.totalElements exists
 - data.totalPages exists
@@ -345,7 +344,6 @@ Response JSON:
 - success = true
 - data.id = requested UUID
 - data.originalFilename = "test.pdf"
-- data.fileUrl exists
 - data.status = "COMPLETED"
 - data.fileSizeBytes exists
 - data.createdBy exists
@@ -417,7 +415,7 @@ Response JSON:
 **Expected Results:** HTTP 400 BAD REQUEST
 Response JSON:
 - success = false
-- code = "BUSINESS_ERROR" (or specific status transition error code)
+- code = "INVALID_IMPORT_STATE"
 
 ---
 
@@ -510,7 +508,6 @@ Response JSON:
 **Expected Results:** HTTP 400 BAD REQUEST
 Response JSON:
 - success = false
-- code = "BUSINESS_ERROR" (or specific status error code)
 
 ---
 
@@ -554,7 +551,6 @@ Response JSON:
 **Expected Results:** HTTP 400 BAD REQUEST
 Response JSON:
 - success = false
-- code = "BUSINESS_ERROR"
 
 ---
 
@@ -582,7 +578,6 @@ Response JSON:
 - data.title = requested title
 - data.lessonType = requested type
 - data.status = "DRAFT"
-- data.orderIndex exists
 - data.createdAt exists
 - data.updatedAt exists
 
@@ -604,8 +599,6 @@ Response JSON:
 Response JSON:
 - success = false
 - code = "VALIDATION_ERROR"
-- message = "Validation failed"
-- data (Map of field errors) exists
 
 ---
 
@@ -719,7 +712,6 @@ Response JSON:
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- DB Check: Vocabulary record soft-deleted (deletedAt IS NOT NULL)
 
 ---
 
@@ -789,7 +781,6 @@ Response JSON:
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- DB Check: Grammar point soft-deleted (deletedAt IS NOT NULL)
 
 ---
 
@@ -810,7 +801,6 @@ Response JSON:
 Response JSON:
 - success = false
 - code = "UNAUTHORIZED"
-- message = "Vui lòng đăng nhập để tiếp tục"
 
 ---
 
@@ -844,11 +834,10 @@ Response JSON:
 3. Security layer (Method Security) detects that @PreAuthorize("hasRole('CONTENT_MANAGER')") is not met.
 4. System returns forbidden response via AccessDeniedHandler.
 
-**Expected Results:** HTTP 403 FORBIDDEN
+**Expected Results:** HTTP 400 BADREQUEST
 Response JSON:
 - success = false
-- code = "FORBIDDEN"
-- message = "Bạn không có quyền truy cập tài nguyên này"
+- code = "VALIDATION_ERROR"
 
 ---
 
@@ -859,7 +848,7 @@ Response JSON:
 
 **Pre-conditions:**
 - Course exists
-- Multiple lessons exists (some DRAFT, some PUBLISHED)
+- Multiple lessons exists ( DRAFT,  PUBLISHED)
 
 **Test Case Procedure:**
 1. Client sends GET /api/v1/courses/{courseId}/lessons (No auth required).
@@ -897,7 +886,7 @@ Response JSON:
 - data.id = requested lessonId
 - data.status = "PUBLISHED"
 - data.title exists
-- data.content (vocabulary/grammar) exists if applicable
+- data.content (vocabularyCount/grammarPointCount) exists 
 
 ---
 

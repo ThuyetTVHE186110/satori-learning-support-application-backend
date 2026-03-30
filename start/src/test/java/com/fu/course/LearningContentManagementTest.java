@@ -147,12 +147,24 @@ class LearningContentManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("N5 Course");
-            saveLesson(course, "Lesson 1", Lesson.LessonType.VOCABULARY, 0);
+            Lesson savedLesson = saveLesson(course, "Lesson 1", Lesson.LessonType.VOCABULARY, 0);
 
             mockMvc.perform(get("/api/v1/manager/lessons").param("courseId", course.getId().toString()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.content.length()").value(1));
+                    .andExpect(jsonPath("$.message").exists())
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andExpect(jsonPath("$.data.content[0].id").exists())
+                    .andExpect(jsonPath("$.data.content[0].id").value(savedLesson.getId().toString()))
+                    .andExpect(jsonPath("$.data.content[0].title").value("Lesson 1"))
+                    .andExpect(jsonPath("$.data.content[0].lessonType").value("VOCABULARY"))
+                    .andExpect(jsonPath("$.data.content[0].status").value("DRAFT"))
+                    .andExpect(jsonPath("$.data.content[0].orderIndex").value(0))
+                    .andExpect(jsonPath("$.data.totalElements").value(1))
+                    .andExpect(jsonPath("$.data.totalPages").value(1))
+                    .andExpect(jsonPath("$.data.pageNumber").value(0))
+                    .andExpect(jsonPath("$.data.pageSize").value(10))
+                    .andExpect(jsonPath("$.data.last").value(true));
         }
 
         @Test
@@ -182,7 +194,9 @@ class LearningContentManagementTest {
 
             mockMvc.perform(get("/api/v1/manager/lessons").param("courseId", course.getId().toString()).param("status", "PUBLISHED").header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true));
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andExpect(jsonPath("$.data.content[*].status").value("PUBLISHED"));
         }
 
         @Test
@@ -218,7 +232,9 @@ class LearningContentManagementTest {
 
             mockMvc.perform(get("/api/v1/manager/lessons").param("courseId", course.getId().toString()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true));
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
+                    .andExpect(jsonPath("$.data.content[0].title").value("Completed Lesson"));
         }
 
         @Test
@@ -249,7 +265,20 @@ class LearningContentManagementTest {
             mockMvc.perform(get("/api/v1/manager/lessons/{id}", lesson.getId()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.id").value(lesson.getId().toString()));
+                    .andExpect(jsonPath("$.data.id").value(lesson.getId().toString()))
+                    .andExpect(jsonPath("$.data.courseId").exists())
+                    .andExpect(jsonPath("$.data.courseId").value(course.getId().toString()))
+                    .andExpect(jsonPath("$.data.title").value("Detail Lesson"))
+                    .andExpect(jsonPath("$.data.lessonType").exists())
+                    .andExpect(jsonPath("$.data.lessonType").value("VOCABULARY"))
+                    .andExpect(jsonPath("$.data.status").exists())
+                    .andExpect(jsonPath("$.data.status").value("DRAFT"))
+                    .andExpect(jsonPath("$.data.orderIndex").exists())
+                    .andExpect(jsonPath("$.data.orderIndex").value(0))
+                    .andExpect(jsonPath("$.data.createdAt").exists())
+                    .andExpect(jsonPath("$.data.updatedAt").exists())
+                    .andExpect(jsonPath("$.data.vocabularyCount").exists())
+                    .andExpect(jsonPath("$.data.grammarPointCount").exists());
         }
 
         @Test
@@ -279,7 +308,13 @@ class LearningContentManagementTest {
             mockMvc.perform(multipart("/api/v1/manager/curriculum-imports").file(pdf).header("Authorization", "Bearer " + token))
                     .andExpect(status().isAccepted())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.id").isNotEmpty());
+                    .andExpect(jsonPath("$.message").value("Import accepted and queued for processing"))
+                    .andExpect(jsonPath("$.data.id").exists())
+                    .andExpect(jsonPath("$.data.originalFilename").value("test.pdf"))
+                    .andExpect(jsonPath("$.data.status").value("QUEUED"))
+                    .andExpect(jsonPath("$.data.fileSizeBytes").exists())
+                    .andExpect(jsonPath("$.data.createdBy").exists())
+                    .andExpect(jsonPath("$.data.createdAt").exists());
         }
 
         @Test
@@ -293,7 +328,8 @@ class LearningContentManagementTest {
             mockMvc.perform(multipart("/api/v1/manager/curriculum-imports").file(txt).header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("INVALID_FILE"));
+                    .andExpect(jsonPath("$.code").value("INVALID_FILE"))
+                    .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Chỉ chấp nhận các tệp PDF và PPTX. Loại MIME nhận được: text/plain, tên tệp: test.txt")));
         }
 
         @Test
@@ -326,7 +362,15 @@ class LearningContentManagementTest {
             mockMvc.perform(get("/api/v1/manager/curriculum-imports").header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.content").isArray());
+                    .andExpect(jsonPath("$.data.content").isArray())
+                    .andExpect(jsonPath("$.data.content[0].id").exists())
+                    .andExpect(jsonPath("$.data.content[0].originalFilename").exists())
+                    .andExpect(jsonPath("$.data.content[0].status").value("COMPLETED"))
+                    .andExpect(jsonPath("$.data.content[0].createdAt").exists())
+                    .andExpect(jsonPath("$.data.totalElements").exists())
+                    .andExpect(jsonPath("$.data.totalPages").exists())
+                    .andExpect(jsonPath("$.data.pageNumber").value(0))
+                    .andExpect(jsonPath("$.data.pageSize").value(10));
         }
 
         @Test
@@ -339,7 +383,13 @@ class LearningContentManagementTest {
             mockMvc.perform(get("/api/v1/manager/curriculum-imports/{id}", ci.getId()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.id").value(ci.getId().toString()));
+                    .andExpect(jsonPath("$.data.id").value(ci.getId().toString()))
+                    .andExpect(jsonPath("$.data.originalFilename").value("test.pdf"))
+                    .andExpect(jsonPath("$.data.status").value("COMPLETED"))
+                    .andExpect(jsonPath("$.data.fileSizeBytes").exists())
+                    .andExpect(jsonPath("$.data.createdBy").exists())
+                    .andExpect(jsonPath("$.data.createdAt").exists())
+                    .andExpect(jsonPath("$.data.updatedAt").exists());
         }
 
         @Test
@@ -367,7 +417,9 @@ class LearningContentManagementTest {
 
             mockMvc.perform(post("/api/v1/manager/curriculum-imports/{id}/approve", ci.getId()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true));
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.id").value(ci.getId().toString()))
+                    .andExpect(jsonPath("$.data.status").value("COMPLETED"));
                     
             CurriculumImport updated = curriculumImportRepository.findById(ci.getId()).orElseThrow();
             assertThat(updated.getStatus()).isEqualTo(ImportStatus.COMPLETED);
@@ -382,7 +434,9 @@ class LearningContentManagementTest {
 
             mockMvc.perform(post("/api/v1/manager/curriculum-imports/{id}/approve", ci.getId()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false));
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("INVALID_IMPORT_STATE"));
+            ;
         }
 
         @Test
@@ -396,7 +450,9 @@ class LearningContentManagementTest {
 
             mockMvc.perform(post("/api/v1/manager/curriculum-imports/{id}/rollback", ci.getId()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true));
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.id").value(ci.getId().toString()))
+                    .andExpect(jsonPath("$.data.status").value("ROLLED_BACK"));
 
             CurriculumImport updated = curriculumImportRepository.findById(ci.getId()).orElseThrow();
             assertThat(updated.getStatus()).isEqualTo(ImportStatus.ROLLED_BACK);
@@ -429,7 +485,10 @@ class LearningContentManagementTest {
 
             mockMvc.perform(patch("/api/v1/manager/lessons/{id}/publish", lesson.getId()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true));
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.id").value(lesson.getId().toString()))
+                    .andExpect(jsonPath("$.data.status").value("PUBLISHED"))
+                    .andExpect(jsonPath("$.data.updatedAt").exists());
                     
             Lesson updated = lessonRepository.findById(lesson.getId()).orElseThrow();
             assertThat(updated.getStatus()).isEqualTo(Lesson.ContentStatus.PUBLISHED);
@@ -458,7 +517,9 @@ class LearningContentManagementTest {
 
             mockMvc.perform(patch("/api/v1/manager/lessons/{id}/archive", lesson.getId()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true));
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.id").value(lesson.getId().toString()))
+                    .andExpect(jsonPath("$.data.status").value("ARCHIVED"));
                     
             Lesson updated = lessonRepository.findById(lesson.getId()).orElseThrow();
             assertThat(updated.getStatus()).isEqualTo(Lesson.ContentStatus.ARCHIVED);
@@ -493,7 +554,13 @@ class LearningContentManagementTest {
             mockMvc.perform(post("/api/v1/manager/lessons").contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.title").value("New Lesson"));
+                    .andExpect(jsonPath("$.data.id").exists())
+                    .andExpect(jsonPath("$.data.courseId").value(course.getId().toString()))
+                    .andExpect(jsonPath("$.data.title").value("New Lesson"))
+                    .andExpect(jsonPath("$.data.lessonType").value("VOCABULARY"))
+                    .andExpect(jsonPath("$.data.status").value("DRAFT"))
+                    .andExpect(jsonPath("$.data.createdAt").exists())
+                    .andExpect(jsonPath("$.data.updatedAt").exists());
         }
 
         @Test
@@ -523,7 +590,9 @@ class LearningContentManagementTest {
             mockMvc.perform(put("/api/v1/manager/lessons/{id}", lesson.getId()).contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.title").value("Updated Name"));
+                    .andExpect(jsonPath("$.data.id").value(lesson.getId().toString()))
+                    .andExpect(jsonPath("$.data.title").value("Updated Name"))
+                    .andExpect(jsonPath("$.data.updatedAt").exists());
         }
 
         @Test
@@ -555,7 +624,12 @@ class LearningContentManagementTest {
 
             mockMvc.perform(post("/api/v1/manager/vocabulary").characterEncoding("UTF-8").contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
-                    .andExpect(jsonPath("$.success").value(true));
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.id").exists())
+                    .andExpect(jsonPath("$.data.japaneseText").value("猫"))
+                    .andExpect(jsonPath("$.data.jlptLevel").value("N5"))
+                    .andExpect(jsonPath("$.data.meaningVi").value("Con mèo"))
+                    .andExpect(jsonPath("$.data.createdAt").exists());
         }
 
         @Test
@@ -570,7 +644,9 @@ class LearningContentManagementTest {
             mockMvc.perform(put("/api/v1/manager/vocabulary/{id}", v.getId()).characterEncoding("UTF-8").contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.meaningVi").value("Con mèo"));
+                    .andExpect(jsonPath("$.data.id").value(v.getId().toString()))
+                    .andExpect(jsonPath("$.data.meaningVi").value("Con mèo"))
+                    .andExpect(jsonPath("$.data.updatedAt").exists());
         }
 
         @Test
@@ -599,7 +675,12 @@ class LearningContentManagementTest {
 
             mockMvc.perform(post("/api/v1/manager/grammar-points").characterEncoding("UTF-8").contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
-                    .andExpect(jsonPath("$.success").value(true));
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.id").exists())
+                    .andExpect(jsonPath("$.data.pattern").value("〜てから"))
+                    .andExpect(jsonPath("$.data.jlptLevel").value("N4"))
+                    .andExpect(jsonPath("$.data.meaningVi").value("Sau khi..."))
+                    .andExpect(jsonPath("$.data.createdAt").exists());
         }
 
         @Test
@@ -614,7 +695,9 @@ class LearningContentManagementTest {
             mockMvc.perform(put("/api/v1/manager/grammar-points/{id}", gp.getId()).characterEncoding("UTF-8").contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.meaningVi").value("Sau khi..."));
+                    .andExpect(jsonPath("$.data.id").value(gp.getId().toString()))
+                    .andExpect(jsonPath("$.data.meaningVi").value("Sau khi..."))
+                    .andExpect(jsonPath("$.data.updatedAt").exists());
         }
 
         @Test
@@ -678,8 +761,12 @@ class LearningContentManagementTest {
             mockMvc.perform(get("/api/v1/courses/{id}/lessons", course.getId()))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.length()").value(1))
-                    .andExpect(jsonPath("$.data[0].title").value("Published"));
+                    .andExpect(jsonPath("$.data").isArray())
+                    .andExpect(jsonPath("$.data[*].status").value("PUBLISHED"))
+                    .andExpect(jsonPath("$.data[0].id").exists())
+                    .andExpect(jsonPath("$.data[0].title").exists())
+                    .andExpect(jsonPath("$.data[0].lessonType").exists())
+                    .andExpect(jsonPath("$.data[0].orderIndex").exists());
         }
 
         @Test
@@ -691,7 +778,11 @@ class LearningContentManagementTest {
             mockMvc.perform(get("/api/v1/courses/{courseId}/lessons/{lessonId}", course.getId(), lesson.getId()))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.id").value(lesson.getId().toString()));
+                    .andExpect(jsonPath("$.data.id").value(lesson.getId().toString()))
+                    .andExpect(jsonPath("$.data.status").value("PUBLISHED"))
+                    .andExpect(jsonPath("$.data.title").exists())
+                    .andExpect(jsonPath("$.data.vocabularyCount").exists())
+                    .andExpect(jsonPath("$.data.grammarPointCount").exists());
         }
 
         @Test
