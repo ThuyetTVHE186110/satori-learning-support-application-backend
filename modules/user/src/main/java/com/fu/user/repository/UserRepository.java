@@ -185,6 +185,7 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
             LIMIT 1
             """, nativeQuery = true)
     java.util.List<Object[]> findActiveEnrollment(@Param("userId") UUID userId);
+    
     @Query("SELECT u FROM User u WHERE u.email = :email AND u.deletedAt IS NULL")
     Optional<User> findByEmailAndNotDeleted(@Param("email") String email);
 }
