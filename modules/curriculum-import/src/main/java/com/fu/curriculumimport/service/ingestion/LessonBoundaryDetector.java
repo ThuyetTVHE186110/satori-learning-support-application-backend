@@ -44,9 +44,10 @@ public final class LessonBoundaryDetector {
 
     /**
      * Minimum number of distinct lesson numbers needed to activate lesson-aware chunking.
-     * Lowered to 2 so short documents (e.g. a sample chapter) still get lesson-aware chunking.
+     * Set to 1 so even single-lesson PDFs (e.g. "Bài 1" only) get lesson-aware chunking
+     * instead of falling back to character-based chunking with no lesson structure.
      */
-    private static final int MIN_LESSONS_TO_ACTIVATE = 2;
+    private static final int MIN_LESSONS_TO_ACTIVATE = 1;
 
     /**
      * Matches lines containing a lesson header.
@@ -74,7 +75,7 @@ public final class LessonBoundaryDetector {
      */
     private static final Pattern LESSON_PATTERN = Pattern.compile(
             "(?imu)" +                                        // case-insensitive + multiline + unicode-case
-            "(?:^|\\n)[ \\t]*" +                             // start of line (with optional indent)
+            "(?:^|\\n)[ \\t#]*" +                            // start of line (with optional indent + markdown headers)
             "(?:" +
               // Vietnamese: standard Bài + OCR-confused accent variants + i/l/1 confusion
               "b[\\u00e0\\u00e1\\u1ea3\\u00e3\\u1ea1a4][il1]" +

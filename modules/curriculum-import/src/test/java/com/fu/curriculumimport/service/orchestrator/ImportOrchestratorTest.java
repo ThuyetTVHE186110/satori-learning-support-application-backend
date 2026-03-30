@@ -66,7 +66,7 @@ import static org.mockito.BDDMockito.*;
  *   - VOCABULARY → uses vocabularyAgent.extractVocabulary
  *   - GRAMMAR → uses grammarAgent.extractGrammar
  *   - EXERCISE / OTHER → returns empty result (no AI call)
- *   - MIXED / default → uses extractionAgent.extractContent
+ *   - MIXED / default → uses both vocab + grammar agents + LessonMetadataParser
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -74,7 +74,6 @@ import static org.mockito.BDDMockito.*;
 class ImportOrchestratorTest {
 
     @Mock private FileIngestionRouter fileIngestionRouter;
-    @Mock private ContentExtractionAgent extractionAgent;
     @Mock private ContentClassifierAgent classifierAgent;
     @Mock private VocabularyExtractionAgent vocabularyAgent;
     @Mock private GrammarExtractionAgent grammarAgent;
@@ -183,7 +182,7 @@ class ImportOrchestratorTest {
             });
             disableAllRagFeatures();
             given(persistenceService.persistChunks(any(), any())).willReturn(List.of(dbChunk(0)));
-            given(classifierAgent.classify(any())).willReturn(ClassificationResult.fallback());
+            given(classifierAgent.heuristicClassify(any())).willReturn(ClassificationResult.fallback());
 
             MultipartFile file = mock(MultipartFile.class);
             orchestrator.processImportAsync(IMPORT_ID, file);
@@ -219,10 +218,11 @@ class ImportOrchestratorTest {
             given(persistenceService.persistChunks(any(), any())).willReturn(List.of(dbChunk0));
 
             ClassificationResult classification = ClassificationResult.fallback(); // MIXED
-            given(classifierAgent.classify(any())).willReturn(classification);
+            given(classifierAgent.heuristicClassify(any())).willReturn(classification);
 
             ExtractionResult result = emptyResult(0);
-            given(extractionAgent.extractContent(any(), any(), any())).willReturn(result);
+            given(vocabularyAgent.extractVocabulary(any(), any(), any())).willReturn(result);
+            given(grammarAgent.extractGrammar(any(), any(), any())).willReturn(result);
 
             disableAllRagFeatures();
 
@@ -281,9 +281,10 @@ class ImportOrchestratorTest {
             given(persistenceService.persistChunks(any(), any())).willReturn(List.of(dbChunk0));
 
             ClassificationResult classification = ClassificationResult.fallback(); // MIXED
-            given(classifierAgent.classify(any())).willReturn(classification);
+            given(classifierAgent.heuristicClassify(any())).willReturn(classification);
             ExtractionResult result = emptyResult(0);
-            given(extractionAgent.extractContent(any(), any(), any())).willReturn(result);
+            given(vocabularyAgent.extractVocabulary(any(), any(), any())).willReturn(result);
+            given(grammarAgent.extractGrammar(any(), any(), any())).willReturn(result);
 
             disableAllRagFeatures();
 
@@ -308,7 +309,7 @@ class ImportOrchestratorTest {
 
             ClassificationResult vocabClassification = new ClassificationResult();
             vocabClassification.setContentType(ClassificationResult.ContentType.VOCABULARY);
-            given(classifierAgent.classify(any())).willReturn(vocabClassification);
+            given(classifierAgent.heuristicClassify(any())).willReturn(vocabClassification);
 
             given(vocabularyAgent.extractVocabulary(any(), any(), any())).willReturn(emptyResult(0));
 
@@ -318,7 +319,6 @@ class ImportOrchestratorTest {
 
             then(vocabularyAgent).should().extractVocabulary(any(), any(), any());
             then(grammarAgent).should(never()).extractGrammar(any(), any(), any());
-            then(extractionAgent).should(never()).extractContent(any(), any(), any());
         }
 
         @Test
@@ -334,7 +334,7 @@ class ImportOrchestratorTest {
 
             ClassificationResult grammarClassification = new ClassificationResult();
             grammarClassification.setContentType(ClassificationResult.ContentType.GRAMMAR);
-            given(classifierAgent.classify(any())).willReturn(grammarClassification);
+            given(classifierAgent.heuristicClassify(any())).willReturn(grammarClassification);
 
             given(grammarAgent.extractGrammar(any(), any(), any())).willReturn(emptyResult(0));
 
@@ -359,7 +359,7 @@ class ImportOrchestratorTest {
 
             ClassificationResult exerciseClassification = new ClassificationResult();
             exerciseClassification.setContentType(ClassificationResult.ContentType.EXERCISE);
-            given(classifierAgent.classify(any())).willReturn(exerciseClassification);
+            given(classifierAgent.heuristicClassify(any())).willReturn(exerciseClassification);
 
             disableAllRagFeatures();
 
@@ -367,7 +367,6 @@ class ImportOrchestratorTest {
 
             then(vocabularyAgent).should(never()).extractVocabulary(any(), any(), any());
             then(grammarAgent).should(never()).extractGrammar(any(), any(), any());
-            then(extractionAgent).should(never()).extractContent(any(), any(), any());
             assertThat(entity.getStatus()).isEqualTo(ImportStatus.COMPLETED);
         }
 
@@ -439,7 +438,8 @@ class ImportOrchestratorTest {
 
             ClassificationResult classification = ClassificationResult.fallback();
             given(classifierAgent.classify(any())).willReturn(classification);
-            given(extractionAgent.extractContent(any(), any(), any())).willReturn(emptyResult(0));
+            given(vocabularyAgent.extractVocabulary(any(), any(), any())).willReturn(emptyResult(0));
+            given(grammarAgent.extractGrammar(any(), any(), any())).willReturn(emptyResult(0));
 
             disableAllRagFeatures();
 

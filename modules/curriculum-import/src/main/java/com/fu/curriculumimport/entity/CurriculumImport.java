@@ -268,6 +268,17 @@ public class CurriculumImport extends BaseEntity {
         this.completedAt = null;
         this.currentStep = null;
         this.queuedAt = LocalDateTime.now();
+        // Reset all result counters so they don't accumulate across retry attempts
+        this.vocabularyCreated = 0;
+        this.grammarPointsCreated = 0;
+        this.lessonsCreated = 0;
+        this.embeddingsCreated = 0;
+        this.chunksCreated = 0;
+        this.hallucinatedItems = 0;
+        this.reExtractions = 0;
+        this.validationPassed = 0;
+        this.validationFailed = 0;
+        this.tokensUsed = 0;
     }
 
     /**

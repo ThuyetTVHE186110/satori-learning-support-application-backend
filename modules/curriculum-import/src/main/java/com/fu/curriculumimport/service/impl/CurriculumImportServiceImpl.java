@@ -206,6 +206,9 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
     @Transactional
     public CurriculumImportResponse cancelImport(UUID importId) {
         log.info("Cancelling import: {}", importId);
+
+        // Reload fresh from DB inside the transaction to avoid stale-state race with
+        // the async pipeline thread that may have changed status since last read.
         CurriculumImport importEntity = findImportOrThrow(importId);
 
         if (importEntity.getStatus() == ImportStatus.COMPLETED ||
@@ -219,7 +222,7 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
                     "Import is awaiting approval. Use the reject endpoint to cancel it.");
         }
 
-        // Request async cancellation of the running import
+        // Signal the async pipeline to stop at its next checkpoint.
         orchestrator.requestCancel(importId);
 
         importEntity.markCancelled();

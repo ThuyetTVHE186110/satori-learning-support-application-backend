@@ -2,6 +2,7 @@ package com.fu.curriculumimport.service.ingestion;
 
 import com.fu.curriculumimport.service.agent.ExtractionResult;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,11 +33,30 @@ import java.util.regex.Pattern;
  * for any textbook, not just Minna no Nihongo.
  */
 @Slf4j
-public final class MnNTableParser {
+@Component
+public class MnNTableParser {
 
     private static final Pattern DIGITS_ONLY = Pattern.compile("^\\d+\\.?$");
     private static final Pattern CJK_OR_KANA = Pattern.compile("[\\u3040-\\u9FFF]");
     private static final Pattern PURE_KANA   = Pattern.compile("^[\\u3040-\\u30FF\\u30A0-\\u30FFー・ \\t]+$");
+
+    /**
+     * Matches "kana space kanji" format in a single cell, e.g. "かんこく 韓国".
+     * Group 1 = pure kana reading, Group 2 = kanji word.
+     */
+    private static final Pattern KANA_SPACE_KANJI = Pattern.compile(
+            "^([\\u3040-\\u30FFー]+)\\s+([\\u4E00-\\u9FFF].*)$");
+
+    /**
+     * Matches "kana+kanji" glued together (no space), as produced by Document AI.
+     * E.g. "かんこく韓国", "えいご英語", "にほんじん日本人".
+     * Group 1 = pure hiragana reading, Group 2 = kanji portion (may include trailing kana).
+     *
+     * <p>Also handles mixed katakana+hiragana+kanji like "アメリカじん人":
+     * Group 1 = kana prefix (アメリカじん), Group 2 = kanji portion (人).
+     */
+    private static final Pattern KANA_GLUED_KANJI = Pattern.compile(
+            "^([\\u3040-\\u30FFー]{2,})([\\u4E00-\\u9FFF][\\u4E00-\\u9FFF\\u3040-\\u30FFー]*)$");
     private static final Pattern ROMAJI      = Pattern.compile("^[a-zA-Z\\s\\-']+$");
     private static final Pattern POS_TAG     = Pattern.compile("^\\(([^)]{1,30})\\)(.*)$");
 
@@ -46,7 +66,19 @@ public final class MnNTableParser {
      */
     private static final Pattern JAPANESE_IN_MEANING = Pattern.compile("[\\u3040-\\u30FF\\u4E00-\\u9FFF]");
 
-    private MnNTableParser() {}
+    /**
+     * Matches Japanese text inside brackets or parenthetical notes — these are
+     * quoted examples embedded within Vietnamese explanations and should NOT
+     * trigger the Japanese-in-meaning safety guard.
+     * Examples:
+     * - "người kia (「あのかた」là cách nói lịch sự của「あのひと」)"
+     * - "(hậu tố thêm vào phía sau tên của trẻ em thay cho ～さん)"
+     * - "nhân viên Công ty ~ (dùng kèm theo tên công ty; ví dụ IMCの しゃいん)"
+     */
+    private static final Pattern JAPANESE_IN_BRACKETS = Pattern.compile(
+            "「[^」]*」|｢[^｣]*｣"                                // 「...」 brackets
+            + "|[～〜~][\\u3040-\\u30FFー]+"                    // tilde + kana suffix (～さん)
+    );
 
     // ── Column role detection ─────────────────────────────────────────────────
 
@@ -65,7 +97,7 @@ public final class MnNTableParser {
      *
      * @return column mapping; any field may be {@code -1} if the role was not found
      */
-    private static ColumnMapping detectColumns(List<String> rows) {
+    private ColumnMapping detectColumns(List<String> rows) {
         int maxCols = 0;
         int rowCount = 0;
         for (String row : rows) {
@@ -136,6 +168,52 @@ public final class MnNTableParser {
             }
         }
 
+        // ── Step 2b: Swap word↔reading when wordCol is predominantly pure-kana
+        //     and another column has kanji (cjkMix) entries.
+        //     Common pattern: hiragana | kanji | meaning (e.g. みなさん | 皆さん | ...)
+        //     Without swap: word=0 (kana), reading=-1, kanji col ignored.
+        //     With swap:    word=1 (kanji), reading=0 (kana) — correct.
+        if (wordCol >= 0 && nonBlank[wordCol] > 0) {
+            double pureKanaRateInWord = pureKanaCount[wordCol] * 1.0 / nonBlank[wordCol];
+            if (pureKanaRateInWord >= 0.5) {
+                // wordCol is mostly pure kana — look for a better kanji column
+                int kanjiCol = -1;
+                int bestKanjiCount = 0;
+                for (int i = 0; i < maxCols; i++) {
+                    if (i == meaningCol || i == wordCol || nonBlank[i] == 0) continue;
+                    if (cjkMixCount[i] > bestKanjiCount) {
+                        bestKanjiCount = cjkMixCount[i];
+                        kanjiCol = i;
+                    }
+                }
+                if (kanjiCol >= 0 && bestKanjiCount > 0) {
+                    log.debug("MnNTableParser: swapping word col {} (pure kana {}) ↔ kanji col {} (cjkMix {})",
+                            wordCol, pureKanaCount[wordCol], kanjiCol, bestKanjiCount);
+                    int readingCandidate = wordCol;
+                    wordCol = kanjiCol;
+                    // The old wordCol becomes the reading column (set below after step 3)
+                    // We'll handle this by directly assigning readingCol here
+                    // and skipping the normal step 3 detection for these columns
+                    int readingCol2 = readingCandidate;
+                    // Continue to step 3 with readingCol pre-set
+                    // Jump to step 4 directly
+                    int romajiCol2 = -1;
+                    double bestRomajiRate2 = 0.3;
+                    for (int i = 0; i < maxCols; i++) {
+                        if (i == meaningCol || i == wordCol || i == readingCol2 || nonBlank[i] == 0) continue;
+                        double r = romajiCount[i] * 1.0 / nonBlank[i];
+                        if (r > bestRomajiRate2) {
+                            bestRomajiRate2 = r;
+                            romajiCol2 = i;
+                        }
+                    }
+                    log.debug("MnNTableParser: detected columns — word={}, reading={}, meaning={}, romaji={} (from {} cols, {} rows)",
+                            wordCol, readingCol2, meaningCol, romajiCol2, maxCols, rowCount);
+                    return new ColumnMapping(wordCol, readingCol2, meaningCol, romajiCol2);
+                }
+            }
+        }
+
         // ── Step 3: READING column — highest pure-kana rate (≥30%, among remaining) ──
         int readingCol = -1;
         double bestKanaRate = 0.3;
@@ -168,7 +246,7 @@ public final class MnNTableParser {
     /**
      * Returns true if the string contains at least one Unicode letter character.
      */
-    private static boolean hasAnyLetter(String text) {
+    private boolean hasAnyLetter(String text) {
         for (int i = 0; i < text.length(); i++) {
             if (Character.isLetter(text.charAt(i))) return true;
         }
@@ -189,7 +267,7 @@ public final class MnNTableParser {
      * @param jlptLevel  JLPT level to tag each item with (e.g. "N5")
      * @return parsed vocabulary list; empty when rows are not well-structured
      */
-    public static List<ExtractionResult.ExtractedVocabulary> parse(
+    public List<ExtractionResult.ExtractedVocabulary> parse(
             List<String> rows, String jlptLevel) {
 
         if (rows == null || rows.isEmpty()) return List.of();
@@ -231,6 +309,11 @@ public final class MnNTableParser {
                     result.size(), rows.size(), skipped);
         }
 
+        // ── Post-process: merge adjacent hiragana-only + kanji+meaning pairs ──
+        // Common in Vietnamese-edition textbooks where hiragana and kanji are
+        // on separate rows:  かんこく | (empty)  →  韓国 | Hàn Quốc
+        result = mergeHiraganaKanjiPairs(result);
+
         // If fewer than half the rows parsed successfully, the table structure
         // is probably incorrect — return empty so caller uses LLM fallback.
         if (result.size() < rows.size() / 2.0 && !result.isEmpty()) {
@@ -242,14 +325,138 @@ public final class MnNTableParser {
         return result;
     }
 
+    /**
+     * Merge adjacent vocabulary items where one is hiragana-only (no meaning)
+     * and the next is kanji+meaning for the same word.
+     *
+     * <p>Pattern in Vietnamese-edition textbooks:
+     * <pre>
+     *   かんこく |         ← pure kana, empty or same-as-word meaning
+     *   韓国     | Hàn Quốc ← kanji form with actual meaning
+     * </pre>
+     * Result: word=韓国, reading=かんこく, meaning=Hàn Quốc
+     */
+    private List<ExtractionResult.ExtractedVocabulary> mergeHiraganaKanjiPairs(
+            List<ExtractionResult.ExtractedVocabulary> items) {
+        if (items.size() < 2) return items;
+
+        List<ExtractionResult.ExtractedVocabulary> merged = new ArrayList<>();
+        int i = 0;
+
+        while (i < items.size()) {
+            ExtractionResult.ExtractedVocabulary current = items.get(i);
+
+            if (i + 1 < items.size()) {
+                ExtractionResult.ExtractedVocabulary next = items.get(i + 1);
+
+                // Check if current is pure-kana with no useful meaning
+                // and next has kanji with a real meaning.
+                // The next item MUST have a non-empty meaning — otherwise both are
+                // broken items (e.g. from a combined table with wrong column mapping)
+                // and merging would produce nonsense readings.
+                String curWord = current.getJapaneseText();
+                String nextWord = next.getJapaneseText();
+                String nextMeaning = next.getMeaningVi();
+                boolean curIsKana = curWord != null && PURE_KANA.matcher(curWord.trim()).matches();
+                boolean nextHasKanji = nextWord != null && !PURE_KANA.matcher(nextWord.trim()).matches()
+                        && CJK_OR_KANA.matcher(nextWord).find();
+                boolean nextHasMeaning = nextMeaning != null && !nextMeaning.isBlank();
+                boolean curMeaningEmpty = current.getMeaningVi() == null
+                        || current.getMeaningVi().isBlank()
+                        || current.getMeaningVi().equals(curWord); // meaning = word itself
+
+                if (curIsKana && nextHasKanji && curMeaningEmpty && nextHasMeaning) {
+                    // Merge: use next's word/meaning, set current's kana as reading
+                    if (next.getReading() == null || next.getReading().isBlank()) {
+                        next.setReading(curWord.trim());
+                    }
+                    merged.add(next);
+                    i += 2; // skip both
+                    log.debug("MnNTableParser: merged kana '{}' + kanji '{}' → reading='{}'",
+                            curWord, nextWord, curWord);
+                    continue;
+                }
+            }
+
+            merged.add(current);
+            i++;
+        }
+
+        if (merged.size() < items.size()) {
+            log.debug("MnNTableParser: merged {} hiragana/kanji pairs ({} → {} items)",
+                    items.size() - merged.size(), items.size(), merged.size());
+        }
+        return merged;
+    }
+
     // ── Row parsing ──────────────────────────────────────────────────────────
 
-    private static ExtractionResult.ExtractedVocabulary parseRow(
+    private ExtractionResult.ExtractedVocabulary parseRow(
             String[] cells, String jlptLevel, ColumnMapping mapping) {
 
         // ── Word column ─────────────────────────────────────────────────────
         if (mapping.wordCol >= cells.length) return null;
         String rawJapanese = cells[mapping.wordCol].trim();
+
+        // ── Reading column (read early — may be needed as word fallback) ──
+        String reading = "";
+        if (mapping.readingCol >= 0 && mapping.readingCol < cells.length) {
+            reading = cells[mapping.readingCol].trim();
+        }
+
+        // ── Split "kana space kanji" within a single cell ──────────────────
+        // OCR sometimes produces "かんこく 韓国" in one cell instead of
+        // separate columns. Split into reading=かんこく, word=韓国.
+        var kanaKanjiMatch = KANA_SPACE_KANJI.matcher(rawJapanese);
+        if (kanaKanjiMatch.matches()) {
+            String kanaPart = kanaKanjiMatch.group(1).trim();
+            String kanjiPart = kanaKanjiMatch.group(2).trim();
+            if (reading.isBlank()) {
+                reading = kanaPart;
+            }
+            rawJapanese = kanjiPart;
+        }
+
+        // ── Split "kana+kanji" glued together (no space) ─────────────────
+        // Document AI often produces "かんこく韓国", "えいご英語", "アメリカじん人"
+        // where furigana is concatenated directly before kanji without separator.
+        if (!kanaKanjiMatch.matches()) {
+            var gluedMatch = KANA_GLUED_KANJI.matcher(rawJapanese);
+            if (gluedMatch.matches()) {
+                String kanaPart = gluedMatch.group(1);   // "アメリカじん" or "かんこく"
+                String kanjiPart = gluedMatch.group(2);   // "人" or "韓国"
+
+                // Extract leading katakana prefix from kanaPart — this prefix is
+                // shared between reading and word (e.g. "アメリカ" in "アメリカじん人").
+                int kataEnd = 0;
+                for (int ci = 0; ci < kanaPart.length(); ) {
+                    int cp = kanaPart.codePointAt(ci);
+                    if ((cp >= 0x30A0 && cp <= 0x30FF) || cp == 'ー') {
+                        kataEnd = ci + Character.charCount(cp);
+                        ci = kataEnd;
+                    } else {
+                        break;
+                    }
+                }
+                String kataPrefix = kanaPart.substring(0, kataEnd); // "アメリカ" or ""
+
+                if (reading.isBlank()) {
+                    reading = kanaPart; // "アメリカじん" or "かんこく"
+                }
+                rawJapanese = kataPrefix + kanjiPart; // "アメリカ人" or "韓国"
+            }
+        }
+
+        // When the kanji/word column is empty but the reading (kana) column
+        // has content, use the kana as the word. Common in tables like:
+        //   わたし | (empty) | tôi       ← wordCol empty, reading has kana
+        //   みなさん | 皆さん | ...       ← wordCol has kanji, reading has kana
+        if ((rawJapanese.isBlank() || !CJK_OR_KANA.matcher(rawJapanese).find())
+                && !reading.isBlank() && CJK_OR_KANA.matcher(reading).find()) {
+            rawJapanese = reading;
+            reading = ""; // kana is now the word, no separate reading
+        }
+
         if (rawJapanese.isBlank() || !CJK_OR_KANA.matcher(rawJapanese).find()) return null;
 
         // Skip serial-number cells that ended up in the word column
@@ -261,12 +468,6 @@ public final class MnNTableParser {
         String col1InlineMeaning = inlineResult.found() ? inlineResult.meaning() : null;
 
         if (japanese.isBlank() || !CJK_OR_KANA.matcher(japanese).find()) return null;
-
-        // ── Reading column ──────────────────────────────────────────────────
-        String reading = "";
-        if (mapping.readingCol >= 0 && mapping.readingCol < cells.length) {
-            reading = cells[mapping.readingCol].trim();
-        }
 
         // ── Romaji column ───────────────────────────────────────────────────
         String romaji = "";
@@ -304,14 +505,51 @@ public final class MnNTableParser {
             }
         }
 
-        if (japanese.isBlank() || meaningVi.isBlank()) return null;
+        if (japanese.isBlank()) return null;
 
-        // Guard: reject if meaningVi still contains Japanese characters.
-        // This catches edge cases where column detection was correct overall but
-        // a specific row has Japanese text in the meaning slot.
-        if (JAPANESE_IN_MEANING.matcher(meaningVi).find()) {
-            log.debug("MnNTableParser: meaningVi '{}' contains Japanese text — rejecting row for word '{}'",
+        // If the detected meaning cell for this specific row contains Japanese text,
+        // the column detection was right globally but wrong for this row (e.g. a kanji
+        // variant cell ended up in the meaning slot).  Try every remaining cell for one
+        // that has Latin/Vietnamese letters and no Japanese characters before giving up.
+        //
+        // Exception: Japanese inside「」brackets is part of the Vietnamese explanation
+        // (e.g. "người kia (「あのかた」là cách nói lịch sự...)") — strip these before checking.
+        String meaningWithoutBrackets = JAPANESE_IN_BRACKETS.matcher(meaningVi).replaceAll("");
+        // If the remaining text (after stripping brackets and tilde-suffixes) still
+        // contains Japanese, check if the meaning is PREDOMINANTLY Vietnamese.
+        // Vietnamese meanings like "thay cho ～さん" or "ví dụ IMCの しゃいん" have
+        // more Latin characters than Japanese — these are valid explanations.
+        boolean japaneseInMeaning = JAPANESE_IN_MEANING.matcher(meaningWithoutBrackets).find();
+        if (japaneseInMeaning) {
+            long latinChars = meaningWithoutBrackets.chars()
+                    .filter(c -> Character.isLetter(c) && c < 0x3000).count();
+            long jpChars = meaningWithoutBrackets.chars()
+                    .filter(c -> (c >= 0x3040 && c <= 0x30FF) || (c >= 0x4E00 && c <= 0x9FFF)).count();
+            if (latinChars > jpChars) {
+                japaneseInMeaning = false; // predominantly Vietnamese — keep the meaning
+            }
+        }
+        if (!meaningVi.isBlank() && japaneseInMeaning) {
+            log.debug("MnNTableParser: meaningVi '{}' contains Japanese — scanning other cells for word '{}'",
                     meaningVi, japanese);
+            String fallback = "";
+            for (int i = 0; i < cells.length; i++) {
+                if (i == mapping.wordCol || i == mapping.readingCol
+                        || i == mapping.romajiCol || i == mapping.meaningCol) continue;
+                String cell = cells[i].trim();
+                if (!cell.isBlank() && !JAPANESE_IN_MEANING.matcher(cell).find() && hasAnyLetter(cell)) {
+                    fallback = cell;
+                    break;
+                }
+            }
+            meaningVi = fallback; // may be empty — row still kept, LLM will fill meaning
+        }
+
+        // ── Skip rows with no useful Vietnamese meaning ────────────────────
+        // After all fallback attempts, if meaningVi is still empty or equals the
+        // Japanese word itself, the row has no translation → skip it.
+        // This filters out country-name-only rows, institution reference data, etc.
+        if (meaningVi.isBlank() || meaningVi.equals(japanese) || meaningVi.equals(rawJapanese)) {
             return null;
         }
 
@@ -353,7 +591,7 @@ public final class MnNTableParser {
      * Map Vietnamese POS abbreviations to English POS strings expected by the
      * vocabulary entity. Works for any Vietnamese-edition Japanese textbook.
      */
-    private static String normalizePOS(String raw) {
+    private String normalizePOS(String raw) {
         String lower = raw.toLowerCase();
         if (lower.contains("đt") || lower.contains("động từ") || lower.contains("v."))
             return "verb";

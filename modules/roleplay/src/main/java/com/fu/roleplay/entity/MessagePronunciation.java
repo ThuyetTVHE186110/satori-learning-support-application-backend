@@ -1,4 +1,4 @@
-package com.fu.roleplay.dto.entity;
+package com.fu.roleplay.entity;
 
 import com.fu.infrastructure.persistence.BaseEntity;
 import jakarta.persistence.*;

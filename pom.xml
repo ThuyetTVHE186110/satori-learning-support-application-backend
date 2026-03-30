@@ -20,6 +20,7 @@
         <module>modules/pronunciation</module>
         <module>modules/roleplay</module>
         <module>modules/assignment</module>
+        <module>modules/practice</module>
         <module>start</module>
     </modules>
 
@@ -44,6 +45,18 @@
                 <version>${spring-boot.version}</version>
                 <scope>import</scope>
                 <type>pom</type>
+            </dependency>
+
+            <!-- Google Cloud BOM — manages gax, grpc, proto, and all google-cloud-* versions
+                 together so they are guaranteed compatible with each other.
+                 26.61.0 aligns google-cloud-document-ai, google-cloud-vision, and gax
+                 without any manual version overrides. -->
+            <dependency>
+                <groupId>com.google.cloud</groupId>
+                <artifactId>libraries-bom</artifactId>
+                <version>26.61.0</version>
+                <type>pom</type>
+                <scope>import</scope>
             </dependency>
             
             <!-- Spring AI BOM -->
@@ -104,6 +117,11 @@
             <dependency>
                 <groupId>com.fu</groupId>
                 <artifactId>assignment</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fu</groupId>
+                <artifactId>practice</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

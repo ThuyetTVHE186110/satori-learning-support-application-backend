@@ -25,10 +25,10 @@ import java.util.*;
  * By placing these methods in a separate @Service bean, Spring correctly
  * creates a proxy and all @Transactional annotations work as expected.
  *
- * Individual item persistence (vocabulary, grammar, lesson-links) is delegated
- * to ImportItemPersistenceHelper which runs each operation in its own
- * REQUIRES_NEW transaction — preventing the PostgreSQL "current transaction
- * is aborted" cascade error.
+ * Batch persistence (vocabulary, grammar, lesson-links) is delegated to
+ * ImportItemPersistenceHelper which runs batches of 50 items in REQUIRES_NEW
+ * transactions — preventing the PostgreSQL "current transaction is aborted"
+ * cascade error while minimizing transaction count.
  */
 @Service
 @Slf4j
@@ -83,11 +83,41 @@ public class ImportPersistenceService {
     }
 
     /**
-     * Update import entity progress.
+     * Persist progress fields from {@code importEntity} to the database.
+     *
+     * <p>The async pipeline holds a single {@link CurriculumImport} reference for its
+     * entire lifetime and calls this method many times. Each call runs in its own
+     * transaction (via Spring AOP proxy). To avoid a stale-state merge (Hibernate
+     * compares the in-memory entity's id/state against the DB row and throws
+     * {@code StaleObjectStateException} when the row was already updated by a
+     * different call), we reload the row fresh, copy only the mutable progress fields,
+     * and then save the managed instance.
      */
     @Transactional
     public void updateImportProgress(CurriculumImport importEntity) {
-        importRepository.save(importEntity);
+        importRepository.findById(importEntity.getId()).ifPresent(fresh -> {
+            fresh.setStatus(importEntity.getStatus());
+            fresh.setCurrentStep(importEntity.getCurrentStep());
+            fresh.setProgressPercent(importEntity.getProgressPercent());
+            fresh.setPagesProcessed(importEntity.getPagesProcessed());
+            fresh.setChunksCreated(importEntity.getChunksCreated());
+            fresh.setVocabularyCreated(importEntity.getVocabularyCreated());
+            fresh.setGrammarPointsCreated(importEntity.getGrammarPointsCreated());
+            fresh.setLessonsCreated(importEntity.getLessonsCreated());
+            fresh.setEmbeddingsCreated(importEntity.getEmbeddingsCreated());
+            fresh.setTokensUsed(importEntity.getTokensUsed());
+            fresh.setValidationPassed(importEntity.getValidationPassed());
+            fresh.setValidationFailed(importEntity.getValidationFailed());
+            fresh.setReExtractions(importEntity.getReExtractions());
+            fresh.setHallucinatedItems(importEntity.getHallucinatedItems());
+            fresh.setStartedAt(importEntity.getStartedAt());
+            fresh.setCompletedAt(importEntity.getCompletedAt());
+            fresh.setEstimatedCostUsd(importEntity.getEstimatedCostUsd());
+            fresh.setActualCostUsd(importEntity.getActualCostUsd());
+            fresh.setErrorMessage(importEntity.getErrorMessage());
+            fresh.setErrorDetails(importEntity.getErrorDetails());
+            importRepository.save(fresh);
+        });
     }
 
     /**
@@ -100,9 +130,13 @@ public class ImportPersistenceService {
      *
      * @param importEntity the parent import
      * @param results      list of extraction results from all chunks
+     * @return map of groupKey → saved lessonId (same groupKey logic used internally).
+     *         Used by the embedding stage to write lesson_id into vector metadata
+     *         without re-deriving it from unreliable lesson-number lookups.
      */
-    public void persistExtractedContent(CurriculumImport importEntity,
-                                         List<ExtractionResult> results) {
+    @Transactional
+    public Map<String, UUID> persistExtractedContent(CurriculumImport importEntity,
+                                                      List<ExtractionResult> results) {
         Course course = null;
         if (importEntity.getCourseId() != null) {
             course = courseRepository.findById(importEntity.getCourseId()).orElse(null);
@@ -119,6 +153,10 @@ public class ImportPersistenceService {
             lessonGroups.computeIfAbsent(groupKey, k -> new ArrayList<>()).add(result);
         }
 
+        // groupKey → saved lessonId — returned to the embedding stage so it can write
+        // lesson_id into vector metadata without any secondary lookup.
+        Map<String, UUID> groupKeyToLessonId = new LinkedHashMap<>();
+
         int lessonsCount = 0;
         int vocabCount   = 0;
         int grammarCount = 0;
@@ -128,30 +166,73 @@ public class ImportPersistenceService {
             String groupKey      = entry.getKey();
             List<ExtractionResult> groupResults = entry.getValue();
 
-            // 1. Persist all vocabulary for this lesson group
-            List<Vocabulary> persistedVocab = new ArrayList<>();
-            List<Boolean>    vocabKeyFlags  = new ArrayList<>();
+            // 1. Collect all vocabulary items for this lesson group, deduplicating
+            //    by normalized Japanese text to prevent the same word appearing twice
+            //    when both table parser and LLM extract it (e.g. 先生 vs せんせい).
+            List<ExtractionResult.ExtractedVocabulary> allVocabItems = new ArrayList<>();
+            List<Boolean> vocabKeyFlags = new ArrayList<>();
+            Set<String> seenNormalizedVocab = new LinkedHashSet<>();
             for (ExtractionResult result : groupResults) {
                 for (ExtractionResult.ExtractedVocabulary ev : result.getVocabulary()) {
-                    Vocabulary vocab = itemHelper.findOrCreateVocabulary(ev, importEntity.getCreatedBy());
-                    if (vocab != null) {
-                        persistedVocab.add(vocab);
+                    String normKey = normalizeVocabKey(ev.getJapaneseText());
+                    if (normKey.isEmpty() || seenNormalizedVocab.add(normKey)) {
+                        allVocabItems.add(ev);
                         vocabKeyFlags.add(ev.isKeyWord());
+                    } else {
+                        log.debug("Dedup: skipping duplicate vocab '{}' (normalized: '{}')",
+                                ev.getJapaneseText(), normKey);
+                    }
+                }
+            }
+
+            // Batch persist vocabulary (50 items per transaction)
+            List<Vocabulary> persistedVocab = new ArrayList<>();
+            int batchSize = 50;
+            for (int b = 0; b < allVocabItems.size(); b += batchSize) {
+                int end = Math.min(b + batchSize, allVocabItems.size());
+                List<Vocabulary> batchResult = itemHelper.findOrCreateVocabularyBatch(
+                        allVocabItems.subList(b, end), importEntity.getCreatedBy());
+                for (Vocabulary v : batchResult) {
+                    if (v != null) {
+                        persistedVocab.add(v);
                     } else {
                         failedItems++;
                     }
                 }
             }
 
-            // 2. Persist all grammar for this lesson group
-            List<GrammarPoint> persistedGrammar  = new ArrayList<>();
-            List<Boolean>      grammarKeyFlags    = new ArrayList<>();
+            // 2. Collect all grammar items for this lesson group, deduplicating by
+            //    normalized pattern to prevent near-duplicates like "Danh từ は Danh từ です"
+            //    vs "N は N です" from creating separate DB rows.
+            List<ExtractionResult.ExtractedGrammar> allGrammarItems = new ArrayList<>();
+            List<Boolean> grammarKeyFlags = new ArrayList<>();
+            Set<String> seenNormalizedPatterns = new LinkedHashSet<>();
             for (ExtractionResult result : groupResults) {
                 for (ExtractionResult.ExtractedGrammar eg : result.getGrammarPoints()) {
-                    GrammarPoint grammar = itemHelper.findOrCreateGrammarPoint(eg, importEntity.getCreatedBy());
-                    if (grammar != null) {
-                        persistedGrammar.add(grammar);
+                    String normalized = normalizeGrammarPattern(eg.getPattern());
+                    if (normalized.isEmpty() || seenNormalizedPatterns.add(normalized)) {
+                        allGrammarItems.add(eg);
                         grammarKeyFlags.add(eg.isKeyPoint());
+                    } else {
+                        log.debug("Dedup: skipping duplicate grammar pattern '{}' (normalized: '{}')",
+                                eg.getPattern(), normalized);
+                    }
+                }
+            }
+
+            // Note: removeSubsumedPatterns disabled — the suffix-matching heuristic was
+            // too aggressive, removing valid patterns like "N は N ですか" (a real textbook
+            // section) when "N か" existed. The normalized-string dedup above is sufficient.
+
+            // Batch persist grammar (50 items per transaction)
+            List<GrammarPoint> persistedGrammar = new ArrayList<>();
+            for (int b = 0; b < allGrammarItems.size(); b += batchSize) {
+                int end = Math.min(b + batchSize, allGrammarItems.size());
+                List<GrammarPoint> batchResult = itemHelper.findOrCreateGrammarBatch(
+                        allGrammarItems.subList(b, end), importEntity.getCreatedBy());
+                for (GrammarPoint g : batchResult) {
+                    if (g != null) {
+                        persistedGrammar.add(g);
                     } else {
                         failedItems++;
                     }
@@ -159,7 +240,7 @@ public class ImportPersistenceService {
             }
 
             // 3. Determine lessons to create for this group.
-            //    Prefer explicit lessons returned by ContentExtractionAgent (MIXED chunks).
+            //    Prefer explicit lessons returned by LessonMetadataParser (MIXED chunks).
             //    VocabularyExtractionAgent / GrammarExtractionAgent always return empty lists,
             //    so we auto-generate one lesson per group using the detected lesson title.
             ExtractionResult firstResult = groupResults.get(0);
@@ -263,19 +344,30 @@ public class ImportPersistenceService {
                     continue;
                 }
                 lessonsCount++;
+                // Record groupKey → lessonId so the embedding stage can attach lesson_id
+                // to vector metadata without any secondary lookup.
+                groupKeyToLessonId.put(entry.getKey(), savedLesson.getId());
 
-                for (int i = 0; i < persistedVocab.size(); i++) {
-                    boolean linked = itemHelper.linkVocabularyToLesson(
-                            savedLesson.getId(), persistedVocab.get(i), i,
-                            i < vocabKeyFlags.size() && vocabKeyFlags.get(i));
-                    if (!linked) failedItems++;
+                // Batch link vocabulary to lesson (50 items per transaction)
+                for (int b = 0; b < persistedVocab.size(); b += batchSize) {
+                    int end = Math.min(b + batchSize, persistedVocab.size());
+                    List<Boolean> batchFlags = vocabKeyFlags.subList(
+                            Math.min(b, vocabKeyFlags.size()),
+                            Math.min(end, vocabKeyFlags.size()));
+                    int linked = itemHelper.linkVocabularyBatchToLesson(
+                            savedLesson.getId(), persistedVocab.subList(b, end), batchFlags, b);
+                    failedItems += (end - b) - linked;
                 }
 
-                for (int i = 0; i < persistedGrammar.size(); i++) {
-                    boolean linked = itemHelper.linkGrammarToLesson(
-                            savedLesson.getId(), persistedGrammar.get(i), i,
-                            i < grammarKeyFlags.size() && grammarKeyFlags.get(i));
-                    if (!linked) failedItems++;
+                // Batch link grammar to lesson (50 items per transaction)
+                for (int b = 0; b < persistedGrammar.size(); b += batchSize) {
+                    int end = Math.min(b + batchSize, persistedGrammar.size());
+                    List<Boolean> batchFlags = grammarKeyFlags.subList(
+                            Math.min(b, grammarKeyFlags.size()),
+                            Math.min(end, grammarKeyFlags.size()));
+                    int linked = itemHelper.linkGrammarBatchToLesson(
+                            savedLesson.getId(), persistedGrammar.subList(b, end), batchFlags, b);
+                    failedItems += (end - b) - linked;
                 }
             }
 
@@ -291,6 +383,8 @@ public class ImportPersistenceService {
         importEntity.setVocabularyCreated(vocabCount);
         importEntity.setGrammarPointsCreated(grammarCount);
         updateImportProgress(importEntity);
+
+        return groupKeyToLessonId;
     }
 
     /**
@@ -305,18 +399,188 @@ public class ImportPersistenceService {
     @Transactional
     public void softDeleteLessonsByImportId(UUID importId, UUID managerId) {
         List<com.fu.course.entity.Lesson> lessons = lessonRepository.findByImportIdAndNotDeleted(importId);
-        int joinRecordsRemoved = 0;
-        for (com.fu.course.entity.Lesson lesson : lessons) {
-            // Clean up join tables before soft-deleting the lesson
-            lessonVocabularyRepository.deleteByLessonId(lesson.getId());
-            lessonGrammarRepository.deleteByLessonId(lesson.getId());
-            joinRecordsRemoved++;
+        if (lessons.isEmpty()) return;
 
+        // Batch delete join table records in 2 queries (was N+2 per lesson)
+        List<UUID> lessonIds = lessons.stream()
+                .map(com.fu.course.entity.Lesson::getId)
+                .toList();
+        lessonVocabularyRepository.deleteByLessonIdIn(lessonIds);
+        lessonGrammarRepository.deleteByLessonIdIn(lessonIds);
+
+        // Soft-delete all lessons
+        for (com.fu.course.entity.Lesson lesson : lessons) {
             lesson.softDelete(managerId);
-            lessonRepository.save(lesson);
         }
-        log.info("Soft-deleted {} lessons (cleaned up join records for {}) for import {}",
-                lessons.size(), joinRecordsRemoved, importId);
+        lessonRepository.saveAll(lessons);
+
+        log.info("Soft-deleted {} lessons (batch-cleaned join records) for import {}",
+                lessons.size(), importId);
+    }
+
+    /**
+     * Trả về Map từ lessonNumber → lessonId cho tất cả lesson đang hoạt động của course.
+     * Dùng trong ImportOrchestrator để gán lessonId vào metadata khi embed lesson chunks.
+     * Trả về Map rỗng nếu courseId null hoặc không tìm thấy lesson nào.
+     *
+     * @param courseId UUID của course
+     * @return Map&lt;lessonNumber, lessonId&gt;
+     */
+    public Map<Integer, UUID> getLessonIdsByNumber(UUID courseId) {
+        if (courseId == null) return Map.of();
+        try {
+            // Lesson.orderIndex tương đương với ImportChunk.lessonNumber (1-based)
+            return lessonRepository.findByCourseIdAndNotDeleted(courseId)
+                    .stream()
+                    .filter(l -> l.getOrderIndex() != null)
+                    .collect(java.util.stream.Collectors.toMap(
+                            com.fu.course.entity.Lesson::getOrderIndex,
+                            com.fu.course.entity.Lesson::getId,
+                            (existing, replacement) -> existing // giữ lesson đầu tiên nếu trùng số
+                    ));
+        } catch (Exception e) {
+            log.warn("Không thể lấy lesson IDs theo number cho course {}: {}", courseId, e.getMessage());
+            return Map.of();
+        }
+    }
+
+    // ── Grammar pattern subsumption + normalization for dedup ─────────────────
+
+    /**
+     * Remove grammar patterns that are "expanded" specializations of a more abstract
+     * pattern already in the list.
+     *
+     * <p>Examples of subsumption:
+     * <ul>
+     *   <li>"N は N ですか" is subsumed by "N か" (= Câu か)</li>
+     *   <li>"N は N か" is subsumed by "N か"</li>
+     *   <li>"N も N です" is subsumed by "N も" (= Danh từ も)</li>
+     * </ul>
+     *
+     * <p>The rule: if pattern A ends with a particle/suffix X, and there exists
+     * a shorter pattern B that is just "N X" (or "N + X"), then A is an expansion of B.
+     */
+    static void removeSubsumedPatterns(List<ExtractionResult.ExtractedGrammar> items,
+                                        Set<String> seenNormalized) {
+        // Build set of "short" abstract patterns (≤ 2 meaningful tokens after normalization)
+        // e.g. "n か", "n も", "n + さん"
+        Set<String> shortPatterns = new LinkedHashSet<>();
+        for (String np : seenNormalized) {
+            String cleaned = np.replace("+", "").replaceAll("\\s+", " ").strip();
+            String[] tokens = cleaned.split("\\s+");
+            if (tokens.length <= 2) {
+                shortPatterns.add(cleaned);
+            }
+        }
+        if (shortPatterns.isEmpty()) return;
+
+        // Check each item: if its normalized pattern ends with the suffix of a short pattern,
+        // and it's longer than that short pattern, it's an expansion → remove it.
+        var it = items.iterator();
+        while (it.hasNext()) {
+            ExtractionResult.ExtractedGrammar eg = it.next();
+            String norm = normalizeGrammarPattern(eg.getPattern())
+                    .replace("+", "").replaceAll("\\s+", " ").strip();
+            String[] tokens = norm.split("\\s+");
+            if (tokens.length <= 2) continue; // short patterns are never subsumed
+
+            String suffix = tokens[tokens.length - 1]; // e.g. "か", "も", "さん"
+
+            for (String shortP : shortPatterns) {
+                String[] shortTokens = shortP.split("\\s+");
+                if (shortTokens.length < 2) continue;
+                String shortSuffix = shortTokens[shortTokens.length - 1];
+
+                // If the long pattern ends with same suffix as a short "N + suffix" pattern
+                if (suffix.equals(shortSuffix) && !norm.equals(shortP)) {
+                    log.debug("Dedup subsumption: removing '{}' (normalized: '{}') — "
+                                    + "subsumed by short pattern '{}'",
+                            eg.getPattern(), norm, shortP);
+                    it.remove();
+                    seenNormalized.remove(norm);
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
+     * Normalize a grammar pattern string for deduplication comparison.
+     *
+     * <p>Collapses common naming variations so that patterns like
+     * "Danh từ は Danh từ です", "N は N です", "名詞 は 名詞 です"
+     * all produce the same normalized key.
+     *
+     * <p>Normalization steps:
+     * <ol>
+     *   <li>Lowercase</li>
+     *   <li>Strip tilde prefixes (～, 〜)</li>
+     *   <li>Replace noun placeholders (Danh từ, danh từ, 名詞, N₁, N₂, noun) → "N"</li>
+     *   <li>Collapse whitespace</li>
+     * </ol>
+     */
+    static String normalizeGrammarPattern(String pattern) {
+        if (pattern == null || pattern.isBlank()) return "";
+        String s = pattern.toLowerCase()
+                .replace("～", "").replace("〜", "").replace("~", "")
+                .replace("–", "").replace("—", "");
+        // Noun placeholders → N
+        s = s.replaceAll("(?i)danh\\s*từ", "N")
+                .replaceAll("名詞", "N")
+                .replaceAll("(?i)noun", "N")
+                .replaceAll("(?i)câu", "N")     // "Câu + か" → "N + か"
+                .replaceAll("(?i)họ", "N")      // "Họ + さん" → "N + さん"
+                .replaceAll("(?i)tên\\s*người", "N") // "Tên người + さん" → "N + さん"
+                .replaceAll("N\\s*[₁₂₃₄₅]", "N")   // "N ₁" or "N₁" → "N"
+                .replaceAll("n\\s*[₁₂₃₄₅]", "N")
+                .replaceAll("N\\s*\\d", "N")           // "N 1", "N1", "N2" → "N"
+                .replaceAll("\\bN\\d\\b", "N");
+        // Strip standalone subscript digits that remain after replacements
+        s = s.replaceAll("[₁₂₃₄₅₆₇₈₉₀]", "");
+        // Normalize じゃ ありません → じゃありません (space-insensitive particle matching)
+        s = s.replace("じゃ ありません", "じゃありません")
+                .replace("では ありません", "ではありません");
+        // Strip "+" connector (e.g. "N + さん" → "N さん")
+        s = s.replace("+", " ");
+        // Collapse whitespace
+        s = s.replaceAll("\\s+", " ").strip();
+        // Final lowercase to ensure "N" from replacements matches "n" from other paths
+        s = s.toLowerCase();
+        // Normalize standalone suffixes to "n suffix" form
+        // e.g. "さん" → "n さん" to match "Tên người + さん" which normalizes to "n さん"
+        if (s.matches("^[\\u3040-\\u30FFー]+$")) {
+            s = "n " + s;
+        }
+        return s;
+    }
+
+    /**
+     * Normalize a vocabulary Japanese text key for in-memory deduplication.
+     *
+     * <p>Strips tildes, parentheses, normalizes kana/kanji variants so that
+     * entries like "～さん" and "〜さん", or "先生" and "せんせい" (when one is
+     * the reading of the other) can be detected as duplicates.
+     *
+     * <p>Note: this does NOT resolve kanji→kana (e.g. "先生" ≠ "せんせい") because
+     * that requires a dictionary lookup. For those cases, the DB-level dedup in
+     * {@code ImportItemPersistenceHelper.findOrCreateVocabularyBatch()} handles it
+     * via the {@code japaneseText} column match. This method catches:
+     * <ul>
+     *   <li>Tilde variants: ～さん, 〜さん → さん</li>
+     *   <li>Parenthesized forms: (あの方), (おいくつ) → あの方, おいくつ</li>
+     *   <li>Whitespace and connector differences</li>
+     * </ul>
+     */
+    static String normalizeVocabKey(String japaneseText) {
+        if (japaneseText == null || japaneseText.isBlank()) return "";
+        String s = japaneseText.strip()
+                .replace("～", "").replace("〜", "")
+                .replace("–", "").replace("—", "");
+        // Strip leading/trailing parentheses: (あの方) → あの方
+        s = s.replaceAll("^\\((.+)\\)$", "$1");
+        // Collapse whitespace
+        s = s.replaceAll("\\s+", " ").strip();
+        return s;
     }
 
 }

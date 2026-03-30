@@ -1,6 +1,7 @@
 package com.fu.curriculumimport.service.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -17,6 +18,8 @@ import org.springframework.ai.openai.OpenAiChatModel;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 
@@ -46,6 +49,7 @@ import static org.mockito.Mockito.mock;
 class ContentClassifierAgentTest {
 
     @Mock private OpenAiChatModel chatModel;
+    @Mock private PromptTemplateLoader promptLoader;
 
     // Use a real ObjectMapper so JSON parsing logic is tested for real
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -54,7 +58,9 @@ class ContentClassifierAgentTest {
 
     @BeforeEach
     void setUp() {
-        agent = new ContentClassifierAgent(chatModel, objectMapper);
+        given(promptLoader.load(anyString())).willReturn("system prompt");
+        given(promptLoader.render(anyString(), anyMap())).willReturn("user prompt");
+        agent = new ContentClassifierAgent(chatModel, objectMapper, promptLoader);
     }
 
     // -------------------------------------------------------------------------
