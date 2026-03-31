@@ -21,7 +21,6 @@ public interface CourseMapper {
      * Map CreateCourseRequest to Course entity
      */
     @Mapping(target = "id", ignore = true)
-    @Mapping(target = "thumbnailUrl", ignore = true)  // Set by service after Cloudinary upload
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     @Mapping(target = "createdBy", ignore = true)
@@ -38,7 +37,6 @@ public interface CourseMapper {
     @BeanMapping(nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "jlptLevel", ignore = true)      // Cannot change JLPT level
-    @Mapping(target = "thumbnailUrl", ignore = true)    // Managed by service (Cloudinary)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     @Mapping(target = "createdBy", ignore = true)

@@ -22,7 +22,6 @@ public class CourseSummaryResponse {
     private UUID id;
     private String name;
     private JlptLevel jlptLevel;
-    private String thumbnailUrl;
     private CourseStatus status;
     private Integer orderIndex;
     private LocalDateTime createdAt;

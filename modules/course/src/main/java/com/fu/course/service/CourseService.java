@@ -24,14 +24,9 @@ public interface CourseService {
     CourseResponse createCourse(CreateCourseRequest request, UUID managerId);
 
     /**
-     * Create a new course with optional thumbnail upload (MANAGER only)
-     */
-    CourseResponse createCourse(CreateCourseRequest request, MultipartFile thumbnail, UUID managerId);
-
-    /**
      * Update course (MANAGER only)
      */
-    CourseResponse updateCourse(UUID courseId, UpdateCourseRequest request, MultipartFile thumbnail, UUID managerId);
+    CourseResponse updateCourse(UUID courseId, UpdateCourseRequest request, UUID managerId);
 
     /**
      * Get course by ID
@@ -100,10 +95,6 @@ public interface CourseService {
      */
     boolean existsByName(String name);
 
-    /**
-     * Update course thumbnail URL (MANAGER only)
-     */
-    CourseResponse updateThumbnail(UUID courseId, String thumbnailUrl, UUID managerId);
 
     /**
      * Get course statistics
