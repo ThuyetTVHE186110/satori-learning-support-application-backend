@@ -22,11 +22,16 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.swing.text.DateFormatter;
 import java.io.InputStream;
 import java.security.SecureRandom;
+import java.text.SimpleDateFormat;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 
 /**
@@ -111,12 +116,7 @@ public class UserServiceImpl implements UserService {
         log.info("User created successfully with id: {}", savedUser.getId());
 
         // Send welcome email with login credentials
-        emailService.sendWelcomeEmailWithCredentials(
-                savedUser.getEmail(),
-                savedUser.getFullName(),
-                savedUser.getEmail(),
-                rawPassword
-        );
+        emailService.sendWelcomeEmailWithCredentials(savedUser.getEmail(), savedUser.getFullName(), savedUser.getEmail(), rawPassword);
 
         return userMapper.toResponse(savedUser);
     }
@@ -143,9 +143,7 @@ public class UserServiceImpl implements UserService {
 
         UserResponse userResponse = userMapper.toResponse(user);
 
-        UserDetailResponse detailResponse = UserDetailResponse.builder()
-                .userInfo(userResponse)
-                .build();
+        UserDetailResponse detailResponse = UserDetailResponse.builder().userInfo(userResponse).build();
 
         // TODO: Populate enrollment history when course/class management modules are available
         // For now, return empty lists based on role
@@ -170,8 +168,7 @@ public class UserServiceImpl implements UserService {
     @Override
     public UserResponse getUserByEmail(String email) {
         log.debug("Fetching user by email: {}", email);
-        User user = userRepository.findActiveByEmail(email)
-                .orElseThrow(() -> new ResourceNotFoundException("User", "email", email));
+        User user = userRepository.findActiveByEmail(email).orElseThrow(() -> new ResourceNotFoundException("User", "email", email));
         return userMapper.toResponse(user);
     }
 
@@ -189,8 +186,7 @@ public class UserServiceImpl implements UserService {
         }
 
         // Admin sees all users including deleted
-        return userRepository.findAll(pageable)
-                .map(userMapper::toResponse);
+        return userRepository.findAll(pageable).map(userMapper::toResponse);
     }
 
     /**
@@ -207,12 +203,7 @@ public class UserServiceImpl implements UserService {
         }
 
         // Admin sees all users
-        return userRepository.searchUsers(
-                filter.getKeyword(),
-                filter.getRole(),
-                filter.getStatus(),
-                pageable
-        ).map(userMapper::toResponse);
+        return userRepository.searchUsers(filter.getKeyword(), filter.getRole(), filter.getStatus(), pageable).map(userMapper::toResponse);
     }
 
     /**
@@ -309,8 +300,7 @@ public class UserServiceImpl implements UserService {
         log.info("Admin {} restoring user with id: {}", restoredByUserId, request.getUserId());
 
         // Find the deleted user
-        User user = userRepository.findById(request.getUserId())
-                .orElseThrow(() -> new ResourceNotFoundException("User", "id", request.getUserId()));
+        User user = userRepository.findById(request.getUserId()).orElseThrow(() -> new ResourceNotFoundException("User", "id", request.getUserId()));
 
         if (user.getDeletedAt() == null) {
             throw new BusinessException("USER_NOT_DELETED", "Tài khoản này chưa bị xóa");
@@ -343,12 +333,7 @@ public class UserServiceImpl implements UserService {
         log.info("User restored successfully with id: {}", restoredUser.getId());
 
         // Send welcome email with new credentials
-        emailService.sendWelcomeEmailWithCredentials(
-                restoredUser.getEmail(),
-                restoredUser.getFullName(),
-                restoredUser.getEmail(),
-                rawPassword
-        );
+        emailService.sendWelcomeEmailWithCredentials(restoredUser.getEmail(), restoredUser.getFullName(), restoredUser.getEmail(), rawPassword);
 
         return userMapper.toResponse(restoredUser);
     }
@@ -437,21 +422,17 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public ImportUsersResult importUsersFromExcel(MultipartFile file, UUID adminID) {
-        List<UserResponse> created = new ArrayList<>();
-        List<UserResponse> updated = new ArrayList<>();
+        List<NewUserFromImportResponse> created = new ArrayList<>();
+        List<UserChangedFromImportResponse> updated = new ArrayList<>();
         List<ImportRowError> errors = new ArrayList<>();
-        List<User> usersToImport = new ArrayList<>();
-        // collect new-user/rawPassword pairs; emails sent AFTER saveAll succeeds
-        Map<User, String> newUserPasswords = new LinkedHashMap<>();
 
-        try (InputStream inputStream = file.getInputStream();
-             Workbook workbook = WorkbookFactory.create(inputStream)
-        ) {
+        try (InputStream inputStream = file.getInputStream(); Workbook workbook = WorkbookFactory.create(inputStream)) {
             int sheetCount = Math.min(2, workbook.getNumberOfSheets());
 
             // parse all rows, collect valid & deduplicated rows ────────────
             // Each entry: [sheetIndex, rowNumber, email, fullName, phoneNumber]
-            record RowData(int sheetIndex, int rowNumber, String email, String fullName, String phone) {
+            record RowData(int sheetIndex, int rowNumber, String email, String fullName, String phone,
+                           LocalDate birthDay, UserRole role) {
             }
             List<RowData> validRows = new ArrayList<>();
             Set<String> seenEmails = new HashSet<>();
@@ -460,52 +441,46 @@ public class UserServiceImpl implements UserService {
             for (int i = 0; i < sheetCount; i++) {
                 Sheet sheet = workbook.getSheetAt(i);
                 for (Row row : sheet) {
+
                     if (row.getRowNum() == 0) continue; // skip header
-                    totalRows++;
                     int rowNum = row.getRowNum() + 1; // 1-based for reporting
 
-                    String fullName, phoneNumber, email;
+                    String fullName, phoneNumber, email, birthDay;
                     if (i == 0) {
                         fullName = getCellValueAsString(row.getCell(8));
-                        phoneNumber = getCellValueAsString(row.getCell(9));
-                        email = getCellValueAsString(row.getCell(10));
+                        birthDay = getCellValueAsString(row.getCell(9));
+                        phoneNumber = getCellValueAsString(row.getCell(10));
+                        email = getCellValueAsString(row.getCell(11));
                     } else {
                         fullName = getCellValueAsString(row.getCell(1));
-                        phoneNumber = getCellValueAsString(row.getCell(2));
-                        email = getCellValueAsString(row.getCell(3));
+                        birthDay = getCellValueAsString(row.getCell(2));
+                        phoneNumber = getCellValueAsString(row.getCell(3));
+                        email = getCellValueAsString(row.getCell(4));
                     }
-                    if (!(StringUtils.hasText(email) || StringUtils.hasText(fullName) || StringUtils.hasText(phoneNumber))) {
+                    if (!(StringUtils.hasText(email) || StringUtils.hasText(fullName) || StringUtils.hasText(phoneNumber) || StringUtils.hasText(birthDay))) {
                         // skip completely empty rows without error
                         continue;
                     }
+                    totalRows++;
+
                     // Validate row data
-                    Optional<String> validationError = validateRow(email, fullName, phoneNumber);
-                    if (validationError.isPresent()) {
-                        errors.add(ImportRowError.builder()
-                                .rowNumber(rowNum)
-                                .sheetIndex(i)
-                                .email(email)
-                                .fullName(fullName)
-                                .phoneNumber(phoneNumber)
-                                .errorMessage(validationError.get())
-                                .build());
+                    ImportRowError error = ImportRowError.builder().rowNumber(rowNum).sheetIndex(i).email(email).fullName(fullName).phoneNumber(phoneNumber).birthDay(birthDay).build();
+                    validateRow(error, email, fullName, phoneNumber, birthDay);
+
+                    if (error.hasError()) {
+                        errors.add(error);
                         continue;
                     }
-
                     String normalizedEmail = email.trim().toLowerCase();
                     if (!seenEmails.add(normalizedEmail)) {
-                        errors.add(ImportRowError.builder()
-                                .rowNumber(rowNum)
-                                .sheetIndex(i)
-                                .email(email)
-                                .fullName(fullName)
-                                .phoneNumber(phoneNumber)
-                                .errorMessage("Email trùng lặp trong file")
-                                .build());
+                        errors.add(ImportRowError.builder().rowNumber(rowNum).sheetIndex(i).email(email).fullName(fullName).phoneNumber(phoneNumber).emailErrorMessage("Email trùng lặp trong file").build());
                         continue;
                     }
-
-                    validRows.add(new RowData(i, rowNum, normalizedEmail, fullName.trim(), phoneNumber.trim()));
+                    LocalDate birthDate = null;
+                    if (!birthDay.isBlank()) {
+                        birthDate = LocalDate.parse(birthDay, DateTimeFormatter.ofPattern("dd/MM/yyyy"));
+                    }
+                    validRows.add(new RowData(i, rowNum, normalizedEmail, fullName.trim(), phoneNumber.trim(), birthDate, i == 0 ? UserRole.LEARNER : UserRole.TEACHER));
                 }
             }
 
@@ -521,88 +496,132 @@ public class UserServiceImpl implements UserService {
             for (RowData rd : validRows) {
                 String[] nameParts = rd.fullName().split("\\s+");
                 String lastName = nameParts[nameParts.length - 1];
-                String firstName = nameParts.length > 1
-                        ? String.join(" ", Arrays.copyOf(nameParts, nameParts.length - 1))
-                        : "";
+                String firstName = nameParts.length > 1 ? String.join(" ", Arrays.copyOf(nameParts, nameParts.length - 1)) : "";
 
                 User user = existingByEmail.get(rd.email());
                 boolean isNewUser = (user == null);
-                boolean isChanged = false;
-
+                UserChangedFromImportResponse userChangedFromImportResponse = null;
                 if (!isNewUser) {
                     // Existing user — update profile only
                     if (!user.getFirstName().equals(firstName) || !user.getLastName().equals(lastName) || !user.getPhoneNumber().equals(rd.phone())) {
-                        isChanged = true;
-                        user.setLastName(lastName);
-                        user.setFirstName(firstName);
-                        user.setPhoneNumber(rd.phone());
-                    }
-                    if (isChanged) {
-                        user.setUpdatedBy(adminID);
-                        usersToImport.add(user);
+                        userChangedFromImportResponse = UserChangedFromImportResponse.builder().newEmail(rd.email).oldEmail(user.getEmail()).oldDateOfBirth(user.getDateOfBirth()).newDateOfBirth(rd.birthDay).oldFullName(user.getFullName()).newFullName(rd.fullName).oldPhoneNumber(user.getPhoneNumber()).newPhoneNumber(rd.phone).build();
+                        updated.add(userChangedFromImportResponse);
                     }
                 } else {
                     // New user — build entity, defer email until after save
-                    String password = generateRandomPassword();
-                    user = User.builder()
-                            .email(rd.email())
-                            .firstName(firstName)
-                            .lastName(lastName)
-                            .phoneNumber(rd.phone())
-                            .role(rd.sheetIndex() == 0 ? UserRole.LEARNER : UserRole.TEACHER)
-                            .status(UserStatus.INACTIVE)
-                            .authProvider(AuthProvider.LOCAL)
-                            .emailVerifiedAt(LocalDateTime.now())
-                            .createdBy(adminID)
-                            .passwordHash(passwordEncoder.encode(password))
-                            .build();
-                    // store password so we can email AFTER save succeeds
-                    newUserPasswords.put(user, password);
-                    usersToImport.add(user);
+                    NewUserFromImportResponse userFromImportResponse = NewUserFromImportResponse.builder().email(rd.email).fullName(rd.fullName).phoneNumber(rd.phone()).role(rd.role).birthDay(rd.birthDay).build();
+                    created.add(userFromImportResponse);
                 }
 
             }
-
-            // save first, then send emails — rollback keeps DB consistent on failure
-            List<User> savedUsers = userRepository.saveAll(usersToImport);
-
-            // Convert to responses and split into created/updated
-            for (User savedUser : savedUsers) {
-                UserResponse response = userMapper.toResponse(savedUser);
-                // A user was created if they were in the newUserPasswords map
-                if (newUserPasswords.containsKey(savedUser)) {
-                    created.add(response);
-                } else {
-                    updated.add(response);
-                }
-            }
-
-            // only send welcome emails after DB commit is guaranteed
-            newUserPasswords.forEach((newUser, rawPassword) ->
-                    emailService.sendWelcomeEmailWithCredentials(
-                            newUser.getEmail(),
-                            newUser.getFullName(),
-                            newUser.getEmail(),
-                            rawPassword
-                    )
-            );
-
-            return ImportUsersResult.builder()
-                    .created(created)
-                    .updated(updated)
-                    .errors(errors)
-                    .totalRows(totalRows)
-                    .createdCount(created.size())
-                    .updatedCount(updated.size())
-                    .errorCount(errors.size())
-                    .build();
-
+            return ImportUsersResult.builder().created(created).updated(updated).errors(errors).totalRows(totalRows).createdCount(created.size()).updatedCount(updated.size()).errorCount(errors.size()).build();
         } catch (BusinessException e) {
             throw e; // re-throw cleanly without wrapping
         } catch (Exception e) {
             log.error("Error importing users from Excel file", e);
-            throw new BusinessException("IMPORT_FAILED",
-                    "Đã xảy ra lỗi khi nhập người dùng từ file Excel. Vui lòng thử lại sau");
+            throw new BusinessException("IMPORT_FAILED", "Đã xảy ra lỗi khi nhập người dùng từ file Excel. Vui lòng thử lại sau");
+        }
+    }
+
+    @Override
+    @Transactional
+    public ImportUserResponse approveImport(ApproveImportRequest request, UUID currentUserId) {
+        List<User> usersToCreate = new ArrayList<>();
+        List<User> usersToUpdate = new ArrayList<>();
+        Map<String, String> rawPasswords = new HashMap<>(); // Email -> Raw Password
+
+        // 0. Kiểm tra sơ bộ các email đã tồn tại trong Database để tránh trùng lặp khi tạo mới
+        Set<String> existingEmailsInDb = new HashSet<>();
+        if (request.getCreateUserRequests() != null && !request.getCreateUserRequests().isEmpty()) {
+            List<String> createEmails = request.getCreateUserRequests().stream()
+                    .map(ImportCreateUserRequest::getEmail)
+                    .toList();
+            existingEmailsInDb = userRepository.findByEmailIn(createEmails).stream()
+                    .map(u -> u.getEmail().toLowerCase())
+                    .collect(Collectors.toSet());
+        }
+
+        // 1. Process Create Requests
+        if (request.getCreateUserRequests() != null) {
+            for (ImportCreateUserRequest createReq : request.getCreateUserRequests()) {
+                // Nếu email đã tồn tại thì bỏ qua (không tạo mới)
+                if (existingEmailsInDb.contains(createReq.getEmail().toLowerCase())) {
+                    log.warn("Bỏ qua tạo mới cho email đã tồn tại trong hệ thống: {}", createReq.getEmail());
+                    continue;
+                }
+
+                String rawPassword = generateRandomPassword();
+                User user = new User();
+
+                // Set first/last name from fullName
+                splitFullNameToUser(createReq.getFullName(), user);
+                user.setPhoneNumber(createReq.getPhoneNumber());
+                user.setDateOfBirth(createReq.getDateOfBirth());
+                user.setEmail(createReq.getEmail());
+                user.setPasswordHash(passwordEncoder.encode(rawPassword));
+                user.setRole(createReq.getRole());
+                user.setStatus(UserStatus.INACTIVE);
+                user.setAuthProvider(AuthProvider.LOCAL);
+                user.setEmailVerifiedAt(LocalDateTime.now());
+                user.setCreatedBy(currentUserId);
+
+                usersToCreate.add(user);
+                rawPasswords.put(user.getEmail(), rawPassword);
+            }
+        }
+
+        // 2. Process Update Requests
+        if (request.getUpdateUserRequests() != null && !request.getUpdateUserRequests().isEmpty()) {
+            List<UUID> userIds = request.getUpdateUserRequests().stream()
+                    .map(ImportUpdateUserRequest::getUserId)
+                    .toList();
+
+            Map<UUID, User> existingUsers = userRepository.findAllById(userIds).stream()
+                    .collect(Collectors.toMap(User::getId, u -> u));
+
+            for (ImportUpdateUserRequest updateReq : request.getUpdateUserRequests()) {
+                User user = existingUsers.get(updateReq.getUserId());
+                if (user != null) {
+                    splitFullNameToUser(updateReq.getFullName(), user);
+                    user.setPhoneNumber(updateReq.getPhoneNumber());
+                    user.setDateOfBirth(updateReq.getDateOfBirth());
+                    user.setUpdatedBy(currentUserId);
+                    usersToUpdate.add(user);
+                }
+            }
+        }
+
+        // 3. Save all
+        List<User> savedCreated = usersToCreate.isEmpty() ? List.of() : userRepository.saveAll(usersToCreate);
+        List<User> savedUpdated = usersToUpdate.isEmpty() ? List.of() : userRepository.saveAll(usersToUpdate);
+        if (!savedCreated.isEmpty()) {
+            // 4. Send emails to NEW users
+            for (User user : savedCreated) {
+                String rawPassword = rawPasswords.get(user.getEmail());
+                emailService.sendWelcomeEmailWithCredentials(
+                        user.getEmail(),
+                        user.getFullName(),
+                        user.getEmail(),
+                        rawPassword
+                );
+            }
+        }
+
+        return ImportUserResponse.builder()
+                .created(userMapper.toResponseList(savedCreated))
+                .updated(userMapper.toResponseList(savedUpdated))
+                .build();
+    }
+
+    private void splitFullNameToUser(String fullName, User user) {
+        if (fullName == null || fullName.isBlank()) return;
+        String[] parts = fullName.trim().split("\\s+");
+        if (parts.length == 1) {
+            user.setFirstName("");
+            user.setLastName(parts[0]);
+        } else {
+            user.setFirstName(String.join(" ", Arrays.copyOfRange(parts, 0, parts.length - 1)));
+            user.setLastName(parts[parts.length - 1]);
         }
     }
 
@@ -612,17 +631,14 @@ public class UserServiceImpl implements UserService {
      * Find user by ID (not soft-deleted).
      */
     private User findUserById(UUID id) {
-        return userRepository.findById(id)
-                .filter(user -> user.getDeletedAt() == null)
-                .orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
+        return userRepository.findById(id).filter(user -> user.getDeletedAt() == null).orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
     }
 
     /**
      * Find user by ID including soft-deleted.
      */
     private User findUserByIdIncludingDeleted(UUID id) {
-        return userRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
+        return userRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
     }
 
     /**
@@ -750,35 +766,47 @@ public class UserServiceImpl implements UserService {
      * Validate a single row from the Excel file.
      * Returns an Optional error message if validation fails.
      */
-    private Optional<String> validateRow(String email, String fullName, String phoneNumber) {
+    private void validateRow(ImportRowError error, String email, String fullName, String phoneNumber, String birthDay) {
         if (!StringUtils.hasText(email)) {
-            return Optional.of("Email không được để trống");
+            error.setEmailErrorMessage("Email không được để trống");
         }
         if (!Pattern.matches(EMAIL_REGEX, email.trim())) {
-            return Optional.of("Email không đúng định dạng");
+            error.setEmailErrorMessage("Email không đúng định dạng");
         }
         if (email.length() > 255) {
-            return Optional.of("Email không được vượt quá 255 ký tự");
+            error.setEmailErrorMessage("Email không được vượt quá 255 ký tự");
         }
 
         if (!StringUtils.hasText(fullName)) {
-            return Optional.of("Họ tên không được để trống");
+            error.setFullNameErrorMessage("Họ tên không được để trống");
         }
         if (!Pattern.matches(FULLNAME_REGEX, fullName.trim())) {
-            return Optional.of("Họ tên không được chứa số hoặc ký tự đặc biệt");
+            error.setFullNameErrorMessage("Họ tên không được chứa số hoặc ký tự đặc biệt");
         }
         if (fullName.trim().length() > 100) {
-            return Optional.of("Họ tên không được vượt quá 100 ký tự");
+            error.setFullNameErrorMessage("Họ tên không được vượt quá 100 ký tự");
         }
 
         if (!StringUtils.hasText(phoneNumber)) {
-            return Optional.of("Số điện thoại không được để trống");
+            error.setPhoneNumberErrorMessage("Số điện thoại không được để trống");
         }
         if (!Pattern.matches(PHONE_REGEX, phoneNumber.trim())) {
-            return Optional.of("Số điện thoại phải đúng 10 chữ số");
+            error.setPhoneNumberErrorMessage("Số điện thoại phải đúng 10 chữ số");
         }
-
-        return Optional.empty();
+        if (StringUtils.hasText(birthDay)) {
+            try {
+                // Pattern [d]/[M]/yyyy cho phép đọc cả "9/12/2004" và "09/12/2004"
+                DateTimeFormatter flexibleFormatter = DateTimeFormatter.ofPattern("[d][dd]/[M][MM]/yyyy");
+                java.time.LocalDate birthDate = LocalDate.parse(birthDay, flexibleFormatter);
+                if (birthDate.isAfter(LocalDate.now())) {
+                    error.setBirthDayErrorMessage("Ngày sinh phải ở trong quá khứ");
+                }
+            } catch (Exception e) {
+                log.error("Lỗi parse ngày sinh : {}", birthDay);
+                // Có thể gán mặc định hoặc bỏ qua dòng này
+                error.setBirthDayErrorMessage("Ngày sinh phải đúng định dạng dd/MM/yyyy");
+            }
+        }
     }
 
     /**
@@ -787,22 +815,23 @@ public class UserServiceImpl implements UserService {
     private String getCellValueAsString(Cell cell) {
         if (cell == null) return "";
 
-        switch (cell.getCellType()) {
-            case STRING:
-                return cell.getStringCellValue();
-            case NUMERIC:
-                if (DateUtil.isCellDateFormatted(cell)) {
-                    return cell.getDateCellValue().toString();
-                }
-                // Tránh trường hợp số bị biến thành 1.0E7 (khoa học)
-                return String.format("%.0f", cell.getNumericCellValue());
-            case BOOLEAN:
-                return String.valueOf(cell.getBooleanCellValue());
-            case FORMULA:
-                return cell.getCellFormula();
-            default:
-                return "";
+        if (cell.getCellType() == CellType.NUMERIC) {
+            if (DateUtil.isCellDateFormatted(cell)) {
+                // Dùng SimpleDateFormat để ép kiểu Date thành chuỗi định dạng Việt Nam
+                // Đây là bước quan trọng nhất để xóa bỏ chuỗi "Sun Sep 12..."
+                return new java.text.SimpleDateFormat("dd/MM/yyyy").format(cell.getDateCellValue());
+            }
+            // Trường hợp là số điện thoại hoặc số thường
+            return String.format("%.0f", cell.getNumericCellValue());
         }
+
+        if (cell.getCellType() == CellType.STRING) {
+            return cell.getStringCellValue().trim();
+        }
+
+        // Các kiểu khác (Boolean, Formula...)
+        DataFormatter formatter = new DataFormatter();
+        return formatter.formatCellValue(cell);
     }
 
 }
