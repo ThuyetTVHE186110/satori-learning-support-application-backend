@@ -162,7 +162,6 @@ public class ProfileServiceImpl implements ProfileService {
         ClassEnrollmentResponse enrollment = ClassEnrollmentResponse.builder()
                 .classId(toUuid(row[0]))
                 .className((String) row[1])
-                .classCode(null)
                 .courseId(toUuid(row[2]))
                 .courseName((String) row[3])
                 .startDate(toLocalDateTime(row[4]))
