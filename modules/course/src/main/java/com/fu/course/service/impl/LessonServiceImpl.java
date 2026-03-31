@@ -122,10 +122,15 @@ public class LessonServiceImpl implements LessonService {
     }
 
     @Override
-    public Page<LessonSummaryResponse> getLessonsByCourseId(UUID courseId, Pageable pageable) {
-        log.debug("Fetching lessons for course {} with pagination", courseId);
-        return lessonRepository.findByCourseIdAndNotDeleted(courseId, pageable)
-                .map(lesson -> enrichSummaryWithCounts(lessonMapper.toSummaryResponse(lesson), lesson.getId()));
+    public Page<LessonSummaryResponse> getLessonsByCourseId(UUID courseId, ContentStatus status, Pageable pageable) {
+        log.debug("Fetching lessons for course {} with status {} and pagination", courseId, status);
+        Page<Lesson> lessonPage;
+        if (status != null) {
+            lessonPage = lessonRepository.findByCourseIdAndStatusAndNotDeleted(courseId, status, pageable);
+        } else {
+            lessonPage = lessonRepository.findByCourseIdAndNotDeleted(courseId, pageable);
+        }
+        return lessonPage.map(lesson -> enrichSummaryWithCounts(lessonMapper.toSummaryResponse(lesson), lesson.getId()));
     }
 
     @Override
@@ -145,10 +150,15 @@ public class LessonServiceImpl implements LessonService {
     }
 
     @Override
-    public Page<LessonSummaryResponse> searchLessonsInCourse(UUID courseId, String keyword, Pageable pageable) {
-        log.debug("Searching lessons in course {} by keyword: {}", courseId, keyword);
-        return lessonRepository.searchByTitleInCourse(courseId, keyword, pageable)
-                .map(lesson -> enrichSummaryWithCounts(lessonMapper.toSummaryResponse(lesson), lesson.getId()));
+    public Page<LessonSummaryResponse> searchLessonsInCourse(UUID courseId, String keyword, ContentStatus status, Pageable pageable) {
+        log.debug("Searching lessons in course {} by keyword: {} and status: {}", courseId, keyword, status);
+        Page<Lesson> lessonPage;
+        if (status != null) {
+            lessonPage = lessonRepository.searchByTitleAndStatusInCourse(courseId, keyword, status, pageable);
+        } else {
+            lessonPage = lessonRepository.searchByTitleInCourse(courseId, keyword, pageable);
+        }
+        return lessonPage.map(lesson -> enrichSummaryWithCounts(lessonMapper.toSummaryResponse(lesson), lesson.getId()));
     }
 
     // ===== Status Management =====

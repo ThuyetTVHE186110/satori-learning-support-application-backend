@@ -5,6 +5,8 @@ import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.hibernate.annotations.ColumnTransformer;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -48,8 +50,8 @@ public class Lesson extends SoftDeletableEntity {
     private String description;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "lesson_type", nullable = false, length = 20)
-    @ColumnTransformer(write = "CAST(? AS lesson_type)")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "lesson_type", columnDefinition = "lesson_type", nullable = false)
     private LessonType lessonType;
 
     /**
@@ -80,8 +82,8 @@ public class Lesson extends SoftDeletableEntity {
     private String contentFileName;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "processing_status", length = 20)
-    @ColumnTransformer(write = "CAST(? AS processing_status)")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "processing_status", columnDefinition = "processing_status")
     @Builder.Default
     private ProcessingStatus processingStatus = ProcessingStatus.COMPLETED;
 
@@ -112,8 +114,8 @@ public class Lesson extends SoftDeletableEntity {
     // --- Status ---
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", length = 20)
-    @ColumnTransformer(write = "CAST(? AS content_status)")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "status", columnDefinition = "content_status")
     @Builder.Default
     private ContentStatus status = ContentStatus.DRAFT;
 

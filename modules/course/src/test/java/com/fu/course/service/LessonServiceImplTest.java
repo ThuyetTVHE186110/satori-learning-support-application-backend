@@ -15,7 +15,9 @@ import com.fu.course.exception.CourseNotFoundException;
 import com.fu.course.exception.LessonNotFoundException;
 import com.fu.course.mapper.LessonMapper;
 import com.fu.course.repository.CourseRepository;
+import com.fu.course.repository.LessonGrammarRepository;
 import com.fu.course.repository.LessonRepository;
+import com.fu.course.repository.LessonVocabularyRepository;
 import com.fu.course.service.LessonService.LessonStatistics;
 import com.fu.course.service.impl.LessonServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
@@ -59,6 +61,12 @@ class LessonServiceImplTest {
 
     @Mock
     private LessonMapper lessonMapper;
+
+    @Mock
+    private LessonVocabularyRepository lessonVocabularyRepository;
+
+    @Mock
+    private LessonGrammarRepository lessonGrammarRepository;
 
     @InjectMocks
     private LessonServiceImpl lessonService;
@@ -338,10 +346,27 @@ class LessonServiceImplTest {
             given(lessonMapper.toSummaryResponse(testLesson)).willReturn(testSummaryResponse);
 
             // When
-            Page<LessonSummaryResponse> result = lessonService.getLessonsByCourseId(courseId, pageable);
+            Page<LessonSummaryResponse> result = lessonService.getLessonsByCourseId(courseId, null, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("Should get lessons by course ID and status")
+        void shouldGetLessonsByCourseIdAndStatus() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Lesson> lessonPage = new PageImpl<>(List.of(testLesson), pageable, 1);
+            given(lessonRepository.findByCourseIdAndStatusAndNotDeleted(courseId, ContentStatus.DRAFT, pageable)).willReturn(lessonPage);
+            given(lessonMapper.toSummaryResponse(testLesson)).willReturn(testSummaryResponse);
+
+            // When
+            Page<LessonSummaryResponse> result = lessonService.getLessonsByCourseId(courseId, ContentStatus.DRAFT, pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            verify(lessonRepository).findByCourseIdAndStatusAndNotDeleted(courseId, ContentStatus.DRAFT, pageable);
         }
 
         @Test
@@ -384,10 +409,27 @@ class LessonServiceImplTest {
             given(lessonMapper.toSummaryResponse(testLesson)).willReturn(testSummaryResponse);
 
             // When
-            Page<LessonSummaryResponse> result = lessonService.searchLessonsInCourse(courseId, "Hiragana", pageable);
+            Page<LessonSummaryResponse> result = lessonService.searchLessonsInCourse(courseId, "Hiragana", null, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("Should search lessons within a specific course and status")
+        void shouldSearchLessonsInCourseAndStatus() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Lesson> lessonPage = new PageImpl<>(List.of(testLesson), pageable, 1);
+            given(lessonRepository.searchByTitleAndStatusInCourse(courseId, "Hiragana", ContentStatus.DRAFT, pageable)).willReturn(lessonPage);
+            given(lessonMapper.toSummaryResponse(testLesson)).willReturn(testSummaryResponse);
+
+            // When
+            Page<LessonSummaryResponse> result = lessonService.searchLessonsInCourse(courseId, "Hiragana", ContentStatus.DRAFT, pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            verify(lessonRepository).searchByTitleAndStatusInCourse(courseId, "Hiragana", ContentStatus.DRAFT, pageable);
         }
     }
 

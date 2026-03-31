@@ -49,7 +49,7 @@ public interface LessonService {
     /**
      * Get all lessons for a course with pagination.
      */
-    Page<LessonSummaryResponse> getLessonsByCourseId(UUID courseId, Pageable pageable);
+    Page<LessonSummaryResponse> getLessonsByCourseId(UUID courseId, ContentStatus status, Pageable pageable);
 
     /**
      * Get published lessons for a course (student view).
@@ -64,7 +64,7 @@ public interface LessonService {
     /**
      * Search lessons within a specific course.
      */
-    Page<LessonSummaryResponse> searchLessonsInCourse(UUID courseId, String keyword, Pageable pageable);
+    Page<LessonSummaryResponse> searchLessonsInCourse(UUID courseId, String keyword, ContentStatus status, Pageable pageable);
 
     // ===== Status Management =====
 

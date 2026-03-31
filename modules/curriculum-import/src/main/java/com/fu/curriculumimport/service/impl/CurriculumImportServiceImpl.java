@@ -517,8 +517,8 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
 
         if (!mimeOk && !extOk) {
             throw new InvalidImportFileException(
-                    "Only PDF and PPTX files are accepted. Received MIME type: " + contentType
-                            + ", filename: " + file.getOriginalFilename());
+                    "Chỉ chấp nhận các tệp PDF và PPTX. Loại MIME nhận được: " + contentType
+                            + ", tên tệp: " + file.getOriginalFilename());
         }
 
         if (file.getSize() > MAX_FILE_SIZE_BYTES) {

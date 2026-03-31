@@ -65,6 +65,14 @@ public interface LessonRepository extends JpaRepository<Lesson, UUID> {
                                         @Param("keyword") String keyword,
                                         Pageable pageable);
 
+    @Query("SELECT l FROM Lesson l WHERE l.course.id = :courseId AND l.status = :status AND l.deletedAt IS NULL AND " +
+           "(LOWER(l.title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+           "LOWER(l.titleJapanese) LIKE LOWER(CONCAT('%', :keyword, '%')))")
+    Page<Lesson> searchByTitleAndStatusInCourse(@Param("courseId") UUID courseId,
+                                                 @Param("keyword") String keyword,
+                                                 @Param("status") ContentStatus status,
+                                                 Pageable pageable);
+
     // ===== Counting =====
 
     long countByCourseIdAndDeletedAtIsNull(UUID courseId);
