@@ -80,6 +80,7 @@ public final class MarkdownGrammarSplitter {
         List<int[]> positions = new ArrayList<>();   // [start, end]
         List<Integer> numbers = new ArrayList<>();   // -1 for unnumbered
         List<String> titles = new ArrayList<>();
+        List<Integer> levels = new ArrayList<>();    // heading depth (# count)
 
         while (matcher.find()) {
             String title = matcher.group(3).trim();
@@ -90,7 +91,55 @@ public final class MarkdownGrammarSplitter {
             positions.add(new int[]{matcher.start(), matcher.end()});
             numbers.add(matcher.group(2) != null ? Integer.parseInt(matcher.group(2)) : -1);
             titles.add(title);
+            levels.add(matcher.group(1).length());
         }
+
+        if (positions.isEmpty()) return List.of();
+
+        // --- Grammar section boundary detection ---
+        //
+        // PDF parsers sometimes produce inconsistent heading levels for the same content type:
+        //   ## IV. Giải thích ngữ pháp   ← chapter header (skipped above)
+        //   ### 1. Danh từ₁ は...          ← grammar point at level 3
+        //   ### 2. ...
+        //   ## 4. Danh từ も              ← grammar point at level 2 (!)
+        //
+        // Using minimum-level filtering would miss the "###" grammar points.
+        //
+        // Key insight: numbered headings use "N." format (period), while subsection
+        // explanations use "N)" format (parenthesis). The SECTION_HEADING regex only
+        // captures group(2) when the format is "N." — so:
+        //   ### 1. Danh từ₁ は ...  → group(2)="1"  → numbered → grammar point ✓
+        //   ### 1) Trợ từ は        → group(2)=null → unnumbered → subsection body ✗
+        //
+        // Strategy:
+        //   1. All numbered headings (N. format, any level) are grammar section boundaries.
+        //   2. Unnumbered headings are included only when at the same level as the
+        //      shallowest numbered heading (to handle documents that use unnumbered
+        //      headings for grammar points like "## ～さん").
+        int minNumberedLevel = 999;
+        for (int i = 0; i < levels.size(); i++) {
+            if (numbers.get(i) >= 0 && levels.get(i) < minNumberedLevel) {
+                minNumberedLevel = levels.get(i);
+            }
+        }
+        if (minNumberedLevel == 999) minNumberedLevel = 2; // no numbered headings found
+
+        List<int[]> filteredPositions = new ArrayList<>();
+        List<Integer> filteredNumbers = new ArrayList<>();
+        List<String> filteredTitles = new ArrayList<>();
+        for (int i = 0; i < positions.size(); i++) {
+            boolean isNumbered = numbers.get(i) >= 0;                              // N. format
+            boolean isUnnumberedAtPrimary = !isNumbered && levels.get(i) == minNumberedLevel;
+            if (isNumbered || isUnnumberedAtPrimary) {
+                filteredPositions.add(positions.get(i));
+                filteredNumbers.add(numbers.get(i));
+                filteredTitles.add(titles.get(i));
+            }
+        }
+        positions = filteredPositions;
+        numbers = filteredNumbers;
+        titles = filteredTitles;
 
         if (positions.isEmpty()) return List.of();
 

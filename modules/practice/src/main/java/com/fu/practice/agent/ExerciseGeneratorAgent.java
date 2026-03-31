@@ -19,12 +19,14 @@ import com.fu.course.repository.VocabularyRepository;
 import com.fu.curriculumimport.service.embedding.ChatbotFilter;
 import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import com.fu.curriculumimport.service.embedding.RagContext;
+import com.fu.practice.entity.PracticeItemType;
 import com.fu.practice.entity.PracticeSessionType;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.stereotype.Service;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -70,9 +72,10 @@ public class ExerciseGeneratorAgent {
      *
      * @param lessonId   ID bài học
      * @param courseId   ID khóa học
-     * @param type       loại phiên luyện tập
+     * @param type       loại phiên luyện tập (quyết định nội dung: vocab / grammar / mixed)
      * @param count      số lượng câu hỏi yêu cầu (1-20)
      * @param jlptLevel  cấp độ JLPT của khóa học (ví dụ: "N5")
+     * @param itemTypes  dạng câu hỏi muốn sinh — null/rỗng = tự chọn theo sessionType
      * @return danh sách câu hỏi đã sinh
      */
     public List<GeneratedItem> generateItems(
@@ -80,7 +83,8 @@ public class ExerciseGeneratorAgent {
             UUID courseId,
             PracticeSessionType type,
             int count,
-            String jlptLevel) {
+            String jlptLevel,
+            List<PracticeItemType> itemTypes) {
 
         List<Vocabulary> vocabList = loadVocabulary(lessonId, type);
         List<GrammarPoint> grammarList = loadGrammar(lessonId, type);
@@ -90,18 +94,16 @@ public class ExerciseGeneratorAgent {
                     "Bài học chưa có nội dung để luyện tập. Vui lòng liên hệ giáo viên.");
         }
 
+        List<PracticeItemType> resolvedTypes = resolveItemTypes(type, itemTypes);
         String contentSummary = buildContentSummary(vocabList, grammarList);
-
-        // RAG: lấy distractor tương tự từ embedding store
         String ragContext = buildRagContext(contentSummary, courseId, lessonId);
-
-        String prompt = buildPrompt(count, type, jlptLevel, contentSummary, ragContext);
+        String prompt = buildPrompt(count, type, jlptLevel, contentSummary, ragContext, resolvedTypes);
 
         List<GeneratedItem> items = callLlm(prompt, count);
 
         if (items == null || items.isEmpty()) {
             log.warn("ExerciseGeneratorAgent: LLM trả về rỗng, retry với prompt đơn giản hơn");
-            items = callLlm(buildSimplePrompt(count, type, jlptLevel, contentSummary), count);
+            items = callLlm(buildSimplePrompt(count, type, jlptLevel, contentSummary, resolvedTypes), count);
         }
 
         if (items == null || items.isEmpty()) {
@@ -179,32 +181,86 @@ public class ExerciseGeneratorAgent {
         }
     }
 
-    private String buildPrompt(int count, PracticeSessionType type,
-                               String jlptLevel, String contentSummary, String ragContext) {
+    /**
+     * Xác định danh sách dạng câu hỏi cần sinh.
+     * Nếu người dùng không chọn, dùng default theo sessionType.
+     */
+    private List<PracticeItemType> resolveItemTypes(PracticeSessionType type,
+                                                     List<PracticeItemType> requested) {
+        if (requested != null && !requested.isEmpty()) {
+            return requested;
+        }
+        return switch (type) {
+            case VOCAB_DRILL    -> List.of(PracticeItemType.MULTIPLE_CHOICE,
+                                           PracticeItemType.FILL_BLANK,
+                                           PracticeItemType.MATCHING);
+            case GRAMMAR_DRILL  -> List.of(PracticeItemType.FILL_BLANK,
+                                           PracticeItemType.MULTIPLE_CHOICE,
+                                           PracticeItemType.TRUE_FALSE);
+            case KANJI_READING  -> List.of(PracticeItemType.MULTIPLE_CHOICE,
+                                           PracticeItemType.FILL_BLANK);
+            case SENTENCE_BUILD -> List.of(PracticeItemType.SENTENCE_ORDER,
+                                           PracticeItemType.FILL_BLANK);
+            case MIXED_LESSON   -> List.of(PracticeItemType.MULTIPLE_CHOICE,
+                                           PracticeItemType.FILL_BLANK,
+                                           PracticeItemType.TRUE_FALSE,
+                                           PracticeItemType.MATCHING);
+        };
+    }
+
+    private String buildPrompt(int count, PracticeSessionType type, String jlptLevel,
+                               String contentSummary, String ragContext,
+                               List<PracticeItemType> itemTypes) {
         return promptLoader.render("prompts/exercise-generator-system.st", Map.of(
                 "count", String.valueOf(count),
-                "typeDescription", describeType(type),
+                "sessionTypeDescription", describeSessionType(type),
                 "jlptLevel", jlptLevel != null ? jlptLevel : "N5",
                 "contentSummary", contentSummary,
                 "ragContext", ragContext,
-                "sessionType", type.name()));
+                "itemTypeInstruction", buildItemTypeInstruction(itemTypes)));
     }
 
-    private String buildSimplePrompt(int count, PracticeSessionType type,
-                                     String jlptLevel, String contentSummary) {
+    private String buildSimplePrompt(int count, PracticeSessionType type, String jlptLevel,
+                                     String contentSummary, List<PracticeItemType> itemTypes) {
         return promptLoader.render("prompts/exercise-generator-simple.st", Map.of(
                 "count", String.valueOf(count),
                 "jlptLevel", jlptLevel != null ? jlptLevel : "N5",
-                "contentSummary", contentSummary));
+                "contentSummary", contentSummary,
+                "itemTypeInstruction", buildItemTypeInstruction(itemTypes)));
     }
 
-    private String describeType(PracticeSessionType type) {
+    private String describeSessionType(PracticeSessionType type) {
         return switch (type) {
-            case VOCAB_DRILL -> "từ vựng";
-            case GRAMMAR_DRILL -> "ngữ pháp";
-            case MIXED_LESSON -> "tổng hợp (từ vựng + ngữ pháp)";
-            case KANJI_READING -> "đọc Hán tự";
-            case SENTENCE_BUILD -> "xây dựng câu";
+            case VOCAB_DRILL    -> "Từ vựng — nghĩa, cách đọc, cách dùng của từng từ";
+            case GRAMMAR_DRILL  -> "Ngữ pháp — cấu trúc câu, ứng dụng mẫu ngữ pháp";
+            case KANJI_READING  -> "Hán tự — cách đọc on/kun-yomi và nghĩa của Kanji";
+            case SENTENCE_BUILD -> "Xây dựng câu — ghép từ vựng và ngữ pháp thành câu đúng";
+            case MIXED_LESSON   -> "Tổng hợp — kết hợp từ vựng lẫn ngữ pháp của bài học";
+        };
+    }
+
+    /**
+     * Tạo instruction cho từng dạng câu hỏi được yêu cầu.
+     */
+    private String buildItemTypeInstruction(List<PracticeItemType> types) {
+        if (types.size() == 1) {
+            return "Tất cả câu hỏi phải là dạng: " + describeSingleType(types.get(0));
+        }
+        StringBuilder sb = new StringBuilder("Phân bổ đều các dạng sau (xen kẽ, không dồn vào 1 dạng):\n");
+        for (PracticeItemType t : types) {
+            sb.append("  - ").append(t.name()).append(": ").append(describeSingleType(t)).append("\n");
+        }
+        return sb.toString().trim();
+    }
+
+    private String describeSingleType(PracticeItemType type) {
+        return switch (type) {
+            case MULTIPLE_CHOICE -> "MULTIPLE_CHOICE — 4 lựa chọn object {text,isCorrect}, 1 đúng 3 sai";
+            case FILL_BLANK      -> "FILL_BLANK — điền vào chỗ trống trong câu, options=[]";
+            case TRANSLATION     -> "TRANSLATION — dịch câu Nhật↔Việt, options=[]";
+            case SENTENCE_ORDER  -> "SENTENCE_ORDER — options = danh sách từ cần sắp xếp (isCorrect=false), correctAnswer = câu hoàn chỉnh";
+            case MATCHING        -> "MATCHING — ghép cặp, 4 options (1 đúng isCorrect=true, 3 sai)";
+            case TRUE_FALSE      -> "TRUE_FALSE — phát biểu đúng/sai, options=[{\"text\":\"Đúng\",\"isCorrect\":X},{\"text\":\"Sai\",\"isCorrect\":Y}]";
         };
     }
 
@@ -242,6 +298,7 @@ public class ExerciseGeneratorAgent {
      * @JsonProperty để Jackson deserialize đúng tên field từ LLM JSON.
      */
     public record GeneratedItem(
+            @JsonProperty("itemType") String itemType,
             @JsonProperty("question") String question,
             @JsonProperty("questionJapanese") String questionJapanese,
             @JsonProperty("options") List<OptionItem> options,

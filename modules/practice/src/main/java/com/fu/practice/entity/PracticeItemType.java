@@ -8,5 +8,6 @@ public enum PracticeItemType {
     FILL_BLANK,
     TRANSLATION,
     SENTENCE_ORDER,
-    MATCHING
+    MATCHING,
+    TRUE_FALSE
 }
