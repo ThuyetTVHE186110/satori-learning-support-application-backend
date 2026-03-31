@@ -118,22 +118,20 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, UUID> 
             SELECT * FROM ai_conversation.conversation_sessions
             WHERE user_id = :userId
               AND session_type = CAST(:sessionType AS session_type)
-              AND deleted_at IS NULL
             ORDER BY created_at DESC
             """,
             countQuery = """
             SELECT COUNT(*) FROM ai_conversation.conversation_sessions
             WHERE user_id = :userId
               AND session_type = CAST(:sessionType AS session_type)
-              AND deleted_at IS NULL
             """,
             nativeQuery = true)
     Page<ChatSession> findByUserIdAndSessionType(@Param("userId") UUID userId,
                                                   @Param("sessionType") String sessionType,
                                                   Pageable pageable);
 
-    /** Find session by ID regardless of status (for reopen). Excludes soft-deleted. */
-    @Query(value = "SELECT * FROM ai_conversation.conversation_sessions WHERE id = :id AND deleted_at IS NULL",
+    /** Find session by ID regardless of status (for reopen). */
+    @Query(value = "SELECT * FROM ai_conversation.conversation_sessions WHERE id = :id",
            nativeQuery = true)
     Optional<ChatSession> findByIdNotDeleted(@Param("id") UUID id);
 
@@ -150,7 +148,6 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, UUID> 
                SET status = CAST('ABANDONED' AS session_status)
              WHERE status = CAST('ACTIVE' AS session_status)
                AND created_at < :cutoff
-               AND deleted_at IS NULL
             """, nativeQuery = true)
     int markAbandonedBefore(@Param("cutoff") LocalDateTime cutoff);
 }
