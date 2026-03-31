@@ -119,7 +119,6 @@ public interface CurriculumImportService {
             UUID id,
             String title,
             String titleJapanese,
-            String lessonType,
             Integer orderIndex,
             Integer pageStart,
             Integer pageEnd,

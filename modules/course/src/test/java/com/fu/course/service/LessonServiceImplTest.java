@@ -9,7 +9,6 @@ import com.fu.course.entity.Course;
 import com.fu.course.entity.Course.JlptLevel;
 import com.fu.course.entity.Lesson;
 import com.fu.course.entity.Lesson.ContentStatus;
-import com.fu.course.entity.Lesson.LessonType;
 import com.fu.course.entity.Lesson.ProcessingStatus;
 import com.fu.course.exception.CourseNotFoundException;
 import com.fu.course.exception.LessonNotFoundException;
@@ -95,7 +94,7 @@ class LessonServiceImplTest {
                 .title("Hiragana Basics")
                 .titleJapanese("ひらがな基礎")
                 .description("Learn basic Hiragana characters")
-                .lessonType(LessonType.VOCABULARY)
+
                 .orderIndex(1)
                 .estimatedDurationMinutes(30)
                 .status(ContentStatus.DRAFT)
@@ -109,7 +108,7 @@ class LessonServiceImplTest {
                 .courseName("Japanese N5 Course")
                 .title("Hiragana Basics")
                 .titleJapanese("ひらがな基礎")
-                .lessonType(LessonType.VOCABULARY)
+
                 .orderIndex(1)
                 .estimatedDurationMinutes(30)
                 .status(ContentStatus.DRAFT)
@@ -122,7 +121,7 @@ class LessonServiceImplTest {
                 .id(lessonId)
                 .courseId(courseId)
                 .title("Hiragana Basics")
-                .lessonType(LessonType.VOCABULARY)
+
                 .orderIndex(1)
                 .status(ContentStatus.DRAFT)
                 .build();
@@ -132,7 +131,7 @@ class LessonServiceImplTest {
                 .title("Hiragana Basics")
                 .titleJapanese("ひらがな基礎")
                 .description("Learn basic Hiragana characters")
-                .lessonType(LessonType.VOCABULARY)
+
                 .orderIndex(1)
                 .estimatedDurationMinutes(30)
                 .build();
@@ -166,7 +165,6 @@ class LessonServiceImplTest {
             // Then
             assertThat(result).isNotNull();
             assertThat(result.getTitle()).isEqualTo("Hiragana Basics");
-            assertThat(result.getLessonType()).isEqualTo(LessonType.VOCABULARY);
 
             verify(courseRepository).findByIdAndNotDeleted(courseId);
             verify(lessonRepository).save(lessonCaptor.capture());

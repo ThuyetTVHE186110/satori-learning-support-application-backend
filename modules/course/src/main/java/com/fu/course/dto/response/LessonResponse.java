@@ -1,7 +1,6 @@
 package com.fu.course.dto.response;
 
 import com.fu.course.entity.Lesson.ContentStatus;
-import com.fu.course.entity.Lesson.LessonType;
 import com.fu.course.entity.Lesson.ProcessingStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -28,7 +27,6 @@ public class LessonResponse {
     private String title;
     private String titleJapanese;
     private String description;
-    private LessonType lessonType;
 
     private String content;
     private List<String> objectives;
