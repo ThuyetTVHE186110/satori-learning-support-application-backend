@@ -2,7 +2,6 @@ package com.fu.course.repository;
 
 import com.fu.course.entity.Lesson;
 import com.fu.course.entity.Lesson.ContentStatus;
-import com.fu.course.entity.Lesson.LessonType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -46,10 +45,6 @@ public interface LessonRepository extends JpaRepository<Lesson, UUID> {
     Page<Lesson> findByCourseIdAndStatusAndNotDeleted(@Param("courseId") UUID courseId,
                                                        @Param("status") ContentStatus status,
                                                        Pageable pageable);
-
-    // ===== Filter by lesson type =====
-
-    Page<Lesson> findByLessonTypeAndDeletedAtIsNull(LessonType lessonType, Pageable pageable);
 
     // ===== Search =====
 

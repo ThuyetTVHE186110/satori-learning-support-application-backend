@@ -694,7 +694,6 @@ class CurriculumImportServiceImplTest {
             lesson.setId(UUID.randomUUID());
             lesson.setTitle("Lesson 1");
             lesson.setTitleJapanese("レッスン 1");
-            lesson.setLessonType(Lesson.LessonType.VOCABULARY);
             lesson.setOrderIndex(1);
             lesson.setPageStart(1);
             lesson.setPageEnd(5);
@@ -708,7 +707,6 @@ class CurriculumImportServiceImplTest {
             LessonSummaryDto dto = result.get(0);
             assertThat(dto.id()).isEqualTo(lesson.getId());
             assertThat(dto.title()).isEqualTo("Lesson 1");
-            assertThat(dto.lessonType()).isEqualTo("VOCABULARY");
             assertThat(dto.status()).isEqualTo("DRAFT");
         }
     }

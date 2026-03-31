@@ -526,30 +526,6 @@ class ImportPersistenceServiceTest {
         }
 
         @Test
-        @DisplayName("Lesson entity always gets LessonType.MIXED regardless of content")
-        void persistExtracted_lessonType_alwaysMixed() {
-            CurriculumImport entity = makeImport(COURSE_ID);
-            Course course = new Course();
-            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
-
-            given(itemHelper.findOrCreateLesson(any(Lesson.class), any(UUID.class)))
-                    .willAnswer(inv -> inv.getArgument(0));
-
-            ExtractionResult.ExtractedLesson lesson = ExtractionResult.ExtractedLesson.builder()
-                    .title("Some Lesson")
-                    .pageStart(1).pageEnd(3).orderIndex(1)
-                    .build();
-
-            ExtractionResult result = resultWith(List.of(lesson), List.of(), List.of());
-
-            service.persistExtractedContent(entity, List.of(result));
-
-            ArgumentCaptor<Lesson> captor = ArgumentCaptor.forClass(Lesson.class);
-            then(itemHelper).should().findOrCreateLesson(captor.capture(), any());
-            assertThat(captor.getValue().getLessonType()).isEqualTo(Lesson.LessonType.MIXED);
-        }
-
-        @Test
         @DisplayName("Multiple ExtractionResults -> vocab/grammar counts accumulate from batch results")
         void persistExtracted_multipleResults_countsAccumulate() {
             CurriculumImport entity = makeImport(null); // no course -> no lesson persisted
