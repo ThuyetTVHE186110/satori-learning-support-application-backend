@@ -23,7 +23,6 @@ import java.util.UUID;
 @Table(name = "lessons", schema = "learning_content", indexes = {
     @Index(name = "idx_lessons_course_id", columnList = "course_id"),
     @Index(name = "idx_lessons_status", columnList = "status"),
-    @Index(name = "idx_lessons_lesson_type", columnList = "lesson_type"),
     @Index(name = "idx_lessons_order_index", columnList = "order_index"),
     @Index(name = "idx_lessons_import_id", columnList = "import_id")
 })
@@ -48,11 +47,6 @@ public class Lesson extends SoftDeletableEntity {
 
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
-
-    @Enumerated(EnumType.STRING)
-    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
-    @Column(name = "lesson_type", columnDefinition = "lesson_type", nullable = false)
-    private LessonType lessonType;
 
     /**
      * Flexible content structure stored as JSONB in PostgreSQL.
@@ -118,18 +112,6 @@ public class Lesson extends SoftDeletableEntity {
     @Column(name = "status", columnDefinition = "content_status")
     @Builder.Default
     private ContentStatus status = ContentStatus.DRAFT;
-
-    /**
-     * Lesson Type enum - categorizes lesson content.
-     */
-    public enum LessonType {
-        VOCABULARY,
-        GRAMMAR,
-        KANJI,
-        LISTENING,
-        READING,
-        MIXED
-    }
 
     /**
      * Processing Status enum - tracks AI/import pipeline progress.

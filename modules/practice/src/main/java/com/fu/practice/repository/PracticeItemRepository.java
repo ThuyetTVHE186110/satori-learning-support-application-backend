@@ -18,6 +18,12 @@ public interface PracticeItemRepository extends JpaRepository<PracticeItem, UUID
     List<PracticeItem> findBySessionIdOrderByItemIndex(UUID sessionId);
 
     /**
+     * Lấy câu hỏi tại vị trí cụ thể trong session — dùng bởi submitAnswer để
+     * lấy câu tiếp theo đã được sinh sẵn từ startSession.
+     */
+    java.util.Optional<PracticeItem> findBySessionIdAndItemIndex(UUID sessionId, int itemIndex);
+
+    /**
      * Lấy các item chưa được trả lời trong session.
      */
     @Query("SELECT pi FROM PracticeItem pi WHERE pi.sessionId = :sessionId AND pi.userAnswer IS NULL ORDER BY pi.itemIndex ASC")

@@ -15,7 +15,6 @@ import com.fu.course.repository.CourseRepository;
 import com.fu.course.repository.LessonRepository;
 import com.fu.course.service.CourseService.CourseStatistics;
 import com.fu.course.service.impl.CourseServiceImpl;
-import com.fu.infrastructure.cloudinary.CloudinaryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -60,9 +59,6 @@ class CourseServiceImplTest {
     @Mock
     private LessonRepository lessonRepository;
 
-    @Mock
-    private CloudinaryService cloudinaryService;
-
     @InjectMocks
     private CourseServiceImpl courseService;
 
@@ -87,7 +83,6 @@ class CourseServiceImplTest {
                 .name("Japanese N5 Course")
                 .description("Beginner Japanese course for N5 level")
                 .jlptLevel(JlptLevel.N5)
-                .thumbnailUrl("https://example.com/thumb.jpg")
                 .orderIndex(1)
                 .status(Course.CourseStatus.INACTIVE)
                 .build();
@@ -134,7 +129,7 @@ class CourseServiceImplTest {
     class CreateCourseTests {
 
         @Test
-        @DisplayName("Should create course successfully without thumbnail")
+        @DisplayName("Should create course successfully")
         void shouldCreateCourseSuccessfullyWithoutThumbnail() {
             // Given
             given(courseRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
@@ -170,7 +165,6 @@ class CourseServiceImplTest {
                     .hasMessageContaining(createRequest.getName());
 
             verify(courseRepository, never()).save(any());
-            verify(cloudinaryService, never()).uploadImage(any(), any());
         }
     }
 
@@ -421,12 +415,14 @@ class CourseServiceImplTest {
 
         @Test
         @DisplayName("Should get all courses with pagination")
+        @SuppressWarnings("unchecked")
         void shouldGetAllCoursesWithPagination() {
             // Given
             Pageable pageable = PageRequest.of(0, 10);
             Page<Course> coursePage = new PageImpl<>(List.of(testCourse), pageable, 1);
             given(courseRepository.findAll(pageable)).willReturn(coursePage);
             given(courseMapper.toSummaryResponse(testCourse)).willReturn(testSummaryResponse);
+            given(lessonRepository.countByCourseIdAndDeletedAtIsNull(courseId)).willReturn(5L);
 
             // When
             Page<CourseSummaryResponse> result = courseService.getAllCourses(pageable);
@@ -434,6 +430,8 @@ class CourseServiceImplTest {
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
             assertThat(result.getContent().getFirst().getName()).isEqualTo("Japanese N5 Course");
+            assertThat(result.getContent().getFirst().getLessonCount()).isEqualTo(5L);
+            verify(lessonRepository).countByCourseIdAndDeletedAtIsNull(courseId);
         }
 
         @Test
@@ -444,12 +442,15 @@ class CourseServiceImplTest {
             Page<Course> coursePage = new PageImpl<>(List.of(testCourse), pageable, 1);
             given(courseRepository.findByStatusAndDeletedAtIsNull(CourseStatus.INACTIVE, pageable)).willReturn(coursePage);
             given(courseMapper.toSummaryResponse(testCourse)).willReturn(testSummaryResponse);
+            given(lessonRepository.countByCourseIdAndDeletedAtIsNull(courseId)).willReturn(5L);
 
             // When
             Page<CourseSummaryResponse> result = courseService.getCoursesByStatus(Course.CourseStatus.INACTIVE, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
+            assertThat(result.getContent().getFirst().getLessonCount()).isEqualTo(5L);
+            verify(lessonRepository).countByCourseIdAndDeletedAtIsNull(courseId);
         }
 
         @Test

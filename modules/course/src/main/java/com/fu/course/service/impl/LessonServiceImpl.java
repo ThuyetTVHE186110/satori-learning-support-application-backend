@@ -1,5 +1,6 @@
 package com.fu.course.service.impl;
 
+import com.fu.common.exception.BusinessException;
 import com.fu.course.dto.request.CreateLessonRequest;
 import com.fu.course.dto.request.UpdateLessonRequest;
 import com.fu.course.dto.response.LessonResponse;
@@ -74,7 +75,7 @@ public class LessonServiceImpl implements LessonService {
         if (request.getTitle() != null
                 && !request.getTitle().equalsIgnoreCase(lesson.getTitle())
                 && lessonRepository.existsByTitleIgnoreCaseAndCourseIdAndIdNot(
-                        request.getTitle(), lesson.getCourse().getId(), lessonId)) {
+                request.getTitle(), lesson.getCourse().getId(), lessonId)) {
             throw new com.fu.common.exception.BusinessException(
                     "Lesson with title '" + request.getTitle() + "' already exists in this course");
         }
@@ -123,10 +124,10 @@ public class LessonServiceImpl implements LessonService {
 
     @Override
     public Page<LessonSummaryResponse> getLessonsByCourseId(UUID courseId, ContentStatus status, Pageable pageable) {
-        log.debug("Fetching lessons for course {} with status {} and pagination", courseId, status);
+        log.debug("Fetching lessons for course {} with status: {}", courseId, status);
         Page<Lesson> lessonPage;
         if (status != null) {
-            lessonPage = lessonRepository.findByCourseIdAndStatusAndNotDeleted(courseId, status, pageable);
+            lessonPage = lessonRepository.findByCourseIdAndStatusAndNotDeleted(courseId, status.name(), pageable);
         } else {
             lessonPage = lessonRepository.findByCourseIdAndNotDeleted(courseId, pageable);
         }
@@ -154,7 +155,7 @@ public class LessonServiceImpl implements LessonService {
         log.debug("Searching lessons in course {} by keyword: {} and status: {}", courseId, keyword, status);
         Page<Lesson> lessonPage;
         if (status != null) {
-            lessonPage = lessonRepository.searchByTitleAndStatusInCourse(courseId, keyword, status, pageable);
+            lessonPage = lessonRepository.searchByTitleAndStatusInCourse(courseId, keyword, status.name(), pageable);
         } else {
             lessonPage = lessonRepository.searchByTitleInCourse(courseId, keyword, pageable);
         }
@@ -169,6 +170,9 @@ public class LessonServiceImpl implements LessonService {
         log.info("Publishing lesson {} by manager {}", lessonId, managerId);
 
         Lesson lesson = findLessonOrThrow(lessonId);
+        if (lesson.getStatus() == ContentStatus.PUBLISHED) {
+            throw new BusinessException("ALREADY_PUBLISHED", "Bài học đã được mở trước đó rồi.");
+        }
         lesson.setStatus(ContentStatus.PUBLISHED);
         lesson.setUpdatedBy(managerId);
 
@@ -184,6 +188,9 @@ public class LessonServiceImpl implements LessonService {
         log.info("Archiving lesson {} by manager {}", lessonId, managerId);
 
         Lesson lesson = findLessonOrThrow(lessonId);
+        if (lesson.getStatus() == ContentStatus.DRAFT) {
+            throw new BusinessException("INVALID_STATUS", "Không thể lưu trữ bài ở trạng thái nháp");
+        }
         lesson.setStatus(ContentStatus.ARCHIVED);
         lesson.setUpdatedBy(managerId);
 

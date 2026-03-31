@@ -5,7 +5,6 @@ import com.fu.course.dto.request.UpdateLessonRequest;
 import com.fu.course.dto.response.LessonResponse;
 import com.fu.course.dto.response.LessonSummaryResponse;
 import com.fu.course.entity.Lesson.ContentStatus;
-import com.fu.course.entity.Lesson.LessonType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 

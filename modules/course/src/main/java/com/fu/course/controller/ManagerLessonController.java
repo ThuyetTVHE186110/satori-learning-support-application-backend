@@ -96,7 +96,7 @@ public class ManagerLessonController {
             @RequestParam(required = false) Lesson.ContentStatus status
     ) {
 
-        Pageable pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("orderIndex").ascending());
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("order_index").ascending());
 
         Page<LessonSummaryResponse> lessonPage;
         if (keyword != null && !keyword.isBlank()) {

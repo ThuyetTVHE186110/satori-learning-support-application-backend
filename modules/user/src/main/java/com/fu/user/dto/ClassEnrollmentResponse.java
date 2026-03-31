@@ -20,7 +20,6 @@ public class ClassEnrollmentResponse {
     
     private UUID classId;
     private String className;
-    private String classCode;
     private UUID courseId;
     private String courseName;
     private LocalDateTime startDate;

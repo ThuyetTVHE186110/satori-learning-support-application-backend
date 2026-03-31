@@ -256,7 +256,6 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
                         l.getId(),
                         l.getTitle(),
                         l.getTitleJapanese(),
-                        l.getLessonType().name(),
                         l.getOrderIndex(),
                         l.getPageStart(),
                         l.getPageEnd(),

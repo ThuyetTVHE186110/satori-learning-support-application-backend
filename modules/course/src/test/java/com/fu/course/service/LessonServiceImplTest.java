@@ -9,7 +9,6 @@ import com.fu.course.entity.Course;
 import com.fu.course.entity.Course.JlptLevel;
 import com.fu.course.entity.Lesson;
 import com.fu.course.entity.Lesson.ContentStatus;
-import com.fu.course.entity.Lesson.LessonType;
 import com.fu.course.entity.Lesson.ProcessingStatus;
 import com.fu.course.exception.CourseNotFoundException;
 import com.fu.course.exception.LessonNotFoundException;
@@ -103,7 +102,7 @@ class LessonServiceImplTest {
                 .title("Hiragana Basics")
                 .titleJapanese("ひらがな基礎")
                 .description("Learn basic Hiragana characters")
-                .lessonType(LessonType.VOCABULARY)
+
                 .orderIndex(1)
                 .estimatedDurationMinutes(30)
                 .status(ContentStatus.DRAFT)
@@ -117,7 +116,7 @@ class LessonServiceImplTest {
                 .courseName("Japanese N5 Course")
                 .title("Hiragana Basics")
                 .titleJapanese("ひらがな基礎")
-                .lessonType(LessonType.VOCABULARY)
+
                 .orderIndex(1)
                 .estimatedDurationMinutes(30)
                 .status(ContentStatus.DRAFT)
@@ -130,7 +129,7 @@ class LessonServiceImplTest {
                 .id(lessonId)
                 .courseId(courseId)
                 .title("Hiragana Basics")
-                .lessonType(LessonType.VOCABULARY)
+
                 .orderIndex(1)
                 .status(ContentStatus.DRAFT)
                 .build();
@@ -140,7 +139,7 @@ class LessonServiceImplTest {
                 .title("Hiragana Basics")
                 .titleJapanese("ひらがな基礎")
                 .description("Learn basic Hiragana characters")
-                .lessonType(LessonType.VOCABULARY)
+
                 .orderIndex(1)
                 .estimatedDurationMinutes(30)
                 .build();
@@ -174,7 +173,6 @@ class LessonServiceImplTest {
             // Then
             assertThat(result).isNotNull();
             assertThat(result.getTitle()).isEqualTo("Hiragana Basics");
-            assertThat(result.getLessonType()).isEqualTo(LessonType.VOCABULARY);
 
             verify(courseRepository).findByIdAndNotDeleted(courseId);
             verify(lessonRepository).save(lessonCaptor.capture());
@@ -358,7 +356,7 @@ class LessonServiceImplTest {
             // Given
             Pageable pageable = PageRequest.of(0, 10);
             Page<Lesson> lessonPage = new PageImpl<>(List.of(testLesson), pageable, 1);
-            given(lessonRepository.findByCourseIdAndStatusAndNotDeleted(courseId, ContentStatus.DRAFT, pageable)).willReturn(lessonPage);
+            given(lessonRepository.findByCourseIdAndStatusAndNotDeleted(courseId, ContentStatus.DRAFT.toString(), pageable)).willReturn(lessonPage);
             given(lessonMapper.toSummaryResponse(testLesson)).willReturn(testSummaryResponse);
 
             // When
@@ -366,7 +364,7 @@ class LessonServiceImplTest {
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
-            verify(lessonRepository).findByCourseIdAndStatusAndNotDeleted(courseId, ContentStatus.DRAFT, pageable);
+            verify(lessonRepository).findByCourseIdAndStatusAndNotDeleted(courseId, ContentStatus.DRAFT.toString(), pageable);
         }
 
         @Test
@@ -421,7 +419,7 @@ class LessonServiceImplTest {
             // Given
             Pageable pageable = PageRequest.of(0, 10);
             Page<Lesson> lessonPage = new PageImpl<>(List.of(testLesson), pageable, 1);
-            given(lessonRepository.searchByTitleAndStatusInCourse(courseId, "Hiragana", ContentStatus.DRAFT, pageable)).willReturn(lessonPage);
+            given(lessonRepository.searchByTitleAndStatusInCourse(courseId, "Hiragana", ContentStatus.DRAFT.toString(), pageable)).willReturn(lessonPage);
             given(lessonMapper.toSummaryResponse(testLesson)).willReturn(testSummaryResponse);
 
             // When
@@ -429,7 +427,24 @@ class LessonServiceImplTest {
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
-            verify(lessonRepository).searchByTitleAndStatusInCourse(courseId, "Hiragana", ContentStatus.DRAFT, pageable);
+            verify(lessonRepository).searchByTitleAndStatusInCourse(courseId, "Hiragana", ContentStatus.DRAFT.toString(), pageable);
+        }
+
+        @Test
+        @DisplayName("Should search lessons in course when status is null")
+        void shouldSearchLessonsInCourse_WhenStatusIsNull() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<Lesson> lessonPage = new PageImpl<>(List.of(testLesson), pageable, 1);
+            given(lessonRepository.searchByTitleInCourse(courseId, "Hiragana", pageable)).willReturn(lessonPage);
+            given(lessonMapper.toSummaryResponse(testLesson)).willReturn(testSummaryResponse);
+
+            // When
+            Page<LessonSummaryResponse> result = lessonService.searchLessonsInCourse(courseId, "Hiragana", null, pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            verify(lessonRepository).searchByTitleInCourse(courseId, "Hiragana", pageable);
         }
     }
 
@@ -468,6 +483,7 @@ class LessonServiceImplTest {
         @DisplayName("Should archive lesson successfully")
         void shouldArchiveLessonSuccessfully() {
             // Given
+            testLesson.setStatus(ContentStatus.PUBLISHED);
             given(lessonRepository.findByIdAndNotDeleted(lessonId)).willReturn(Optional.of(testLesson));
             given(lessonRepository.save(any(Lesson.class))).willReturn(testLesson);
 

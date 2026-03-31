@@ -15,7 +15,6 @@ import com.fu.course.repository.CourseRepository;
 import com.fu.course.repository.LessonRepository;
 import com.fu.course.repository.specification.CourseSpecification;
 import com.fu.course.service.CourseService;
-import com.fu.infrastructure.cloudinary.CloudinaryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -108,21 +107,21 @@ public class CourseServiceImpl implements CourseService {
     public Page<CourseSummaryResponse> getAllCourses(Pageable pageable) {
         log.debug("Fetching all courses with pagination");
         return courseRepository.findAll(pageable)
-                .map(courseMapper::toSummaryResponse);
+                .map(this::toSummaryResponseWithCounts);
     }
 
     @Override
     public Page<CourseSummaryResponse> getCoursesByStatus(Course.CourseStatus status, Pageable pageable) {
         log.debug("Fetching courses by status: {}", status);
         return courseRepository.findByStatusAndDeletedAtIsNull(status, pageable)
-                .map(courseMapper::toSummaryResponse);
+                .map(this::toSummaryResponseWithCounts);
     }
 
     @Override
     public Page<CourseSummaryResponse> getCoursesByJlptLevel(JlptLevel jlptLevel, Pageable pageable) {
         log.debug("Fetching courses by JLPT level: {}", jlptLevel);
         return courseRepository.findByJlptLevelAndDeletedAtIsNull(jlptLevel, pageable)
-                .map(courseMapper::toSummaryResponse);
+                .map(this::toSummaryResponseWithCounts);
     }
 
     @Override
@@ -130,7 +129,7 @@ public class CourseServiceImpl implements CourseService {
         log.debug("Fetching all active courses");
         return courseRepository.findActiveCourses()
                 .stream()
-                .map(courseMapper::toSummaryResponse)
+                .map(this::toSummaryResponseWithCounts)
                 .toList();
     }
 
@@ -139,7 +138,7 @@ public class CourseServiceImpl implements CourseService {
         log.debug("Fetching active courses by level: {}", jlptLevel);
         return courseRepository.findActiveCoursesByLevel(jlptLevel)
                 .stream()
-                .map(courseMapper::toSummaryResponse)
+                .map(this::toSummaryResponseWithCounts)
                 .toList();
     }
 
@@ -147,14 +146,14 @@ public class CourseServiceImpl implements CourseService {
     public Page<CourseSummaryResponse> searchCourses(String keyword, Pageable pageable) {
         log.debug("Searching courses by keyword: {}", keyword);
         return courseRepository.searchByName(keyword, pageable)
-                .map(courseMapper::toSummaryResponse);
+                .map(this::toSummaryResponseWithCounts);
     }
 
     @Override
     public Page<CourseSummaryResponse> filterCourses(CourseStatus status, JlptLevel level, String keyword, Pageable pageable) {
         log.debug("Filtering courses - status: {}, level: {}, keyword: {}", status, level, keyword);
         return courseRepository.findAll(CourseSpecification.withFilters(status, level, keyword), pageable)
-                .map(courseMapper::toSummaryResponse);
+                .map(this::toSummaryResponseWithCounts);
     }
 
     @Override
@@ -231,6 +230,17 @@ public class CourseServiceImpl implements CourseService {
                 n2Courses,
                 n1Courses
         );
+    }
+
+    /**
+     * Helper method to convert course to summary response and enrich with counts
+     */
+    private CourseSummaryResponse toSummaryResponseWithCounts(Course course) {
+        CourseSummaryResponse response = courseMapper.toSummaryResponse(course);
+        response.setLessonCount(lessonRepository.countByCourseIdAndDeletedAtIsNull(course.getId()));
+        // TODO: Set studentCount from enrollment table when available
+        response.setStudentCount(0L);
+        return response;
     }
 
     /**
