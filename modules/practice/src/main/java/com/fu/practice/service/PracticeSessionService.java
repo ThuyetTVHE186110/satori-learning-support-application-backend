@@ -15,10 +15,12 @@ import com.fu.practice.dto.request.SubmitAnswerRequest;
 import com.fu.practice.dto.response.*;
 import com.fu.practice.entity.*;
 import com.fu.practice.repository.LessonProgressRepository;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fu.practice.repository.PracticeItemRepository;
 import com.fu.practice.repository.PracticeSessionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -56,10 +58,10 @@ public class PracticeSessionService {
     /**
      * Bắt đầu phiên luyện tập mới.
      *
-     * LLM call (exercise generation) runs OUTSIDE the transaction to avoid
-     * holding a DB connection for 5-30 seconds. With HikariCP max-pool=10,
-     * blocking connections during LLM calls can exhaust the pool and stall
-     * the entire application.
+     * Lazy generation: chỉ sinh câu hỏi đầu tiên để giảm thời gian chờ.
+     * Các câu tiếp theo được sinh trong submitAnswer() song song với việc chấm điểm.
+     *
+     * LLM call runs OUTSIDE the transaction to avoid holding a DB connection for 5-30 seconds.
      */
     public StartPracticeResponse startSession(UUID userId, StartPracticeRequest request) {
         int itemCount = request.getItemCount();
@@ -68,20 +70,21 @@ public class PracticeSessionService {
                     "Số lượng câu hỏi phải từ 1 đến 20.");
         }
 
-        // Phase 1: Read-only — load lesson, validate enrollment (short transaction via Spring proxy)
+        // Phase 1: Read-only — load lesson, validate enrollment
         LessonContext lessonCtx = loadLessonContext(userId, request.getLessonId());
 
-        // Phase 2: LLM call — NO transaction held
-        List<ExerciseGeneratorAgent.GeneratedItem> generatedItems =
+        // Phase 2: LLM call — sinh DUY NHẤT câu đầu tiên (NO transaction held)
+        List<ExerciseGeneratorAgent.GeneratedItem> firstItem =
                 exerciseGeneratorAgent.generateItems(
                         request.getLessonId(),
                         lessonCtx.courseId(),
                         request.getSessionType(),
-                        itemCount,
-                        lessonCtx.jlptLevel());
+                        1,
+                        lessonCtx.jlptLevel(),
+                        request.getItemTypes());
 
-        // Phase 3: Persist — short transaction for DB writes only
-        return persistNewSession(userId, request, lessonCtx.courseId(), generatedItems);
+        // Phase 3: Persist session + item 0 (totalItems = full requested count)
+        return persistNewSession(userId, request, lessonCtx, firstItem);
     }
 
     @Transactional(readOnly = true)
@@ -97,23 +100,30 @@ public class PracticeSessionService {
 
     @Transactional
     public StartPracticeResponse persistNewSession(UUID userId, StartPracticeRequest request,
-                                                    UUID courseId,
-                                                    List<ExerciseGeneratorAgent.GeneratedItem> generatedItems) {
+                                                    LessonContext lessonCtx,
+                                                    List<ExerciseGeneratorAgent.GeneratedItem> firstItemList) {
+        // Lưu jlptLevel + itemTypes vào context JSON để dùng lại khi sinh câu tiếp theo
+        String itemTypesJson = buildItemTypesJson(request.getItemTypes());
+        String contextJson = String.format("{\"jlptLevel\":\"%s\",\"itemTypes\":%s}",
+                lessonCtx.jlptLevel() != null ? lessonCtx.jlptLevel() : "N5",
+                itemTypesJson);
+
         PracticeSession session = PracticeSession.builder()
                 .userId(userId)
                 .lessonId(request.getLessonId())
-                .courseId(courseId)
+                .courseId(lessonCtx.courseId())
                 .sessionType(request.getSessionType())
                 .status(PracticeStatus.IN_PROGRESS)
-                .totalItems(generatedItems.size())
+                .totalItems(request.getItemCount())   // full count, không phải số đã gen
                 .completedItems(0)
                 .correctItems(0)
                 .score(BigDecimal.ZERO)
                 .startedAt(LocalDateTime.now())
+                .context(contextJson)
                 .build();
         session = sessionRepository.save(session);
 
-        List<PracticeItem> savedItems = saveItems(session, generatedItems);
+        List<PracticeItem> savedItems = saveItems(session, firstItemList);
 
         PracticeSessionResponse sessionResponse = toSessionResponse(session);
         List<PracticeItemResponse> itemResponses = savedItems.stream()
@@ -133,26 +143,49 @@ public class PracticeSessionService {
     /**
      * Nộp câu trả lời cho một câu hỏi.
      *
-     * Split into 3 phases to avoid holding DB connections during LLM calls:
-     * 1. Validate (short read transaction)
-     * 2. Evaluate via LLM (no transaction)
-     * 3. Persist result (short write transaction)
+     * Split into 3 phases:
+     * 1. Validate (short read TX) — cũng lấy session context để gen câu tiếp
+     * 2a. Evaluate via LLM (no TX)
+     * 2b. Generate next item if needed (no TX) — chạy sau khi eval xong
+     * 3. Persist answer + next item (short write TX)
      */
     public AnswerFeedbackResponse submitAnswer(UUID sessionId, UUID itemId,
                                                UUID userId, SubmitAnswerRequest request) {
-        // Phase 1: Validate ownership, status, item — short read transaction
-        PracticeItem item = validateAndLoadItem(sessionId, itemId, userId);
+        // Phase 1: validate + load session context — short read TX
+        SessionItemContext ctx = validateAndLoadItem(sessionId, itemId, userId);
 
-        // Phase 2: LLM evaluation — NO transaction held
+        // Xác định trước xem sau câu này có cần sinh câu tiếp không
+        boolean willNeedNext = (ctx.completedItemsSnapshot() + 1) < ctx.totalItems();
+
+        // Phase 2a: LLM evaluation — NO transaction held
         AnswerEvaluatorAgent.EvaluationResult result =
-                answerEvaluatorAgent.evaluate(item, request.getUserAnswer());
+                answerEvaluatorAgent.evaluate(ctx.item(), request.getUserAnswer());
 
-        // Phase 3: Persist + session update — short write transaction
-        return persistAnswerResult(sessionId, itemId, request.getUserAnswer(), result, item);
+        // Phase 2b: sinh câu tiếp theo ngay bây giờ (NO transaction held)
+        ExerciseGeneratorAgent.GeneratedItem nextGen = null;
+        if (willNeedNext) {
+            try {
+                List<ExerciseGeneratorAgent.GeneratedItem> nextItems =
+                        exerciseGeneratorAgent.generateItems(
+                                ctx.lessonId(), ctx.courseId(),
+                                ctx.sessionType(), 1, ctx.jlptLevel(), ctx.itemTypes());
+                nextGen = nextItems.isEmpty() ? null : nextItems.get(0);
+            } catch (Exception e) {
+                log.warn("submitAnswer: Không sinh được câu hỏi tiếp theo cho session {}: {}",
+                        sessionId, e.getMessage());
+            }
+        }
+
+        // Phase 3: Persist answer + next item — short write TX
+        return persistAnswerResult(sessionId, itemId, request.getUserAnswer(), result, ctx, nextGen);
     }
 
+    /**
+     * Validate quyền truy cập và trạng thái, đồng thời đọc session context cần thiết
+     * để sinh câu hỏi tiếp theo bên ngoài transaction.
+     */
     @Transactional(readOnly = true)
-    public PracticeItem validateAndLoadItem(UUID sessionId, UUID itemId, UUID userId) {
+    public SessionItemContext validateAndLoadItem(UUID sessionId, UUID itemId, UUID userId) {
         PracticeSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new BusinessException("SESSION_NOT_FOUND",
                         "Không tìm thấy phiên luyện tập."));
@@ -181,15 +214,28 @@ public class PracticeSessionService {
                     "Câu hỏi này đã được trả lời.");
         }
 
-        return item;
+        String jlptLevel = extractJlptLevel(session.getContext());
+        List<PracticeItemType> itemTypes = extractItemTypes(session.getContext());
+
+        return new SessionItemContext(
+                item,
+                session.getCompletedItems(),
+                session.getTotalItems(),
+                session.getSessionType(),
+                session.getLessonId(),
+                session.getCourseId(),
+                jlptLevel,
+                itemTypes
+        );
     }
 
     @Transactional
     public AnswerFeedbackResponse persistAnswerResult(UUID sessionId, UUID itemId,
                                                        String userAnswer,
                                                        AnswerEvaluatorAgent.EvaluationResult result,
-                                                       PracticeItem validatedItem) {
-        // Re-read entities within this transaction for consistency
+                                                       SessionItemContext ctx,
+                                                       ExerciseGeneratorAgent.GeneratedItem nextGen) {
+        // Re-read entities within this transaction (optimistic locking)
         PracticeSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new BusinessException("SESSION_NOT_FOUND",
                         "Không tìm thấy phiên luyện tập."));
@@ -197,7 +243,7 @@ public class PracticeSessionService {
                 .orElseThrow(() -> new BusinessException("ITEM_NOT_FOUND",
                         "Không tìm thấy câu hỏi."));
 
-        // Double-check: item may have been answered by a concurrent request
+        // Double-check race condition
         if (item.getUserAnswer() != null) {
             throw new BusinessException("ITEM_ALREADY_ANSWERED",
                     "Câu hỏi này đã được trả lời.");
@@ -217,18 +263,36 @@ public class PracticeSessionService {
             session.setCorrectItems(session.getCorrectItems() + 1);
         }
 
+        // Lưu câu hỏi tiếp theo (nếu gen thành công)
+        PracticeItem savedNextItem = null;
         boolean sessionCompleted = session.getCompletedItems() >= session.getTotalItems();
+
+        if (!sessionCompleted) {
+            if (nextGen != null) {
+                int nextIndex = session.getCompletedItems(); // sau khi tăng, đây là index câu tiếp
+                savedNextItem = saveItem(session, nextGen, nextIndex);
+            } else {
+                // Sinh thất bại — giảm totalItems để session vẫn có thể kết thúc
+                session.setTotalItems(session.getTotalItems() - 1);
+                sessionCompleted = session.getCompletedItems() >= session.getTotalItems();
+                log.warn("persistAnswerResult: Gen câu {} thất bại, giảm totalItems → {}",
+                        session.getCompletedItems(), session.getTotalItems());
+            }
+        }
+
         if (sessionCompleted) {
             finishSession(session);
         } else {
             sessionRepository.save(session);
         }
 
-        // explanation: ưu tiên pre-generated từ LLM (đã lưu khi tạo câu hỏi),
-        // fallback về correction/feedback từ evaluator
         String explanation = item.getExplanation() != null
                 ? item.getExplanation()
                 : (result.correction() != null ? result.correction() : result.feedback());
+
+        PracticeItemResponse nextItemResponse = savedNextItem != null
+                ? toItemResponse(savedNextItem)
+                : null;
 
         return AnswerFeedbackResponse.builder()
                 .isCorrect(result.isCorrect())
@@ -237,8 +301,21 @@ public class PracticeSessionService {
                 .correctAnswer(item.getCorrectAnswer())
                 .explanation(explanation)
                 .sessionCompleted(sessionCompleted)
+                .nextItem(nextItemResponse)
                 .build();
     }
+
+    /** Context cần thiết từ session để sinh câu tiếp theo ngoài transaction. */
+    public record SessionItemContext(
+            PracticeItem item,
+            int completedItemsSnapshot,
+            int totalItems,
+            PracticeSessionType sessionType,
+            UUID lessonId,
+            UUID courseId,
+            String jlptLevel,
+            List<PracticeItemType> itemTypes
+    ) {}
 
     // ── Complete Session ──────────────────────────────────────────────────
 
@@ -265,6 +342,16 @@ public class PracticeSessionService {
         if (session.getLessonId() != null) {
             upsertLessonProgress(session);
         }
+    }
+
+    /**
+     * Generate AI feedback for a completed session and persist it — async version.
+     * Trả về ngay lập tức, không block HTTP response. Dùng importTaskExecutor
+     * vì đây là LLM call tốn thời gian tương tự các agent khác.
+     */
+    @Async("importTaskExecutor")
+    public void generateAndSaveFeedbackAsync(UUID sessionId) {
+        generateAndSaveFeedback(sessionId);
     }
 
     /**
@@ -446,50 +533,109 @@ public class PracticeSessionService {
 
     private List<PracticeItem> saveItems(PracticeSession session,
                                          List<ExerciseGeneratorAgent.GeneratedItem> generatedItems) {
-        UUID sessionId = session.getId();
         List<PracticeItem> items = new ArrayList<>();
         for (int i = 0; i < generatedItems.size(); i++) {
-            ExerciseGeneratorAgent.GeneratedItem gen = generatedItems.get(i);
-
-            String optionsJson = buildOptionsJson(gen.options());
-            UUID refContentId = parseUuid(gen.refContentId());
-
-            PracticeItemType itemType = inferItemType(session.getSessionType(), gen.options());
-
-            PracticeItem item = PracticeItem.builder()
-                    .sessionId(sessionId)
-                    .itemIndex(i)
-                    .itemType(itemType)
-                    .question(gen.question() != null ? gen.question() : "")
-                    .questionJapanese(gen.questionJapanese())
-                    .hint(gen.hint())
-                    .options(optionsJson)
-                    .correctAnswer(gen.correctAnswer() != null ? gen.correctAnswer() : "")
-                    .explanation(gen.explanation())
-                    .refContentId(refContentId)
-                    .refContentType(gen.refContentType())
-                    .build();
-
-            items.add(item);
+            items.add(buildItem(session, generatedItems.get(i), i));
         }
         return itemRepository.saveAll(items);
     }
 
     /**
-     * Suy luận loại câu hỏi từ loại phiên và số lượng options.
-     * Nếu có options → MULTIPLE_CHOICE; ngược lại dựa theo loại phiên.
+     * Sinh và lưu một câu hỏi đơn lẻ tại vị trí index cho trước.
+     * Dùng trong lazy generation khi submit câu trả lời.
      */
-    private PracticeItemType inferItemType(PracticeSessionType sessionType,
-                                           List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options) {
+    private PracticeItem saveItem(PracticeSession session,
+                                   ExerciseGeneratorAgent.GeneratedItem gen,
+                                   int index) {
+        return itemRepository.save(buildItem(session, gen, index));
+    }
+
+    private PracticeItem buildItem(PracticeSession session,
+                                    ExerciseGeneratorAgent.GeneratedItem gen,
+                                    int index) {
+        return PracticeItem.builder()
+                .sessionId(session.getId())
+                .itemIndex(index)
+                .itemType(resolveItemType(session.getSessionType(), gen))
+                .question(gen.question() != null ? gen.question() : "")
+                .questionJapanese(gen.questionJapanese())
+                .hint(gen.hint())
+                .options(buildOptionsJson(gen.options()))
+                .correctAnswer(gen.correctAnswer() != null ? gen.correctAnswer() : "")
+                .explanation(gen.explanation())
+                .refContentId(parseUuid(gen.refContentId()))
+                .refContentType(gen.refContentType())
+                .build();
+    }
+
+    /**
+     * Đọc jlptLevel từ session.context JSON.
+     * Fallback về "N5" nếu không parse được.
+     */
+    private String extractJlptLevel(String contextJson) {
+        if (contextJson == null || contextJson.isBlank()) return "N5";
+        try {
+            return objectMapper.readTree(contextJson).path("jlptLevel").asText("N5");
+        } catch (Exception e) {
+            return "N5";
+        }
+    }
+
+    /**
+     * Đọc itemTypes từ session.context JSON.
+     * Trả về null nếu không có (generator sẽ dùng default theo sessionType).
+     */
+    private List<PracticeItemType> extractItemTypes(String contextJson) {
+        if (contextJson == null || contextJson.isBlank()) return null;
+        try {
+            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(contextJson).path("itemTypes");
+            if (node.isMissingNode() || node.isNull() || !node.isArray() || node.isEmpty()) return null;
+            return objectMapper.convertValue(node, new TypeReference<List<PracticeItemType>>() {});
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String buildItemTypesJson(List<PracticeItemType> itemTypes) {
+        if (itemTypes == null || itemTypes.isEmpty()) return "null";
+        try {
+            return objectMapper.writeValueAsString(
+                    itemTypes.stream().map(Enum::name).collect(Collectors.toList()));
+        } catch (Exception e) {
+            return "null";
+        }
+    }
+
+    /**
+     * Xác định loại câu hỏi:
+     * 1. Ưu tiên trường itemType do LLM khai báo (nguồn chính xác nhất)
+     * 2. Fallback: suy luận từ cấu trúc options
+     * 3. Fallback cuối: dựa theo sessionType
+     */
+    private PracticeItemType resolveItemType(PracticeSessionType sessionType,
+                                              ExerciseGeneratorAgent.GeneratedItem gen) {
+        if (gen.itemType() != null && !gen.itemType().isBlank()) {
+            try {
+                return PracticeItemType.valueOf(gen.itemType().trim().toUpperCase());
+            } catch (IllegalArgumentException e) {
+                log.warn("resolveItemType: LLM trả về itemType không hợp lệ '{}', fallback.", gen.itemType());
+            }
+        }
+        List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.options();
+        if (options != null && options.size() == 2) {
+            boolean hasTrueFalse = options.stream()
+                    .anyMatch(o -> "Đúng".equals(o.text()) || "Sai".equals(o.text()));
+            if (hasTrueFalse) return PracticeItemType.TRUE_FALSE;
+        }
         if (options != null && !options.isEmpty()) {
             return PracticeItemType.MULTIPLE_CHOICE;
         }
         return switch (sessionType) {
-            case VOCAB_DRILL -> PracticeItemType.FILL_BLANK;
-            case GRAMMAR_DRILL -> PracticeItemType.FILL_BLANK;
             case SENTENCE_BUILD -> PracticeItemType.SENTENCE_ORDER;
-            case KANJI_READING -> PracticeItemType.FILL_BLANK;
-            default -> PracticeItemType.TRANSLATION;
+            case KANJI_READING  -> PracticeItemType.FILL_BLANK;
+            case VOCAB_DRILL    -> PracticeItemType.FILL_BLANK;
+            case GRAMMAR_DRILL  -> PracticeItemType.FILL_BLANK;
+            default             -> PracticeItemType.TRANSLATION;
         };
     }
 
