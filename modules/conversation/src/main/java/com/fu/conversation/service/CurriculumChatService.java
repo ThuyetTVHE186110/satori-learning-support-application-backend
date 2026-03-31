@@ -15,7 +15,7 @@ public interface CurriculumChatService {
 
     /** Create a new chatbot session for an enrolled learner. */
     ChatSessionResponse createSession(UUID userId, UUID courseId,
-                                      UUID lessonId, String jlptLevel);
+                                      UUID lessonId, String jlptLevel, String userTitle);
 
     /** Send a question; triggers RAG retrieval + AI response + message persistence. */
     ChatMessageResponse chat(UUID sessionId, UUID userId, String question);
