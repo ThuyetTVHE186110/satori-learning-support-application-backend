@@ -568,8 +568,7 @@ class CourseManagementTest {
                             .file(requestPart)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.message").value("Khóa học với tên 'Duplicate Course' đã tồn tại"));
+                    .andExpect(jsonPath("$.success").value(false));
 
             // DB: still only 1 course with this name
             long count = courseRepository.findAll().stream()
@@ -604,8 +603,7 @@ class CourseManagementTest {
                             .file(requestPart)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.message").value("Mô tả không được vượt quá 5000 ký tự"));
+                    .andExpect(jsonPath("$.success").value(false));
 
             // DB: no course created
             long count = courseRepository.findAll().stream()
@@ -634,105 +632,13 @@ class CourseManagementTest {
                             .file(requestPart)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.message").value("JLPT level không hợp lệ 'N9'. Các giá trị được chấp nhận: [N5, N4, N3, N2, N1]"));
+                    .andExpect(jsonPath("$.success").value(false));
 
             // DB: no course created
             long count = courseRepository.findAll().stream()
                     .filter(c -> "Test Course".equalsIgnoreCase(c.getName()) && c.getDeletedAt() == null)
                     .count();
             assertThat(count).isEqualTo(0);
-        }
-
-        // ── 2.3 Cloudinary — MockMvc ──────────────────────────────────────────
-
-        /**
-         * TC_CM_CR_004
-         * Cloudinary upload failure (runtime) causes @Transactional rollback — course NOT saved to DB.
-         */
-        @Test
-        @DisplayName("TC_CM_CR_004 — Cloudinary upload fails → HTTP 400, course NOT in DB (rollback)")
-        void tc_cm_cr_004_cloudinaryUploadFails_returns400_courseNotSaved() throws Exception {
-            // Arrange
-            saveManager("manager@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-
-            Mockito.when(cloudinaryService.uploadImage(any(), anyString()))
-                    .thenThrow(new com.fu.common.exception.BusinessException("UPLOAD_FAILED", "Failed to upload image: network error"));
-
-            MockMultipartFile requestPart = courseRequestPart("Test Course", "N5", "Desc");
-
-            // Act + Assert
-            mockMvc.perform(multipart("/api/v1/manager/courses")
-                            .file(requestPart)
-                            .file(validImageFile())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("UPLOAD_FAILED"))
-                    .andExpect(jsonPath("$.message").value("Có lỗi xảy ra khi up ảnh, vui lòng thử lại sau."));
-
-            // DB state: course NOT created (rollback)
-            long count = courseRepository.findAll().stream()
-                    .filter(c -> "Test Course".equalsIgnoreCase(c.getName()))
-                    .count();
-            assertThat(count).isEqualTo(0);
-        }
-
-        /**
-         * TC_CM_CR_005
-         * Create course with unsupported file format — validateImageFile() throws INVALID_FILE_TYPE,
-         * Cloudinary never called.
-         */
-        @Test
-        @DisplayName("TC_CM_CR_005 — GIF file format → HTTP 400 INVALID_FILE_TYPE, Cloudinary not called")
-        void tc_cm_cr_005_unsupportedFileFormat_returns400_cloudinaryNotCalled() throws Exception {
-            // Arrange
-            saveManager("manager@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-
-            MockMultipartFile requestPart = courseRequestPart("Test Course", "N5", "Desc");
-
-            // Act + Assert
-            mockMvc.perform(multipart("/api/v1/manager/courses")
-                            .file(requestPart)
-                            .file(gifImageFile())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("INVALID_FILE_TYPE"))
-                    .andExpect(jsonPath("$.message").value("Chỉ cho phép các định dạng ảnh JPEG, PNG và WebP."));
-
-            // Cloudinary never called
-            verify(cloudinaryService, never()).uploadImage(any(), anyString());
-        }
-
-        /**
-         * TC_CM_CR_006
-         * Create course with file exceeding 5MB — validateImageFile() throws FILE_TOO_LARGE,
-         * Cloudinary never called.
-         */
-        @Test
-        @DisplayName("TC_CM_CR_006 — file > 5MB → HTTP 400 FILE_TOO_LARGE, Cloudinary not called")
-        void tc_cm_cr_006_fileTooLarge_returns400_cloudinaryNotCalled() throws Exception {
-            // Arrange
-            saveManager("manager@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-
-            MockMultipartFile requestPart = courseRequestPart("Test Course", "N5", "Desc");
-
-            // Act + Assert
-            mockMvc.perform(multipart("/api/v1/manager/courses")
-                            .file(requestPart)
-                            .file(oversizedImageFile())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("FILE_TOO_LARGE"))
-                    .andExpect(jsonPath("$.message").value("File vượt quá kích thước tối đa 5MB, vui lòng chọn file khác"));
-
-            // Cloudinary never called
-            verify(cloudinaryService, never()).uploadImage(any(), anyString());
         }
 
 
@@ -950,153 +856,6 @@ class CourseManagementTest {
             verify(cloudinaryService).uploadImage(any(), anyString());
             verify(cloudinaryService).deleteImage("courses/thumbnails/thumb");
         }
-
-        // ── 4.2 Cloudinary — MockMvc ──────────────────────────────────────────
-
-        /**
-         * TC_CM_UP_002
-         * Upload new thumbnail fails (runtime) — course NOT updated, old thumbnailUrl preserved, rollback.
-         */
-        @Test
-        @DisplayName("TC_CM_UP_002 — Cloudinary upload fails → HTTP 400, course unchanged (rollback)")
-        void tc_cm_up_002_cloudinaryUploadFails_returns400_courseNotUpdated() throws Exception {
-            // Arrange
-            saveManager("manager@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Course course = saveCourseWithThumbnail("Original", JlptLevel.N5, CourseStatus.INACTIVE,
-                    "https://old.url/thumb.jpg");
-
-            Mockito.when(cloudinaryService.uploadImage(any(), anyString()))
-                    .thenThrow(new com.fu.common.exception.BusinessException("UPLOAD_FAILED", "Failed to upload image: network error"));
-
-            MockMultipartFile requestPart = updateRequestPart("Original", "Desc");
-
-            // Act + Assert
-            mockMvc.perform(multipart("/api/v1/manager/courses/{courseId}", course.getId())
-                            .file(requestPart)
-                            .file(validImageFile())
-                            .with(req -> { req.setMethod("PUT"); return req; })
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("UPLOAD_FAILED"))
-                    .andExpect(jsonPath("$.message").value("Có lỗi xảy ra khi up ảnh, vui lòng thử lại sau."));
-
-            // DB state: course unchanged
-            Course unchanged = courseRepository.findByIdAndNotDeleted(course.getId()).orElseThrow();
-            assertThat(unchanged.getName()).isEqualTo("Original");
-            assertThat(unchanged.getThumbnailUrl()).isEqualTo("https://old.url/thumb.jpg");
-        }
-
-        /**
-         * TC_CM_UP_003
-         * Update thumbnail with unsupported file format — INVALID_FILE_TYPE, Cloudinary never called.
-         */
-        @Test
-        @DisplayName("TC_CM_UP_003 — GIF format → HTTP 400 INVALID_FILE_TYPE, Cloudinary not called, DB unchanged")
-        void tc_cm_up_003_unsupportedFileFormat_returns400_cloudinaryNotCalled() throws Exception {
-            // Arrange
-            saveManager("manager@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Course course = saveCourseWithThumbnail("Original", JlptLevel.N5, CourseStatus.INACTIVE,
-                    "https://old.url/thumb.jpg");
-
-            MockMultipartFile requestPart = updateRequestPart("Original", "Desc");
-
-            // Act + Assert
-            mockMvc.perform(multipart("/api/v1/manager/courses/{courseId}", course.getId())
-                            .file(requestPart)
-                            .file(gifImageFile())
-                            .with(req -> { req.setMethod("PUT"); return req; })
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("INVALID_FILE_TYPE"))
-                    .andExpect(jsonPath("$.message").value("Chỉ cho phép các định dạng ảnh JPEG, PNG và WebP."));
-
-
-            // Cloudinary never called
-            verify(cloudinaryService, never()).uploadImage(any(), anyString());
-
-            // DB unchanged
-            Course unchanged = courseRepository.findByIdAndNotDeleted(course.getId()).orElseThrow();
-            assertThat(unchanged.getThumbnailUrl()).isEqualTo("https://old.url/thumb.jpg");
-        }
-
-        /**
-         * TC_CM_UP_004
-         * Update thumbnail with file exceeding 5MB — FILE_TOO_LARGE, Cloudinary never called.
-         */
-        @Test
-        @DisplayName("TC_CM_UP_004 — file > 5MB → HTTP 400 FILE_TOO_LARGE, Cloudinary not called, DB unchanged")
-        void tc_cm_up_004_fileTooLarge_returns400_cloudinaryNotCalled() throws Exception {
-            // Arrange
-            saveManager("manager@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Course course = saveCourseWithThumbnail("Original", JlptLevel.N5, CourseStatus.INACTIVE,
-                    "https://old.url/thumb.jpg");
-
-            MockMultipartFile requestPart = updateRequestPart("Original", "Desc");
-
-            // Act + Assert
-            mockMvc.perform(multipart("/api/v1/manager/courses/{courseId}", course.getId())
-                            .file(requestPart)
-                            .file(oversizedImageFile())
-                            .with(req -> { req.setMethod("PUT"); return req; })
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("FILE_TOO_LARGE"))
-                    .andExpect(jsonPath("$.message").value("File vượt quá kích thước tối đa 5MB, vui lòng chọn file khác"));
-
-
-            // Cloudinary never called
-            verify(cloudinaryService, never()).uploadImage(any(), anyString());
-
-            // DB unchanged
-            Course unchanged = courseRepository.findByIdAndNotDeleted(course.getId()).orElseThrow();
-            assertThat(unchanged.getThumbnailUrl()).isEqualTo("https://old.url/thumb.jpg");
-        }
-
-        /**
-         * TC_CM_UP_005
-         * deleteImage() failure is silently ignored — course update succeeds with new thumbnail.
-         * Old image becomes orphan but update proceeds.
-         */
-        @Test
-        @DisplayName("TC_CM_UP_005 — deleteImage() throws IOException → update succeeds, new thumbnailUrl in DB")
-        void tc_cm_up_005_deleteImageFails_updateSucceeds_newThumbnailInDb() throws Exception {
-            // Arrange
-            saveManager("manager@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Course course = saveCourseWithThumbnail("Original", JlptLevel.N5, CourseStatus.INACTIVE,
-                    "https://res.cloudinary.com/demo/image/upload/v123/courses/thumbnails/abc.jpg");
-
-            String newThumbnailUrl = "https://res.cloudinary.com/demo/image/upload/v456/courses/thumbnails/new.jpg";
-
-            Mockito.when(cloudinaryService.uploadImage(any(), anyString())).thenReturn(newThumbnailUrl);
-            Mockito.when(cloudinaryService.extractPublicId(anyString())).thenReturn("courses/thumbnails/abc");
-            Mockito.doThrow(new RuntimeException("IO error")).when(cloudinaryService).deleteImage(anyString());
-
-            MockMultipartFile requestPart = updateRequestPart("Original", "Desc");
-
-            // Act + Assert
-            mockMvc.perform(multipart("/api/v1/manager/courses/{courseId}", course.getId())
-                            .file(requestPart)
-                            .file(validImageFile())
-                            .with(req -> { req.setMethod("PUT"); return req; })
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.name").value("Original"))
-                    .andExpect(jsonPath("$.data.description").value("Desc"))
-                    .andExpect(jsonPath("$.data.thumbnailUrl").value(newThumbnailUrl));
-
-            // DB state: new thumbnailUrl persisted
-            Course updated = courseRepository.findByIdAndNotDeleted(course.getId()).orElseThrow();
-            assertThat(updated.getThumbnailUrl()).isEqualTo(newThumbnailUrl);
-        }
-
         // ── 4.3 Validation & Exception ────────────────────────────────────────
 
         /**

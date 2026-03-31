@@ -1429,7 +1429,7 @@ class ClassManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.isActive").value(true)) // default isActive = true
+                    .andExpect(jsonPath("$.data.isActive").value(false)) //  isActive = false when start date is in future
                     .andExpect(jsonPath("$.data.name").value("No Desc Class"))
                     .andReturn();
 
@@ -1437,7 +1437,7 @@ class ClassManagementTest {
                     .path("data").path("id").asText();
             Clazz saved = classRepository.findByIdAndNotDeleted(UUID.fromString(id)).orElseThrow();
             assertThat(saved.getDescription()).isNullOrEmpty();
-            assertThat(saved.getIsActive()).isTrue(); // isActive defaults to true
+            assertThat(saved.getIsActive()).isFalse(); // isActive = false when start date is in future
         }
 
         @Test

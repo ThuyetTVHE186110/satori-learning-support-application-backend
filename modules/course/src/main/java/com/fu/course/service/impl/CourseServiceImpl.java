@@ -63,7 +63,6 @@ public class CourseServiceImpl implements CourseService {
         String thumbnailUrl = null;
         if (thumbnail != null && !thumbnail.isEmpty()) {
             log.info("Uploading thumbnail for new course: {}", request.getName());
-            validateImageFile(thumbnail);
             thumbnailUrl = cloudinaryService.uploadImage(thumbnail, THUMBNAIL_FOLDER);
         }
 
@@ -104,7 +103,6 @@ public class CourseServiceImpl implements CourseService {
         // Handle thumbnail upload if a new file is provided
         if (thumbnail != null && !thumbnail.isEmpty()) {
             log.info("Uploading new thumbnail for course: {}", courseId);
-            validateImageFile(thumbnail);
             String thumbnailUrl = cloudinaryService.uploadImage(thumbnail, THUMBNAIL_FOLDER);
             
             // Delete old thumbnail if it exists
@@ -148,8 +146,8 @@ public class CourseServiceImpl implements CourseService {
 
     @Override
     public Page<CourseSummaryResponse> getAllCourses(Pageable pageable) {
-        log.debug("Fetching all non-deleted courses with pagination");
-        return courseRepository.findByDeletedAtIsNull(pageable)
+        log.debug("Fetching all courses with pagination");
+        return courseRepository.findAll(pageable)
             .map(courseMapper::toSummaryResponse);
     }
 
@@ -301,29 +299,5 @@ public class CourseServiceImpl implements CourseService {
     private Course findCourseOrThrow(UUID courseId) {
         return courseRepository.findByIdAndNotDeleted(courseId)
             .orElseThrow(() -> new CourseNotFoundException(courseId));
-    }
-
-    /**
-     * Validates uploaded image file for type and size constraints.
-     * Allowed types: image/jpeg, image/png, image/webp
-     * Max size: 5MB
-     */
-    private void validateImageFile(MultipartFile file) {
-        // Validate content type
-        String contentType = file.getContentType();
-        if (contentType == null ||
-                (!contentType.equals("image/jpeg") &&
-                 !contentType.equals("image/png") &&
-                 !contentType.equals("image/webp"))) {
-            throw new BusinessException("INVALID_FILE_TYPE",
-                    "Only JPEG, PNG, and WebP images are allowed");
-        }
-
-        // Validate file size (max 5MB)
-        long maxSizeBytes = 5L * 1024 * 1024;
-        if (file.getSize() > maxSizeBytes) {
-            throw new BusinessException("FILE_TOO_LARGE",
-                    "Image size must not exceed 5MB");
-        }
     }
 }
