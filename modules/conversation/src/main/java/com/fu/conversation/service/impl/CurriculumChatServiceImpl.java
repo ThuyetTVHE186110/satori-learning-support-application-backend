@@ -47,6 +47,8 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
     private static final int MEMORY_ADVISOR_ORDER    = 10;
 
     private final ChatClient chatClient;
+    /** Lightweight client used only for title generation — no advisors, minimal tokens. */
+    private final ChatClient titleChatClient;
     private final ChatProperties chatProperties;
     private final ChatRateLimiter chatRateLimiter;
     private final CurriculumQueryTools curriculumQueryTools;
@@ -93,6 +95,9 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
         this.chatClient = ChatClient.builder(chatModel)
                 .defaultAdvisors(memoryAdvisor, retrievalAdvisor, relevanceCheckAdvisor, groundingAdvisor)
                 .build();
+
+        // ── Lightweight client for async title generation (no advisors, no RAG) ──
+        this.titleChatClient = ChatClient.builder(chatModel).build();
     }
 
     // ── Public API ──────────────────────────────────────────────────────────
@@ -100,7 +105,7 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
     @Override
     @Transactional
     public ChatSessionResponse createSession(UUID userId, UUID courseId,
-                                              UUID lessonId, String jlptLevel) {
+                                              UUID lessonId, String jlptLevel, String userTitle) {
         // Auto-resolve courseId when frontend does not supply it.
         // Business rule: 1 learner → at most 1 active class → 1 course at any time.
         if (courseId == null) {
@@ -132,19 +137,28 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
         if (jlptLevel   != null) ctx.put("jlptLevel",  jlptLevel);
         ctx.put("sessionType", "CURRICULUM_QA");
 
+        // Title priority: user-provided → auto-generated from context
+        String defaultTitle = (lessonTitle != null)
+                ? courseName + " — " + lessonTitle
+                : courseName;
+        String sessionTitle = (userTitle != null && !userTitle.isBlank())
+                ? userTitle.trim() : defaultTitle;
+
         ChatSession session = ChatSession.builder()
                 .userId(userId)
                 .sessionType("CURRICULUM_QA")
                 .context(toJson(ctx))
                 .status("ACTIVE")
+                .title(sessionTitle)
                 .build();
         session = chatSessionRepository.save(session);
 
-        log.info("Tạo phiên chat: sessionId={}, userId={}, courseId={}, lessonId={}",
-                session.getId(), userId, courseId, lessonId);
+        log.info("Tạo phiên chat: sessionId={}, userId={}, courseId={}, lessonId={}, title={}",
+                session.getId(), userId, courseId, lessonId, sessionTitle);
 
         return ChatSessionResponse.builder()
                 .sessionId(session.getId())
+                .title(sessionTitle)
                 .status("ACTIVE")
                 .courseId(courseId)
                 .lessonId(lessonId)
@@ -233,6 +247,15 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
 
         // Persist exchange — saveExchange runs in its own @Transactional
         UUID aiMessageId = historyManager.saveExchange(sessionId, question, aiResponse);
+
+        // After the very first message, generate an AI title async (fire-and-forget).
+        // messageCount == 0 means this is the first exchange (counter not yet incremented).
+        if (session.messageCount() == 0) {
+            final String firstQuestion = question;
+            final UUID sid = sessionId;
+            java.util.concurrent.CompletableFuture.runAsync(
+                    () -> generateAndSaveTitleAsync(sid, firstQuestion));
+        }
 
         log.debug("Chat: session={} responseTokens≈{} ragDocs={}",
                 sessionId, ChatHistoryManager.estimateTokens(aiResponse), retrievedDocs.size());
@@ -326,6 +349,7 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
 
         return ChatSessionResponse.builder()
                 .sessionId(entity.getId())
+                .title(entity.getTitle())
                 .status(entity.getStatus())
                 .courseId(courseId)
                 .lessonId(lessonId)
@@ -360,7 +384,8 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
                     "Phiên chat thiếu thông tin khóa học.");
         }
         return new SessionContext(sessionId, entity.getUserId(),
-                courseId, lessonId, jlptLevel, courseName, lessonTitle);
+                courseId, lessonId, jlptLevel, courseName, lessonTitle,
+                entity.getMessageCount());
     }
 
     private void verifyOwnership(UUID sessionId, UUID userId) {
@@ -478,5 +503,42 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
 
     private record SessionContext(UUID sessionId, UUID userId,
                                   UUID courseId, UUID lessonId, String jlptLevel,
-                                  String courseName, String lessonTitle) {}
+                                  String courseName, String lessonTitle,
+                                  int messageCount) {}
+
+    /**
+     * Fire-and-forget: generate a short AI title from the first user question and
+     * persist it. Runs on the common ForkJoinPool — never blocks the chat response.
+     * Any failure is swallowed and logged; the default context title remains intact.
+     */
+    private void generateAndSaveTitleAsync(UUID sessionId, String firstQuestion) {
+        try {
+            String prompt = """
+                    Tạo tiêu đề ngắn gọn (tối đa 7 từ, tiếng Việt) cho cuộc trò chuyện \
+                    học tiếng Nhật dựa trên câu hỏi sau đây. \
+                    Chỉ trả về tiêu đề, không giải thích, không dấu ngoặc kép:
+                    """ + firstQuestion;
+
+            String generated = titleChatClient.prompt()
+                    .user(prompt)
+                    .options(OpenAiChatOptions.builder()
+                            .model(chatProperties.getModel())
+                            .temperature(0.3)
+                            .maxTokens(30)
+                            .build())
+                    .call()
+                    .content();
+
+            if (generated != null && !generated.isBlank()) {
+                String title = generated.trim()
+                        .replaceAll("^\"|\"$", "")   // strip surrounding quotes if any
+                        .replaceAll("^'|'$", "");
+                chatSessionRepository.updateTitle(sessionId, title);
+                log.debug("AI title saved for session {}: \"{}\"", sessionId, title);
+            }
+        } catch (Exception e) {
+            log.warn("AI title generation failed for session {} — keeping default title: {}",
+                    sessionId, e.getMessage());
+        }
+    }
 }

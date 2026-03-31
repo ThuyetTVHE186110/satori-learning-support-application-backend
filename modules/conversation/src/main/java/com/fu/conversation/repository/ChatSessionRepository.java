@@ -37,6 +37,10 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, UUID> 
     @Query("UPDATE ChatSession s SET s.status = :status WHERE s.id = :id")
     void updateStatus(@Param("id") UUID id, @Param("status") String status);
 
+    @Modifying
+    @Query("UPDATE ChatSession s SET s.title = :title WHERE s.id = :id")
+    void updateTitle(@Param("id") UUID id, @Param("title") String title);
+
     /**
      * Increment message counters and stamp updatedAt so that
      * {@code toSessionResponse()} can expose it as {@code lastMessageAt}
@@ -114,16 +118,23 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, UUID> 
      * Paginated list of sessions for a user filtered by session type.
      * Native query required for PostgreSQL enum cast on session_type.
      */
+    /**
+     * Sessions with at least one message, newest first.
+     * Sessions with message_count = 0 are excluded — they are phantom sessions
+     * created but never used (e.g. user opened the chat screen then navigated away).
+     */
     @Query(value = """
             SELECT * FROM ai_conversation.conversation_sessions
             WHERE user_id = :userId
               AND session_type = CAST(:sessionType AS session_type)
-            ORDER BY created_at DESC
+              AND message_count > 0
+            ORDER BY updated_at DESC
             """,
             countQuery = """
             SELECT COUNT(*) FROM ai_conversation.conversation_sessions
             WHERE user_id = :userId
               AND session_type = CAST(:sessionType AS session_type)
+              AND message_count > 0
             """,
             nativeQuery = true)
     Page<ChatSession> findByUserIdAndSessionType(@Param("userId") UUID userId,

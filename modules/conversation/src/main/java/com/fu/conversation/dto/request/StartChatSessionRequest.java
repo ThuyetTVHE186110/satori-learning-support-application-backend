@@ -1,6 +1,7 @@
 package com.fu.conversation.dto.request;
 
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.util.UUID;
@@ -24,4 +25,12 @@ public class StartChatSessionRequest {
     /** Cấp độ JLPT của người học (optional, dùng để tùy chỉnh system prompt). */
     @Pattern(regexp = "^(N[1-5])?$", message = "jlptLevel phải là N1, N2, N3, N4 hoặc N5")
     private String jlptLevel;
+
+    /**
+     * Tiêu đề do người dùng đặt (optional).
+     * Nếu null → backend tự sinh từ courseName + lessonTitle,
+     * sau đó AI sẽ overwrite sau tin nhắn đầu tiên.
+     */
+    @Size(max = 255, message = "Tiêu đề không được vượt quá 255 ký tự")
+    private String title;
 }

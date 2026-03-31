@@ -55,4 +55,9 @@ public class ChatSession extends BaseEntity {
     @Column(name = "corrections_count", nullable = false)
     @Builder.Default
     private int correctionsCount = 0;
+
+    /** Display title shown in session list. Set at creation from course/lesson context;
+     *  overwritten async with an AI-generated summary after the first message. */
+    @Column(name = "title", length = 255)
+    private String title;
 }
