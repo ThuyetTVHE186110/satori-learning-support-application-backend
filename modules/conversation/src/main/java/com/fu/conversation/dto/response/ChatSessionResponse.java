@@ -14,6 +14,7 @@ import java.util.UUID;
 public class ChatSessionResponse {
 
     private UUID sessionId;
+    private String title;        // display name shown in session list
     private String status;       // ACTIVE | COMPLETED | ABANDONED
     private UUID courseId;
     private UUID lessonId;       // null nếu search toàn khóa học

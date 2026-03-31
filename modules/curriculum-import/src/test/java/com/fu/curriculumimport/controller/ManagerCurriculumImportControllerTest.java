@@ -407,7 +407,6 @@ class ManagerCurriculumImportControllerTest {
                     UUID.randomUUID(),
                     "Lesson 1: Basic Greetings",
                     "第一課：挨拶",
-                    "VOCABULARY",
                     1, 1, 10,
                     "PUBLISHED"
             );

@@ -12,6 +12,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -81,6 +82,31 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.error("VALIDATION_ERROR", message));
+    }
+
+    /**
+     * Handles malformed path/query parameters — e.g. a string that is too long to be a UUID,
+     * or an unrecognised enum value passed as a path variable.
+     * Returns 400 so the frontend receives an actionable error instead of an opaque 500.
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMethodArgumentTypeMismatch(
+            MethodArgumentTypeMismatchException ex) {
+        String paramName   = ex.getName();
+        Object value       = ex.getValue();
+        Class<?> required  = ex.getRequiredType();
+        String typeName    = required != null ? required.getSimpleName() : "unknown";
+
+        String message = String.format(
+                "Invalid value for parameter '%s': '%s' is not a valid %s.",
+                paramName, value, typeName);
+
+        log.warn("Type mismatch on parameter '{}': value='{}', required={} — {}",
+                paramName, value, typeName, ex.getMessage());
+
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.error("INVALID_PARAMETER", message));
     }
 
     @ExceptionHandler(Exception.class)
