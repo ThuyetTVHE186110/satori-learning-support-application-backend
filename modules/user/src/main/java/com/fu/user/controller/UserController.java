@@ -218,7 +218,7 @@ public class UserController {
      * Admin: Import excel file to bulk create users
      * POST /api/v1/users/import
      */
-    @PostMapping("/import") 
+    @PostMapping("/import")
     public ResponseEntity<ApiResponse<ImportUsersResult>> importUsersFromExcel(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @RequestParam("file") MultipartFile file) {
@@ -230,7 +230,16 @@ public class UserController {
             throw new BusinessException("INVALID_FILE_TYPE", "Chỉ chấp nhận file Excel (.xlsx, .xls)");
         }
         UUID currentUserId = extractUserId(userDetails);
-        return ResponseEntity.ok(ApiResponse.success("Đã nhập người dùng từ file Excel", userService.importUsersFromExcel(file, currentUserId)));
+        return ResponseEntity.ok(ApiResponse.success("Trích xuất dữ liệu từ file excel thành công.", userService.importUsersFromExcel(file, currentUserId)));
+    }
+
+    @PostMapping("/import/approve")
+    public ResponseEntity<ApiResponse<ImportUserResponse>> approveImportFromExcel(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @RequestBody ApproveImportRequest request
+    ) {
+        UUID currentUserId = extractUserId(userDetails);
+        return ResponseEntity.ok(ApiResponse.success("Nhập thành công dữ liệu.", userService.approveImport(request, currentUserId)));
     }
 
     /**

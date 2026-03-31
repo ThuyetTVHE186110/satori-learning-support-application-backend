@@ -672,5 +672,89 @@ class UserServiceImplTest {
                 assertThat(updated.getDisplayName()).isEqualTo("My Display Name");
             }
         }
+        @Nested
+        @DisplayName("Import Users Tests")
+        class ImportUsersTests {
+
+            @Test
+            @DisplayName("Should approve import successfully (Create & Update)")
+            void shouldApproveImportSuccessfully() {
+                // Given
+                ImportCreateUserRequest createReq = ImportCreateUserRequest.builder()
+                        .email("new@example.com")
+                        .fullName("New User One")
+                        .role(UserRole.LEARNER)
+                        .build();
+
+                UUID existingId = UUID.randomUUID();
+                ImportUpdateUserRequest updateReq = ImportUpdateUserRequest.builder()
+                        .userId(existingId)
+                        .email("existing@example.com")
+                        .fullName("Updated Name")
+                        .phoneNumber("0988888888")
+                        .build();
+
+                ApproveImportRequest request = ApproveImportRequest.builder()
+                        .createUserRequests(List.of(createReq))
+                        .updateUserRequests(List.of(updateReq))
+                        .build();
+
+                User existingUser = User.builder()
+                        .email("existing@example.com")
+                        .firstName("Old")
+                        .lastName("Name")
+                        .phoneNumber("0123456789")
+                        .build();
+                ReflectionTestUtils.setField(existingUser, "id", existingId);
+
+                // Mock Repository calls
+                given(userRepository.findByEmailIn(anyList())).willReturn(List.of()); // No existing email for create list
+                given(userRepository.findAllById(anyList())).willReturn(List.of(existingUser));
+                given(userRepository.saveAll(anyList())).willAnswer(invocation -> invocation.getArgument(0));
+
+                // Mock Mapper
+                given(userMapper.toResponseList(anyList())).willReturn(List.of(new UserResponse()));
+                
+                // Mock Security/Email
+                given(passwordEncoder.encode(anyString())).willReturn("hashed");
+                doNothing().when(emailService).sendWelcomeEmailWithCredentials(anyString(), anyString(), anyString(), anyString());
+
+                // When
+                ImportUserResponse response = userService.approveImport(request, adminId);
+
+                // Then
+                assertThat(response).isNotNull();
+                verify(userRepository, times(2)).saveAll(anyList()); // One for create, one for update
+                verify(emailService).sendWelcomeEmailWithCredentials(eq("new@example.com"), anyString(), eq("new@example.com"), anyString());
+            }
+
+            @Test
+            @DisplayName("Should skip creation if email already exists in Database")
+            void shouldSkipCreateIfEmailExists() {
+                // Given
+                ImportCreateUserRequest createReq = ImportCreateUserRequest.builder()
+                        .email("existing@example.com") // Already in DB
+                        .fullName("Duplicate User")
+                        .role(UserRole.LEARNER)
+                        .build();
+
+                ApproveImportRequest request = ApproveImportRequest.builder()
+                        .createUserRequests(List.of(createReq))
+                        .updateUserRequests(List.of())
+                        .build();
+
+                User existingUser = User.builder().email("existing@example.com").build();
+                given(userRepository.findByEmailIn(anyList())).willReturn(List.of(existingUser));
+                given(userMapper.toResponseList(anyList())).willReturn(List.of());
+
+                // When
+                ImportUserResponse response = userService.approveImport(request, adminId);
+
+                // Then
+                assertThat(response.getCreated()).isEmpty();
+                verify(userRepository, never()).saveAll(anyList()); // No saveAll calls because both lists are empty
+                verify(emailService, never()).sendWelcomeEmailWithCredentials(anyString(), anyString(), anyString(), anyString());
+            }
+        }
     }
 }
