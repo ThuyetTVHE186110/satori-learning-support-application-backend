@@ -160,9 +160,9 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
     /**
      * Fetch the single active class enrollment for a learner.
      * Business rule: 1 learner → at most 1 active class → 1 course at any time.
-     *
-         * Returns at most one row: (class_id, class_name, course_id,
-         *                           course_name, start_date, end_date, status).
+     * <p>
+     * Returns at most one row: (class_id, class_name, course_id,
+     * course_name, start_date, end_date, status).
      * Cross-schema JOIN: user_management (class_members, classes) → learning_content (courses).
      */
     @Query(value = """
@@ -185,7 +185,10 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
             LIMIT 1
             """, nativeQuery = true)
     java.util.List<Object[]> findActiveEnrollment(@Param("userId") UUID userId);
-    
+
     @Query("SELECT u FROM User u WHERE u.email = :email AND u.deletedAt IS NULL")
     Optional<User> findByEmailAndNotDeleted(@Param("email") String email);
+
+    @Query("SELECT u FROM User  u where u.role = 'TEACHER' and u.status = 'ACTIVE' and u.deletedAt IS NULL")
+    List<User> findAllTeacher();
 }

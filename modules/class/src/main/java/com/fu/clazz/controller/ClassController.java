@@ -206,6 +206,20 @@ public class ClassController {
     }
 
     /**
+     * Close an existing class (set isActive to false).
+     * PUT /api/v1/classes/{classId}/close
+     */
+    @PutMapping("/{classId}/close")
+    @PreAuthorize("hasRole('OPERATION_MANAGER')")
+    public ResponseEntity<ApiResponse<ClassResponse>> closeClass(
+            @PathVariable UUID classId,
+            @AuthenticationPrincipal UUID managerId) {
+        ClassResponse response = clazzService.closeClass(classId, managerId);
+        log.info("Manager {} closed class: {}", managerId, classId);
+        return ResponseEntity.ok(ApiResponse.success("Đóng lớp học thành công.", response));
+    }
+
+    /**
      * Delete a class (soft delete only — does NOT change isActive).
      * DELETE /api/v1/classes/{classId}
      */
