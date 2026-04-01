@@ -1,0 +1,69 @@
+services:
+    # ==================== PostgreSQL (UAT) ====================
+    postgres-uat:
+        image: pgvector/pgvector:pg16
+        container_name: satori-postgres-uat
+        restart: unless-stopped
+        environment:
+            POSTGRES_DB: satori_uat
+            POSTGRES_USER: satori_user
+            POSTGRES_PASSWORD: ${POSTGRES_UAT_PASSWORD:-SatoriUAT2026!}
+        ports:
+            - "5434:5432"
+        volumes:
+            - postgres_uat_data:/var/lib/postgresql/data
+            - ./docker/init-scripts/postgres:/docker-entrypoint-initdb.d
+            - ./docker/init-scripts/uat/01-uat-seed.sql:/docker-entrypoint-initdb.d/99-uat-seed.sql
+        networks:
+            - satori-uat-network
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U satori_user -d satori_uat"]
+            interval: 10s
+            timeout: 5s
+            retries: 10
+
+    # ==================== Redis (UAT) ====================
+    redis-uat:
+        image: redis:7.2-alpine
+        container_name: satori-redis-uat
+        restart: unless-stopped
+        command: >
+            redis-server
+            --requirepass ${REDIS_UAT_PASSWORD:-SatoriRedisUAT2026!}
+            --appendonly yes
+            --maxmemory 128mb
+            --maxmemory-policy allkeys-lru
+        ports:
+            - "6381:6379"
+        volumes:
+            - redis_uat_data:/data
+        networks:
+            - satori-uat-network
+        healthcheck:
+            test: ["CMD", "redis-cli", "-a", "${REDIS_UAT_PASSWORD:-SatoriRedisUAT2026!}", "ping"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+    # ==================== Adminer (UAT DB UI) ====================
+    adminer-uat:
+        image: adminer:latest
+        container_name: satori-adminer-uat
+        restart: unless-stopped
+        ports:
+            - "8082:8080"
+        networks:
+            - satori-uat-network
+        depends_on:
+            postgres-uat:
+                condition: service_healthy
+
+networks:
+    satori-uat-network:
+        driver: bridge
+
+volumes:
+    postgres_uat_data:
+        name: satori-postgres-uat-data
+    redis_uat_data:
+        name: satori-redis-uat-data
