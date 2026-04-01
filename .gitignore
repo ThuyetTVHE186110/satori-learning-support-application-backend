@@ -66,6 +66,6 @@ release.properties
 **/generated-test-sources/**
 /docs
 .claude/**
-.github/**
+.github/agents/**
 *.json
  environment/secrets/
