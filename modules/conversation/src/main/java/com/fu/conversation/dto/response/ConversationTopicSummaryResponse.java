@@ -31,4 +31,11 @@ public class ConversationTopicSummaryResponse {
     private boolean isPracticed;
     private int practiceCount;
     private LocalDateTime lastPracticedAt;
+    private PracticeStatus practiceStatus;
+
+    public enum PracticeStatus {
+        NOT_STARTED,
+        IN_PROGRESS,
+        COMPLETED
+    }
 }
