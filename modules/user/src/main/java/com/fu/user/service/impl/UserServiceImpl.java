@@ -560,7 +560,7 @@ public class UserServiceImpl implements UserService {
                 user.setEmail(createReq.getEmail());
                 user.setPasswordHash(passwordEncoder.encode(rawPassword));
                 user.setRole(createReq.getRole());
-                user.setStatus(UserStatus.INACTIVE);
+                user.setStatus(createReq.getRole() == UserRole.LEARNER ? UserStatus.INACTIVE : UserStatus.ACTIVE);
                 user.setAuthProvider(AuthProvider.LOCAL);
                 user.setEmailVerifiedAt(LocalDateTime.now());
                 user.setCreatedBy(currentUserId);
@@ -611,6 +611,13 @@ public class UserServiceImpl implements UserService {
                 .created(userMapper.toResponseList(savedCreated))
                 .updated(userMapper.toResponseList(savedUpdated))
                 .build();
+    }
+
+    @Override
+    public List<UserResponse> getAllTeachers() {
+        return userRepository.findAllTeacher().stream()
+                .map(userMapper::toResponse)
+                .toList();
     }
 
     private void splitFullNameToUser(String fullName, User user) {
@@ -704,7 +711,7 @@ public class UserServiceImpl implements UserService {
 
         user.setPasswordHash(passwordEncoder.encode(rawPassword));
         user.setRole(request.getRole());
-        user.setStatus(UserStatus.ACTIVE);
+        user.setStatus(request.getRole() == UserRole.LEARNER ? UserStatus.INACTIVE : UserStatus.ACTIVE);
         user.setAuthProvider(AuthProvider.LOCAL);
         user.setEmailVerifiedAt(LocalDateTime.now()); // Verified by manager/admin
         user.setCreatedBy(createdByUserId);

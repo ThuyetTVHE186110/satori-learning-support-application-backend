@@ -159,6 +159,11 @@ public class ConversationTopicServiceImpl implements ConversationTopicService {
                         dto.setPracticed(true);
                         dto.setPracticeCount(stats.getPracticeCount().intValue());
                         dto.setLastPracticedAt(stats.getLastPracticedAt());
+                        dto.setPracticeStatus(Boolean.TRUE.equals(stats.getIsCompleted())
+                                ? ConversationTopicSummaryResponse.PracticeStatus.COMPLETED
+                                : ConversationTopicSummaryResponse.PracticeStatus.IN_PROGRESS);
+                    } else {
+                        dto.setPracticeStatus(ConversationTopicSummaryResponse.PracticeStatus.NOT_STARTED);
                     }
                     return dto;
                 })
