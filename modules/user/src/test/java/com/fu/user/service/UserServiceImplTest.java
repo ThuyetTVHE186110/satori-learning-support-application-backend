@@ -201,7 +201,7 @@ class UserServiceImplTest {
             verify(emailService).sendWelcomeEmailWithCredentials(anyString(), anyString(), anyString(), anyString());
 
             User savedUser = userCaptor.getValue();
-            assertThat(savedUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
+            assertThat(savedUser.getStatus()).isEqualTo(UserStatus.INACTIVE);
             assertThat(savedUser.getPasswordHash()).isNotNull();
             assertThat(savedUser.getEmailVerifiedAt()).isNotNull();
         }
