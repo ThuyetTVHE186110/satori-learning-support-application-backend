@@ -45,7 +45,6 @@ public class SecurityConfig {
             "/api/v1/auth/reset-password",
             "/api/v1/auth/refresh",
             "/api/v1/auth/verify-otp",
-            "/actuator/**",
             "/swagger-ui/**",
             "/swagger-ui.html",
             "/v3/api-docs/**",
@@ -80,6 +79,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/courses/*/lessons/**").permitAll()
                         // User management - Admin access only
                         .requestMatchers("/api/v1/users/**").hasRole("ADMIN")
+                        // Monitor - Admin access only
+                        .requestMatchers("/actuator/**").hasRole("ADMIN")
+                        .requestMatchers("/api/v1/monitoring/**").hasRole("ADMIN")
                         // All other requests require authentication
                         .anyRequest().authenticated()
                 )

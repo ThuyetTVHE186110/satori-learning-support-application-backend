@@ -21,6 +21,7 @@
         <module>modules/roleplay</module>
         <module>modules/assignment</module>
         <module>modules/practice</module>
+        <module>modules/monitoring</module>
         <module>start</module>
     </modules>
 
@@ -144,6 +145,11 @@
                 <groupId>org.jsoup</groupId>
                 <artifactId>jsoup</artifactId>
                 <version>1.18.1</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fu</groupId>
+                <artifactId>monitoring</artifactId>
+                <version>${project.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
