@@ -504,7 +504,7 @@ public class UserServiceImpl implements UserService {
                 if (!isNewUser) {
                     // Existing user — update profile only
                     if (!user.getFirstName().equals(firstName) || !user.getLastName().equals(lastName) || !user.getPhoneNumber().equals(rd.phone())) {
-                        userChangedFromImportResponse = UserChangedFromImportResponse.builder().newEmail(rd.email).oldEmail(user.getEmail()).oldDateOfBirth(user.getDateOfBirth()).newDateOfBirth(rd.birthDay).oldFullName(user.getFullName()).newFullName(rd.fullName).oldPhoneNumber(user.getPhoneNumber()).newPhoneNumber(rd.phone).build();
+                        userChangedFromImportResponse = UserChangedFromImportResponse.builder().userId(user.getId()).newEmail(rd.email).oldEmail(user.getEmail()).oldDateOfBirth(user.getDateOfBirth()).newDateOfBirth(rd.birthDay).oldFullName(user.getFullName()).newFullName(rd.fullName).oldPhoneNumber(user.getPhoneNumber()).newPhoneNumber(rd.phone).build();
                         updated.add(userChangedFromImportResponse);
                     }
                 } else {
