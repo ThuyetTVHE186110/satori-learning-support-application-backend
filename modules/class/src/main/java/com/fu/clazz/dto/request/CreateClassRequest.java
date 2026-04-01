@@ -36,6 +36,4 @@ public class CreateClassRequest {
     private Integer maxStudents = 8;
 
     private LocalDate startDate;
-
-    private LocalDate endDate;
 }

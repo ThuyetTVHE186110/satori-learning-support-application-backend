@@ -613,6 +613,13 @@ public class UserServiceImpl implements UserService {
                 .build();
     }
 
+    @Override
+    public List<UserResponse> getAllTeachers() {
+        return userRepository.findAllTeacher().stream()
+                .map(userMapper::toResponse)
+                .toList();
+    }
+
     private void splitFullNameToUser(String fullName, User user) {
         if (fullName == null || fullName.isBlank()) return;
         String[] parts = fullName.trim().split("\\s+");
