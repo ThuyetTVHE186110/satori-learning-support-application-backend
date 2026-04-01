@@ -71,7 +71,7 @@ public class SystemMonitoringServiceImpl implements SystemMonitoringService {
                 .totalCourses(courseRepository.count())
                 .totalClasses(classRepository.count())
                 .totalAssignments(assignmentRepository.count())
-                .activeSessions(getMetricValue("http.server.requests.active"))
+                .activeSessions((long) getMetricValue("http.server.requests.active"))
                 .build();
     }
 
