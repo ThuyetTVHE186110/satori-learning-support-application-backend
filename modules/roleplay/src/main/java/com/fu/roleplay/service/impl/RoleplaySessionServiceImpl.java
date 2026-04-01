@@ -10,6 +10,7 @@ import com.fu.conversation.entity.ConversationMission;
 import com.fu.conversation.entity.ConversationTopic;
 import com.fu.conversation.repository.ConversationMissionRepository;
 import com.fu.conversation.repository.ConversationTopicRepository;
+import com.fu.conversation.repository.UserConversationProgressRepository;
 import com.fu.course.entity.Course;
 import com.fu.pronunciation.dto.AssessmentRequest;
 import com.fu.pronunciation.dto.AssessmentResult;
@@ -62,6 +63,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     private final SessionMissionRepository sessionMissionRepository;
     private final MessagePronunciationRepository pronunciationRepository;
     private final ConversationTopicRepository topicRepository;
+    private final UserConversationProgressRepository progressRepository;
 
     private final RoleplayAIService roleplayAIService;
     private final MissionEvaluatorAI missionEvaluatorAI;
@@ -83,6 +85,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             SessionMissionRepository sessionMissionRepository,
             MessagePronunciationRepository pronunciationRepository,
             ConversationTopicRepository topicRepository,
+            UserConversationProgressRepository progressRepository,
             RoleplayAIService roleplayAIService,
             MissionEvaluatorAI missionEvaluatorAI,
             SessionEvaluatorAI sessionEvaluatorAI,
@@ -99,6 +102,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         this.sessionMissionRepository = sessionMissionRepository;
         this.pronunciationRepository = pronunciationRepository;
         this.topicRepository = topicRepository;
+        this.progressRepository = progressRepository;
         this.roleplayAIService = roleplayAIService;
         this.missionEvaluatorAI = missionEvaluatorAI;
         this.sessionEvaluatorAI = sessionEvaluatorAI;
@@ -192,6 +196,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         response.setMissions(sessionMissions.stream()
                 .map(missionMapper::toSessionMissionResponse)
                 .collect(Collectors.toList()));
+
+        // Update user_conversation_progress (upsert: increment total_sessions, update last_practiced_at)
+        progressRepository.upsertOnSessionStart(userId, request.getTopicId(), session.getCreatedAt());
 
         log.info("Started roleplay session {} for user {} on topic {}", session.getId(), userId, request.getTopicId());
         return response;
@@ -571,8 +578,21 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         session.setLanguageScore(languageScore);
         session.setOverallScore(overallScore);
         session.setStatus(ConversationSession.SessionStatus.COMPLETED);
-        session.setCompletedAt(LocalDateTime.now());
+        LocalDateTime completedAt = LocalDateTime.now();
+        session.setCompletedAt(completedAt);
         sessionRepository.save(session);
+
+        // Update user_conversation_progress if this was a topic-based session
+        if (session.getTopicId() != null) {
+            progressRepository.markCompleted(
+                    session.getUserId(),
+                    session.getTopicId(),
+                    completedAt,
+                    overallScore,
+                    languageEval.getFluencyScore(),
+                    languageEval.getAccuracyScore(),
+                    languageEval.getVocabularyScore());
+        }
 
         // 7. Clear Redis cache
         roleplayAIService.clearSessionCache(sessionId);

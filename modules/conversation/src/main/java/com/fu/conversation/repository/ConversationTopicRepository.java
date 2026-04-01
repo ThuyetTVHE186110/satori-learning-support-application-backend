@@ -23,21 +23,21 @@ public interface ConversationTopicRepository extends JpaRepository<ConversationT
         UUID getTopicId();
         Long getPracticeCount();
         LocalDateTime getLastPracticedAt();
+        Boolean getIsCompleted();
     }
 
     /**
-     * Returns practice statistics for the given user grouped by topicId.
-     * Queries ai_conversation.conversation_sessions directly (cross-schema native query).
+     * Returns practice statistics from user_conversation_progress for the given topics.
      * Returns only topics that have at least one session (unpracticed topics are absent).
      */
     @Query(value = """
-            SELECT s.topic_id                  AS topicId,
-                   COUNT(*)                    AS practiceCount,
-                   MAX(s.created_at)           AS lastPracticedAt
-            FROM ai_conversation.conversation_sessions s
-            WHERE s.user_id   = :userId
-              AND s.topic_id IN (:topicIds)
-            GROUP BY s.topic_id
+            SELECT p.topic_id           AS topicId,
+                   p.total_sessions     AS practiceCount,
+                   p.last_practiced_at  AS lastPracticedAt,
+                   p.is_completed       AS isCompleted
+            FROM speaking.user_conversation_progress p
+            WHERE p.user_id     = :userId
+              AND p.topic_id IN (:topicIds)
             """, nativeQuery = true)
     List<PracticeStatsProjection> findPracticeStatsByUserIdAndTopicIds(
             @Param("userId") UUID userId,
