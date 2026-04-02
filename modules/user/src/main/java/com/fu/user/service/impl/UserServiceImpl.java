@@ -427,7 +427,7 @@ public class UserServiceImpl implements UserService {
         List<ImportRowError> errors = new ArrayList<>();
 
         //Size limit 5MB
-        if (file.getSize() > 5 * 1024 * 1024) {
+        if (file.getSize() > 20 * 1024 * 1024) {
             throw new BusinessException("FILE_TOO_LARGE", "Kích thước file vượt quá giới hạn 5MB");
         }
 
