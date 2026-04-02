@@ -53,7 +53,8 @@ CREATE TYPE message_role AS ENUM ('USER', 'ASSISTANT', 'SYSTEM', 'HINT');
 CREATE TYPE correction_type AS ENUM ('GRAMMAR', 'VOCABULARY', 'KANJI', 'POLITENESS', 'PARTICLE', 'CONJUGATION', 'WORD_ORDER', 'SPELLING', 'NATURAL');
 
 -- Gamification enums
-CREATE TYPE badge_type AS ENUM ('STREAK', 'ACHIEVEMENT', 'MILESTONE', 'SPECIAL');
+CREATE TYPE badge_type AS ENUM ('LEARNING_STREAK', 'AI_SPEAKING_COUNT', 'AI_PRACTICE_COUNT', 'LEARNING_LEVEL');
+CREATE TYPE badge_status AS ENUM ('ACTIVE', 'ARCHIVED');
 CREATE TYPE reward_type AS ENUM ('EXP', 'COINS', 'BADGE', 'ITEM');
 CREATE TYPE transaction_type AS ENUM ('EARN', 'SPEND', 'REFUND', 'BONUS');
 CREATE TYPE item_type AS ENUM ('AVATAR', 'THEME', 'BOOSTER', 'FEATURE_UNLOCK', 'DECORATION');
@@ -1088,24 +1089,19 @@ CREATE TABLE gamification.badges (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 
     name VARCHAR(100) NOT NULL,
-    name_japanese VARCHAR(100),
     description TEXT,
 
     badge_type badge_type NOT NULL,
 
-    requirement_type VARCHAR(50),
     requirement_value INT,
-    requirement_details JSONB,
 
     icon_url TEXT,
-    color VARCHAR(20),
-    rarity item_rarity DEFAULT 'COMMON',
 
     exp_reward INT DEFAULT 0,
-    coin_reward INT DEFAULT 0,
 
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    status badge_status DEFAULT 'ACTIVE',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- User earned badges
@@ -1596,20 +1592,7 @@ INSERT INTO pronunciation.pronunciation_topics (name, name_japanese, description
 ('Self Introduction', '自己紹介', 'Practice introducing yourself in Japanese', 'SENTENCE', 'N5', 3, ARRAY['はじめまして', '～です', 'よろしく'], 26, 'PUBLISHED'),
 ('Minimal Pairs: し/ち', 'し/ちの区別', 'Distinguish between し and ち sounds', 'MINIMAL_PAIR', 'N5', 3, ARRAY['し', 'ち'], 30, 'PUBLISHED');
 
--- Default badges
-INSERT INTO gamification.badges (name, name_japanese, description, badge_type, requirement_type, requirement_value, icon_url, rarity, exp_reward, coin_reward) VALUES
-('First Step', '第一歩', 'Complete your first practice session', 'ACHIEVEMENT', 'practice_count', 1, '/badges/first-step.png', 'COMMON', 10, 5),
-('Week Warrior', '週間戦士', 'Maintain a 7-day streak', 'STREAK', 'streak', 7, '/badges/week-warrior.png', 'UNCOMMON', 50, 25),
-('Month Master', '月間マスター', 'Maintain a 30-day streak', 'STREAK', 'streak', 30, '/badges/month-master.png', 'RARE', 200, 100),
-('Century Streak', '百日達成', 'Maintain a 100-day streak', 'STREAK', 'streak', 100, '/badges/century-streak.png', 'EPIC', 500, 250),
-('Pronunciation Pro', '発音プロ', 'Master 50 pronunciation items', 'MILESTONE', 'pronunciation_mastered', 50, '/badges/pronunciation-pro.png', 'RARE', 150, 75),
-('Conversation King', '会話王', 'Complete 100 conversation sessions', 'MILESTONE', 'conversation_count', 100, '/badges/conversation-king.png', 'RARE', 150, 75),
-('Quiz Master', 'テストマスター', 'Complete 50 quizzes with 80%+ score', 'MILESTONE', 'quiz_master', 50, '/badges/quiz-master.png', 'RARE', 150, 75),
-('Perfect Score', '満点', 'Get 100% on any practice', 'ACHIEVEMENT', 'perfect_score', 1, '/badges/perfect-score.png', 'UNCOMMON', 30, 15),
-('Early Bird', '早起き鳥', 'Practice before 7 AM', 'SPECIAL', 'early_practice', 1, '/badges/early-bird.png', 'COMMON', 20, 10),
-('Night Owl', '夜更かし', 'Practice after 11 PM', 'SPECIAL', 'night_practice', 1, '/badges/night-owl.png', 'COMMON', 20, 10),
-('Level 10', 'レベル10', 'Reach level 10', 'MILESTONE', 'level', 10, '/badges/level-10.png', 'UNCOMMON', 100, 50);
-
+-- Default badges mock data has been moved to 35-change-achievement-type.sql
 -- Default conversation topics
 INSERT INTO speaking.conversation_topics (title, title_japanese, description, scenario, category, jlpt_level, difficulty_score, is_roleplay, vocabulary_hints, grammar_points, useful_expressions, order_index, status) VALUES
 ('Self Introduction', '自己紹介', 'Practice introducing yourself in Japanese', 'You are meeting someone new at a language exchange event.', 'daily_life', 'N5', 1, true,

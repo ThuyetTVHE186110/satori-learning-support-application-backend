@@ -21,6 +21,7 @@
         <module>modules/roleplay</module>
         <module>modules/assignment</module>
         <module>modules/practice</module>
+        <module>modules/achievement</module>
         <module>start</module>
     </modules>
 
@@ -122,6 +123,11 @@
             <dependency>
                 <groupId>com.fu</groupId>
                 <artifactId>practice</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fu</groupId>
+                <artifactId>achievement</artifactId>
                 <version>${project.version}</version>
             </dependency>
 
