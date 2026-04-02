@@ -426,6 +426,11 @@ public class UserServiceImpl implements UserService {
         List<UserChangedFromImportResponse> updated = new ArrayList<>();
         List<ImportRowError> errors = new ArrayList<>();
 
+        //Size limit 5MB
+        if (file.getSize() > 5 * 1024 * 1024) {
+            throw new BusinessException("FILE_TOO_LARGE", "Kích thước file vượt quá giới hạn 5MB");
+        }
+
         try (InputStream inputStream = file.getInputStream(); Workbook workbook = WorkbookFactory.create(inputStream)) {
             int sheetCount = Math.min(2, workbook.getNumberOfSheets());
 
