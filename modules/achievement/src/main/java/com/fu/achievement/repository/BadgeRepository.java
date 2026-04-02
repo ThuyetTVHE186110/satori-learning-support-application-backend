@@ -18,7 +18,7 @@ public interface BadgeRepository extends JpaRepository<Badge, UUID> {
 
     @Query("SELECT new com.fu.achievement.dto.response.BadgeSummaryResponse(" +
            "b.id, b.name, b.description, b.badgeType, " +
-           "b.expReward, b.iconUrl, b.status, b.createdAt, COUNT(ub.id)) " +
+           "b.expReward, b.requirementValue, b.iconUrl, b.status, b.createdAt, COUNT(ub.id)) " +
            "FROM Badge b LEFT JOIN UserBadges ub ON b.id = ub.badgeId " +
            "WHERE (cast(:keyword as string) IS NULL OR LOWER(b.name) LIKE LOWER(CONCAT('%', cast(:keyword as string), '%'))) " +
            "AND (cast(:status as string) IS NULL OR b.status = :status) " +
