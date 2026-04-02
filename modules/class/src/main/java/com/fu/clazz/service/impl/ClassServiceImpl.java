@@ -441,9 +441,11 @@ public class ClassServiceImpl implements ClassService {
         // Enrich with teacher info
         if (currentTeacherId != null) {
             userRepository.findById(currentTeacherId).ifPresent(teacher -> {
+                response.setTeacherId(teacher.getId());
                 response.setTeacherName(teacher.getFullName());
                 response.setTeacherEmail(teacher.getEmail());
                 response.setTeacherAvatarUrl(teacher.getAvatarUrl());
+                response.setTeacherPhoneNumber(teacher.getPhoneNumber());
             });
         }
 
@@ -475,6 +477,7 @@ public class ClassServiceImpl implements ClassService {
         }
         if (currentTeacherId != null) {
             userRepository.findById(currentTeacherId).ifPresent(teacher -> {
+                response.setTeacherId(teacher.getId());
                 response.setTeacherName(teacher.getFullName());
             });
         }
