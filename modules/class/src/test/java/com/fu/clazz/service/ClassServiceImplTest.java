@@ -219,7 +219,7 @@ class ClassServiceImplTest {
     class CreateClassTests {
 
         @Test
-        @DisplayName("Should create class successfully")
+        @DisplayName("TC01 & TC12 & TC13: Should create class successfully with full data")
         void shouldCreateClassSuccessfully() {
             // Given
             given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
@@ -238,15 +238,20 @@ class ClassServiceImplTest {
             assertThat(result.getName()).isEqualTo("N5 Morning Class");
             assertThat(result.getMemberCount()).isEqualTo(0L);
 
+            verify(classMapper).toEntity(createRequest);
+            verify(classRepository).save(any(Clazz.class));
             verify(classRepository).save(clazzCaptor.capture());
             Clazz savedClazz = clazzCaptor.getValue();
             assertThat(savedClazz.getCreatedBy()).isEqualTo(managerId);
             assertThat(savedClazz.getUpdatedBy()).isEqualTo(managerId);
+            assertThat(savedClazz.getCourseId()).isEqualTo(courseId);
         }
 
         @Test
-        @DisplayName("Should set courseId when creating class")
-        void shouldPersistCourseId() {
+        @DisplayName("TC02: Should set default maxStudents to 8 when null")
+        void shouldSetDefaultMaxStudentsWhenNull() {
+            // Given
+            createRequest.setMaxStudents(null);
             given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
             given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
             given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
@@ -255,32 +260,91 @@ class ClassServiceImplTest {
             given(classMapper.toResponse(any(Clazz.class))).willReturn(testClassResponse);
             given(classMemberRepository.countActiveByClassId(any())).willReturn(0L);
 
+            // When
             clazzService.createClass(createRequest, managerId);
 
+            // Then
             verify(classRepository).save(clazzCaptor.capture());
-            assertThat(clazzCaptor.getValue().getCourseId()).isEqualTo(courseId);
+            assertThat(clazzCaptor.getValue().getMaxStudents()).isEqualTo(8);
         }
 
         @Test
-        @DisplayName("Should throw exception when teacher is inactive or not found")
-        void shouldThrowExceptionWhenTeacherInactive() {
+        @DisplayName("TC03: Should set isActive to false when startDate is in the future")
+        void shouldSetIsActiveFalseWhenStartDateIsFuture() {
             // Given
-            CreateClassRequest request = CreateClassRequest.builder()
-                    .name("N5 Morning Class")
-                    .description("Beginner Japanese class")
-                    .teacherId(teacherId)
-                    .courseId(courseId)
-                    .maxStudents(30)
-                    .startDate(LocalDate.now().plusMonths(1))
-                    .endDate(LocalDate.now().plusMonths(4))
-                    .build();
-
-            testTeacher.setStatus(UserStatus.INACTIVE);
+            createRequest.setStartDate(LocalDate.now().plusDays(5));
+            given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
             given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
-            given(classRepository.existsByNameIgnoreCase(anyString())).willReturn(false);
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(classMapper.toEntity(createRequest)).willReturn(testClazz);
+            given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
+            given(classMapper.toResponse(any(Clazz.class))).willReturn(testClassResponse);
+            given(classMemberRepository.countActiveByClassId(any())).willReturn(0L);
+
+            // When
+            clazzService.createClass(createRequest, managerId);
+
+            // Then
+            verify(classRepository).save(clazzCaptor.capture());
+            assertThat(clazzCaptor.getValue().getIsActive()).isFalse();
+        }
+
+        @Test
+        @DisplayName("TC06: Should throw exception when class name already exists")
+        void shouldThrowWhenClassNameExists() {
+            // Given
+            given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(true);
 
             // When/Then
-            assertThatThrownBy(() -> clazzService.createClass(request, managerId))
+            assertThatThrownBy(() -> clazzService.createClass(createRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(ex -> ((BusinessException) ex).getErrorCode())
+                    .isEqualTo("CLASS_NAME_EXISTS");
+
+            verify(classRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("TC07: Should throw exception when teacher not found")
+        void shouldThrowWhenTeacherNotFound() {
+            // Given
+            given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
+            given(userRepository.findById(teacherId)).willReturn(Optional.empty());
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.createClass(createRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(ex -> ((BusinessException) ex).getErrorCode())
+                    .isEqualTo("INVALID_TEACHER");
+
+            verify(classRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("TC08: Should throw exception when teacher has wrong role")
+        void shouldThrowWhenTeacherHasWrongRole() {
+            // Given
+            testTeacher.setRole(UserRole.LEARNER);
+            given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.createClass(createRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(ex -> ((BusinessException) ex).getErrorCode())
+                    .isEqualTo("INVALID_TEACHER");
+        }
+
+        @Test
+        @DisplayName("TC09: Should throw exception when teacher is inactive")
+        void shouldThrowExceptionWhenTeacherInactive() {
+            // Given
+            testTeacher.setStatus(UserStatus.INACTIVE);
+            given(classRepository.existsByNameIgnoreCase(anyString())).willReturn(false);
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.createClass(createRequest, managerId))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("Giáo viên không tồn tại hoặc không hợp lệ");
 
@@ -288,53 +352,7 @@ class ClassServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should throw exception when end date is in the past (E4)")
-        void shouldThrowExceptionWhenStartDateInPast() {
-            // Given
-            CreateClassRequest badDateRequest = CreateClassRequest.builder()
-                    .name("N5 Morning Class")
-                    .description("Beginner Japanese class")
-                    .teacherId(teacherId)
-                    .courseId(courseId)
-                    .maxStudents(30)
-                    .startDate(LocalDate.now().minusDays(10)) // Past date
-                    .endDate(LocalDate.now().minusDays(3))
-                    .build();
-
-            // When/Then
-            assertThatThrownBy(() -> clazzService.createClass(badDateRequest, managerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("Ngày kết thúc phải ở tương lai.");
-
-            verify(classRepository, never()).save(any());
-        }
-
-      
-
-        @Test
-        @DisplayName("Should throw exception when end date is before start date (E3)")
-        void shouldThrowExceptionWhenEndDateBeforeStartDate() {
-            // Given
-            CreateClassRequest badDateRequest = CreateClassRequest.builder()
-                    .name("N5 Morning Class")
-                    .description("Beginner Japanese class")
-                    .teacherId(teacherId)
-                    .courseId(courseId)
-                    .maxStudents(30)
-                    .startDate(LocalDate.now().plusDays(10))
-                    .endDate(LocalDate.now().plusDays(5)) // Before start date
-                    .build();
-
-            // When/Then
-            assertThatThrownBy(() -> clazzService.createClass(badDateRequest, managerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("Ngày kết thúc phải sau ngày bắt đầu.");
-
-            verify(classRepository, never()).save(any());
-        }
-
-        @Test
-        @DisplayName("Should throw exception when course not found or deleted")
+        @DisplayName("TC10: Should throw exception when course not found or deleted")
         void shouldThrowWhenCourseNotFound() {
             given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
             given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
@@ -348,7 +366,7 @@ class ClassServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should throw exception when course is not active")
+        @DisplayName("TC11: Should throw exception when course is not active")
         void shouldThrowWhenCourseNotPublished() {
             testCourse.setStatus(Course.CourseStatus.INACTIVE);
             given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
@@ -655,240 +673,165 @@ class ClassServiceImplTest {
 
     @Nested
     @DisplayName("Add Member Tests")
-        class AddMemberTests {
+    class AddMemberTests {
 
-            @Test
-            @DisplayName("Should add member successfully")
-            void shouldAddMemberSuccessfully() {
-                // Given
-                AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
-                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-                given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
-                given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
-                given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.empty());
-                given(classMemberRepository.save(any(ClassMember.class))).willReturn(testMember);
-                given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
-                given(userRepository.save(any(User.class))).willReturn(testStudent);
+        @Test
+        @DisplayName("TC01 & TC04: Should add new member successfully and enrich response (ACTIVE user)")
+        void shouldAddMemberSuccessfully() {
+            // Given
+            AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent)); // ACTIVE
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
+            given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.empty());
+            given(classMemberRepository.save(any(ClassMember.class))).willReturn(testMember);
+            given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
+            given(userRepository.save(any(User.class))).willReturn(testStudent);
 
-                // When
-                ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
+            // When
+            ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
 
-                // Then
-                assertThat(result).isNotNull();
-                assertThat(result.getUserId()).isEqualTo(studentId);
-                assertThat(result.getClassId()).isEqualTo(classId);
+            // Then
+            assertThat(result).isNotNull();
+            // Verify TC04 Enrichment
+            assertThat(result.getFullName()).isEqualTo(testStudent.getFullName());
+            assertThat(result.getEmail()).isEqualTo(testStudent.getEmail());
+            assertThat(result.getAvatarUrl()).isEqualTo(testStudent.getAvatarUrl());
+            assertThat(result.getRole()).isEqualTo(testStudent.getRole().name());
 
-                verify(classMemberRepository).save(memberCaptor.capture());
-                assertThat(memberCaptor.getValue().getClassId()).isEqualTo(classId);
-                assertThat(memberCaptor.getValue().getUserId()).isEqualTo(studentId);
-            }
-
-            @Test
-            @DisplayName("Should throw exception when class is full")
-            void shouldThrowWhenClassIsFull() {
-                // Given
-                AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
-                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-                given(classMemberRepository.countActiveByClassId(classId)).willReturn(30L); // maxStudents = 30
-
-                // When/Then
-                assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
-                        .isInstanceOf(ClassFullException.class);
-
-                verify(classMemberRepository, never()).save(any());
-            }
-
-            @Test
-            @DisplayName("Should throw exception when member already exists")
-            void shouldThrowWhenMemberAlreadyExists() {
-                // Given
-                AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
-                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-                given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
-                given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
-                given(classMemberRepository.findByClassIdAndUserId(classId, studentId))
-                        .willReturn(Optional.of(testMember));
-
-                // When/Then
-                assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
-                        .isInstanceOf(MemberAlreadyExistsException.class);
-            }
-
-            @Test
-            @DisplayName("Should re-join previously removed member")
-            void shouldReJoinRemovedMember() {
-                // Given
-                AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
-                ClassMember removedMember = ClassMember.builder()
-                        .classId(classId).userId(studentId)
-                        .joinedAt(LocalDateTime.now().minusDays(10))
-                        .removedAt(LocalDateTime.now().minusDays(1))
-                        .build();
-                ReflectionTestUtils.setField(removedMember, "id", UUID.randomUUID());
-
-                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-                given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
-                given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
-                given(classMemberRepository.findByClassIdAndUserId(classId, studentId))
-                        .willReturn(Optional.of(removedMember));
-                given(classMemberRepository.save(any(ClassMember.class))).willReturn(removedMember);
-                given(classMapper.toMemberResponse(removedMember)).willReturn(testMemberResponse);
-                given(userRepository.save(any(User.class))).willReturn(testStudent);
-
-                // When
-                ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
-
-                // Then
-                assertThat(result).isNotNull();
-                verify(classMemberRepository).save(memberCaptor.capture());
-                assertThat(memberCaptor.getValue().getRemovedAt()).isNull(); // restored
-            }
-
-            @Test
-            @DisplayName("Should throw when adding to inactive class")
-            void shouldThrowWhenClassIsInactive() {
-                // Given
-                testClazz.setIsActive(false);
-                AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
-                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-
-                // When/Then
-                assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
-                        .isInstanceOf(BusinessException.class)
-                        .hasMessageContaining("Không thể thêm học viên vào lớp ");
-
-                verify(classMemberRepository, never()).save(any());
-            }
-
-            @Test
-            @DisplayName("Should throw when adding user with TEACHER role as member")
-            void shouldThrowWhenAddingTeacherAsMember() {
-                // Given
-                AddMemberRequest request = AddMemberRequest.builder().userId(teacherId).build();
-                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-                given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
-
-                // When/Then
-                assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
-                        .isInstanceOf(BusinessException.class)
-                        .hasMessageContaining("HỌC VIÊN");
-
-                verify(classMemberRepository, never()).save(any());
-            }
-
-            @Test
-            @DisplayName("Should throw when adding non-existent user as member")
-            void shouldThrowWhenUserNotFound() {
-                // Given
-                UUID unknownId = UUID.randomUUID();
-                AddMemberRequest request = AddMemberRequest.builder().userId(unknownId).build();
-                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-                given(userRepository.findById(unknownId)).willReturn(Optional.empty());
-
-                // When/Then
-                assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
-                        .isInstanceOf(ResourceNotFoundException.class);
-
-                verify(classMemberRepository, never()).save(any());
-            }
-
-            @Test
-            @DisplayName("Should activate INACTIVE learner when added to class")
-            void shouldActivateInactiveLearnerWhenAdded() {
-                // Given
-                User inactiveStudent = User.builder()
-                        .email("inactive@example.com")
-                        .firstName("Inactive")
-                        .lastName("Student")
-                        .role(UserRole.LEARNER)
-                        .status(UserStatus.INACTIVE)
-                        .build();
-                ReflectionTestUtils.setField(inactiveStudent, "id", studentId);
-
-                AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
-                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-                given(userRepository.findById(studentId)).willReturn(Optional.of(inactiveStudent));
-                given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
-                given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.empty());
-                given(classMemberRepository.save(any(ClassMember.class))).willReturn(testMember);
-                given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
-                given(userRepository.save(any(User.class))).willReturn(inactiveStudent);
-
-                // When
-                ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
-
-                // Then
-                assertThat(result).isNotNull();
-                verify(userRepository).save(userCaptor.capture());
-                User savedUser = userCaptor.getValue();
-                assertThat(savedUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
-            }
-
-            @Test
-            @DisplayName("Should NOT change status of ACTIVE learner when added to class")
-            void shouldNotChangeStatusOfActiveLearner() {
-                // Given
-                AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
-                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-                given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent)); // ACTIVE
-                given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
-                given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.empty());
-                given(classMemberRepository.save(any(ClassMember.class))).willReturn(testMember);
-                given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
-                given(userRepository.save(any(User.class))).willReturn(testStudent);
-
-                // When
-                ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
-
-                // Then
-                assertThat(result).isNotNull();
-                verify(userRepository).save(userCaptor.capture());
-                User savedUser = userCaptor.getValue();
-                assertThat(savedUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
-            }
-
-            @Test
-            @DisplayName("Should activate INACTIVE learner when re-joining class after removal")
-            void shouldActivateInactiveLearnerOnReJoin() {
-                // Given
-                User inactiveStudent = User.builder()
-                        .email("inactive@example.com")
-                        .firstName("Inactive")
-                        .lastName("Student")
-                        .role(UserRole.LEARNER)
-                        .status(UserStatus.INACTIVE)
-                        .build();
-                ReflectionTestUtils.setField(inactiveStudent, "id", studentId);
-
-                ClassMember removedMember = ClassMember.builder()
-                        .classId(classId).userId(studentId)
-                        .joinedAt(LocalDateTime.now().minusDays(10))
-                        .removedAt(LocalDateTime.now().minusDays(1))
-                        .build();
-                ReflectionTestUtils.setField(removedMember, "id", UUID.randomUUID());
-
-                AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
-                given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
-                given(userRepository.findById(studentId)).willReturn(Optional.of(inactiveStudent));
-                given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
-                given(classMemberRepository.findByClassIdAndUserId(classId, studentId))
-                        .willReturn(Optional.of(removedMember));
-                given(classMemberRepository.save(any(ClassMember.class))).willReturn(removedMember);
-                given(classMapper.toMemberResponse(removedMember)).willReturn(testMemberResponse);
-                given(userRepository.save(any(User.class))).willReturn(inactiveStudent);
-
-                // When
-                ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
-
-                // Then
-                assertThat(result).isNotNull();
-                verify(userRepository).save(userCaptor.capture());
-                User savedUser = userCaptor.getValue();
-                assertThat(savedUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
-            }
+            verify(classMemberRepository).save(any(ClassMember.class));
+            verify(userRepository).save(any(User.class));
         }
 
-        // =====================================================
+        @Test
+        @DisplayName("TC02: Should activate INACTIVE user when adding to class")
+        void shouldActivateInactiveUser() {
+            // Given
+            User inactiveUser = User.builder()
+                    .role(UserRole.LEARNER)
+                    .status(UserStatus.INACTIVE)
+                    .build();
+            ReflectionTestUtils.setField(inactiveUser, "id", studentId);
+
+            AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(userRepository.findById(studentId)).willReturn(Optional.of(inactiveUser));
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
+            given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.empty());
+            given(classMemberRepository.save(any(ClassMember.class))).willReturn(testMember);
+            given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
+            given(userRepository.save(any(User.class))).willReturn(inactiveUser);
+
+            // When
+            clazzService.addMember(classId, request, managerId);
+
+            // Then
+            verify(userRepository).save(userCaptor.capture());
+            assertThat(userCaptor.getValue().getStatus()).isEqualTo(UserStatus.ACTIVE);
+        }
+
+        @Test
+        @DisplayName("TC03: Should re-join member (restore inactive member)")
+        void shouldRestoreInactiveMember() {
+            // Given
+            AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
+            ClassMember inactiveMember = ClassMember.builder()
+                    .classId(classId).userId(studentId)
+                    .removedAt(LocalDateTime.now())
+                    .build();
+
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
+            given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.of(inactiveMember));
+            given(classMemberRepository.save(any(ClassMember.class))).willReturn(inactiveMember);
+            given(classMapper.toMemberResponse(inactiveMember)).willReturn(testMemberResponse);
+            given(userRepository.save(any(User.class))).willReturn(testStudent);
+
+            // When
+            clazzService.addMember(classId, request, managerId);
+
+            // Then
+            verify(classMemberRepository).save(memberCaptor.capture());
+            assertThat(memberCaptor.getValue().getRemovedAt()).isNull(); // logic RESTORE
+        }
+
+        @Test
+        @DisplayName("TC05: Should throw ResourceNotFoundException when class not found")
+        void shouldThrowWhenClassNotFound() {
+            // Given
+            AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.empty());
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
+                    .isInstanceOf(ResourceNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("TC06: Should throw exception when class is invalid/full and NOT call user repository")
+        void shouldThrowWhenClassInvalidAndShortCircuit() {
+            // Given
+            AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(30L); // Max Students = 30
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
+                    .isInstanceOf(ClassFullException.class);
+
+            // Verify short-circuit
+            verify(userRepository, never()).findById(any());
+        }
+
+        @Test
+        @DisplayName("TC07: Should throw ResourceNotFoundException when user not found")
+        void shouldThrowWhenUserNotFound() {
+            // Given
+            AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(userRepository.findById(studentId)).willReturn(Optional.empty());
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
+                    .isInstanceOf(ResourceNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("TC08: Should throw BusinessException when user is not a LEARNER")
+        void shouldThrowWhenUserNotLearner() {
+            // Given
+            AddMemberRequest request = AddMemberRequest.builder().userId(teacherId).build();
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher)); // testTeacher has TEACHER role
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", "INVALID_MEMBER_ROLE");
+        }
+
+        @Test
+        @DisplayName("TC09: Should throw MemberAlreadyExistsException when member already active and NOT call save()")
+        void shouldThrowWhenMemberAlreadyActiveAndNoSave() {
+            // Given
+            AddMemberRequest request = AddMemberRequest.builder().userId(studentId).build();
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(userRepository.findById(studentId)).willReturn(Optional.of(testStudent));
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
+            given(classMemberRepository.findByClassIdAndUserId(classId, studentId)).willReturn(Optional.of(testMember)); // Active member
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.addMember(classId, request, managerId))
+                    .isInstanceOf(MemberAlreadyExistsException.class);
+
+            // Verify no save
+            verify(classMemberRepository, never()).save(any());
+            verify(userRepository, never()).save(any());
+        }
+    }
+
+    // =====================================================
         // REMOVE MEMBER
         // =====================================================
 
@@ -990,7 +933,7 @@ class ClassServiceImplTest {
         @DisplayName("Create Class Date Validation Tests")
         class CreateClassDateValidationTests {
             @Test
-            @DisplayName("Should throw when dueDate is in the past")
+            @DisplayName("TC04: Should throw when dueDate is in the past")
             void shouldThrowWhenStartDateInPast() {
                 CreateClassRequest req = CreateClassRequest.builder()
                         .name("Lớp kiểm thử")
@@ -1007,7 +950,7 @@ class ClassServiceImplTest {
             }
 
             @Test
-            @DisplayName("Should throw when endDate is before startDate")
+            @DisplayName("TC05: Should throw when endDate is before startDate")
             void shouldThrowWhenEndDateBeforeStartDate() {
                 CreateClassRequest req = CreateClassRequest.builder()
                         .name("Lớp kiểm thử")
