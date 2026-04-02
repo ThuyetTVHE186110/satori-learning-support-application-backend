@@ -478,7 +478,9 @@ public class UserServiceImpl implements UserService {
                     }
                     LocalDate birthDate = null;
                     if (!birthDay.isBlank()) {
-                        birthDate = LocalDate.parse(birthDay, DateTimeFormatter.ofPattern("dd/MM/yyyy"));
+                        birthDate = LocalDate.parse(birthDay,
+                                DateTimeFormatter.ofPattern("[d][dd]/[M][MM]/uuuu")
+                                        .withResolverStyle(java.time.format.ResolverStyle.STRICT));
                     }
                     validRows.add(new RowData(i, rowNum, normalizedEmail, fullName.trim(), phoneNumber.trim(), birthDate, i == 0 ? UserRole.LEARNER : UserRole.TEACHER));
                 }
@@ -802,15 +804,17 @@ public class UserServiceImpl implements UserService {
         }
         if (StringUtils.hasText(birthDay)) {
             try {
-                // Pattern [d]/[M]/yyyy cho phép đọc cả "9/12/2004" và "09/12/2004"
-                DateTimeFormatter flexibleFormatter = DateTimeFormatter.ofPattern("[d][dd]/[M][MM]/yyyy");
+                // ResolverStyle.STRICT + "uuuu" (thay "yyyy") để reject ngày không tồn tại như 31/02
+                // SMART (mặc định) sẽ tự động round 31/02 → ngày cuối tháng mà không throw exception
+                DateTimeFormatter flexibleFormatter = DateTimeFormatter
+                        .ofPattern("[d][dd]/[M][MM]/uuuu")
+                        .withResolverStyle(java.time.format.ResolverStyle.STRICT);
                 java.time.LocalDate birthDate = LocalDate.parse(birthDay, flexibleFormatter);
                 if (birthDate.isAfter(LocalDate.now())) {
                     error.setBirthDayErrorMessage("Ngày sinh phải ở trong quá khứ");
                 }
             } catch (Exception e) {
                 log.error("Lỗi parse ngày sinh : {}", birthDay);
-                // Có thể gán mặc định hoặc bỏ qua dòng này
                 error.setBirthDayErrorMessage("Ngày sinh phải đúng định dạng dd/MM/yyyy");
             }
         }
