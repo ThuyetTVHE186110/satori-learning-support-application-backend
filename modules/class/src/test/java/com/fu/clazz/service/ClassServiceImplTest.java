@@ -621,7 +621,6 @@ class ClassServiceImplTest {
     @Nested
     @DisplayName("Add Member Tests")
     class AddMemberTests {
-    class AddMemberTests {
 
         @Test
         @DisplayName("TC01 & TC04: Should add new member successfully and enrich response (ACTIVE user)")
@@ -636,8 +635,6 @@ class ClassServiceImplTest {
             given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
             given(userRepository.save(any(User.class))).willReturn(testStudent);
 
-            // When
-            ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
             // When
             ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
 
