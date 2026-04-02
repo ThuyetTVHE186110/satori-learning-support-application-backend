@@ -15,6 +15,7 @@ import com.fu.assignment.service.impl.AssignmentServiceImpl;
 import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.repository.ClassMemberRepository;
 import com.fu.clazz.repository.ClassRepository;
+import com.fu.clazz.repository.ClassTeacherHistoryRepository;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.infrastructure.cloudinary.CloudinaryService;
@@ -70,7 +71,9 @@ class AssignmentServiceImplTest {
     @Mock private CloudinaryService cloudinaryService;
     @Mock private SubmissionService submissionService;
     @Mock private AiGradingService aiGradingService;
+    @Mock private ClassTeacherHistoryRepository classTeacherHistoryRepository;
     @Mock private AssignmentScheduleManager scheduleManager;
+
 
     @InjectMocks
     private AssignmentServiceImpl assignmentService;
@@ -107,7 +110,6 @@ class AssignmentServiceImplTest {
 
         testClazz = Clazz.builder()
                 .name("N5 Morning Class")
-                .teacherId(teacherId)
                 .build();
         ReflectionTestUtils.setField(testClazz, "id", classId);
 
@@ -194,6 +196,7 @@ class AssignmentServiceImplTest {
     // ── Helper to stub teacher-access verification ────────────────────────────
     private void stubTeacherAccess() {
         given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+        given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId)).willReturn(Optional.of(teacherId));
     }
 
     private void stubEnrichResponse(Assignment a) {
@@ -405,10 +408,11 @@ class AssignmentServiceImplTest {
         @DisplayName("Should throw when teacher does not own the assignment")
         void shouldThrowWhenAccessDenied() {
             UUID otherTeacherId = UUID.randomUUID();
-            Clazz otherClazz = Clazz.builder().name("Other").teacherId(otherTeacherId).build();
+            Clazz otherClazz = Clazz.builder().name("Other").build();
             ReflectionTestUtils.setField(otherClazz, "id", classId);
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
             given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(otherClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId)).willReturn(Optional.of(otherTeacherId));
 
             UUID wrongTeacher = UUID.randomUUID();
             assertThatThrownBy(() -> assignmentService.deleteAssignment(assignmentId, wrongTeacher))
@@ -514,7 +518,7 @@ class AssignmentServiceImplTest {
         @DisplayName("Should clone quiz assignment to another class")
         void shouldCloneQuizAssignment() {
             UUID targetClassId = UUID.randomUUID();
-            Clazz targetClazz = Clazz.builder().name("Target Class").teacherId(teacherId).build();
+            Clazz targetClazz = Clazz.builder().name("Target Class").build();
             ReflectionTestUtils.setField(targetClazz, "id", targetClassId);
 
             CloneAssignmentRequest request = CloneAssignmentRequest.builder()
@@ -526,6 +530,7 @@ class AssignmentServiceImplTest {
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
             stubTeacherAccess();
             given(classRepository.findByIdAndNotDeleted(targetClassId)).willReturn(Optional.of(targetClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(targetClassId)).willReturn(Optional.of(teacherId));
 
             Assignment clonedAssignment = Assignment.builder()
                     .title("Cloned Quiz")
