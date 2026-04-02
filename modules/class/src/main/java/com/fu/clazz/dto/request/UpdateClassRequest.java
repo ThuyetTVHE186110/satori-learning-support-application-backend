@@ -31,7 +31,4 @@ public class UpdateClassRequest {
 
     private LocalDate startDate;
 
-    private LocalDate endDate;
-
-    private Boolean isActive;
 }
