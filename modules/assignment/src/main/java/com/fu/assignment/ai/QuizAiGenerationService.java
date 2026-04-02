@@ -123,25 +123,28 @@ public class QuizAiGenerationService {
     private List<AiQuizQuestionDto> callAi(AiQuizGenerationRequest request) {
         // 1. First Attempt: Full contextual prompt (Lesson Content + RAG Context)
         try {
-            log.info("AI Generation Lần 1: Sử dụng ngữ cảnh đầy đủ (Lesson + RAG)");
+            log.info("AI Generation Attempt 1: Using full context (Lesson + RAG)");
             List<AiQuizQuestionDto> results = callAiSingleAttempt(request, true, userPromptResource);
             if (results != null && !results.isEmpty()) {
                 return results;
             }
         } catch (Exception e) {
-            log.warn("AI Generation Lần 1 thất bại. Error: {}", e.getMessage());
+            log.warn("AI Generation Attempt 1 failed. Error: {}", e.getMessage());
         }
 
         // 2. Second Attempt (Retry): Simple prompt (Lesson Content only, no RAG)
-        log.info("AI Generation Lần 2 (Retry): Sử dụng prompt đơn giản hơn (Không RAG)");
+        log.info("AI Generation Attempt 2 (Retry): Using simpler prompt (No RAG)");
         try {
             List<AiQuizQuestionDto> results = callAiSingleAttempt(request, false, simpleUserPromptResource);
             if (results != null && !results.isEmpty()) {
                 return results;
             }
+        } catch (BusinessException be) {
+            log.error("AI Generation Attempt 2 (Retry) failed with BusinessException: {}", be.getMessage());
+            throw be; // Re-throw the specific error (e.g., AI_PARSE_ERROR, AI_EMPTY_RESPONSE)
         } catch (Exception e) {
-            log.error("AI Generation Lần 2 (Retry) cũng thất bại. Error: {}", e.getMessage());
-            throw new BusinessException("AI_GENERATION_FAILED", "Không thể sinh câu hỏi. Vui lòng thử lại với prompt khác hoặc chọn ít bài học hơn.");
+            log.error("AI Generation Attempt 2 (Retry) failed with unexpected error: {}", e.getMessage());
+            throw new BusinessException("AI_GENERATION_FAILED", "Không thể sinh câu hỏi: " + e.getMessage());
         }
 
         throw new BusinessException("AI_EMPTY_RESPONSE", "AI không thể sinh được câu hỏi hợp lệ sau 2 lượt thử.");
@@ -167,11 +170,11 @@ public class QuizAiGenerationService {
                     .system(systemTemplate.render(Map.of("lb", "{", "rb", "}")))
                     .user(userTemplate.render(Map.of(
                             "context", contextStr != null ? contextStr : "No extra context provided.",
-                            "teacherPrompt", request.getTeacherPrompt(),
-                            "questionCount", request.getQuestionCount(),
-                            "questionTypes", request.getQuestionTypes(),
-                            "jlptLevel", request.getJlptLevel(),
-                            "formatInstruction", formatInstruction,
+                            "teacherPrompt", request.getTeacherPrompt() != null ? request.getTeacherPrompt() : "General quiz",
+                            "questionCount", request.getQuestionCount() != null ? request.getQuestionCount() : 10,
+                            "questionTypes", request.getQuestionTypes() != null ? request.getQuestionTypes() : List.of("multiple_choice"),
+                            "jlptLevel", request.getJlptLevel() != null ? request.getJlptLevel() : "N5 (Default)",
+                            "formatInstruction", formatInstruction != null ? formatInstruction : "",
                             "lb", "{",
                             "rb", "}"
                     )))
@@ -187,14 +190,14 @@ public class QuizAiGenerationService {
                 finishReason = response.getResults().get(0).getMetadata().getFinishReason();
                 rawContent = response.getResult().getOutput().getText();
             } else {
-                throw new BusinessException("AI_EMPTY_RESPONSE", "AI returned empty response object.");
+                throw new BusinessException("AI_EMPTY_RESPONSE", "Đối tượng phản hồi từ AI bị trống.");
             }
 
             log.info("AI finish_reason={}, content length={} chars", finishReason, rawContent != null ? rawContent.length() : 0);
 
         } catch (Exception e) {
             log.error("AI call failed: {}", e.getMessage(), e);
-            throw new BusinessException("AI_RESPONSE_ERROR", "AI call failed: " + e.getMessage());
+            throw new BusinessException("AI_RESPONSE_ERROR", "Lỗi khi gọi AI: " + e.getMessage());
         }
 
         boolean wasTruncated = "length".equals(finishReason);
@@ -204,7 +207,7 @@ public class QuizAiGenerationService {
         }
 
         if (rawContent == null || rawContent.isBlank()) {
-            throw new BusinessException("AI_EMPTY_RESPONSE", "AI returned empty content.");
+            throw new BusinessException("AI_EMPTY_RESPONSE", "Nội dung phản hồi từ AI bị trống.");
         }
 
         // Strip markdown code fences (```json ... ```)
@@ -234,11 +237,11 @@ public class QuizAiGenerationService {
         // 3. Fallback: If no questions could be salvaged, throw error
         if (wasTruncated) {
             throw new BusinessException("AI_PARSE_ERROR",
-                    "AI response was incomplete (output truncated). Try reducing the number of questions (requested "
+                    "Phản hồi từ AI không hoàn chỉnh (bị cắt bớt). Hãy thử giảm số lượng câu hỏi (đã yêu cầu "
                             + request.getQuestionCount() + ").");
         } else {
             log.error("Parse failed (not truncated) and could not salvage. Raw:\n{}", rawContent);
-            throw new BusinessException("AI_PARSE_ERROR", "Failed to parse AI response. The generated content might be malformed.");
+            throw new BusinessException("AI_PARSE_ERROR", "Thất bại khi phân tích phản hồi AI. Nội dung có thể bị sai định dạng.");
         }
     }
 
@@ -421,8 +424,7 @@ public class QuizAiGenerationService {
         }
 
         if (allVocab.isEmpty() && allGrammar.isEmpty()) {
-            log.info("None of the selected lessons have vocab or grammar linked.");
-            return null;
+            throw new BusinessException("EMPTY_LESSON_CONTENT", "Bài học đã chọn không có từ vựng hoặc ngữ pháp. Không thể sinh câu hỏi từ bài học trống.");
         }
 
         StringBuilder contentSummary = new StringBuilder();

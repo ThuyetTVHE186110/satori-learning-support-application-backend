@@ -28,3 +28,53 @@ INSERT INTO user_management.class_teacher_history (
         'a0000000-0000-0000-0000-000000000001' -- created_by (admin)
     )
 ON CONFLICT (id) DO NOTHING;
+
+-- ---------------------------------------------------------
+-- MOCK LEARNING CONTENT (Lessons, Vocab, Grammar)
+-- ---------------------------------------------------------
+
+DO $$
+DECLARE
+    v_course_id   UUID := 'd0000000-0000-0000-0000-000000000001';
+    v_teacher_id  UUID := 'a0000000-0000-0000-0000-000000000003';
+    
+    v_lesson1_id  UUID := 'f0000000-0000-0000-0000-000000000001';
+    v_lesson2_id  UUID := 'f0000000-0000-0000-0000-000000000002';
+    
+    v_vocab1_id   UUID := '10000000-0000-0000-0000-000000000001';
+    v_vocab2_id   UUID := '10000000-0000-0000-0000-000000000002';
+    
+    v_grammar1_id UUID := '20000000-0000-0000-0000-000000000001';
+BEGIN
+
+    -- 1. Create Lessons
+    INSERT INTO learning_content.lessons (id, course_id, title, title_japanese, description, order_index, status, created_by)
+    VALUES
+    (v_lesson1_id, v_course_id, 'Chào hỏi cơ bản', 'あいさつ', 'Các mẫu câu chào hỏi thông dụng trong tiếng Nhật.', 1, 'PUBLISHED', v_teacher_id),
+    (v_lesson2_id, v_course_id, 'Giới thiệu bản thân', '自己紹介', 'Cách giới thiệu tên, quốc tịch và nghề nghiệp.',  2, 'PUBLISHED', v_teacher_id)
+    ON CONFLICT (id) DO NOTHING;
+
+    -- 2. Create Vocabulary
+    INSERT INTO learning_content.vocabulary (id, japanese_text, reading, meaning_vi, jlpt_level, created_by)
+    VALUES
+    (v_vocab1_id, 'おはよう', 'おはよう', 'Chào buổi sáng', 'N5', v_teacher_id),
+    (v_vocab2_id, 'わたし', 'わたし', 'Tôi (bản thân)', 'N5', v_teacher_id)
+    ON CONFLICT (id) DO NOTHING;
+
+    -- 3. Create Grammar Points
+    INSERT INTO learning_content.grammar_points (id, pattern, pattern_reading, meaning_vi, short_explanation, jlpt_level, category, created_by)
+    VALUES
+    (v_grammar1_id, '～は ～です', '～は ～です', 'Là...', 'Cấu trúc câu khẳng định cơ bản nhất.', 'N5', 'SENTENCE_PATTERN', v_teacher_id)
+    ON CONFLICT (id) DO NOTHING;
+
+    -- 4. Map Content to Lessons
+    INSERT INTO learning_content.lesson_vocabulary (lesson_id, vocabulary_id, order_index)
+    VALUES (v_lesson1_id, v_vocab1_id, 1), (v_lesson2_id, v_vocab2_id, 1)
+    ON CONFLICT (lesson_id, vocabulary_id) DO NOTHING;
+
+    INSERT INTO learning_content.lesson_grammar (lesson_id, grammar_id, order_index)
+    VALUES (v_lesson2_id, v_grammar1_id, 1)
+    ON CONFLICT (lesson_id, grammar_id) DO NOTHING;
+
+    RAISE NOTICE 'Mock learning content seeded successfully.';
+END $$;
