@@ -91,11 +91,13 @@ class BadgeServiceImplTest {
 
         updateRequest = new BadgeUpdateRequest();
         updateRequest.setName("Updated Badge");
+        updateRequest.setRequirementValue(1);
 
         responseDTO = BadgeResponse.builder()
                 .id(badgeId)
                 .name("First Practice")
                 .status(BadgeStatus.ACTIVE)
+                .requirementValue(1)
                 .totalLearnerCount(100L)
                 .build();
 
@@ -103,6 +105,7 @@ class BadgeServiceImplTest {
                 .id(badgeId)
                 .name("First Practice")
                 .status(BadgeStatus.ACTIVE)
+                .requirementValue(1)
                 .achieversCount(5L)
                 .build();
 
@@ -125,6 +128,7 @@ class BadgeServiceImplTest {
         assertNotNull(result);
         assertEquals(1, result.getTotalElements());
         assertEquals(5L, result.getContent().get(0).getAchieversCount());
+        assertEquals(1, result.getContent().get(0).getRequirementValue());
         verify(badgeRepository).searchBadges("keyword", BadgeStatus.ACTIVE, BadgeType.AI_PRACTICE_COUNT, pageable);
     }
 
@@ -155,6 +159,7 @@ class BadgeServiceImplTest {
 
         assertNotNull(result);
         assertEquals(badgeId, result.getId());
+        assertEquals(1, result.getRequirementValue());
         assertEquals(15L, result.getAchieversCount());
         assertEquals(100L, result.getTotalLearnerCount());
     }
@@ -180,6 +185,7 @@ class BadgeServiceImplTest {
 
         assertNotNull(result);
         assertEquals("http://new-url/img.png", badge.getIconUrl());
+        assertEquals(1, result.getRequirementValue());
         assertEquals(100L, result.getTotalLearnerCount());
         verify(cloudinaryService).uploadImage(validIconFile, "achievements/badges");
         verify(badgeRepository).save(badge);

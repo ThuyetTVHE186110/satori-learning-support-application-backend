@@ -19,6 +19,7 @@ public class BadgeSummaryResponse {
     String description;
     BadgeType badgeType;
     Integer expReward;
+    Integer requirementValue;
     String iconUrl;
     BadgeStatus status;
     LocalDateTime createdAt;
