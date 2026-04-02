@@ -58,6 +58,10 @@
             <groupId>com.fu</groupId>
             <artifactId>practice</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.fu</groupId>
+            <artifactId>achievement</artifactId>
+        </dependency>
 
         <!-- Spring Boot -->
         <dependency>

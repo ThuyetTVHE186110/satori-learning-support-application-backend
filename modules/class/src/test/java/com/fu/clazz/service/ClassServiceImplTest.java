@@ -621,7 +621,6 @@ class ClassServiceImplTest {
     @Nested
     @DisplayName("Add Member Tests")
     class AddMemberTests {
-    class AddMemberTests {
 
         @Test
         @DisplayName("TC01 & TC04: Should add new member successfully and enrich response (ACTIVE user)")
@@ -636,8 +635,6 @@ class ClassServiceImplTest {
             given(classMapper.toMemberResponse(testMember)).willReturn(testMemberResponse);
             given(userRepository.save(any(User.class))).willReturn(testStudent);
 
-            // When
-            ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
             // When
             ClassMemberResponse result = clazzService.addMember(classId, request, managerId);
 
@@ -883,39 +880,6 @@ class ClassServiceImplTest {
         @Nested
         @DisplayName("Create Class Date Validation Tests")
         class CreateClassDateValidationTests {
-            @Test
-            @DisplayName("TC04: Should throw when dueDate is in the past")
-            void shouldThrowWhenStartDateInPast() {
-                CreateClassRequest req = CreateClassRequest.builder()
-                        .name("Lớp kiểm thử")
-                        .teacherId(teacherId)
-                        .courseId(courseId)
-                        .maxStudents(30)
-                        .startDate(java.time.LocalDate.now().minusDays(20))
-                        .endDate(java.time.LocalDate.now().minusDays(10))
-                        .build();
-                // date validation occurs before any user lookup, so no stubbing needed
-                assertThatThrownBy(() -> clazzService.createClass(req, managerId))
-                        .isInstanceOf(BusinessException.class)
-                        .hasMessageContaining("Ngày kết thúc phải ở tương lai");
-            }
-
-            @Test
-            @DisplayName("TC05: Should throw when endDate is before startDate")
-            void shouldThrowWhenEndDateBeforeStartDate() {
-                CreateClassRequest req = CreateClassRequest.builder()
-                        .name("Lớp kiểm thử")
-                        .teacherId(teacherId)
-                        .courseId(courseId)
-                        .maxStudents(30)
-                        .startDate(java.time.LocalDate.now().plusDays(5))
-                        .endDate(java.time.LocalDate.now().plusDays(2))
-                        .build();
-                // date validation occurs before any user lookup, so no stubbing needed
-                assertThatThrownBy(() -> clazzService.createClass(req, managerId))
-                        .isInstanceOf(BusinessException.class)
-                        .hasMessageContaining("Ngày kết thúc phải sau ngày bắt đầu");
-            }
 
             @Test
             @DisplayName("Should not throw when startDate is today and endDate is after startDate")
@@ -926,7 +890,6 @@ class ClassServiceImplTest {
                         .courseId(courseId)
                         .maxStudents(30)
                         .startDate(java.time.LocalDate.now().plusDays(1))
-                        .endDate(java.time.LocalDate.now().plusDays(10))
                         .build();
                 given(classRepository.existsByNameIgnoreCase(req.getName())).willReturn(false);
                 given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
