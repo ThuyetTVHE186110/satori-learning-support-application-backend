@@ -19,6 +19,10 @@ import com.fu.course.entity.Vocabulary;
 import com.fu.course.repository.GrammarPointRepository;
 import com.fu.course.repository.LessonRepository;
 import com.fu.course.repository.VocabularyRepository;
+import com.fu.curriculumimport.service.embedding.ChatbotFilter;
+import com.fu.curriculumimport.service.embedding.EmbeddingService;
+import com.fu.curriculumimport.service.embedding.RagContext;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.prompt.PromptTemplate;
@@ -61,6 +65,10 @@ public class QuizAiGenerationService {
     @Value("classpath:prompts/quiz-generation-user.st")
     private Resource userPromptResource;
 
+    @Value("classpath:prompts/quiz-generation-simple-user.st")
+    private Resource simpleUserPromptResource;
+
+
     private final ObjectMapper objectMapper;
     private final AssignmentMapper assignmentMapper;
     private final BeanOutputConverter<AiQuizResponseWrapper> outputConverter;
@@ -69,6 +77,8 @@ public class QuizAiGenerationService {
     private final LessonRepository lessonRepository;
     private final VocabularyRepository vocabularyRepository;
     private final GrammarPointRepository grammarPointRepository;
+    private final EmbeddingService embeddingService;
+
 
     public QuizAiGenerationService(ObjectMapper objectMapper,
                                    OpenAiChatModel chatModel,
@@ -76,7 +86,8 @@ public class QuizAiGenerationService {
                                    ClassRepository classRepository,
                                    LessonRepository lessonRepository,
                                    VocabularyRepository vocabularyRepository,
-                                   GrammarPointRepository grammarPointRepository) {
+                                   GrammarPointRepository grammarPointRepository,
+                                   EmbeddingService embeddingService) {
         this.objectMapper = objectMapper;
         this.assignmentMapper = assignmentMapper;
         this.chatClient = ChatClient.builder(chatModel).build();
@@ -84,6 +95,7 @@ public class QuizAiGenerationService {
         this.lessonRepository = lessonRepository;
         this.vocabularyRepository = vocabularyRepository;
         this.grammarPointRepository = grammarPointRepository;
+        this.embeddingService = embeddingService;
         this.outputConverter = new BeanOutputConverter<>(AiQuizResponseWrapper.class);
     }
 
@@ -97,6 +109,9 @@ public class QuizAiGenerationService {
      * then confirms via the saveFullQuiz endpoint.
      */
     public List<QuizQuestionResponse> generateQuestions(AiQuizGenerationRequest request) {
+        if (request.getLessonIds() == null || request.getLessonIds().isEmpty()) {
+            throw new BusinessException("MISSING_LESSONS", "Vui lòng chọn ít nhất 1 bài học để tạo câu hỏi.");
+        }
         List<AiQuizQuestionDto> aiDtos = callAi(request);
         return mapToPreviewResponses(aiDtos, request);
     }
@@ -106,12 +121,44 @@ public class QuizAiGenerationService {
     // ═══════════════════════════════════════════════════════════════════════════
 
     private List<AiQuizQuestionDto> callAi(AiQuizGenerationRequest request) {
-        String contextStr = extractContextForPrompt(request);
+        // 1. First Attempt: Full contextual prompt (Lesson Content + RAG Context)
+        try {
+            log.info("AI Generation Lần 1: Sử dụng ngữ cảnh đầy đủ (Lesson + RAG)");
+            List<AiQuizQuestionDto> results = callAiSingleAttempt(request, true, userPromptResource);
+            if (results != null && !results.isEmpty()) {
+                return results;
+            }
+        } catch (Exception e) {
+            log.warn("AI Generation Lần 1 thất bại. Error: {}", e.getMessage());
+        }
+
+        // 2. Second Attempt (Retry): Simple prompt (Lesson Content only, no RAG)
+        log.info("AI Generation Lần 2 (Retry): Sử dụng prompt đơn giản hơn (Không RAG)");
+        try {
+            List<AiQuizQuestionDto> results = callAiSingleAttempt(request, false, simpleUserPromptResource);
+            if (results != null && !results.isEmpty()) {
+                return results;
+            }
+        } catch (Exception e) {
+            log.error("AI Generation Lần 2 (Retry) cũng thất bại. Error: {}", e.getMessage());
+            throw new BusinessException("AI_GENERATION_FAILED", "Không thể sinh câu hỏi. Vui lòng thử lại với prompt khác hoặc chọn ít bài học hơn.");
+        }
+
+        throw new BusinessException("AI_EMPTY_RESPONSE", "AI không thể sinh được câu hỏi hợp lệ sau 2 lượt thử.");
+    }
+
+    private List<AiQuizQuestionDto> callAiSingleAttempt(AiQuizGenerationRequest request,
+                                                        boolean includeRag,
+                                                        Resource promptResource) {
+        String contextStr = extractContextForPrompt(request, includeRag);
         String formatInstruction = outputConverter.getFormat();
-        log.info("Requesting AI: {} questions, types={}", request.getQuestionCount(), request.getQuestionTypes());
+        log.info("Requesting AI: {} questions, types={}, includeRag={}",
+                request.getQuestionCount(), request.getQuestionTypes(), includeRag);
+
 
         PromptTemplate systemTemplate = new PromptTemplate(systemPromptResource);
-        PromptTemplate userTemplate = new PromptTemplate(userPromptResource);
+        PromptTemplate userTemplate = new PromptTemplate(promptResource);
+
 
         String rawContent;
         String finishReason = "unknown";
@@ -334,20 +381,14 @@ public class QuizAiGenerationService {
     // ═══════════════════════════════════════════════════════════════════════════
     // CONTEXT EXTRACTION & PROMPT BUILDING
     // ═══════════════════════════════════════════════════════════════════════════
+    private String extractContextForPrompt(AiQuizGenerationRequest request, boolean includeRag) {
 
-    private String extractContextForPrompt(AiQuizGenerationRequest request) {
-        if (request.getClassId() == null) {
+        List<UUID> lessonIds = request.getLessonIds();
+        if (lessonIds == null || lessonIds.isEmpty()) {
             return null;
         }
 
-        // 1. Ask AI to detect lesson index from prompt
-        String detectionResult = detectLessonIndexFromPrompt(request.getTeacherPrompt());
-        if (detectionResult == null) {
-            log.info("No explicit lesson reference detected in teacher prompt.");
-            return null;
-        }
-
-        // 2. Resolve Course ID from Class
+        // 1. Resolve Course ID from Class
         Clazz clazz = classRepository.findByIdAndNotDeleted(request.getClassId()).orElse(null);
         if (clazz == null || clazz.getCourseId() == null) {
             log.warn("Class {} not found or has no linked Course", request.getClassId());
@@ -355,110 +396,79 @@ public class QuizAiGenerationService {
         }
         UUID courseId = clazz.getCourseId();
 
-        // 3. Find the matching lessons
-        List<Lesson> activeLessons = lessonRepository.findByCourseIdAndNotDeleted(courseId);
-        List<Lesson> targetLessons = new ArrayList<>();
-
-        if ("ALL".equalsIgnoreCase(detectionResult)) {
-            targetLessons.addAll(activeLessons);
-        } else {
-            String[] indices = detectionResult.split(",");
-            for (String indexStr : indices) {
-                try {
-                    String clean = indexStr.trim().replaceAll("[^0-9]", "");
-                    if (clean.isEmpty()) continue;
-                    int index = Integer.parseInt(clean);
-                    Lesson target = findLessonByIndex(activeLessons, index);
-                    if (target != null && !targetLessons.contains(target)) {
-                        targetLessons.add(target);
-                    }
-                } catch (NumberFormatException e) {
-                    log.warn("Invalid lesson index detected: {}", indexStr);
-                }
-            }
-        }
-
+        // 2. Fetch lesson metadata for context
+        List<Lesson> targetLessons = lessonRepository.findAllById(lessonIds);
         if (targetLessons.isEmpty()) {
-            log.warn("No matching lessons found for detection result: {}", detectionResult);
+            log.warn("No matching lessons found for IDs: {}", lessonIds);
             return null;
         }
 
-        log.info("Context Resolved: Using {} lessons for AI quiz generation", targetLessons.size());
-
-        // 4. Aggregate Vocabulary and Grammar
         StringBuilder ctx = new StringBuilder();
-        ctx.append("Detected Source Lessons: ");
+        ctx.append("Selected Source Lessons: ");
         for (int i = 0; i < targetLessons.size(); i++) {
             ctx.append(targetLessons.get(i).getTitle());
             if (i < targetLessons.size() - 1) ctx.append(", ");
         }
         ctx.append("\n\n");
 
+        // 3. Aggregate Vocabulary and Grammar
         List<Vocabulary> allVocab = new ArrayList<>();
         List<GrammarPoint> allGrammar = new ArrayList<>();
 
-        for (Lesson l : targetLessons) {
-            allVocab.addAll(vocabularyRepository.findByLessonId(l.getId()));
-            allGrammar.addAll(grammarPointRepository.findByLessonId(l.getId()));
+        for (UUID lessonId : lessonIds) {
+            allVocab.addAll(vocabularyRepository.findByLessonId(lessonId));
+            allGrammar.addAll(grammarPointRepository.findByLessonId(lessonId));
         }
 
         if (allVocab.isEmpty() && allGrammar.isEmpty()) {
-            log.info("None of the detected lessons have vocab or grammar linked.");
+            log.info("None of the selected lessons have vocab or grammar linked.");
             return null;
         }
 
+        StringBuilder contentSummary = new StringBuilder();
         if (!allVocab.isEmpty()) {
-            ctx.append("--- TARGET VOCABULARY ---\n");
+            contentSummary.append("--- TARGET VOCABULARY ---\n");
             for (Vocabulary v : allVocab) {
-                ctx.append("- ").append(v.getJapaneseText())
+                contentSummary.append("- ").append(v.getJapaneseText())
                         .append(" (").append(v.getMeaningVi() != null ? v.getMeaningVi() : v.getMeaningEn()).append(")\n");
             }
-            ctx.append("\n");
+            contentSummary.append("\n");
         }
 
         if (!allGrammar.isEmpty()) {
-            ctx.append("--- TARGET GRAMMAR ---\n");
+            contentSummary.append("--- TARGET GRAMMAR ---\n");
             for (GrammarPoint g : allGrammar) {
-                ctx.append("- ").append(g.getPattern())
+                contentSummary.append("- ").append(g.getPattern())
                         .append(": ").append(g.getMeaningVi() != null ? g.getMeaningVi() : g.getMeaningEn()).append("\n");
             }
-            ctx.append("\n");
+            contentSummary.append("\n");
         }
+
+        ctx.append(contentSummary);
+
+        // 4. RAG: Retrieve supplementary context for distractors (Only if includeRag is true)
+        if (includeRag) {
+            try {
+                // If 1 lesson -> filter precisely. If > 1 lesson -> search course-wide (lessonId = null)
+                UUID filterLessonId = (lessonIds.size() == 1) ? lessonIds.get(0) : null;
+                ChatbotFilter filter = null;
+                if (filterLessonId != null) {
+                    filter = ChatbotFilter.forPractice(courseId, filterLessonId);
+                } else
+                    filter = ChatbotFilter.byCourse(courseId);
+
+                RagContext rag = embeddingService.retrieveContext(contentSummary.toString(), filter);
+                if (rag.hasContext()) {
+                    ctx.append("--- SUPPLEMENTARY CONTEXT (for distractors) ---\n");
+                    rag.getSimilarItems().forEach(item ->
+                            ctx.append("- ").append(item.getTextContent()).append("\n"));
+                }
+            } catch (Exception e) {
+                log.warn("Failed to retrieve RAG context (ignored for fallback): {}", e.getMessage());
+            }
+        }
+
 
         return ctx.toString();
-    }
-
-    private Lesson findLessonByIndex(List<Lesson> lessons, int index) {
-        for (Lesson l : lessons) {
-            if (l.getOrderIndex() != null && l.getOrderIndex().equals(index)) {
-                return l;
-            }
-            if (l.getTitle() != null && l.getTitle().contains(String.valueOf(index))) {
-                return l;
-            }
-        }
-        int zeroBased = index - 1;
-        if (zeroBased >= 0 && zeroBased < lessons.size()) {
-            return lessons.get(zeroBased);
-        }
-        return null;
-    }
-
-    private String detectLessonIndexFromPrompt(String teacherPrompt) {
-        String systemMsg = "You are an assistant that extracts target lesson numbers from a teacher's prompt. " +
-                "Rules: " +
-                "1. If the teacher wants all lessons, the entire course, or everything (e.g., 'cả khóa học', 'tất cả'), respond 'ALL'. " +
-                "2. If they mention ranges (e.g., 'bài 1 đến 5', 'từ bài đầu tiên đến 3'), expand it into a comma-separated list of integers (e.g., '1,2,3,4,5' or '1,2,3'). " +
-                "3. If they list specific lessons (e.g., 'bài 1, 3, 5'), respond with those integers (e.g., '1,3,5'). " +
-                "4. Otherwise, respond with a single integer. " +
-                "5. If no lesson reference is found, respond 'NONE'. " +
-                "Respond ONLY with the keyword or comma-separated integers. No explanation.";
-
-        return chatClient.prompt()
-                .system(systemMsg)
-                .user(teacherPrompt)
-                .options(OpenAiChatOptions.builder().temperature(0.0).build()) // Ép temperature về 0
-                .call()
-                .content();
     }
 }

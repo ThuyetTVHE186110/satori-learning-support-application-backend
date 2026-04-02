@@ -52,4 +52,10 @@ public class AiQuizGenerationRequest {
      * If provided, AI will try to match the level.
      */
     private com.fu.course.entity.Course.JlptLevel jlptLevel;
+    
+    /**
+     * Specific lessons to generate questions from.
+     * If provided, these lessons will be used for context (Vocabulary/Grammar).
+     */
+    private List<UUID> lessonIds;
 }

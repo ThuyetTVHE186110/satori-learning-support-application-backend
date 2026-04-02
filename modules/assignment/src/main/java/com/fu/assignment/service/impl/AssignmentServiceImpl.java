@@ -804,7 +804,10 @@ public class AssignmentServiceImpl implements AssignmentService {
     }
 
     private void verifyTeacherAccess(Clazz clazz, UUID teacherId) {
-        if (clazz != null && !classTeacherHistoryRepository.findCurrentTeacherIdByClassId(clazz.getId()).get().equals(teacherId)) {
+        if (clazz == null) return;
+        UUID currentTeacherId = classTeacherHistoryRepository.findCurrentTeacherIdByClassId(clazz.getId())
+                .orElse(null);
+        if (!teacherId.equals(currentTeacherId)) {
             throw new BusinessException("ACCESS_DENIED", "Bạn không phải là giáo viên của lớp này.");
         }
     }
