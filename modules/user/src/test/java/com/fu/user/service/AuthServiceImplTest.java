@@ -1,6 +1,7 @@
 package com.fu.user.service;
 
 import com.fu.common.exception.BusinessException;
+import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.infrastructure.email.EmailService;
 import com.fu.user.dto.auth.*;
 import com.fu.user.entity.*;
@@ -764,7 +765,41 @@ class AuthServiceImplTest {
     class ChangePasswordTests {
 
         @Test
-        @DisplayName("Should change password successfully")
+        @DisplayName("TC03: Should throw ResourceNotFoundException when user not found")
+        void shouldThrowResourceNotFoundExceptionWhenUserNotFound() {
+            // Given
+            ChangePasswordRequest request = new ChangePasswordRequest();
+            given(userRepository.findById(userId)).willReturn(Optional.empty());
+
+            // When/Then
+            assertThatThrownBy(() -> authService.changePassword(userId, request, UUID.randomUUID()))
+                    .isInstanceOf(ResourceNotFoundException.class);
+
+            verify(userRepository, never()).save(any(User.class));
+        }
+
+        @Test
+        @DisplayName("TC04: Should reject change password when new password and confirm mismatch (Fail-fast)")
+        void shouldRejectChangePasswordWhenPasswordsMismatch() {
+            // Given
+            ChangePasswordRequest request = new ChangePasswordRequest();
+            request.setNewPassword("Password123!");
+            request.setConfirmPassword("Mismatch123!");
+
+            given(userRepository.findById(userId)).willReturn(Optional.of(testUser));
+
+            // When/Then
+            assertThatThrownBy(() -> authService.changePassword(userId, request, UUID.randomUUID()))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("không khớp");
+
+            // Verify Fail-fast: No further interaction with security/DB
+            verify(passwordEncoder, never()).matches(anyString(), anyString());
+            verify(userRepository, never()).save(any(User.class));
+        }
+
+        @Test
+        @DisplayName("TC07: Should change password successfully and set lastPasswordChangeAt")
         void shouldChangePasswordSuccessfully() {
             // Given
             ChangePasswordRequest request = new ChangePasswordRequest();
@@ -787,6 +822,7 @@ class AuthServiceImplTest {
             verify(userRepository).save(userCaptor.capture());
             User savedUser = userCaptor.getValue();
             assertThat(savedUser.getPasswordHash()).isEqualTo("newHashedPassword");
+            assertThat(savedUser.getLastPasswordChangeAt()).isNotNull();
 
             verify(emailService).sendPasswordChangedNotification(
                     eq("test@example.com"),
@@ -794,7 +830,7 @@ class AuthServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should reject change password with wrong current password")
+        @DisplayName("TC05: Should reject change password with wrong current password")
         void shouldRejectWrongCurrentPassword() {
             // Given
             ChangePasswordRequest request = new ChangePasswordRequest();
@@ -833,10 +869,9 @@ class AuthServiceImplTest {
                     .isInstanceOf(BusinessException.class);
         }
 
-
         // Java
         @Test
-        @DisplayName("Should reject change password when new password matches current password")
+        @DisplayName("TC06: Should reject change password when new password matches current password")
         void shouldRejectReuseOldPassword() {
             // Given
             ChangePasswordRequest request = new ChangePasswordRequest();
@@ -862,7 +897,7 @@ class AuthServiceImplTest {
 
         // BR-63: logoutOtherDevices = true → revoke ALL sessions including current
         @Test
-        @DisplayName("BR-63: Should revoke ALL sessions (incl. current) when logoutOtherDevices=true")
+        @DisplayName("TC02: Should revoke ALL sessions when logoutOtherDevices=true")
         void shouldRevokeAllSessionsWhenLogoutOtherDevicesIsTrue() {
             // Given
             ChangePasswordRequest request = new ChangePasswordRequest();
@@ -890,7 +925,7 @@ class AuthServiceImplTest {
 
         // logoutOtherDevices = false → không revoke session nào
         @Test
-        @DisplayName("Should NOT revoke any session when logoutOtherDevices=false")
+        @DisplayName("TC01: Should NOT revoke any session when logoutOtherDevices=false")
         void shouldNotRevokeSessionsWhenLogoutOtherDevicesIsFalse() {
             // Given
             ChangePasswordRequest request = new ChangePasswordRequest();

@@ -19,7 +19,6 @@ import java.util.UUID;
 @Entity
 @Table(name = "classes", schema = "user_management", indexes = {
         @Index(name = "idx_classes_course_id", columnList = "course_id"),
-        @Index(name = "idx_classes_teacher_id", columnList = "teacher_id"),
         @Index(name = "idx_classes_jlpt_level", columnList = "jlpt_level"),
         @Index(name = "idx_classes_is_active", columnList = "is_active")
 })
@@ -39,9 +38,6 @@ public class Clazz extends SoftDeletableEntity {
 
     @Column(name = "course_id", nullable = false)
     private UUID courseId;
-
-    @Column(name = "teacher_id", nullable = false)
-    private UUID teacherId;
 
     @Column(name = "max_students")
     @Builder.Default
