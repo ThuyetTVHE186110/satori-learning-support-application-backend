@@ -62,10 +62,9 @@ public class PracticeController {
         log.debug("Học viên {} nộp câu trả lời cho item {} trong session {}", userId, itemId, sessionId);
         AnswerFeedbackResponse response = practiceSessionService.submitAnswer(sessionId, itemId, userId, request);
 
-        // Generate AI feedback AFTER the answer transaction commits — avoids holding
-        // a DB connection during the LLM call (5-15s).
+        // AI feedback sinh async sau khi transaction commit — không block HTTP response.
         if (response.isSessionCompleted()) {
-            practiceSessionService.generateAndSaveFeedback(sessionId);
+            practiceSessionService.generateAndSaveFeedbackAsync(sessionId);
         }
 
         return ResponseEntity.ok(ApiResponse.success("Đã nhận câu trả lời.", response));

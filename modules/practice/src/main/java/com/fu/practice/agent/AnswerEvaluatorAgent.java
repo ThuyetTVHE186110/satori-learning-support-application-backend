@@ -43,7 +43,8 @@ public class AnswerEvaluatorAgent {
      */
     public EvaluationResult evaluate(PracticeItem item, String userAnswer) {
         if (item.getItemType() == PracticeItemType.MULTIPLE_CHOICE
-                || item.getItemType() == PracticeItemType.MATCHING) {
+                || item.getItemType() == PracticeItemType.MATCHING
+                || item.getItemType() == PracticeItemType.TRUE_FALSE) {
             return evaluateByRule(item, userAnswer);
         }
         return evaluateByLlm(item, userAnswer);

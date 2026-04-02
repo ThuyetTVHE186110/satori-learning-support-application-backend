@@ -1,5 +1,8 @@
 package com.fu.curriculumimport.service.impl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.common.exception.BusinessException;
 import com.fu.common.response.PageResponse;
 import com.fu.course.entity.GrammarPoint;
 import com.fu.course.entity.Lesson;
@@ -17,6 +20,7 @@ import com.fu.curriculumimport.mapper.CurriculumImportMapper;
 import com.fu.curriculumimport.repository.CurriculumImportRepository;
 import com.fu.curriculumimport.repository.ImportChunkRepository;
 import com.fu.curriculumimport.service.CurriculumImportService;
+import com.fu.curriculumimport.service.agent.ExtractionResult;
 import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import com.fu.curriculumimport.service.ingestion.InMemoryMultipartFile;
 import com.fu.curriculumimport.service.orchestrator.ImportOrchestrator;
@@ -34,6 +38,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -57,6 +62,7 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
     private final ImportOrchestrator orchestrator;
     private final ImportPersistenceService persistenceService;
     private final EmbeddingService embeddingService;
+    private final ObjectMapper objectMapper;
 
     @Override
     @Transactional
@@ -67,13 +73,18 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
         // Validate file
         validateImportFile(file);
 
-        // Validate course exists if provided
-        String courseName = null;
-        if (courseId != null) {
-            var course = courseRepository.findById(courseId)
-                    .orElseThrow(() -> new CourseNotFoundException(courseId));
-            courseName = course.getName();
+        // courseId is required — lessons cannot be created without a target course.
+        // Use PATCH /{importId}/link-course after import if the course is not yet known.
+        if (courseId == null) {
+            throw new BusinessException("VALIDATION_ERROR",
+                    "courseId is required. Please select a course before uploading the curriculum.");
         }
+
+        // Validate course exists
+        String courseName = null;
+        var course = courseRepository.findById(courseId)
+                .orElseThrow(() -> new CourseNotFoundException(courseId));
+        courseName = course.getName();
 
         // Create import record
         CurriculumImport importEntity = CurriculumImport.builder()
@@ -245,7 +256,6 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
                         l.getId(),
                         l.getTitle(),
                         l.getTitleJapanese(),
-                        l.getLessonType().name(),
                         l.getOrderIndex(),
                         l.getPageStart(),
                         l.getPageEnd(),
@@ -346,18 +356,66 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
         importEntity.setCourseId(courseId);
         importRepository.save(importEntity);
 
-        // Reassign all lessons that belong to this import to the target course
+        // Reassign existing lessons to the target course
         List<Lesson> lessons = lessonRepository.findByImportIdAndNotDeleted(importId);
         for (Lesson lesson : lessons) {
             lesson.setCourse(course);
             lessonRepository.save(lesson);
         }
 
-        log.info("Linked {} lessons from import {} to course {}", lessons.size(), importId, courseId);
+        if (!lessons.isEmpty()) {
+            log.info("Linked {} existing lessons from import {} to course {}", lessons.size(), importId, courseId);
+        } else {
+            // No lessons were created during the original import (courseId was null at upload time).
+            // Re-run lesson persistence from stored extractedData — no LLM calls, zero cost.
+            log.info("Import {} has 0 lessons — re-running lesson persistence from stored chunk data", importId);
+            List<ExtractionResult> storedResults = deserializeChunkResults(importId);
+            if (!storedResults.isEmpty()) {
+                persistenceService.persistExtractedContent(importEntity, storedResults);
+                log.info("Re-created {} lessons for import {} linked to course {}",
+                        importEntity.getLessonsCreated(), importId, courseId);
+            } else {
+                log.warn("Import {} has no completed chunks with extractedData — cannot re-create lessons", importId);
+            }
+        }
 
         CurriculumImportResponse response = importMapper.toResponse(importEntity);
         response.setCourseName(course.getName());
         return response;
+    }
+
+    /**
+     * Deserialize stored {@code extractedData} JSONB from completed chunks back into
+     * {@link ExtractionResult} objects for lesson re-persistence.
+     *
+     * <p>Called by {@link #linkToCourse} when an import completed with {@code lessonsCreated=0}
+     * because {@code courseId} was null at upload time. The extraction results were already
+     * serialized and stored in {@code import_chunks.extracted_data} during the original run,
+     * so no LLM calls are needed.
+     */
+    private List<ExtractionResult> deserializeChunkResults(UUID importId) {
+        List<ImportChunk> chunks = chunkRepository
+                .findByCurriculumImportIdOrderByChunkIndexAsc(importId);
+
+        List<ExtractionResult> results = new ArrayList<>();
+        for (ImportChunk chunk : chunks) {
+            if (chunk.getStatus() != ImportChunk.ChunkStatus.COMPLETED
+                    || chunk.getExtractedData() == null
+                    || chunk.getExtractedData().isBlank()) {
+                continue;
+            }
+            try {
+                ExtractionResult result = objectMapper.readValue(
+                        chunk.getExtractedData(), ExtractionResult.class);
+                results.add(result);
+            } catch (JsonProcessingException e) {
+                log.warn("Failed to deserialize extractedData for chunk {} of import {}: {}",
+                        chunk.getChunkIndex(), importId, e.getMessage());
+            }
+        }
+        log.info("Deserialized {} extraction results from {} chunks for import {}",
+                results.size(), chunks.size(), importId);
+        return results;
     }
 
     @Override
@@ -458,8 +516,8 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
 
         if (!mimeOk && !extOk) {
             throw new InvalidImportFileException(
-                    "Only PDF and PPTX files are accepted. Received MIME type: " + contentType
-                            + ", filename: " + file.getOriginalFilename());
+                    "Chỉ chấp nhận các tệp PDF và PPTX. Loại MIME nhận được: " + contentType
+                            + ", tên tệp: " + file.getOriginalFilename());
         }
 
         if (file.getSize() > MAX_FILE_SIZE_BYTES) {

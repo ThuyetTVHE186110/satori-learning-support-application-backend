@@ -326,7 +326,6 @@ public class ImportPersistenceService {
                         .title(el.getTitle())
                         .titleJapanese(el.getTitleJapanese())
                         .description(el.getDescription())
-                        .lessonType(Lesson.LessonType.MIXED)
                         .content(el.getContent())
                         .objectives(el.getObjectives() != null
                                 ? el.getObjectives().toArray(new String[0]) : null)

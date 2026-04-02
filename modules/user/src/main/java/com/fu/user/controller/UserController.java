@@ -1,9 +1,11 @@
 package com.fu.user.controller;
 
 import com.fu.common.constant.AppConstants;
+import com.fu.common.exception.BusinessException;
 import com.fu.common.response.ApiResponse;
 import com.fu.common.response.PageResponse;
 import com.fu.user.dto.*;
+import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
 import com.fu.user.security.CustomUserDetails;
@@ -19,13 +21,15 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
  * REST Controller for User Management.
  * Implements UC-01 to UC-05 from business requirements.
- * 
+ * <p>
  * Access Control:
  * - ADMIN: Full access to all user management operations
  */
@@ -40,9 +44,9 @@ public class UserController {
     /**
      * UC-02: Create User
      * Admin creates LEARNER/TEACHER/CONTENT_MANAGER/OPERATION_MANAGER.
-     * 
+     * <p>
      * POST /api/v1/users
-     * 
+     *
      * @param request CreateUserRequest with user details
      * @return Created user with HTTP 201, or error with deleted user info
      */
@@ -52,7 +56,7 @@ public class UserController {
             @Valid @RequestBody CreateUserRequest request) {
         UUID currentUserId = extractUserId(userDetails);
         UserRole currentUserRole = UserRole.valueOf(userDetails.getRole());
-        
+
         UserResponse response = userService.createUser(request, currentUserId, currentUserRole);
         return ResponseEntity
                 .status(HttpStatus.CREATED)
@@ -61,7 +65,7 @@ public class UserController {
 
     /**
      * UC-01: View User List (single user by ID)
-     * 
+     * <p>
      * GET /api/v1/users/{id}
      */
     @GetMapping("/{id}")
@@ -74,13 +78,13 @@ public class UserController {
      * UC-03: View User Information (detailed with enrollment history)
      * For LEARNER: includes course and class enrollments
      * For TEACHER: includes taught classes history
-     * 
+     * <p>
      * GET /api/v1/users/{id}/details
      */
     @GetMapping("/{id}/details")
     public ResponseEntity<ApiResponse<UserDetailResponse>> getUserDetail(@AuthenticationPrincipal CustomUserDetails currentUser, @PathVariable("id") UUID id) {
         UserRole currentUserRole = UserRole.valueOf(currentUser.getRole());
-        UserDetailResponse response = userService.getUserDetailById(currentUserRole,id);
+        UserDetailResponse response = userService.getUserDetailById(currentUserRole, id);
         return ResponseEntity.ok(ApiResponse.success("Chi tiết người dùng", response));
     }
 
@@ -89,16 +93,16 @@ public class UserController {
      * Returns paginated list of users with optional search and filters.
      * - Admin: sees all users including deleted users
      * Default sort: createdAt DESC
-     * 
+     * <p>
      * GET /api/v1/users?page=0&size=10&keyword=...&role=LEARNER&status=ACTIVE
-     * 
-     * @param page Page number (0-indexed)
-     * @param size Page size
-     * @param sortBy Sort field (default: createdAt)
+     *
+     * @param page    Page number (0-indexed)
+     * @param size    Page size
+     * @param sortBy  Sort field (default: createdAt)
      * @param sortDir Sort direction (default: desc)
      * @param keyword Search keyword (name, email)
-     * @param role Filter by role
-     * @param status Filter by status (ACTIVE, INACTIVE)
+     * @param role    Filter by role
+     * @param status  Filter by status (ACTIVE, INACTIVE)
      */
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<UserResponse>>> getAllUsers(
@@ -112,15 +116,15 @@ public class UserController {
             @RequestParam(name = "status", required = false) UserStatus status) {
 
         UserRole currentUserRole = UserRole.valueOf(userDetails.getRole());
-        
+
         Sort sort = sortDir.equalsIgnoreCase("desc")
                 ? Sort.by(sortBy).descending()
                 : Sort.by(sortBy).ascending();
 
         Pageable pageable = PageRequest.of(page, size, sort);
-        
+
         Page<UserResponse> usersPage;
-        
+
         // If any filter is provided, use search method
         if (keyword != null || role != null || status != null) {
             UserFilterRequest filter = UserFilterRequest.builder()
@@ -159,7 +163,7 @@ public class UserController {
     /**
      * UC-04: Update User Information
      * Admin updates all users.
-     * 
+     * <p>
      * PUT /api/v1/users/{id}
      */
     @PutMapping("/{id}")
@@ -176,7 +180,7 @@ public class UserController {
     /**
      * UC-05: Delete User (Soft Delete)
      * Admin can delete all users.
-     * 
+     * <p>
      * DELETE /api/v1/users/{id}
      */
     @DeleteMapping("/{id}")
@@ -185,7 +189,7 @@ public class UserController {
             @PathVariable("id") UUID id) {
         UUID currentUserId = extractUserId(userDetails);
         UserRole currentUserRole = UserRole.valueOf(userDetails.getRole());
-        
+
         userService.deleteUser(id, currentUserId, currentUserRole);
         return ResponseEntity.ok(ApiResponse.success("Xóa người dùng thành công", null));
     }
@@ -194,7 +198,7 @@ public class UserController {
 
     /**
      * Admin: Restore a deleted user
-     * 
+     * <p>
      * POST /api/v1/users/restore
      */
     @PostMapping("/restore")
@@ -203,11 +207,39 @@ public class UserController {
             @Valid @RequestBody RestoreUserRequest request) {
         UUID currentUserId = extractUserId(userDetails);
         UserRole currentUserRole = UserRole.valueOf(userDetails.getRole());
-        
+
         UserResponse response = userService.restoreUser(request, currentUserId, currentUserRole);
         return ResponseEntity
                 .status(HttpStatus.OK)
                 .body(ApiResponse.success("Khôi phục người dùng thành công", response));
+    }
+
+    /**
+     * Admin: Import excel file to bulk create users
+     * POST /api/v1/users/import
+     */
+    @PostMapping("/import")
+    public ResponseEntity<ApiResponse<ImportUsersResult>> importUsersFromExcel(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @RequestParam("file") MultipartFile file) {
+        if (file.isEmpty()) {
+            throw new BusinessException("EMPTY_FILE", "File không được rỗng");
+        }
+        String filename = file.getOriginalFilename();
+        if (filename == null || (!filename.endsWith(".xlsx") && !filename.endsWith(".xls"))) {
+            throw new BusinessException("INVALID_FILE_TYPE", "Chỉ chấp nhận file Excel (.xlsx, .xls)");
+        }
+        UUID currentUserId = extractUserId(userDetails);
+        return ResponseEntity.ok(ApiResponse.success("Trích xuất dữ liệu từ file excel thành công.", userService.importUsersFromExcel(file, currentUserId)));
+    }
+
+    @PostMapping("/import/approve")
+    public ResponseEntity<ApiResponse<ImportUserResponse>> approveImportFromExcel(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @RequestBody ApproveImportRequest request
+    ) {
+        UUID currentUserId = extractUserId(userDetails);
+        return ResponseEntity.ok(ApiResponse.success("Nhập thành công dữ liệu.", userService.approveImport(request, currentUserId)));
     }
 
     /**

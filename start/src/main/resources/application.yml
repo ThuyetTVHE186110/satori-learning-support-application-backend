@@ -266,6 +266,43 @@ curriculum-import:
         # Combined score below this triggers re-extraction
         combined-re-extraction-threshold: ${RAG_COMBINED_RE_EXTRACTION_THRESHOLD:0.5}
 
+# ==================== Conversation Module Configuration ====================
+conversation:
+    chat:
+        # OpenAI model for the main CURRICULUM_QA response
+        model: ${CHAT_MODEL:gpt-4o-mini}
+        # Sampling temperature (0.0 = deterministic, 1.0 = creative)
+        temperature: ${CHAT_TEMPERATURE:0.3}
+        # Max tokens the model may generate per response
+        max-response-tokens: ${CHAT_MAX_RESPONSE_TOKENS:1024}
+        # Token budget for conversation history (leaves room for system prompt + RAG + question)
+        max-history-tokens: ${CHAT_MAX_HISTORY_TOKENS:2000}
+        # Per-user rate limit: max messages per window
+        rate-limit-max-requests: ${CHAT_RATE_LIMIT_MAX_REQUESTS:20}
+        # Duration of the rate-limit window in minutes
+        rate-limit-window-minutes: ${CHAT_RATE_LIMIT_WINDOW_MINUTES:1}
+        # ACTIVE sessions older than this are marked ABANDONED by the nightly cleanup scheduler
+        session-cleanup-retention-days: ${CHAT_SESSION_CLEANUP_RETENTION_DAYS:30}
+    rag:
+        # Enable Self-RAG relevance check advisor (order=200)
+        relevance-check-enabled: ${CHAT_RAG_RELEVANCE_CHECK:true}
+        # Min confidence threshold for relevance verdict to strip RAG context
+        relevance-threshold: ${CHAT_RAG_RELEVANCE_THRESHOLD:0.5}
+        # Enable CRAG grounding check advisor (order=300)
+        grounding-check-enabled: ${CHAT_RAG_GROUNDING_CHECK:true}
+        # Min confidence for grounding verdict to append disclaimer
+        grounding-threshold: ${CHAT_RAG_GROUNDING_THRESHOLD:0.6}
+        # Min cosine similarity for best retrieved item to be considered meaningful context
+        min-meaningful-similarity: ${CHAT_RAG_MIN_SIMILARITY:0.50}
+        # Model for lightweight advisor LLM calls (relevance + grounding checks)
+        check-model: ${CHAT_RAG_CHECK_MODEL:gpt-4o-mini}
+        # Max tokens for advisor check calls
+        check-max-tokens: ${CHAT_RAG_CHECK_MAX_TOKENS:512}
+        # Enable combined query analysis (intent + bilingual translation) before retrieval
+        query-analysis-enabled: ${CHAT_RAG_QUERY_ANALYSIS:true}
+        # Fallback bilingual query expansion when query-analysis-enabled=false
+        bilingual-query-enabled: ${CHAT_RAG_BILINGUAL:true}
+
 # ==================== Pronunciation Assessment ====================
 # Provider priority: Azure > SpeechSuper (auto-selected by CompositePronunciationProvider)
 pronunciation:

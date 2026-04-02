@@ -1,9 +1,9 @@
 package com.fu.conversation.ai.memory;
 
+import com.fu.conversation.config.ChatProperties;
 import com.fu.conversation.entity.ChatMessage;
 import com.fu.conversation.repository.ChatMessageRepository;
 import com.fu.conversation.service.ChatHistoryManager;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -20,9 +20,10 @@ import java.util.UUID;
 /**
  * Spring AI {@link ChatMemoryRepository} backed by the chat_messages table.
  *
- * <p>Implements the same token-aware sliding window as {@link ChatHistoryManager}:
- * fetch up to 40 messages newest-first, cut when the 2000-token budget is exhausted,
- * then return in chronological order for the advisor to inject into the prompt.
+ * <p>Implements a token-aware sliding window: fetches up to {@value MAX_DB_MESSAGES}
+ * messages newest-first, cuts when the token budget from {@code ChatProperties}
+ * is exhausted, then returns in chronological order for the advisor to inject
+ * into the prompt.
  *
  * <p>{@link #saveAll} is intentionally a no-op. Persistence is handled explicitly
  * by {@link ChatHistoryManager#saveExchange} after the ChatClient call completes,
@@ -30,14 +31,19 @@ import java.util.UUID;
  * round-trip. Allowing the advisor to also call saveAll would cause double-writes.
  */
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class CurriculumChatMemoryRepository implements ChatMemoryRepository {
 
-    private static final int MAX_DB_MESSAGES   = 40;
-    private static final int MAX_HISTORY_TOKENS = 2000;
+    private static final int MAX_DB_MESSAGES = 40;
 
     private final ChatMessageRepository chatMessageRepository;
+    private final ChatProperties chatProperties;
+
+    public CurriculumChatMemoryRepository(ChatMessageRepository chatMessageRepository,
+                                           ChatProperties chatProperties) {
+        this.chatMessageRepository = chatMessageRepository;
+        this.chatProperties = chatProperties;
+    }
 
     @Override
     public List<String> findConversationIds() {
@@ -54,12 +60,12 @@ public class CurriculumChatMemoryRepository implements ChatMemoryRepository {
 
             if (rows.isEmpty()) return List.of();
 
-            // Walk newest → oldest, accumulate token budget — same logic as ChatHistoryManager
+            // Walk newest → oldest, accumulate token budget
             List<Message> window = new ArrayList<>();
             int tokenCount = 0;
             for (ChatMessage row : rows) {
                 int tokens = ChatHistoryManager.estimateTokens(row.getContent());
-                if (tokenCount + tokens > MAX_HISTORY_TOKENS) {
+                if (tokenCount + tokens > chatProperties.getMaxHistoryTokens()) {
                     log.debug("Memory window: stopped at {} messages ({} tokens) for session {}",
                             window.size(), tokenCount, conversationId);
                     break;

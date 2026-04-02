@@ -11,6 +11,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -21,6 +23,12 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
      * Find user by email (for login, uniqueness check)
      */
     Optional<User> findByEmail(String email);
+
+    /**
+     * Batch fetch users by a set of emails.
+     * Used by Excel import to replace N+1 findByEmail calls with a single IN query.
+     */
+    List<User> findByEmailIn(Collection<String> emails);
 
     /**
      * Find active user by email (not soft-deleted)
@@ -144,7 +152,43 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
             @Param("excludedUserIds") java.util.List<UUID> excludedUserIds,
             Pageable pageable
     );
+
     @org.springframework.data.jpa.repository.Modifying
     @Query("UPDATE User u SET u.status = :status, u.updatedAt = CURRENT_TIMESTAMP WHERE u.id IN :ids AND u.role = 'LEARNER'")
     void updateStatusByUserIdIn(@Param("ids") java.util.Collection<java.util.UUID> ids, @Param("status") UserStatus status);
+
+    /**
+     * Fetch the single active class enrollment for a learner.
+     * Business rule: 1 learner → at most 1 active class → 1 course at any time.
+     * <p>
+     * Returns at most one row: (class_id, class_name, course_id,
+     * course_name, start_date, end_date, status).
+     * Cross-schema JOIN: user_management (class_members, classes) → learning_content (courses).
+     */
+    @Query(value = """
+            SELECT
+                c.id                                                    AS class_id,
+                c.name                                                  AS class_name,
+                c.course_id                                             AS course_id,
+                co.name                                                 AS course_name,
+                c.start_date                                            AS start_date,
+                c.end_date                                              AS end_date,
+                                CASE WHEN c.is_active THEN 'ACTIVE' ELSE 'INACTIVE' END AS status
+            FROM user_management.class_members cm
+            JOIN user_management.classes c   ON c.id  = cm.class_id
+            JOIN learning_content.courses co ON co.id = c.course_id
+            WHERE cm.user_id    = :userId
+              AND cm.removed_at IS NULL
+              AND c.deleted_at  IS NULL
+              AND c.is_active   = true
+              AND co.deleted_at IS NULL
+            LIMIT 1
+            """, nativeQuery = true)
+    java.util.List<Object[]> findActiveEnrollment(@Param("userId") UUID userId);
+
+    @Query("SELECT u FROM User u WHERE u.email = :email AND u.deletedAt IS NULL")
+    Optional<User> findByEmailAndNotDeleted(@Param("email") String email);
+
+    @Query("SELECT u FROM User  u where u.role = 'TEACHER' and u.status = 'ACTIVE' and u.deletedAt IS NULL")
+    List<User> findAllTeacher();
 }

@@ -39,9 +39,6 @@ public class Course extends SoftDeletableEntity {
     @Column(name = "jlpt_level", columnDefinition = "jlpt_level", nullable = false)
     private JlptLevel jlptLevel;
 
-    @Column(name = "thumbnail_url", columnDefinition = "TEXT")
-    private String thumbnailUrl;
-
     @Column(name = "order_index")
     @Builder.Default
     private Integer orderIndex = 0;

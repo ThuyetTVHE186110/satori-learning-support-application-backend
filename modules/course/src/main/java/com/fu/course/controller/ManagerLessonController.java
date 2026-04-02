@@ -6,6 +6,8 @@ import com.fu.course.dto.request.CreateLessonRequest;
 import com.fu.course.dto.request.UpdateLessonRequest;
 import com.fu.course.dto.response.LessonResponse;
 import com.fu.course.dto.response.LessonSummaryResponse;
+import com.fu.course.entity.Course;
+import com.fu.course.entity.Lesson;
 import com.fu.course.service.LessonService;
 import com.fu.course.service.LessonService.LessonStatistics;
 import jakarta.validation.Valid;
@@ -26,7 +28,7 @@ import java.util.UUID;
 
 /**
  * REST Controller for Manager Lesson CRUD operations.
- *
+ * <p>
  * All endpoints require ROLE_MANAGER.
  * Base path: /api/v1/manager/lessons
  */
@@ -89,16 +91,18 @@ public class ManagerLessonController {
     public ResponseEntity<ApiResponse<PageResponse<LessonSummaryResponse>>> getLessons(
             @RequestParam UUID courseId,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestParam(required = false) String keyword) {
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Lesson.ContentStatus status
+    ) {
 
-        Pageable pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("orderIndex").ascending());
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("order_index").ascending());
 
         Page<LessonSummaryResponse> lessonPage;
         if (keyword != null && !keyword.isBlank()) {
-            lessonPage = lessonService.searchLessonsInCourse(courseId, keyword.trim(), pageable);
+            lessonPage = lessonService.searchLessonsInCourse(courseId, keyword.trim(), status, pageable);
         } else {
-            lessonPage = lessonService.getLessonsByCourseId(courseId, pageable);
+            lessonPage = lessonService.getLessonsByCourseId(courseId, status, pageable);
         }
 
         PageResponse<LessonSummaryResponse> pageResponse = PageResponse.of(

@@ -15,6 +15,7 @@ import java.util.UUID;
  * Service interface for Class management
  */
 public interface ClassService {
+    ClassResponse closeClass(UUID classId, UUID managerId);
 
     /**
      * Create a new class (MANAGER only)
@@ -35,7 +36,7 @@ public interface ClassService {
      * Get classes with dynamic filters (combines all options with AND)
      */
     Page<ClassSummaryResponse> getClasses(String keyword, UUID teacherId, UUID courseId, Boolean isActive,
-            Pageable pageable);
+                                          Pageable pageable);
 
     /**
      * Delete a class (MANAGER only) — soft delete: records deletion metadata

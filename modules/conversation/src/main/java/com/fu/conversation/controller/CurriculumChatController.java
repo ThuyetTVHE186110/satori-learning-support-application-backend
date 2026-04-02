@@ -53,7 +53,8 @@ public class CurriculumChatController {
                 userId,
                 request.getCourseId(),
                 request.getLessonId(),
-                request.getJlptLevel()
+                request.getJlptLevel(),
+                request.getTitle()
         );
         return ResponseEntity
                 .status(HttpStatus.CREATED)

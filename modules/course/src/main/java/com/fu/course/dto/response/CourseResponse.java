@@ -23,7 +23,6 @@ public class CourseResponse {
     private String name;
     private String description;
     private JlptLevel jlptLevel;
-    private String thumbnailUrl;
     private Integer orderIndex;
     private Course.CourseStatus status;
     

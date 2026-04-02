@@ -1,0 +1,99 @@
+# =============================================================================
+# System Test Profile
+# =============================================================================
+# Activated by: SPRING_PROFILES_ACTIVE=systest
+# Infrastructure: environment/docker-compose.systest.yml
+#   - PostgreSQL: localhost:5433 / DB: satori_systest
+#   - Redis:      localhost:6380 / no password
+#
+# Differences from local:
+#   - AI (OpenAI) disabled — no real LLM calls during system tests
+#   - Email disabled
+#   - Cloudinary disabled
+#   - Redis has no password
+#   - Separate DB so local dev data is never touched
+# =============================================================================
+
+server:
+    port: 8080
+
+spring:
+    # ==================== PostgreSQL (systest) ====================
+    datasource:
+        url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5433}/${POSTGRES_DB:satori_systest}?stringtype=unspecified
+        username: ${POSTGRES_USER:satori_user}
+        password: ${POSTGRES_PASSWORD:SatoriSystest2026!}
+
+    jpa:
+        hibernate:
+            ddl-auto: validate
+        show-sql: true
+        properties:
+            hibernate:
+                format_sql: true
+
+    # ==================== Redis (systest — no password) ====================
+    data:
+        redis:
+            host: ${REDIS_HOST:localhost}
+            port: ${REDIS_PORT:6380}
+            password: ""
+            timeout: 3000
+
+    # ==================== AI — disabled ====================
+    ai:
+        openai:
+            api-key: ""
+            chat:
+                options:
+                    model: gpt-4o-mini
+                    max-tokens: 512
+
+# ==================== Security ====================
+app:
+    security:
+        jwt:
+            access-token-secret: SatoriSystestAccess2026!VeryLongSecretKeyForJWT256Bits
+            refresh-token-secret: SatoriSystestRefresh2026!AnotherLongSecretKeyForJWT256
+            access-token-expiration-ms: 1800000
+            refresh-token-expiration-ms: 604800000
+        max-failed-attempts: 5
+        lock-duration-minutes: 30
+        otp-expiration-minutes: 10
+        activation-token-expiration-hours: 24
+
+    google:
+        firebase:
+            enabled: false
+
+    email:
+        enabled: false
+
+    cloudinary:
+        enabled: false
+
+# ==================== Curriculum Import — AI pipeline disabled ====================
+curriculum-import:
+    ocr:
+        enabled: false
+    agentic-rag:
+        embedding-enabled: false
+        validation-enabled: false
+        self-reflection-enabled: false
+        grounding-enabled: false
+        parallel-processing: false
+        rag-retrieval-enabled: false
+
+# ==================== Conversation RAG — disabled ====================
+conversation:
+    rag:
+        relevance-check-enabled: false
+        grounding-check-enabled: false
+
+# ==================== Logging ====================
+logging:
+    level:
+        root: INFO
+        com.fu: DEBUG
+        org.hibernate.SQL: DEBUG
+        org.hibernate.orm.jdbc.bind: TRACE

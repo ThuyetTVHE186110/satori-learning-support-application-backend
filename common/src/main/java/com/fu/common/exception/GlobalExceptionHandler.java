@@ -84,26 +84,29 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error("VALIDATION_ERROR", message));
     }
 
+    /**
+     * Handles malformed path/query parameters — e.g. a string that is too long to be a UUID,
+     * or an unrecognised enum value passed as a path variable.
+     * Returns 400 so the frontend receives an actionable error instead of an opaque 500.
+     */
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ApiResponse<Void>> handleMethodArgumentTypeMismatch(
             MethodArgumentTypeMismatchException ex) {
-        String message = "Invalid value";
-        Class<?> requiredType = ex.getRequiredType();
-        if (requiredType != null && requiredType.isEnum()) {
-            Object[] enumConstants = requiredType.getEnumConstants();
-            String validValues = java.util.Arrays.stream(enumConstants)
-                    .map(Object::toString)
-                    .collect(java.util.stream.Collectors.joining(", "));
-            message = String.format("Invalid value '%s'. Accepted values: [%s]",
-                    ex.getValue(), validValues);
-        } else {
-            message = String.format("Invalid value '%s' for parameter '%s'",
-                    ex.getValue(), ex.getName());
-        }
-        log.warn("Type mismatch: {}", message);
+        String paramName   = ex.getName();
+        Object value       = ex.getValue();
+        Class<?> required  = ex.getRequiredType();
+        String typeName    = required != null ? required.getSimpleName() : "unknown";
+
+        String message = String.format(
+                "Invalid value for parameter '%s': '%s' is not a valid %s.",
+                paramName, value, typeName);
+
+        log.warn("Type mismatch on parameter '{}': value='{}', required={} — {}",
+                paramName, value, typeName, ex.getMessage());
+
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
-                .body(ApiResponse.error("VALIDATION_ERROR", message));
+                .body(ApiResponse.error("INVALID_PARAMETER", message));
     }
 
     @ExceptionHandler(Exception.class)

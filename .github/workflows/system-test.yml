@@ -1,0 +1,95 @@
+name: System Tests
+
+on:
+    push:
+        branches: [ develop ]
+    workflow_dispatch:
+
+jobs:
+    system-test:
+        name: System Test — Smoke (Java 21 + PostgreSQL + Redis)
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout source
+              uses: actions/checkout@v4
+
+            # ── Infrastructure ──────────────────────────────────────────────
+            - name: Start systest infrastructure
+              working-directory: environment
+              run: docker compose -f docker-compose.systest.yml up -d --wait
+
+            - name: Wait for PostgreSQL to be ready
+              run: |
+                  for i in $(seq 1 30); do
+                    pg_isready -h localhost -p 5433 -U satori_user && break
+                    echo "Waiting for postgres... ($i/30)"
+                    sleep 3
+                  done
+
+            # ── Build ────────────────────────────────────────────────────────
+            - name: Set up JDK 21
+              uses: actions/setup-java@v4
+              with:
+                  java-version: '21'
+                  distribution: 'temurin'
+                  cache: maven
+
+            - name: Build (skip tests — compile check only)
+              run: mvn clean package -DskipTests --no-transfer-progress
+
+            # ── Unit tests ───────────────────────────────────────────────────
+            - name: Run unit tests
+              run: mvn test -DskipITs --no-transfer-progress
+
+            # ── Smoke test ───────────────────────────────────────────────────
+            - name: Smoke test — start app with systest profile
+              env:
+                  SPRING_PROFILES_ACTIVE: systest
+                  POSTGRES_HOST: localhost
+                  POSTGRES_PORT: 5433
+                  POSTGRES_DB: satori_systest
+                  POSTGRES_USER: satori_user
+                  POSTGRES_PASSWORD: SatoriSystest2026!
+                  REDIS_HOST: localhost
+                  REDIS_PORT: 6380
+                  OPENAI_API_KEY: ""
+              run: |
+                  java -jar start/target/*.jar \
+                    --spring.profiles.active=systest \
+                    --management.endpoints.web.exposure.include=health \
+                    &
+                  APP_PID=$!
+
+                  echo "Waiting for application to start..."
+                  for i in $(seq 1 40); do
+                    STATUS=$(curl -sf http://localhost:8080/actuator/health \
+                             -H "Accept: application/json" | grep -o '"status":"[A-Z]*"' | head -1 || true)
+                    if [ "$STATUS" = '"status":"UP"' ]; then
+                      echo "Application is UP after $((i * 5))s"
+                      break
+                    fi
+                    echo "  attempt $i/40 — not ready yet"
+                    sleep 5
+                  done
+
+                  curl -sf http://localhost:8080/actuator/health || \
+                    (echo "Health check FAILED" && kill $APP_PID && exit 1)
+
+                  kill $APP_PID
+                  echo "Smoke test PASSED"
+
+            # ── Teardown ─────────────────────────────────────────────────────
+            - name: Teardown systest infrastructure
+              if: always()
+              working-directory: environment
+              run: docker compose -f docker-compose.systest.yml down -v
+
+            # ── Artifacts ────────────────────────────────────────────────────
+            - name: Upload test reports
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: system-test-reports
+                  path: '**/target/surefire-reports/*.xml'
+                  retention-days: 7

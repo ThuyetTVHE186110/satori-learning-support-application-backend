@@ -102,7 +102,7 @@ public class EmailServiceImpl implements EmailService {
     }
 
     @Override
-    @Async
+    @Async("mailExecutor")
     public void sendWelcomeEmailWithCredentials(String to, String userName, String email, String password) {
         String subject = "🎉 Chào mừng đến với Satori Learning - Thông tin đăng nhập";
         

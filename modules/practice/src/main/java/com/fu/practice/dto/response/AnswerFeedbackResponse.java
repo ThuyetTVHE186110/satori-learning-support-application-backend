@@ -31,4 +31,10 @@ public class AnswerFeedbackResponse {
 
     /** Liệu phiên đã hoàn thành sau câu này không. */
     private boolean sessionCompleted;
+
+    /**
+     * Câu hỏi tiếp theo — trả về ngay để FE hiển thị không cần gọi thêm request.
+     * null nếu sessionCompleted = true hoặc nếu việc sinh câu hỏi thất bại.
+     */
+    private PracticeItemResponse nextItem;
 }

@@ -7,6 +7,7 @@ import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
 import com.fu.clazz.entity.ClassMember;
+import com.fu.clazz.entity.ClassTeacherHistory;
 import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.exception.ClassFullException;
 import com.fu.clazz.exception.ClassNotFoundException;
@@ -14,6 +15,7 @@ import com.fu.clazz.exception.MemberAlreadyExistsException;
 import com.fu.clazz.mapper.ClassMapper;
 import com.fu.clazz.repository.ClassMemberRepository;
 import com.fu.clazz.repository.ClassRepository;
+import com.fu.clazz.repository.ClassTeacherHistoryRepository;
 import com.fu.clazz.repository.specification.ClassSpecification;
 import com.fu.clazz.service.ClassService;
 import com.fu.common.exception.BusinessException;
@@ -32,6 +34,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -52,24 +55,31 @@ public class ClassServiceImpl implements ClassService {
     private final ClassMapper classMapper;
     private final UserRepository userRepository;
     private final CourseRepository courseRepository;
-
+    private final ClassTeacherHistoryRepository classTeacherHistoryRepository;
     // =====================================================
     // CLASS CRUD
     // =====================================================
 
     @Override
+    public ClassResponse closeClass(UUID classId, UUID managerId) {
+        Clazz clazz = findClassOrThrow(classId);
+        if (!clazz.getIsActive()) {
+            throw new BusinessException("CLASS_ALREADY_INACTIVE", "Lớp học đã ngưng hoạt động.");
+        }
+        clazz.setIsActive(false);
+        clazz.setEndDate(LocalDate.now());
+        clazz.setUpdatedBy(managerId);
+        Clazz updatedClazz = classRepository.save(clazz);
+        log.info("Đóng lớp học thành công: {}", classId);
+        // Deactivate all members when class is closed
+        deactivateMembers(classId);
+        return toResponseWithMemberCount(updatedClazz);
+    }
+
+    @Override
     @Transactional
     public ClassResponse createClass(CreateClassRequest request, UUID managerId) {
         log.info("Tạo lớp học: {} bởi quản lý: {}", request.getName(), managerId);
-
-        // Validate date range
-        if (request.getEndDate() != null && !request.getEndDate().isAfter(java.time.LocalDate.now())) {
-            throw new BusinessException("INVALID_END_DATE", "Ngày kết thúc phải ở tương lai.");
-        }
-
-        if (request.getStartDate() != null && request.getEndDate() != null && !request.getEndDate().isAfter(request.getStartDate())) {
-            throw new BusinessException("INVALID_DATE_RANGE", "Ngày kết thúc phải sau ngày bắt đầu.");
-        }
         // Check if class name already exists
         if (classRepository.existsByNameIgnoreCase(request.getName())) {
             throw new BusinessException("CLASS_NAME_EXISTS", "Tên lớp học đã tồn tại.");
@@ -104,6 +114,16 @@ public class ClassServiceImpl implements ClassService {
         }
         // Save class
         Clazz savedClazz = classRepository.save(clazz);
+        // Save teacher assignment in history table
+        ClassTeacherHistory history = ClassTeacherHistory.builder()
+                .classId(savedClazz.getId())
+                .teacherId(teacher.getId())
+                .assignedAt(LocalDate.now())
+                .build();
+        history.setCreatedBy(managerId);
+        history.setUpdatedBy(managerId);
+        classTeacherHistoryRepository.save(history);
+
         log.info("Tạo lớp học thành công với ID: {}", savedClazz.getId());
 
         ClassResponse response = toResponseWithMemberCount(clazz);
@@ -133,34 +153,53 @@ public class ClassServiceImpl implements ClassService {
             }
         }
 
-        // Validate date range (E3: startDate must be before endDate)
-        LocalDate effectiveStartDate = request.getStartDate() != null ? request.getStartDate() : clazz.getStartDate();
-        LocalDate effectiveEndDate = request.getEndDate() != null ? request.getEndDate() : clazz.getEndDate();
-        if (effectiveStartDate != null && effectiveEndDate != null && !effectiveEndDate.isAfter(effectiveStartDate)) {
-            throw new BusinessException("INVALID_DATE_RANGE", "Ngày bắt đầu phải trước ngày kết thúc.");
-        }
-
         // Validate capacity (E4: newMaxStudents >= currentMembers)
+        long currentMembers = classMemberRepository.countActiveByClassId(classId);
         if (request.getMaxStudents() != null) {
-            long currentMembers = classMemberRepository.countActiveByClassId(classId);
             if (request.getMaxStudents() < currentMembers) {
                 throw new BusinessException("CAPACITY_VIOLATION", "Số lượng học viên tối đa không thể nhỏ hơn số lượng học viên hiện tại đang theo học.");
             }
         }
+        if (currentMembers > 0 && request.getStartDate() != null && request.getStartDate().isAfter(clazz.getStartDate())) {
+            throw new BusinessException("INVALID_START_DATE", "Không thể cập nhật ngày bắt đầu sau ngày bắt đầu cũ khi đã có học viên trong lớp.");
+        }
 
-        boolean oldIsActive = clazz.getIsActive();
+        // Auto-activate if startDate moved to today or earlier AND no members AND currently inactive
+        if (currentMembers == 0 && request.getStartDate() != null && !request.getStartDate().isAfter(LocalDate.now()) && !clazz.getIsActive()) {
+            clazz.setIsActive(true);
+            log.info("Lớp học {} được tự động kích hoạt do ngày bắt đầu lùi về hiện tại/quá khứ và chưa có học viên.", classId);
+        }
+
         // Update class (only non-null fields are mapped)
         classMapper.updateEntity(clazz, request);
         clazz.setUpdatedBy(managerId);
+        UUID currentTeacherId = classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId).orElse(null);
 
-        if (oldIsActive && (clazz.getIsActive() != null && !clazz.getIsActive())) {
-            deactivateMembers(classId);
+        // If teacher is changed, update history
+        if (request.getTeacherId() != null && !request.getTeacherId().equals(currentTeacherId)) {
+            if (currentTeacherId != null) {
+                ClassTeacherHistory oldHistory = classTeacherHistoryRepository.findActiveByClassIdAndTeacherId(classId, currentTeacherId)
+                        .orElseThrow(() -> new BusinessException("CURRENT_TEACHER_HISTORY_NOT_FOUND", "Không tìm thấy lịch sử giáo viên hiện tại."));
+                oldHistory.setReleasedAt(LocalDate.now());
+                oldHistory.setUpdatedAt(LocalDateTime.now());
+                oldHistory.setUpdatedBy(managerId);
+                classTeacherHistoryRepository.save(oldHistory);
+            }
+            // Create new history record for new teacher
+            ClassTeacherHistory newHistory = ClassTeacherHistory.builder()
+                    .classId(classId)
+                    .teacherId(request.getTeacherId())
+                    .assignedAt(LocalDate.now())
+                    .build();
+            newHistory.setCreatedBy(managerId);
+            newHistory.setUpdatedBy(managerId);
+            classTeacherHistoryRepository.save(newHistory);
         }
-
         Clazz updatedClazz = classRepository.save(clazz);
         log.info("Cập nhật lớp học thành công: {}", classId);
 
         return toResponseWithMemberCount(updatedClazz);
+
     }
 
     @Override
@@ -189,16 +228,17 @@ public class ClassServiceImpl implements ClassService {
         log.info("Xóa lớp học: {} bởi quản lý: {}", classId, managerId);
 
         Clazz clazz = findClassOrThrow(classId);
-
+        //Check if class has members
+        long memberCount = classMemberRepository.countActiveByClassId(classId);
+        if (memberCount > 0) {
+            throw new BusinessException("CLASS_DELETE_VIOLATION", "Không thể xóa lớp học khi còn học viên đang theo học.");
+        }
         // Soft delete: stamp deletedAt + deletedBy
         clazz.softDelete(managerId);
         clazz.setUpdatedBy(managerId);
 
         Clazz deletedClazz = classRepository.save(clazz);
         log.info("Xóa lớp học thành công: {}", classId);
-
-        // Deactivate all members when class is deleted
-        deactivateMembers(classId);
 
         return toResponseWithMemberCount(deletedClazz);
     }
@@ -282,10 +322,7 @@ public class ClassServiceImpl implements ClassService {
     public ClassResponse getClassByIdForTeacher(UUID classId, UUID teacherId) {
         log.debug("Giáo viên {} xem chi tiết lớp: {}", teacherId, classId);
         Clazz clazz = findClassOrThrow(classId);
-
-        if (!clazz.getTeacherId().equals(teacherId)) {
-            throw new BusinessException("ACCESS_DENIED", "Bạn không có quyền xem lớp học này.");
-        }
+        verifyTeacherAccess(clazz, teacherId);
 
         return toResponseWithMemberCount(clazz);
     }
@@ -295,9 +332,7 @@ public class ClassServiceImpl implements ClassService {
         log.debug("Giáo viên {} xem thành viên lớp: {} với từ khóa: {}", teacherId, classId, keyword);
         Clazz clazz = findClassOrThrow(classId);
 
-        if (!clazz.getTeacherId().equals(teacherId)) {
-            throw new BusinessException("ACCESS_DENIED", "Bạn không có quyền xem thành viên của lớp học này.");
-        }
+        verifyTeacherAccess(clazz, teacherId);
 
         return getClassMembers(classId, keyword, pageable);
     }
@@ -329,6 +364,12 @@ public class ClassServiceImpl implements ClassService {
     // =====================================================
     // HELPER METHODS
     // =====================================================
+    private void verifyTeacherAccess(Clazz clazz, UUID teacherId) {
+        UUID currentTeacherId = classTeacherHistoryRepository.findCurrentTeacherIdByClassId(clazz.getId()).orElse(null);
+        if (clazz != null && (currentTeacherId == null || !currentTeacherId.equals(teacherId))) {
+            throw new BusinessException("ACCESS_DENIED", "Bạn không phải là giáo viên của lớp này.");
+        }
+    }
 
     /**
      * Find non-deleted class or throw exception (BR-73)
@@ -396,10 +437,10 @@ public class ClassServiceImpl implements ClassService {
     private ClassResponse toResponseWithMemberCount(Clazz clazz) {
         ClassResponse response = classMapper.toResponse(clazz);
         response.setMemberCount(classMemberRepository.countActiveByClassId(clazz.getId()));
-
+        UUID currentTeacherId = classTeacherHistoryRepository.findCurrentTeacherIdByClassId(clazz.getId()).orElse(null);
         // Enrich with teacher info
-        if (clazz.getTeacherId() != null) {
-            userRepository.findById(clazz.getTeacherId()).ifPresent(teacher -> {
+        if (currentTeacherId != null) {
+            userRepository.findById(currentTeacherId).ifPresent(teacher -> {
                 response.setTeacherName(teacher.getFullName());
                 response.setTeacherEmail(teacher.getEmail());
                 response.setTeacherAvatarUrl(teacher.getAvatarUrl());
@@ -424,7 +465,7 @@ public class ClassServiceImpl implements ClassService {
     private ClassSummaryResponse toSummaryWithMemberCount(Clazz clazz) {
         ClassSummaryResponse response = classMapper.toSummaryResponse(clazz);
         response.setMemberCount(classMemberRepository.countActiveByClassId(clazz.getId()));
-
+        UUID currentTeacherId = classTeacherHistoryRepository.findCurrentTeacherIdByClassId(clazz.getId()).orElse(null);
         if (clazz.getCourseId() != null) {
             courseRepository.findById(clazz.getCourseId()).ifPresent(course -> {
                 response.setCourseName(course.getName());
@@ -432,8 +473,8 @@ public class ClassServiceImpl implements ClassService {
                 response.setCourseStatus(course.getStatus() != null ? course.getStatus().name() : null);
             });
         }
-        if (clazz.getTeacherId() != null) {
-            userRepository.findById(clazz.getTeacherId()).ifPresent(teacher -> {
+        if (currentTeacherId != null) {
+            userRepository.findById(currentTeacherId).ifPresent(teacher -> {
                 response.setTeacherName(teacher.getFullName());
             });
         }

@@ -15,8 +15,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -62,8 +64,7 @@ public class ProfileServiceImpl implements ProfileService {
                 .updatedAt(user.getUpdatedAt())
                 .lastLoginAt(user.getLastLoginAt())
                 .learningPreferences(prefs)
-                // TODO: populate when class management module is available
-                .enrolledClasses(Collections.emptyList())
+                .enrolledClasses(resolveActiveEnrollment(userId))
                 .build();
     }
 
@@ -147,6 +148,42 @@ public class ProfileServiceImpl implements ProfileService {
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    /**
+     * Maps the single active class enrollment (if any) to ClassEnrollmentResponse.
+     * Business rule: 1 learner has at most 1 active class at any point in time.
+     * Returns a one-element list (or empty) to keep the enrolledClasses field type stable.
+     */
+    private List<ClassEnrollmentResponse> resolveActiveEnrollment(UUID userId) {
+        List<Object[]> rows = userRepository.findActiveEnrollment(userId);
+        if (rows.isEmpty()) return Collections.emptyList();
+
+        Object[] row = rows.get(0);
+        ClassEnrollmentResponse enrollment = ClassEnrollmentResponse.builder()
+                .classId(toUuid(row[0]))
+                .className((String) row[1])
+                .courseId(toUuid(row[2]))
+                .courseName((String) row[3])
+                .startDate(toLocalDateTime(row[4]))
+                .endDate(toLocalDateTime(row[5]))
+                .status((String) row[6])
+                .role(null)
+                .build();
+        return List.of(enrollment);
+    }
+
+    private static UUID toUuid(Object val) {
+        if (val == null) return null;
+        if (val instanceof UUID u) return u;
+        return UUID.fromString(val.toString());
+    }
+
+    private static LocalDateTime toLocalDateTime(Object val) {
+        if (val == null) return null;
+        if (val instanceof LocalDateTime ldt) return ldt;
+        if (val instanceof java.sql.Timestamp ts) return ts.toLocalDateTime();
+        return null;
+    }
 
     private User findActiveUser(UUID userId) {
         return userRepository.findById(userId)
