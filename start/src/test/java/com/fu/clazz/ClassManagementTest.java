@@ -2,9 +2,11 @@ package com.fu.clazz;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.clazz.entity.ClassMember;
+import com.fu.clazz.entity.ClassTeacherHistory;
 import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.repository.ClassMemberRepository;
 import com.fu.clazz.repository.ClassRepository;
+import com.fu.clazz.repository.ClassTeacherHistoryRepository;
 import com.fu.course.entity.Course;
 import com.fu.course.entity.Course.CourseStatus;
 import com.fu.course.entity.Course.JlptLevel;
@@ -43,11 +45,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Sql(
-        statements = "TRUNCATE TABLE user_management.class_members, user_management.classes, learning_content.courses, system_admin.curriculum_imports, user_management.user_sessions, user_management.users CASCADE",
+        statements = "TRUNCATE TABLE user_management.class_teacher_history, user_management.class_members, user_management.classes, learning_content.courses, system_admin.curriculum_imports, user_management.user_sessions, user_management.users CASCADE",
         executionPhase = Sql.ExecutionPhase.BEFORE_TEST_CLASS
 )
 @Sql(
-        statements = "TRUNCATE TABLE user_management.class_members, user_management.classes, learning_content.courses, system_admin.curriculum_imports, user_management.user_sessions, user_management.users CASCADE",
+        statements = "TRUNCATE TABLE user_management.class_teacher_history, user_management.class_members, user_management.classes, learning_content.courses, system_admin.curriculum_imports, user_management.user_sessions, user_management.users CASCADE",
         executionPhase = Sql.ExecutionPhase.AFTER_TEST_METHOD,
         config = @SqlConfig(transactionMode = SqlConfig.TransactionMode.ISOLATED)
 )
@@ -58,6 +60,7 @@ class ClassManagementTest {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private ClassRepository classRepository;
     @Autowired private ClassMemberRepository classMemberRepository;
+    @Autowired private ClassTeacherHistoryRepository teacherHistoryRepository;
     @Autowired private CourseRepository courseRepository;
     @Autowired private UserRepository userRepository;
     @Autowired private UserSessionRepository sessionRepository;
@@ -126,15 +129,27 @@ class ClassManagementTest {
                 .build());
     }
 
+    /**
+     * Save a class AND create the corresponding ClassTeacherHistory entry (active assignment).
+     * Use this wherever a class needs a current teacher.
+     */
     private Clazz saveClass(String name, UUID teacherId, UUID courseId,
                             boolean isActive, int maxStudents) {
-        return classRepository.save(Clazz.builder()
+        Clazz clazz = classRepository.save(Clazz.builder()
                 .name(name).description("Test class")
-                .teacherId(teacherId).courseId(courseId)
+                .courseId(courseId)
                 .isActive(isActive).maxStudents(maxStudents)
                 .startDate(LocalDate.now().plusDays(1))
                 .endDate(LocalDate.now().plusMonths(3))
                 .build());
+        if (teacherId != null) {
+            teacherHistoryRepository.save(ClassTeacherHistory.builder()
+                    .classId(clazz.getId())
+                    .teacherId(teacherId)
+                    .assignedAt(LocalDate.now())
+                    .build());
+        }
+        return clazz;
     }
 
     private Clazz saveDeletedClass(String name, UUID teacherId, UUID courseId,
@@ -595,9 +610,8 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Japanese N5 Class\",\"description\":\"Comprehensive Japanese N5 course for beginners\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\",\"endDate\":\"%s\"}",
-                    teacher.getId(), course.getId(),
-                    LocalDate.now(), LocalDate.now().plusMonths(3));
+                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                    teacher.getId(), course.getId(), LocalDate.now());
 
             MvcResult result = mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -627,9 +641,8 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Future Japanese N5 Class\",\"description\":\"Japanese N5 course starting next month\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\",\"endDate\":\"%s\"}",
-                    teacher.getId(), course.getId(),
-                    LocalDate.now().plusDays(30), LocalDate.now().plusMonths(3));
+                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                    teacher.getId(), course.getId(), LocalDate.now().plusDays(30));
 
             MvcResult result = mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -664,9 +677,8 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Japanese N5 Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\",\"endDate\":\"%s\"}",
-                    teacher.getId(), course.getId(),
-                    LocalDate.now().plusDays(1), LocalDate.now().plusMonths(3));
+                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                    teacher.getId(), course.getId(), LocalDate.now().plusDays(1));
 
             mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -677,49 +689,47 @@ class ClassManagementTest {
         }
 
         @Test
-        @DisplayName("TC_CLM_CC_003 — Cannot create class with end date in the past")
+        @DisplayName("TC_CLM_CC_003 — endDate ≤ startDate not applicable (endDate removed from CreateClassRequest); missing startDate returns valid class")
         void tc_clm_cc_003() throws Exception {
             saveManager("manager@test.com");
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
 
-            // Try to create class with end date in the past
-            LocalDate pastEndDate = LocalDate.now().minusDays(10);
-            String requestBody = String.format(
-                    "{\"name\":\"Past Due Class\",\"description\":\"Test class with past end date\",\"teacherId\":\"%s\",\"courseId\":\"%s\",\"maxStudents\":20,\"startDate\":\"%s\",\"endDate\":\"%s\"}",
-                    teacher.getId(), course.getId(), LocalDate.now().toString(), pastEndDate.toString()
-            );
+            // startDate omitted → class should still be created (startDate nullable)
+            String body = String.format(
+                    "{\"name\":\"No Start Date Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\",\"maxStudents\":8}",
+                    teacher.getId(), course.getId());
 
             mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(requestBody)
+                            .content(body)
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("INVALID_END_DATE"));
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.name").value("No Start Date Class"));
         }
 
         @Test
-        @DisplayName("TC_CLM_CC_004 — endDate ≤ startDate → INVALID_DATE_RANGE")
+        @DisplayName("TC_CLM_CC_004 — startDate in the future → class created as inactive")
         void tc_clm_cc_004() throws Exception {
             saveManager("manager@test.com");
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
 
-            LocalDate tomorrow = LocalDate.now().plusDays(1);
             String body = String.format(
-                    "{\"name\":\"Bad Range Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\",\"endDate\":\"%s\"}",
-                    teacher.getId(), course.getId(), tomorrow, tomorrow);
+                    "{\"name\":\"Future Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
+                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                    teacher.getId(), course.getId(), LocalDate.now().plusDays(10));
 
             mockMvc.perform(post("/api/v1/classes")
-                            .contentType(MediaType.APPLICATION_JSON).content(body)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("INVALID_DATE_RANGE"));
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.isActive").value(false));
         }
 
         @Test
@@ -732,9 +742,9 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Bad Teacher Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\",\"endDate\":\"%s\"}",
+                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
                     learner.getId(), course.getId(),
-                    LocalDate.now().plusDays(1), LocalDate.now().plusMonths(3));
+                    LocalDate.now().plusDays(1));
 
             mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -754,9 +764,8 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Inactive Course Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\",\"endDate\":\"%s\"}",
-                    teacher.getId(), course.getId(),
-                    LocalDate.now().plusDays(1), LocalDate.now().plusMonths(3));
+                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                    teacher.getId(), course.getId(), LocalDate.now().plusDays(1));
 
             mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -806,10 +815,10 @@ class ClassManagementTest {
             saveClassMember(clazz.getId(), saveLearner("learner@test.com").getId());
 
             LocalDateTime beforeUpdate = LocalDateTime.now().minusSeconds(1);
+            // UpdateClassRequest has: name, description, teacherId, maxStudents, startDate (no endDate)
             String body = String.format(
-                    "{\"name\":\"New Name\",\"description\":\"Updated desc\"," +
-                            "\"startDate\":\"%s\",\"endDate\":\"%s\"}",
-                    LocalDate.now().plusDays(2), LocalDate.now().plusMonths(6));
+                    "{\"name\":\"New Name\",\"description\":\"Updated desc\",\"startDate\":\"%s\"}",
+                    LocalDate.now().plusDays(2));
 
             mockMvc.perform(put("/api/v1/classes/{classId}", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -866,7 +875,7 @@ class ClassManagementTest {
         }
 
         @Test
-        @DisplayName("TC_CLM_UC_003 — Deactivate class: disappears from teacher list, assign learner blocked, learners become inactive")
+        @DisplayName("TC_CLM_UC_003 — Close class via /close endpoint: disappears from teacher list, assign learner blocked, learners become inactive")
         void tc_clm_uc_003() throws Exception {
             saveManager("manager@test.com");
             User teacher = saveTeacher("teacher@test.com");
@@ -875,16 +884,16 @@ class ClassManagementTest {
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
             Clazz clazz = saveClass("Deactivate Me", teacher.getId(), course.getId(), true, 8);
             User learner = saveLearner("learner@test.com");
-            
-            // Add learner to class first (should be active)
+
+            // Add learner to class first
             String addBody = String.format("{\"userId\":\"%s\"}", learner.getId());
             mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(addBody)
                             .header("Authorization", "Bearer " + mgrToken))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true));
-            
-            // Verify learner is active in class before deactivation
+
+            // Verify learner is active in class before closing
             mockMvc.perform(get("/api/v1/classes/{classId}/members", clazz.getId())
                             .param("page", "0").param("size", "10")
                             .header("Authorization", "Bearer " + mgrToken))
@@ -892,103 +901,73 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.data.content.length()").value(1))
                     .andExpect(jsonPath("$.data.content[0].userId").value(learner.getId().toString()));
 
-            // Deactivate
-            mockMvc.perform(put("/api/v1/classes/{classId}", clazz.getId())
-                            .contentType(MediaType.APPLICATION_JSON).content("{\"isActive\":false}")
+            // Close via dedicated /close endpoint
+            mockMvc.perform(put("/api/v1/classes/{classId}/close", clazz.getId())
                             .header("Authorization", "Bearer " + mgrToken))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.isActive").value(false));
 
-            // Teacher list — class not visible
+            // Teacher list — class not visible (teacher sees only active)
             mockMvc.perform(get("/api/v1/classes").param("page", "0").param("size", "10")
                             .header("Authorization", "Bearer " + tToken))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.content.length()").value(0));
 
-            // Assign learner — blocked
+            // Assign learner — blocked (class inactive)
             mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(addBody)
                             .header("Authorization", "Bearer " + mgrToken))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.code").value("CLASS_INACTIVE"));
-            
-            // Check learner status becomes inactive after class deactivation
-            User learnerUser = userRepository.findById(learner.getId())
-                    .orElseThrow(() -> new AssertionError("Learner not found in database"));
-            // Verify learner's user status becomes inactive when class is deactivated
+
+            // Learner status becomes INACTIVE when class is closed
+            User learnerUser = userRepository.findById(learner.getId()).orElseThrow();
             assertThat(learnerUser.getStatus()).isEqualTo(UserStatus.INACTIVE);
-            // Verify class is actually deactivated
-            Clazz deactivatedClass = classRepository.findById(clazz.getId())
-                    .orElseThrow(() -> new AssertionError("Class not found in database"));
-            assertThat(deactivatedClass.getIsActive()).isFalse();
+
+            // Class is deactivated in DB
+            Clazz closed = classRepository.findById(clazz.getId()).orElseThrow();
+            assertThat(closed.getIsActive()).isFalse();
         }
 
         @Test
-        @DisplayName("TC_CLM_UC_004 — Reactivate class: reappears in teacher list, assign learner re-enabled, learners become active")
+        @DisplayName("TC_CLM_UC_004 — Reactivate class: update startDate to today when no members → auto-activated, reappears in teacher list")
         void tc_clm_uc_004() throws Exception {
             saveManager("manager@test.com");
             User teacher = saveTeacher("teacher@test.com");
             String mgrToken = loginAndGetToken("manager@test.com", "ValidPass@1");
             String tToken = loginAndGetToken("teacher@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Reactivate Me", teacher.getId(), course.getId(), true, 8); // Start with ACTIVE class
-            User learner = saveLearner("learner@test.com");
-            
-            // Add learner to active class (should be active)
-            String addBody = String.format("{\"userId\":\"%s\"}", learner.getId());
-            mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
-                            .contentType(MediaType.APPLICATION_JSON).content(addBody)
-                            .header("Authorization", "Bearer " + mgrToken))
-                    .andExpect(status().isCreated())
-                    .andExpect(jsonPath("$.success").value(true));
-            
-            // Verify learner is active in class (initial state)
-            mockMvc.perform(get("/api/v1/classes/{classId}/members", clazz.getId())
-                            .param("page", "0").param("size", "10")
-                            .header("Authorization", "Bearer " + mgrToken))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content.length()").value(1))
-                    .andExpect(jsonPath("$.data.content[0].userId").value(learner.getId().toString()));
+            // Create an initially INACTIVE class (future startDate, isActive=false)
+            Clazz clazz = saveClass("Reactivate Me", teacher.getId(), course.getId(), false, 8);
 
-            // Deactivate class first
-            mockMvc.perform(put("/api/v1/classes/{classId}", clazz.getId())
-                            .contentType(MediaType.APPLICATION_JSON).content("{\"isActive\":false}")
-                            .header("Authorization", "Bearer " + mgrToken))
+            // Teacher cannot see inactive class
+            mockMvc.perform(get("/api/v1/classes").param("page", "0").param("size", "10")
+                            .header("Authorization", "Bearer " + tToken))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.isActive").value(false));
+                    .andExpect(jsonPath("$.data.content.length()").value(0));
 
-            // Check learner status becomes inactive after class deactivation
-            User learnerUser = userRepository.findById(learner.getId())
-                    .orElseThrow(() -> new AssertionError("Learner not found in database"));
-            // Verify learner's user status becomes inactive when class is deactivated
-            assertThat(learnerUser.getStatus()).isEqualTo(UserStatus.INACTIVE);
-            // Reactivate
+            // Update startDate to today with no members → auto-activate (ClassServiceImpl)
+            String body = String.format("{\"startDate\":\"%s\"}", LocalDate.now());
             mockMvc.perform(put("/api/v1/classes/{classId}", clazz.getId())
-                            .contentType(MediaType.APPLICATION_JSON).content("{\"isActive\":true}")
+                            .contentType(MediaType.APPLICATION_JSON).content(body)
                             .header("Authorization", "Bearer " + mgrToken))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.isActive").value(true));
 
-            // Teacher list — class visible
+            // Teacher list — class now visible
             mockMvc.perform(get("/api/v1/classes").param("page", "0").param("size", "10")
                             .header("Authorization", "Bearer " + tToken))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.content.length()").value(1));
 
-            // Assign learner — succeeds
+            // Assign a new learner — succeeds now that class is active
             User newLearner = saveLearner("newlearner@test.com");
-            String newAddBody = String.format("{\"userId\":\"%s\"}", newLearner.getId());
+            String addBody = String.format("{\"userId\":\"%s\"}", newLearner.getId());
             mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
-                            .contentType(MediaType.APPLICATION_JSON).content(newAddBody)
+                            .contentType(MediaType.APPLICATION_JSON).content(addBody)
                             .header("Authorization", "Bearer " + mgrToken))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true));
-
-            // Check learner status becomes active after class reactivation
-            User learnerActiveUser = userRepository.findById(learner.getId())
-                    .orElseThrow(() -> new AssertionError("Learner not found in database"));
-            // Verify learner's user status becomes inactive when class is deactivated
-            assertThat(learnerActiveUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
         }
 
         @Test
@@ -1420,9 +1399,8 @@ class ClassManagementTest {
             // No description field in the payload
             String body = String.format(
                     "{\"name\":\"No Desc Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\",\"endDate\":\"%s\"}",
-                    teacher.getId(), course.getId(),
-                    LocalDate.now().plusDays(1), LocalDate.now().plusMonths(3));
+                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                    teacher.getId(), course.getId(), LocalDate.now().plusDays(1));
 
             MvcResult result = mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -1469,9 +1447,8 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Ghost Teacher Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\",\"endDate\":\"%s\"}",
-                    UUID.randomUUID(), course.getId(),
-                    LocalDate.now().plusDays(1), LocalDate.now().plusMonths(3));
+                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                    UUID.randomUUID(), course.getId(), LocalDate.now().plusDays(1));
 
             mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -1491,9 +1468,8 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Ghost Course Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\",\"endDate\":\"%s\"}",
-                    teacher.getId(), UUID.randomUUID(),
-                    LocalDate.now().plusDays(1), LocalDate.now().plusMonths(3));
+                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                    teacher.getId(), UUID.randomUUID(), LocalDate.now().plusDays(1));
 
             mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -1514,9 +1490,8 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Default Max Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"startDate\":\"%s\",\"endDate\":\"%s\"}",
-                    teacher.getId(), course.getId(),
-                    LocalDate.now().plusDays(1), LocalDate.now().plusMonths(3));
+                    "\"startDate\":\"%s\"}",
+                    teacher.getId(), course.getId(), LocalDate.now().plusDays(1));
 
             MvcResult result = mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -1579,23 +1554,28 @@ class ClassManagementTest {
         }
 
         @Test
-        @DisplayName("TC_CLM_UC_009 — endDate ≤ startDate on update → INVALID_DATE_RANGE")
+        @DisplayName("TC_CLM_UC_009 — Update startDate to after current startDate when members exist → INVALID_START_DATE")
         void tc_clm_uc_009() throws Exception {
+            // UpdateClassRequest has no endDate; INVALID_DATE_RANGE no longer applies.
+            // INVALID_START_DATE is thrown when currentMembers > 0 and new startDate > old startDate.
             saveManager("manager@test.com");
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
+            // Class starts today (startDate = now), is active
             Clazz clazz = saveClass("Date Test", teacher.getId(), course.getId(), true, 8);
+            // Add a member so the INVALID_START_DATE guard is triggered
+            saveClassMember(clazz.getId(), saveLearner("member@test.com").getId());
 
-            LocalDate start = LocalDate.now().plusDays(5);
-            String body = String.format("{\"startDate\":\"%s\",\"endDate\":\"%s\"}", start, start);
+            // Try to push startDate to the future (after current startDate) with members present
+            String body = String.format("{\"startDate\":\"%s\"}", LocalDate.now().plusDays(5));
 
             mockMvc.perform(put("/api/v1/classes/{classId}", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(body)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("INVALID_DATE_RANGE"));
+                    .andExpect(jsonPath("$.code").value("INVALID_START_DATE"));
         }
 
         @Test
