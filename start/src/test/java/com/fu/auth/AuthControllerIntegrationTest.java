@@ -633,7 +633,7 @@ class   AuthControllerIntegrationTest {
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+                    .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
         }
     }
 
@@ -992,7 +992,7 @@ class   AuthControllerIntegrationTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(verifyRequest)))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                    .andExpect(jsonPath("$.code").value("INVALID_OTP"))
                     .andExpect(jsonPath("$.message").value("Mã OTP không hợp lệ"));
         }
 

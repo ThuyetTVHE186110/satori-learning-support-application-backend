@@ -194,6 +194,9 @@ public class ClassServiceImpl implements ClassService {
             newHistory.setCreatedBy(managerId);
             newHistory.setUpdatedBy(managerId);
             classTeacherHistoryRepository.save(newHistory);
+            
+            // Update teacherId in Clazz entity
+            clazz.setTeacherId(request.getTeacherId());
         }
         Clazz updatedClazz = classRepository.save(clazz);
         log.info("Cập nhật lớp học thành công: {}", classId);
@@ -437,10 +440,11 @@ public class ClassServiceImpl implements ClassService {
     private ClassResponse toResponseWithMemberCount(Clazz clazz) {
         ClassResponse response = classMapper.toResponse(clazz);
         response.setMemberCount(classMemberRepository.countActiveByClassId(clazz.getId()));
-        UUID currentTeacherId = classTeacherHistoryRepository.findCurrentTeacherIdByClassId(clazz.getId()).orElse(null);
-        // Enrich with teacher info
-        if (currentTeacherId != null) {
-            userRepository.findById(currentTeacherId).ifPresent(teacher -> {
+        
+        // Enrich with teacher info from teacherId
+        if (clazz.getTeacherId() != null) {
+            userRepository.findById(clazz.getTeacherId()).ifPresent(teacher -> {
+                response.setTeacherId(teacher.getId());
                 response.setTeacherName(teacher.getFullName());
                 response.setTeacherEmail(teacher.getEmail());
                 response.setTeacherAvatarUrl(teacher.getAvatarUrl());

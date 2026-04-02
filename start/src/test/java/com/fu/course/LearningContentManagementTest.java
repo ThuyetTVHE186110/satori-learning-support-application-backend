@@ -86,16 +86,16 @@ class LearningContentManagementTest {
         return courseRepository.save(Course.builder().name(name).description("Test course").jlptLevel(JlptLevel.N5).status(CourseStatus.ACTIVE).orderIndex(0).build());
     }
 
-    private Lesson saveLesson(Course course, String title, Lesson.LessonType type, int orderIndex) {
-        return lessonRepository.save(Lesson.builder().course(course).title(title).lessonType(type).status(Lesson.ContentStatus.DRAFT).orderIndex(orderIndex).build());
+    private Lesson saveLesson(Course course, String title,  int orderIndex) {
+        return lessonRepository.save(Lesson.builder().course(course).title(title).status(Lesson.ContentStatus.DRAFT).orderIndex(orderIndex).build());
     }
     
-    private Lesson saveLessonWithStatus(Course course, String title, Lesson.LessonType type, Lesson.ContentStatus status, int orderIndex) {
-        return lessonRepository.save(Lesson.builder().course(course).title(title).lessonType(type).status(status).orderIndex(orderIndex).build());
+    private Lesson saveLessonWithStatus(Course course, String title,  Lesson.ContentStatus status, int orderIndex) {
+        return lessonRepository.save(Lesson.builder().course(course).title(title).status(status).orderIndex(orderIndex).build());
     }
 
     private Lesson saveLessonWithImportId(Course course, String title, UUID importId, int orderIndex) {
-        return lessonRepository.save(Lesson.builder().course(course).title(title).lessonType(Lesson.LessonType.VOCABULARY).status(Lesson.ContentStatus.DRAFT).importId(importId).orderIndex(orderIndex).build());
+        return lessonRepository.save(Lesson.builder().course(course).title(title).status(Lesson.ContentStatus.DRAFT).importId(importId).orderIndex(orderIndex).build());
     }
 
     private Vocabulary saveVocabulary(String japaneseText, JlptLevel level) {
@@ -147,7 +147,7 @@ class LearningContentManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("N5 Course");
-            Lesson savedLesson = saveLesson(course, "Lesson 1", Lesson.LessonType.VOCABULARY, 0);
+            Lesson savedLesson = saveLesson(course, "Lesson 1", 0);
 
             mockMvc.perform(get("/api/v1/manager/lessons").param("courseId", course.getId().toString()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
@@ -173,8 +173,8 @@ class LearningContentManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("N5 Course");
-            saveLesson(course, "Apple Lesson", Lesson.LessonType.VOCABULARY, 0);
-            saveLesson(course, "Banana Lesson", Lesson.LessonType.VOCABULARY, 1);
+            saveLesson(course, "Apple Lesson",  0);
+            saveLesson(course, "Banana Lesson",  1);
 
             mockMvc.perform(get("/api/v1/manager/lessons").param("courseId", course.getId().toString()).param("keyword", "Apple").header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
@@ -189,8 +189,8 @@ class LearningContentManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("N5 Course");
-            saveLessonWithStatus(course, "Draft Lesson", Lesson.LessonType.VOCABULARY, Lesson.ContentStatus.DRAFT, 0);
-            saveLessonWithStatus(course, "Published Lesson", Lesson.LessonType.VOCABULARY, Lesson.ContentStatus.PUBLISHED, 1);
+            saveLessonWithStatus(course, "Draft Lesson",  Lesson.ContentStatus.DRAFT, 0);
+            saveLessonWithStatus(course, "Published Lesson",  Lesson.ContentStatus.PUBLISHED, 1);
 
             mockMvc.perform(get("/api/v1/manager/lessons").param("courseId", course.getId().toString()).param("status", "PUBLISHED").header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
@@ -206,7 +206,7 @@ class LearningContentManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("N5 Course");
             for(int i=0; i<15; i++) {
-                saveLesson(course, "Lesson " + i, Lesson.LessonType.VOCABULARY, i);
+                saveLesson(course, "Lesson " + i,  i);
             }
 
             mockMvc.perform(get("/api/v1/manager/lessons").param("courseId", course.getId().toString()).param("page", "1").param("size", "10").header("Authorization", "Bearer " + token))
@@ -260,7 +260,7 @@ class LearningContentManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("N5");
-            Lesson lesson = saveLesson(course, "Detail Lesson", Lesson.LessonType.VOCABULARY, 0);
+            Lesson lesson = saveLesson(course, "Detail Lesson",  0);
 
             mockMvc.perform(get("/api/v1/manager/lessons/{id}", lesson.getId()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
@@ -481,7 +481,7 @@ class LearningContentManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("N5 Course");
-            Lesson lesson = saveLessonWithStatus(course, "Draft Lesson", Lesson.LessonType.VOCABULARY, Lesson.ContentStatus.DRAFT, 0);
+            Lesson lesson = saveLessonWithStatus(course, "Draft Lesson",  Lesson.ContentStatus.DRAFT, 0);
 
             mockMvc.perform(patch("/api/v1/manager/lessons/{id}/publish", lesson.getId()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
@@ -500,7 +500,7 @@ class LearningContentManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("N5 Course");
-            Lesson lesson = saveLessonWithStatus(course, "Published Lesson", Lesson.LessonType.VOCABULARY, Lesson.ContentStatus.PUBLISHED, 0);
+            Lesson lesson = saveLessonWithStatus(course, "Published Lesson", Lesson.ContentStatus.PUBLISHED, 0);
 
             mockMvc.perform(patch("/api/v1/manager/lessons/{id}/publish", lesson.getId()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
@@ -513,7 +513,7 @@ class LearningContentManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("N5 Course");
-            Lesson lesson = saveLessonWithStatus(course, "Published Lesson", Lesson.LessonType.VOCABULARY, Lesson.ContentStatus.PUBLISHED, 0);
+            Lesson lesson = saveLessonWithStatus(course, "Published Lesson",  Lesson.ContentStatus.PUBLISHED, 0);
 
             mockMvc.perform(patch("/api/v1/manager/lessons/{id}/archive", lesson.getId()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
@@ -531,7 +531,7 @@ class LearningContentManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("N5 Course");
-            Lesson lesson = saveLessonWithStatus(course, "Draft Lesson", Lesson.LessonType.VOCABULARY, Lesson.ContentStatus.DRAFT, 0);
+            Lesson lesson = saveLessonWithStatus(course, "Draft Lesson", Lesson.ContentStatus.DRAFT, 0);
 
             mockMvc.perform(patch("/api/v1/manager/lessons/{id}/archive", lesson.getId()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
@@ -583,7 +583,7 @@ class LearningContentManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("N5");
-            Lesson lesson = saveLesson(course, "Old Name", Lesson.LessonType.VOCABULARY, 0);
+            Lesson lesson = saveLesson(course, "Old Name",  0);
 
             String body = "{\"title\":\"Updated Name\"}";
 
@@ -601,7 +601,7 @@ class LearningContentManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("N5");
-            Lesson lesson = saveLesson(course, "To Delete", Lesson.LessonType.VOCABULARY, 0);
+            Lesson lesson = saveLesson(course, "To Delete",  0);
 
             mockMvc.perform(delete("/api/v1/manager/lessons/{id}", lesson.getId()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
@@ -755,8 +755,8 @@ class LearningContentManagementTest {
         @DisplayName("TC_LCM_PB_001 – View published lessons")
         void tc_lcm_pb_001() throws Exception {
             Course course = saveCourse("Public Course");
-            saveLessonWithStatus(course, "Published", Lesson.LessonType.VOCABULARY, Lesson.ContentStatus.PUBLISHED, 0);
-            saveLessonWithStatus(course, "Draft", Lesson.LessonType.VOCABULARY, Lesson.ContentStatus.DRAFT, 1);
+            saveLessonWithStatus(course, "Published", Lesson.ContentStatus.PUBLISHED, 0);
+            saveLessonWithStatus(course, "Draft",  Lesson.ContentStatus.DRAFT, 1);
 
             mockMvc.perform(get("/api/v1/courses/{id}/lessons", course.getId()))
                     .andExpect(status().isOk())
@@ -773,7 +773,7 @@ class LearningContentManagementTest {
         @DisplayName("TC_LCM_PB_002 – View published lesson detail")
         void tc_lcm_pb_002() throws Exception {
             Course course = saveCourse("Public Course");
-            Lesson lesson = saveLessonWithStatus(course, "Detail", Lesson.LessonType.VOCABULARY, Lesson.ContentStatus.PUBLISHED, 0);
+            Lesson lesson = saveLessonWithStatus(course, "Detail",  Lesson.ContentStatus.PUBLISHED, 0);
 
             mockMvc.perform(get("/api/v1/courses/{courseId}/lessons/{lessonId}", course.getId(), lesson.getId()))
                     .andExpect(status().isOk())
@@ -789,7 +789,7 @@ class LearningContentManagementTest {
         @DisplayName("TC_LCM_PB_003 – Draft lesson not in public list")
         void tc_lcm_pb_003() throws Exception {
             Course course = saveCourse("Public Course");
-            Lesson draft = saveLessonWithStatus(course, "Draft", Lesson.LessonType.VOCABULARY, Lesson.ContentStatus.DRAFT, 0);
+            Lesson draft = saveLessonWithStatus(course, "Draft",  Lesson.ContentStatus.DRAFT, 0);
 
             mockMvc.perform(get("/api/v1/courses/{id}/lessons", course.getId()))
                     .andExpect(status().isOk())

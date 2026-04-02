@@ -137,7 +137,6 @@ class CourseManagementTest {
                 .description("Test description")
                 .jlptLevel(level)
                 .status(status)
-                .thumbnailUrl(thumbnailUrl)
                 .orderIndex(0)
                 .build());
     }
@@ -185,7 +184,6 @@ class CourseManagementTest {
         return lessonRepository.save(Lesson.builder()
                 .course(course)
                 .title(title)
-                .lessonType(Lesson.LessonType.VOCABULARY)
                 .status(Lesson.ContentStatus.DRAFT)
                 .orderIndex(0)
                 .build());
@@ -475,7 +473,6 @@ class CourseManagementTest {
             String idStr = objectMapper.readTree(result.getResponse().getContentAsString())
                     .path("data").path("id").asText();
             Course course = courseRepository.findByIdAndNotDeleted(UUID.fromString(idStr)).orElseThrow();
-            assertThat(course.getThumbnailUrl()).isNull();
             assertThat(course.getDeletedAt()).isNull();
 
             // Assert Cloudinary not called
@@ -517,7 +514,6 @@ class CourseManagementTest {
             String idStr = objectMapper.readTree(result.getResponse().getContentAsString())
                     .path("data").path("id").asText();
             Course course = courseRepository.findByIdAndNotDeleted(UUID.fromString(idStr)).orElseThrow();
-            assertThat(course.getThumbnailUrl()).isEqualTo(mockThumbnailUrl);
             assertThat(course.getDeletedAt()).isNull();
 
             // Assert Cloudinary called
@@ -805,7 +801,6 @@ class CourseManagementTest {
             Course updated = courseRepository.findByIdAndNotDeleted(course.getId()).orElseThrow();
             assertThat(updated.getName()).isEqualTo("New Name");
             assertThat(updated.getDescription()).isEqualTo("New Desc");
-            assertThat(updated.getThumbnailUrl()).isEqualTo("https://old.url/thumb.jpg");
             assertThat(updated.getUpdatedAt()).isNotNull();
         }
 
@@ -849,7 +844,6 @@ class CourseManagementTest {
             Course updated = courseRepository.findByIdAndNotDeleted(course.getId()).orElseThrow();
             assertThat(updated.getName()).isEqualTo("Updated Name");
             assertThat(updated.getDescription()).isEqualTo("Updated description");
-            assertThat(updated.getThumbnailUrl()).isEqualTo(newThumbnailUrl);
             assertThat(updated.getUpdatedAt()).isNotNull();
 
             // Assert Cloudinary was called for upload and delete

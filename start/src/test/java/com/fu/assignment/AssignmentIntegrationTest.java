@@ -139,7 +139,7 @@ class AssignmentIntegrationTest {
     private Clazz saveClass(User teacher, Course course) {
         return classRepository.save(Clazz.builder()
                 .name("Test Class 101").description("test class")
-                .teacherId(teacher.getId()).courseId(course.getId())
+                .courseId(course.getId())
                 .isActive(true).maxStudents(30)
                 .startDate(LocalDate.now().plusDays(1))
                 .endDate(LocalDate.now().plusMonths(3))

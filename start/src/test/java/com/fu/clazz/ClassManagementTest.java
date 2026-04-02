@@ -130,7 +130,7 @@ class ClassManagementTest {
                             boolean isActive, int maxStudents) {
         return classRepository.save(Clazz.builder()
                 .name(name).description("Test class")
-                .teacherId(teacherId).courseId(courseId)
+                .courseId(courseId)
                 .isActive(isActive).maxStudents(maxStudents)
                 .startDate(LocalDate.now().plusDays(1))
                 .endDate(LocalDate.now().plusMonths(3))
@@ -235,8 +235,6 @@ class ClassManagementTest {
                 if ("Class A".equals(classNode.path("name").asText())) {
                     assertThat(classNode.path("id").asText()).isEqualTo(classA.getId().toString());
                     assertThat(classNode.path("name").asText()).isEqualTo("Class A");
-                    assertThat(classNode.path("teacherId").asText()).isEqualTo(teacher.getId().toString());
-                    assertThat(classNode.path("teacherName").asText()).isEqualTo("Test Teacher");
                     assertThat(classNode.path("courseId").asText()).isEqualTo(course.getId().toString());
                     assertThat(classNode.path("courseName").asText()).isEqualTo("Japanese N5");
                     assertThat(classNode.path("courseLevel").asText()).isEqualTo("N5");
@@ -375,7 +373,6 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.data.id").value(clazz.getId().toString()))
                     .andExpect(jsonPath("$.data.name").value("Test Class"))
                     .andExpect(jsonPath("$.data.description").value("Test class"))
-                    .andExpect(jsonPath("$.data.teacherId").value(teacher.getId().toString()))
                     .andExpect(jsonPath("$.data.courseId").value(course.getId().toString()))
                     .andExpect(jsonPath("$.data.courseName").value("Japanese N5"))
                     .andExpect(jsonPath("$.data.courseLevel").value("N5"))
@@ -608,7 +605,6 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.data.id").isNotEmpty())
                     .andExpect(jsonPath("$.data.name").value("Japanese N5 Class"))
                     .andExpect(jsonPath("$.data.isActive").value(true)) // Auto-activated since startDate ≤ current date
-                    .andExpect(jsonPath("$.data.teacherId").value(teacher.getId().toString()))
                     .andExpect(jsonPath("$.data.courseId").value(course.getId().toString()))
                     .andReturn();
 
@@ -640,7 +636,6 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.data.id").isNotEmpty())
                     .andExpect(jsonPath("$.data.name").value("Future Japanese N5 Class"))
                     .andExpect(jsonPath("$.data.isActive").value(false)) // Auto-inactive since startDate > current date
-                    .andExpect(jsonPath("$.data.teacherId").value(teacher.getId().toString()))
                     .andExpect(jsonPath("$.data.courseId").value(course.getId().toString()))
                     .andReturn();
 
@@ -820,7 +815,6 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.data.name").value("New Name"))
                     .andExpect(jsonPath("$.data.description").value("Updated desc"))
                     .andExpect(jsonPath("$.data.memberCount").value(1))
-                    .andExpect(jsonPath("$.data.teacherId").value(teacher.getId().toString()))
                     .andExpect(jsonPath("$.data.teacherName").isNotEmpty())
                     .andExpect(jsonPath("$.data.updatedBy").value(manager.getId().toString()))
                     .andExpect(jsonPath("$.data.updatedAt").isNotEmpty());
