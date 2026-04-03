@@ -618,7 +618,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_CLM_CC_004
-**Test Case Description:** endDate ≤ startDate → INVALID_DATE_RANGE
+**Test Case Description:** startDate in the future → class created as inactive
 
 **Pre-conditions:**
 - Manager accessToken is available (from prior login)
@@ -626,17 +626,34 @@ Response JSON:
 - Course exists with ACTIVE status
 
 **Test Case Procedure:**
-1. Client sends POST /api/v1/classes with Authorization: Bearer {token} and JSON body where startDate = endDate.
+1. Client sends POST /api/v1/classes with Authorization: Bearer {token} and JSON body:
+   {
+     "name": "Future Class",
+     "teacherId": "{teacherId}",
+     "courseId": "{courseId}",
+     "maxStudents": 8,
+     "startDate": "{10DaysFromNow}"
+   }
 2. AuthFilter validates token and resolves OPERATION_MANAGER user identity.
 3. ClassController calls ClassService.createClass().
-4. ClassService validates date range and detects endDate ≤ startDate.
-5. ClassService throws BusinessException with INVALID_DATE_RANGE.
-6. System returns the validation error response.
+4. ClassService validates class name uniqueness via ClassRepository.findByName().
+5. ClassRepository executes database query and returns empty (no existing class).
+6. ClassService validates teacher exists and has TEACHER role via UserRepository.
+7. ClassService validates course exists and is ACTIVE via CourseRepository.
+8. ClassService creates new Class entity and determines isActive based on startDate comparison:
+   - startDate > current date, so isActive = false (auto-inactive)
+9. ClassRepository saves the new class.
+10. System returns the created class response.
 
-**Expected Results:** HTTP 400 BAD REQUEST
+**Expected Results:** HTTP 201 CREATED
 Response JSON:
-- success = false
-- code = "INVALID_DATE_RANGE"
+- success = true
+- data.id = non-empty UUID
+- data.name = "Future Class"
+- data.isActive = false (auto-inactive since startDate > current date)
+- data.teacherId = teacher UUID
+- data.courseId = course UUID
+Database state: class.isActive = false, class.deletedAt = null
 
 ---
 
@@ -893,7 +910,7 @@ Teacher2 class list: 1 class
 ---
 
 ### Test Case ID: TC_CLM_UC_003
-**Test Case Description:** Deactivate class: disappears from teacher list, assign learner blocked, learners become inactive
+**Test Case Description:** Close class via /close endpoint: disappears from teacher list, assign learner blocked, learners become inactive
 
 **Pre-conditions:**
 - Manager accessToken is available (from prior login)
@@ -903,15 +920,14 @@ Teacher2 class list: 1 class
 - Learner added to class
 
 **Test Case Procedure:**
-1. Client sends PUT /api/v1/classes/{classId} with Authorization: Bearer {token} and JSON body:
-   { "isActive": false }
+1. Client sends PUT /api/v1/classes/{classId}/close with Authorization: Bearer {token}.
 2. AuthFilter validates token and resolves OPERATION_MANAGER user identity.
-3. ClassController calls ClassService.updateClass().
+3. ClassController calls ClassService.closeClass().
 4. ClassService updates class to isActive=false.
 5. ClassRepository saves the updated class.
 6. ClassService updates all active members to INACTIVE status.
 7. System returns the updated class response.
-8. Teacher lists classes → class not visible
+8. Teacher lists classes → class not visible (teacher sees only active classes)
 9. Attempt to assign new learner → blocked with CLASS_INACTIVE
 10. Check existing learner status → INACTIVE
 
@@ -922,31 +938,31 @@ Response JSON:
 Teacher class list: 0 classes
 New learner assignment: HTTP 400 with CLASS_INACTIVE
 Existing learner status: INACTIVE
+Database state: class.isActive = false, learner.status = INACTIVE
 
 ---
 
 ### Test Case ID: TC_CLM_UC_004
-**Test Case Description:** Reactivate class: reappears in teacher list, assign learner re-enabled, learners become active
+**Test Case Description:** Reactivate class: update startDate to today when no members → auto-activated, reappears in teacher list
 
 **Pre-conditions:**
 - Manager accessToken is available (from prior login)
 - Teacher user exists in database
 - Course exists with ACTIVE status
-- Class exists with isActive=false
-- Learner added to class (status INACTIVE)
+- Class exists with isActive=false (future startDate)
+- No members in class
 
 **Test Case Procedure:**
 1. Client sends PUT /api/v1/classes/{classId} with Authorization: Bearer {token} and JSON body:
-   { "isActive": true }
+   { "startDate": "{today}" }
 2. AuthFilter validates token and resolves OPERATION_MANAGER user identity.
 3. ClassController calls ClassService.updateClass().
-4. ClassService updates class to isActive=true.
-5. ClassRepository saves the updated class.
-6. ClassService updates all members to ACTIVE status.
+4. ClassService updates startDate to today and detects no members present.
+5. ClassService auto-activates class (isActive=true) when startDate ≤ today and no members.
+6. ClassRepository saves the updated class.
 7. System returns the updated class response.
 8. Teacher lists classes → class visible
 9. Assign new learner → succeeds
-10. Check existing learner status → ACTIVE
 
 **Expected Results:** HTTP 200 OK
 Response JSON:
@@ -954,7 +970,7 @@ Response JSON:
 - data.isActive = true
 Teacher class list: 1 class
 New learner assignment: HTTP 201 Created
-Existing learner status: ACTIVE
+Database state: class.isActive = true, class.startDate = today
 
 ---
 
@@ -1036,26 +1052,31 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_CLM_UC_009
-**Test Case Description:** endDate ≤ startDate on update → INVALID_DATE_RANGE
+**Test Case Description:** Update startDate to after current startDate when members exist → INVALID_START_DATE
 
 **Pre-conditions:**
 - Manager accessToken is available (from prior login)
 - Teacher user exists in database
 - Course exists with ACTIVE status
-- Class exists with valid date range
+- Class exists with startDate = today, isActive=true
+- At least one member exists in class
 
 **Test Case Procedure:**
-1. Client sends PUT /api/v1/classes/{classId} with Authorization: Bearer {token} and JSON body where startDate = endDate.
+1. Client sends PUT /api/v1/classes/{classId} with Authorization: Bearer {token} and JSON body:
+   { "startDate": "{5DaysFromNow}" }
 2. AuthFilter validates token and resolves OPERATION_MANAGER user identity.
 3. ClassController calls ClassService.updateClass().
-4. ClassService validates date range and detects endDate ≤ startDate.
-5. ClassService throws BusinessException with INVALID_DATE_RANGE.
-6. System returns the validation error response.
+4. ClassService detects class has existing members.
+5. ClassService validates startDate change and detects new startDate > old startDate.
+6. ClassService throws BusinessException with INVALID_START_DATE.
+7. System returns the validation error response.
 
 **Expected Results:** HTTP 400 BAD REQUEST
 Response JSON:
 - success = false
-- code = "INVALID_DATE_RANGE"
+- code = "INVALID_START_DATE"
+- message = "Không thể thay đổi startDate sang ngày muộn hơn khi lớp đã có học viên."
+Database state: class.startDate unchanged
 
 ---
 
@@ -1500,6 +1521,7 @@ Response JSON:
 - success = true
 - data.removedAt = empty/null
 Database state: Exactly one ClassMember record exists with removedAt=null
+No duplicate membership records created
 
 ---
 
@@ -1529,7 +1551,11 @@ Database state: Exactly one ClassMember record exists with removedAt=null
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-Database state: ClassMember.removedAt = non-null timestamp
+- message = "Xóa học viên ra khỏi lớp học thành công."
+Database state: 
+- ClassMember.removedAt = non-null timestamp
+- Active member count for class = 0
+- Learner status = INACTIVE (if no other active classes)
 Learner no longer appears in active members list
 
 ---
@@ -1585,33 +1611,6 @@ Response JSON:
 
 ---
 
-### Test Case ID: TC_CLM_RL_004
-**Test Case Description:** Remove success: success message, removedAt set, count decremented, learner→INACTIVE when no other active class
-
-**Pre-conditions:**
-- Manager accessToken is available (from prior login)
-- Teacher user exists in database
-- Course exists with ACTIVE status
-- Class exists with isActive=true
-- Learner added as active member (only active class)
-
-**Test Case Procedure:**
-1. Client sends DELETE /api/v1/classes/{classId}/members/{userId} with Authorization: Bearer {token}.
-2. AuthFilter validates token and resolves OPERATION_MANAGER user identity.
-3. ClassController calls ClassService.removeMember().
-4. ClassService updates ClassMember.removedAt to current timestamp.
-5. ClassRepository saves the updated ClassMember.
-6. ClassService checks learner has no other active classes and sets status to INACTIVE.
-7. UserRepository updates learner status.
-8. System returns success response.
-
-**Expected Results:** HTTP 200 OK
-Response JSON:
-- success = true
-- message = "Xóa học viên ra khỏi lớp học thành công."
-Database state: ClassMember.removedAt = non-null, learner.status = INACTIVE
-
----
 
 ### Test Case ID: TC_CLM_RL_005
 **Test Case Description:** Remove from non-existing class → 404 NOT_FOUND
@@ -1733,7 +1732,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_CLM_DC_004
-**Test Case Description:** Delete active class: active learners become inactive, ClassMember records preserved
+**Test Case Description:** Cannot delete active class with enrolled learners → CLASS_HAS_LEARNERS
 
 **Pre-conditions:**
 - Manager accessToken is available (from prior login)
@@ -1748,19 +1747,19 @@ Response JSON:
 3. ClassController calls ClassService.deleteClass().
 4. ClassService retrieves class by ID via ClassRepository.findByIdAndNotDeleted().
 5. ClassRepository executes database query and returns the class object.
-6. ClassService performs soft delete: sets deletedAt and deletedBy via ClassRepository.save().
-7. ClassRepository saves the updated class with soft delete fields.
-8. ClassService checks all active members and updates their status to INACTIVE since their only active class was deleted.
-9. UserRepository updates learner statuses to INACTIVE.
-10. System returns the delete success response.
+6. ClassService checks for active members and detects enrolled learners exist.
+7. ClassService throws BusinessException with CLASS_HAS_LEARNERS.
+8. System returns the validation error response.
 
-**Expected Results:** HTTP 200 OK
+**Expected Results:** HTTP 400 BAD REQUEST
 Response JSON:
-- success = true
+- success = false
+- code = "CLASS_HAS_LEARNERS"
+- message = "Không thể xóa lớp học khi còn học viên."
 Database state: 
-- ClassMember records still exist with removedAt = null (NOT cascade-deleted)
-- Teacher status unchanged (ACTIVE)
-- Learner statuses changed to INACTIVE (since their active class was deleted)
+- Class remains active (deletedAt = null)
+- Learner statuses unchanged (ACTIVE)
+- ClassMember records unchanged
 
 ---
 

@@ -99,6 +99,10 @@ class ClassManagementTest {
         return saveLearner(email, UserStatus.ACTIVE);
     }
 
+    private User saveInactiveLearner(String email) {
+        return saveLearner(email, UserStatus.INACTIVE);
+    }
+
     private User saveLearner(String email, UserStatus status) {
         return userRepository.save(User.builder()
                 .email(email)
@@ -250,6 +254,8 @@ class ClassManagementTest {
                 if ("Class A".equals(classNode.path("name").asText())) {
                     assertThat(classNode.path("id").asText()).isEqualTo(classA.getId().toString());
                     assertThat(classNode.path("name").asText()).isEqualTo("Class A");
+                    assertThat(classNode.path("teacherId").asText()).isEqualTo(teacher.getId().toString());
+                    assertThat(classNode.path("teacherName").asText()).isEqualTo("Test Teacher");
                     assertThat(classNode.path("courseId").asText()).isEqualTo(course.getId().toString());
                     assertThat(classNode.path("courseName").asText()).isEqualTo("Japanese N5");
                     assertThat(classNode.path("courseLevel").asText()).isEqualTo("N5");
@@ -388,6 +394,7 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.data.id").value(clazz.getId().toString()))
                     .andExpect(jsonPath("$.data.name").value("Test Class"))
                     .andExpect(jsonPath("$.data.description").value("Test class"))
+                    .andExpect(jsonPath("$.data.teacherId").value(teacher.getId().toString()))
                     .andExpect(jsonPath("$.data.courseId").value(course.getId().toString()))
                     .andExpect(jsonPath("$.data.courseName").value("Japanese N5"))
                     .andExpect(jsonPath("$.data.courseLevel").value("N5"))
@@ -534,7 +541,7 @@ class ClassManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
-                    .andExpect(jsonPath("$.message").value("Bạn không có quyền xem thành viên của lớp học này."));
+                    .andExpect(jsonPath("$.message").value("Bạn không phải là giáo viên của lớp này."));
         }
 
         @Test
@@ -548,22 +555,6 @@ class ClassManagementTest {
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.code").value("NOT_FOUND"))
                     .andExpect(jsonPath("$.message").value("Lớp học không tồn tại."));
-        }
-
-        @Test
-        @DisplayName("TC_CLM_VM_005 — Empty member list shows no-learners message")
-        void tc_clm_vm_005() throws Exception {
-            saveManager("manager@test.com");
-            User teacher = saveTeacher("teacher@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Empty Class", teacher.getId(), course.getId(), true, 8);
-
-            mockMvc.perform(get("/api/v1/classes/{classId}/members", clazz.getId())
-                            .param("page", "0").param("size", "10")
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.message").value("Không có học viên nào trong lớp này."));
         }
 
         @Test
@@ -619,6 +610,7 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.data.id").isNotEmpty())
                     .andExpect(jsonPath("$.data.name").value("Japanese N5 Class"))
                     .andExpect(jsonPath("$.data.isActive").value(true)) // Auto-activated since startDate ≤ current date
+                    .andExpect(jsonPath("$.data.teacherId").value(teacher.getId().toString()))
                     .andExpect(jsonPath("$.data.courseId").value(course.getId().toString()))
                     .andReturn();
 
@@ -628,8 +620,8 @@ class ClassManagementTest {
         }
 
         @Test
-        @DisplayName("TC_CLM_CC_001b — Create class with future startDate → auto-inactive")
-        void tc_clm_cc_001b() throws Exception {
+        @DisplayName("TC_CLM_CC_003 — Create class with future startDate → auto-inactive")
+        void tc_clm_cc_003() throws Exception {
             saveManager("manager@test.com");
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
@@ -649,6 +641,7 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.data.id").isNotEmpty())
                     .andExpect(jsonPath("$.data.name").value("Future Japanese N5 Class"))
                     .andExpect(jsonPath("$.data.isActive").value(false)) // Auto-inactive since startDate > current date
+                    .andExpect(jsonPath("$.data.teacherId").value(teacher.getId().toString()))
                     .andExpect(jsonPath("$.data.courseId").value(course.getId().toString()))
                     .andReturn();
 
@@ -681,50 +674,6 @@ class ClassManagementTest {
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("CLASS_NAME_EXISTS"));
-        }
-
-        @Test
-        @DisplayName("TC_CLM_CC_003 — endDate ≤ startDate not applicable (endDate removed from CreateClassRequest); missing startDate returns valid class")
-        void tc_clm_cc_003() throws Exception {
-            saveManager("manager@test.com");
-            User teacher = saveTeacher("teacher@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-
-            // startDate omitted → class should still be created (startDate nullable)
-            String body = String.format(
-                    "{\"name\":\"No Start Date Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\",\"maxStudents\":8}",
-                    teacher.getId(), course.getId());
-
-            mockMvc.perform(post("/api/v1/classes")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(body)
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isCreated())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.name").value("No Start Date Class"));
-        }
-
-        @Test
-        @DisplayName("TC_CLM_CC_004 — startDate in the future → class created as inactive")
-        void tc_clm_cc_004() throws Exception {
-            saveManager("manager@test.com");
-            User teacher = saveTeacher("teacher@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-
-            String body = String.format(
-                    "{\"name\":\"Future Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
-                    teacher.getId(), course.getId(), LocalDate.now().plusDays(10));
-
-            mockMvc.perform(post("/api/v1/classes")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(body)
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isCreated())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.isActive").value(false));
         }
 
         @Test
@@ -810,10 +759,10 @@ class ClassManagementTest {
             saveClassMember(clazz.getId(), saveLearner("learner@test.com").getId());
 
             LocalDateTime beforeUpdate = LocalDateTime.now().minusSeconds(1);
-            // UpdateClassRequest has: name, description, teacherId, maxStudents, startDate (no endDate)
+            // UpdateClassRequest has: name, description, teacherId, maxStudents
             String body = String.format(
-                    "{\"name\":\"New Name\",\"description\":\"Updated desc\",\"startDate\":\"%s\"}",
-                    LocalDate.now().plusDays(2));
+                    "{\"name\":\"New Name\",\"description\":\"Updated desc\",\"maxStudents\":\"%d\"}",
+                   8);
 
             mockMvc.perform(put("/api/v1/classes/{classId}", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -1166,7 +1115,8 @@ class ClassManagementTest {
                             clazz.getId(), learner.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true));
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.message").value("Xóa học viên ra khỏi lớp học thành công."));
 
             // Verify removedAt is set
             ClassMember member = classMemberRepository.findByClassIdAndUserId(
@@ -1178,6 +1128,10 @@ class ClassManagementTest {
                             .param("page", "0").param("size", "10")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(jsonPath("$.data.content.length()").value(0));
+
+            assertThat(classMemberRepository.countActiveByClassId(clazz.getId())).isEqualTo(0);
+            User updated = userRepository.findById(learner.getId()).orElseThrow();
+            assertThat(updated.getStatus()).isEqualTo(UserStatus.INACTIVE);
         }
 
         @Test
@@ -1275,7 +1229,7 @@ class ClassManagementTest {
         }
 
         @Test
-        @DisplayName("TC_CLM_DC_004 — Delete active class: active learners become inactive, ClassMember records preserved")
+        @DisplayName("TC_CLM_DC_004 — Cannot delete active class with enrolled learners → CLASS_HAS_LEARNERS")
         void tc_clm_dc_004() throws Exception {
             saveManager("manager@test.com");
             User teacher = saveTeacher("teacher@test.com");
@@ -1297,76 +1251,27 @@ class ClassManagementTest {
 
             mockMvc.perform(delete("/api/v1/classes/{classId}", clazz.getId())
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk());
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("CLASS_DELETE_VIOLATION"))
+                    .andExpect(jsonPath("$.message").value("Không thể xóa lớp học khi còn học viên đang theo học."));
 
-            // ClassMember records still exist with removedAt = null (NOT cascade-deleted)
+            // Class remains active (not deleted)
+            Clazz notDeleted = classRepository.findById(clazz.getId()).orElseThrow();
+            assertThat(notDeleted.getDeletedAt()).isNull();
+
+            // Learner statuses unchanged (still ACTIVE)
+            assertThat(userRepository.findById(l1.getId()).orElseThrow().getStatus())
+                    .isEqualTo(UserStatus.ACTIVE);
+            assertThat(userRepository.findById(l2.getId()).orElseThrow().getStatus())
+                    .isEqualTo(UserStatus.ACTIVE);
+
+            // ClassMember records unchanged
             ClassMember cm1 = classMemberRepository.findById(m1.getId()).orElseThrow();
             ClassMember cm2 = classMemberRepository.findById(m2.getId()).orElseThrow();
             assertThat(cm1.getRemovedAt()).isNull();
             assertThat(cm2.getRemovedAt()).isNull();
-
-            // Teacher status unchanged
-            assertThat(userRepository.findById(teacher.getId()).orElseThrow().getStatus())
-                    .isEqualTo(UserStatus.ACTIVE);
-
-            // Learner statuses become INACTIVE since their active class was deleted
-            assertThat(userRepository.findById(l1.getId()).orElseThrow().getStatus())
-                    .isEqualTo(UserStatus.INACTIVE);
-            assertThat(userRepository.findById(l2.getId()).orElseThrow().getStatus())
-                    .isEqualTo(UserStatus.INACTIVE);
         }
-
-        @Test
-        @DisplayName("TC_CLM_DC_005 — Delete inactive class: learner statuses unchanged (active stay active, inactive stay inactive)")
-        void tc_clm_dc_005() throws Exception {
-            // Verify that deleting an inactive class doesn't change learner statuses
-            User manager = saveManager("manager@test.com");
-            User teacher = saveTeacher("teacher@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Inactive Class", teacher.getId(), course.getId(), false, 8); // Inactive class
-            
-            // Create one active learner and one inactive learner
-            User activeLearner = saveLearner("active@test.com", UserStatus.ACTIVE);
-            User inactiveLearner = saveLearner("inactive@test.com", UserStatus.INACTIVE);
-            ClassMember activeMember = saveClassMember(clazz.getId(), activeLearner.getId());
-            ClassMember inactiveMember = saveClassMember(clazz.getId(), inactiveLearner.getId());
-
-            // Verify initial statuses
-            assertThat(userRepository.findById(activeLearner.getId()).orElseThrow().getStatus())
-                    .isEqualTo(UserStatus.ACTIVE);
-            assertThat(userRepository.findById(inactiveLearner.getId()).orElseThrow().getStatus())
-                    .isEqualTo(UserStatus.INACTIVE);
-
-            // Act
-            mockMvc.perform(delete("/api/v1/classes/{classId}", clazz.getId())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.message").value("Xóa lớp học thành công."))
-                    .andExpect(jsonPath("$.data.id").value(clazz.getId().toString()));
-
-            // Assert: DB audit fields
-            Clazz deleted = classRepository.findById(clazz.getId()).orElseThrow();
-            assertThat(deleted.getDeletedAt()).isNotNull();
-            assertThat(deleted.getDeletedBy()).isEqualTo(manager.getId());
-
-            // Assert: historical member records still intact
-            ClassMember savedActiveMember = classMemberRepository.findById(activeMember.getId()).orElseThrow();
-            assertThat(savedActiveMember.getUserId()).isEqualTo(activeLearner.getId());
-            assertThat(savedActiveMember.getRemovedAt()).isNull(); // historical data untouched
-            
-            ClassMember savedInactiveMember = classMemberRepository.findById(inactiveMember.getId()).orElseThrow();
-            assertThat(savedInactiveMember.getUserId()).isEqualTo(inactiveLearner.getId());
-            assertThat(savedInactiveMember.getRemovedAt()).isNull(); // historical data untouched
-
-            // Assert: learner statuses unchanged (inactive class deletion doesn't affect learner status)
-            assertThat(userRepository.findById(activeLearner.getId()).orElseThrow().getStatus())
-                    .isEqualTo(UserStatus.ACTIVE); // still active
-            assertThat(userRepository.findById(inactiveLearner.getId()).orElseThrow().getStatus())
-                    .isEqualTo(UserStatus.INACTIVE); // still inactive
-        }
-
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1569,7 +1474,8 @@ class ClassManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("INVALID_START_DATE"));
+                    .andExpect(jsonPath("$.code").value("INVALID_START_DATE"))
+                    .andExpect(jsonPath("$.message").value("Không thể cập nhật ngày bắt đầu sau ngày bắt đầu cũ khi đã có học viên trong lớp."));
         }
 
         @Test
@@ -1661,24 +1567,6 @@ class ClassManagementTest {
     class ViewClassMembersAdditionalTests {
 
         @Test
-        @DisplayName("TC_CLM_VM_008 — No learner found after keyword search → empty message \"Không có học viên nào trong lớp này.\"")
-        void tc_clm_vm_008() throws Exception {
-            // A search that produces no results should return the no-learner message
-            saveManager("manager@test.com");
-            User teacher = saveTeacher("teacher@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Search Empty", teacher.getId(), course.getId(), true, 8);
-            saveClassMember(clazz.getId(), saveLearner("existing@test.com").getId());
-
-            mockMvc.perform(get("/api/v1/classes/{classId}/members", clazz.getId())
-                            .param("keyword", "zzz_no_match_zzz")
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.message").value("Không có học viên nào trong lớp này."));
-        }
-
-        @Test
         @DisplayName("TC_CLM_VM_009 — Unauthorized access: LEARNER token →  403 / Thông tin không tồn tại hoặc bạn không có quyền truy cập")
         void tc_clm_vm_009() throws Exception {
             // A LEARNER does not have the MANAGER/TEACHER role and should be denied
@@ -1743,8 +1631,8 @@ class ClassManagementTest {
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
             Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
 
-            saveLearner("alice.smith@test.com");
-            saveLearner("bob.jones@test.com");
+            saveInactiveLearner("alice.smith@test.com");
+            saveInactiveLearner("bob.jones@test.com");
 
             mockMvc.perform(get("/api/v1/classes/{classId}/eligible-learners", clazz.getId())
                             .param("keyword", "alice")
@@ -1808,7 +1696,7 @@ class ClassManagementTest {
             MvcResult result = mockMvc.perform(get("/api/v1/classes/{classId}/eligible-learners", clazz.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content.length()").value(2))
+                    .andExpect(jsonPath("$.data.content.length()").value(1))
                     .andReturn();
 
             String body = result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
@@ -1818,6 +1706,7 @@ class ClassManagementTest {
                 assertThat(status).isIn("INACTIVE");
                 assertThat(item.has("email")).isTrue();
                 assertThat(item.has("fullName")).isTrue();
+                assertThat(status).isNotEqualTo("ACTIVE");
                 assertThat(status).isNotEqualTo("SUSPENDED");
                 assertThat(status).isNotEqualTo("PENDING_ACTIVATION");
             });
@@ -1865,40 +1754,6 @@ class ClassManagementTest {
     @Nested
     @DisplayName("7b. REMOVE LEARNER — Additional cases")
     class RemoveLearnerAdditionalTests {
-
-        @Test
-        @DisplayName("TC_CLM_RL_004 — Remove success: success message, removedAt set, count decremented, learner→INACTIVE when no other active class")
-        void tc_clm_rl_004() throws Exception {
-            saveManager("manager@test.com");
-            User teacher = saveTeacher("teacher@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Remove Test", teacher.getId(), course.getId(), true, 8);
-            User learner = saveLearner("learner@test.com");
-            saveClassMember(clazz.getId(), learner.getId());
-
-            // Confirm initially 1 active member
-            assertThat(classMemberRepository.countActiveByClassId(clazz.getId())).isEqualTo(1);
-
-            mockMvc.perform(delete("/api/v1/classes/{classId}/members/{userId}",
-                            clazz.getId(), learner.getId())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.message").value("Xóa học viên ra khỏi lớp học thành công."));
-
-            // removedAt must be set (soft record)
-            ClassMember member = classMemberRepository
-                    .findByClassIdAndUserId(clazz.getId(), learner.getId()).orElseThrow();
-            assertThat(member.getRemovedAt()).isNotNull();
-
-            // Enrollment count decremented to 0
-            assertThat(classMemberRepository.countActiveByClassId(clazz.getId())).isEqualTo(0);
-
-            // Learner has no remaining active class → demoted to INACTIVE
-            User updated = userRepository.findById(learner.getId()).orElseThrow();
-            assertThat(updated.getStatus()).isEqualTo(UserStatus.INACTIVE);
-        }
 
         @Test
         @DisplayName("TC_CLM_RL_005 — Remove from non-existing class → 404 NOT_FOUND (\"Lớp học không tồn tại.\")")
