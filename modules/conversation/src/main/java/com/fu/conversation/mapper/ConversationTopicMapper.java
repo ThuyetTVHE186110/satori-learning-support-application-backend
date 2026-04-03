@@ -15,6 +15,7 @@ import org.mapstruct.*;
 public interface ConversationTopicMapper {
 
     @Mapping(target = "id", ignore = true)
+    @Mapping(target = "aiGeneratedContext", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     @Mapping(target = "createdBy", ignore = true)
@@ -25,8 +26,8 @@ public interface ConversationTopicMapper {
 
     @BeanMapping(nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
     @Mapping(target = "id", ignore = true)
-    @Mapping(target = "themeId", ignore = true)
     @Mapping(target = "status", ignore = true)
+    @Mapping(target = "aiGeneratedContext", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     @Mapping(target = "createdBy", ignore = true)
@@ -35,10 +36,10 @@ public interface ConversationTopicMapper {
     @Mapping(target = "deletedBy", ignore = true)
     void updateEntity(@MappingTarget ConversationTopic topic, UpdateTopicRequest request);
 
-    @Mapping(target = "themeName", ignore = true)
     @Mapping(target = "courseName", ignore = true)
-    @Mapping(target = "missions", ignore = true)
+    @Mapping(target = "conversationCount", ignore = true)
     ConversationTopicResponse toResponse(ConversationTopic topic);
 
+    @Mapping(target = "conversationCount", ignore = true)
     ConversationTopicSummaryResponse toSummaryResponse(ConversationTopic topic);
 }

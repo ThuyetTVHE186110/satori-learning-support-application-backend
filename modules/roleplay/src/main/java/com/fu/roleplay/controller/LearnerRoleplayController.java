@@ -42,7 +42,7 @@ public class LearnerRoleplayController {
             @Valid @RequestBody StartSessionRequest request,
             @AuthenticationPrincipal(expression = "id") UUID userId) {
 
-        log.info("User {} starting roleplay session for topic {}", userId, request.getTopicId());
+        log.info("User {} starting roleplay session for conversation {}", userId, request.getConversationId());
         SessionResponse response = sessionService.startSession(request, userId);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Roleplay session started", response));

@@ -20,8 +20,8 @@ import java.util.UUID;
 @AllArgsConstructor
 public class CreateMissionRequest {
 
-    @NotNull(message = "Topic ID is required")
-    private UUID topicId;
+    @NotNull(message = "Conversation ID is required")
+    private UUID conversationId;
 
     @NotBlank(message = "Title is required")
     @Size(max = 255)

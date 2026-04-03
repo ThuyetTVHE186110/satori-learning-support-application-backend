@@ -18,7 +18,7 @@ import java.util.UUID;
 public class CreateMissionRequest {
 
     @NotNull
-    private UUID topicId;
+    private UUID conversationId;
 
     @NotBlank
     @Size(max = 255)

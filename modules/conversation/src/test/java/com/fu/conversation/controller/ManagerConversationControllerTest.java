@@ -3,19 +3,20 @@ package com.fu.conversation.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.conversation.config.ConversationModuleTestConfig;
-import com.fu.conversation.dto.request.CreateThemeRequest;
+import com.fu.conversation.dto.request.CreateConversationRequest;
+import com.fu.conversation.dto.request.CreateMissionRequest;
 import com.fu.conversation.dto.request.CreateTopicRequest;
-import com.fu.conversation.dto.request.GenerateThemeRequest;
-import com.fu.conversation.dto.request.UpdateThemeRequest;
+import com.fu.conversation.dto.request.GenerateTopicRequest;
 import com.fu.conversation.dto.request.UpdateTopicRequest;
-import com.fu.conversation.dto.response.ConversationThemeResponse;
-import com.fu.conversation.dto.response.ConversationThemeSummaryResponse;
+import com.fu.conversation.dto.response.ConversationMissionResponse;
+import com.fu.conversation.dto.response.ConversationResponse;
 import com.fu.conversation.dto.response.ConversationTopicResponse;
 import com.fu.conversation.dto.response.ConversationTopicSummaryResponse;
-import com.fu.conversation.dto.response.GeneratedThemeSuggestionResponse;
-import com.fu.conversation.service.ConversationThemeService;
+import com.fu.conversation.dto.response.GeneratedTopicSuggestionResponse;
+import com.fu.conversation.service.ConversationMissionService;
+import com.fu.conversation.service.ConversationService;
 import com.fu.conversation.service.ConversationTopicService;
-import com.fu.conversation.service.UserConversationTopicService;
+import com.fu.conversation.service.UserConversationService;
 import com.fu.course.entity.Course;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -35,7 +36,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.List;
 import java.util.UUID;
 
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -58,73 +58,73 @@ class ManagerConversationControllerTest {
     private ObjectMapper objectMapper;
 
     @MockBean
-    private ConversationThemeService themeService;
-
-    @MockBean
     private ConversationTopicService topicService;
 
-    // Required because ConversationModuleTestConfig component-scans the whole
-    // controller package, pulling in LearnerConversationController which depends
-    // on this service even though it is not under test here.
     @MockBean
-    private UserConversationTopicService userConversationTopicService;
+    private ConversationService conversationService;
 
-    private UUID themeId;
+    @MockBean
+    private ConversationMissionService missionService;
+
+    // Required by LearnerConversationController (also loaded by component scan)
+    @MockBean
+    private UserConversationService userConversationService;
+
     private UUID topicId;
-    private UUID courseId;
+    private UUID conversationId;
+    private UUID missionId;
 
-    private ConversationThemeResponse themeResponse;
-    private ConversationThemeSummaryResponse themeSummary;
     private ConversationTopicResponse topicResponse;
     private ConversationTopicSummaryResponse topicSummary;
+    private ConversationResponse conversationResponse;
+    private ConversationMissionResponse missionResponse;
 
     @BeforeEach
     void setUp() {
-        themeId  = UUID.randomUUID();
-        topicId  = UUID.randomUUID();
-        courseId = UUID.randomUUID();
-
-        themeResponse = ConversationThemeResponse.builder()
-                .id(themeId)
-                .title("Daily Shopping")
-                .status(Course.ContentStatus.DRAFT)
-                .build();
-
-        themeSummary = ConversationThemeSummaryResponse.builder()
-                .id(themeId)
-                .title("Daily Shopping")
-                .status(Course.ContentStatus.DRAFT)
-                .build();
+        topicId        = UUID.randomUUID();
+        conversationId = UUID.randomUUID();
+        missionId      = UUID.randomUUID();
 
         topicResponse = ConversationTopicResponse.builder()
                 .id(topicId)
-                .title("At the Convenience Store")
+                .title("Daily Life")
                 .status(Course.ContentStatus.DRAFT)
                 .build();
 
         topicSummary = ConversationTopicSummaryResponse.builder()
                 .id(topicId)
+                .title("Daily Life")
+                .build();
+
+        conversationResponse = ConversationResponse.builder()
+                .id(conversationId)
+                .topicId(topicId)
                 .title("At the Convenience Store")
+                .status(Course.ContentStatus.DRAFT)
+                .build();
+
+        missionResponse = ConversationMissionResponse.builder()
+                .id(missionId)
+                .conversationId(conversationId)
+                .title("Buy a snack")
                 .build();
     }
 
     // ════════════════════════════════════════════════════════════════════════
     @Nested
-    @DisplayName("POST /api/v1/manager/conversation/themes/generate")
-    class GenerateThemesTests {
+    @DisplayName("POST /api/v1/manager/conversation/topics/generate")
+    class GenerateTopicsTests {
 
         @Test
-        @DisplayName("Should return 200 with suggestions for MANAGER")
+        @DisplayName("Should return 200 with suggestions for CONTENT_MANAGER")
         @WithMockConversationUser
         void shouldReturn200WithSuggestions() throws Exception {
-            GenerateThemeRequest request = GenerateThemeRequest.builder()
-                    .count(2).build();
-
-            GeneratedThemeSuggestionResponse suggestion = GeneratedThemeSuggestionResponse.builder()
+            GenerateTopicRequest request = GenerateTopicRequest.builder().count(2).build();
+            GeneratedTopicSuggestionResponse suggestion = GeneratedTopicSuggestionResponse.builder()
                     .title("Shopping").build();
-            given(themeService.generateThemeSuggestions(any())).willReturn(List.of(suggestion));
+            given(topicService.generateTopicSuggestions(any())).willReturn(List.of(suggestion));
 
-            mockMvc.perform(post("/api/v1/manager/conversation/themes/generate")
+            mockMvc.perform(post("/api/v1/manager/conversation/topics/generate")
                             .with(csrf())
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(request)))
@@ -137,290 +137,13 @@ class ManagerConversationControllerTest {
         @DisplayName("Should return 403 for LEARNER")
         @WithMockConversationUser(roles = "LEARNER")
         void shouldReturn403ForLearner() throws Exception {
-            GenerateThemeRequest request = GenerateThemeRequest.builder()
-                    .count(2).build();
+            GenerateTopicRequest request = GenerateTopicRequest.builder().count(2).build();
 
-            mockMvc.perform(post("/api/v1/manager/conversation/themes/generate")
+            mockMvc.perform(post("/api/v1/manager/conversation/topics/generate")
                             .with(csrf())
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isForbidden());
-        }
-
-        @Test
-        @DisplayName("Should return 400 when count is below minimum")
-        @WithMockConversationUser
-        void shouldReturn400WhenCountBelowMinimum() throws Exception {
-            // count=0 violates @Min(1)
-            String body = "{\"count\": 0}";
-
-            mockMvc.perform(post("/api/v1/manager/conversation/themes/generate")
-                            .with(csrf())
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(body))
-                    .andExpect(status().isBadRequest());
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    @Nested
-    @DisplayName("POST /api/v1/manager/conversation/themes")
-    class CreateThemeTests {
-
-        @Test
-        @DisplayName("Should return 201 when MANAGER creates a theme")
-        @WithMockConversationUser
-        void shouldReturn201OnCreate() throws Exception {
-            CreateThemeRequest request = CreateThemeRequest.builder()
-                    .title("Daily Shopping").build();
-
-            given(themeService.createTheme(any(), any())).willReturn(themeResponse);
-
-            mockMvc.perform(post("/api/v1/manager/conversation/themes")
-                            .with(csrf())
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(objectMapper.writeValueAsString(request)))
-                    .andExpect(status().isCreated())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.title").value("Daily Shopping"));
-        }
-
-        @Test
-        @DisplayName("Should return 400 when title is blank")
-        @WithMockConversationUser
-        void shouldReturn400WhenTitleBlank() throws Exception {
-            CreateThemeRequest request = CreateThemeRequest.builder()
-                    .title("").build(); // blank — @NotBlank violation
-
-            mockMvc.perform(post("/api/v1/manager/conversation/themes")
-                            .with(csrf())
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(objectMapper.writeValueAsString(request)))
-                    .andExpect(status().isBadRequest());
-        }
-
-        @Test
-        @DisplayName("Should return 403 for LEARNER")
-        @WithMockConversationUser(roles = "LEARNER")
-        void shouldReturn403ForLearner() throws Exception {
-            CreateThemeRequest request = CreateThemeRequest.builder()
-                    .title("Test Theme").build();
-
-            mockMvc.perform(post("/api/v1/manager/conversation/themes")
-                            .with(csrf())
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(objectMapper.writeValueAsString(request)))
-                    .andExpect(status().isForbidden());
-        }
-
-        @Test
-        @DisplayName("Should return 400 when jlptLevel has invalid enum value (e.g. N9)")
-        @WithMockConversationUser
-        void shouldReturn400WhenJlptLevelInvalid() throws Exception {
-            String body = "{\"title\":\"Test\",\"jlptLevel\":\"N9\"}";
-
-            mockMvc.perform(post("/api/v1/manager/conversation/themes")
-                            .with(csrf())
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(body))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    @Nested
-    @DisplayName("GET /api/v1/manager/conversation/themes")
-    class GetAllThemesTests {
-
-        @Test
-        @DisplayName("Should return 200 with paginated themes")
-        @WithMockConversationUser
-        void shouldReturn200WithThemes() throws Exception {
-            given(themeService.getAllThemes(any(Pageable.class)))
-                    .willReturn(new PageImpl<>(List.of(themeSummary)));
-
-            mockMvc.perform(get("/api/v1/manager/conversation/themes")
-                            .param("page", "0").param("size", "10"))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.content[0].title").value("Daily Shopping"));
-        }
-
-        @Test
-        @DisplayName("Should return 403 for LEARNER")
-        @WithMockConversationUser(roles = "LEARNER")
-        void shouldReturn403ForLearner() throws Exception {
-            mockMvc.perform(get("/api/v1/manager/conversation/themes"))
-                    .andExpect(status().isForbidden());
-        }
-
-        @Test
-        @DisplayName("Should use searchThemes when keyword is provided")
-        @WithMockConversationUser
-        void shouldSearchWhenKeywordProvided() throws Exception {
-            given(themeService.searchThemes(eq("Daily"), any(Pageable.class)))
-                    .willReturn(new PageImpl<>(List.of(themeSummary)));
-
-            mockMvc.perform(get("/api/v1/manager/conversation/themes")
-                            .param("keyword", "Daily"))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.content[0].title").value("Daily Shopping"));
-        }
-
-        @Test
-        @DisplayName("Should ignore blank keyword and return all themes")
-        @WithMockConversationUser
-        void shouldIgnoreBlankKeyword() throws Exception {
-            given(themeService.getAllThemes(any(Pageable.class)))
-                    .willReturn(new PageImpl<>(List.of(themeSummary)));
-
-            mockMvc.perform(get("/api/v1/manager/conversation/themes")
-                            .param("keyword", "   "))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content[0].title").value("Daily Shopping"));
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    @Nested
-    @DisplayName("GET /api/v1/manager/conversation/themes/{themeId}")
-    class GetThemeByIdTests {
-
-        @Test
-        @DisplayName("Should return 200 with theme details")
-        @WithMockConversationUser
-        void shouldReturn200WithTheme() throws Exception {
-            given(themeService.getTheme(themeId)).willReturn(themeResponse);
-
-            mockMvc.perform(get("/api/v1/manager/conversation/themes/{themeId}", themeId))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.id").value(themeId.toString()));
-        }
-
-        @Test
-        @DisplayName("Should return 404 when theme not found")
-        @WithMockConversationUser
-        void shouldReturn404WhenNotFound() throws Exception {
-            given(themeService.getTheme(themeId))
-                    .willThrow(new ResourceNotFoundException("ConversationTheme", themeId));
-
-            mockMvc.perform(get("/api/v1/manager/conversation/themes/{themeId}", themeId))
-                    .andExpect(status().isNotFound());
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    @Nested
-    @DisplayName("PUT /api/v1/manager/conversation/themes/{themeId}")
-    class UpdateThemeTests {
-
-        @Test
-        @DisplayName("Should return 200 when theme updated")
-        @WithMockConversationUser
-        void shouldReturn200OnUpdate() throws Exception {
-            UpdateThemeRequest request = UpdateThemeRequest.builder()
-                    .title("Updated Theme").build();
-
-            ConversationThemeResponse updated = ConversationThemeResponse.builder()
-                    .id(themeId).title("Updated Theme").status(Course.ContentStatus.DRAFT).build();
-            given(themeService.updateTheme(eq(themeId), any(), any())).willReturn(updated);
-
-            mockMvc.perform(put("/api/v1/manager/conversation/themes/{themeId}", themeId)
-                            .with(csrf())
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(objectMapper.writeValueAsString(request)))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.title").value("Updated Theme"));
-        }
-
-        @Test
-        @DisplayName("Should return 404 when theme not found")
-        @WithMockConversationUser
-        void shouldReturn404WhenNotFound() throws Exception {
-            UpdateThemeRequest request = UpdateThemeRequest.builder()
-                    .title("X").build();
-            given(themeService.updateTheme(eq(themeId), any(), any()))
-                    .willThrow(new ResourceNotFoundException("ConversationTheme", themeId));
-
-            mockMvc.perform(put("/api/v1/manager/conversation/themes/{themeId}", themeId)
-                            .with(csrf())
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(objectMapper.writeValueAsString(request)))
-                    .andExpect(status().isNotFound());
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    @Nested
-    @DisplayName("PATCH /api/v1/manager/conversation/themes/{themeId}/publish")
-    class PublishThemeTests {
-
-        @Test
-        @DisplayName("Should return 200 when theme published")
-        @WithMockConversationUser
-        void shouldReturn200OnPublish() throws Exception {
-            ConversationThemeResponse published = ConversationThemeResponse.builder()
-                    .id(themeId).title("Daily Shopping").status(Course.ContentStatus.PUBLISHED).build();
-            given(themeService.updateStatus(eq(themeId), eq(Course.ContentStatus.PUBLISHED), any()))
-                    .willReturn(published);
-
-            mockMvc.perform(patch("/api/v1/manager/conversation/themes/{themeId}/publish", themeId)
-                            .with(csrf()))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.status").value("PUBLISHED"));
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    @Nested
-    @DisplayName("PATCH /api/v1/manager/conversation/themes/{themeId}/archive")
-    class ArchiveThemeTests {
-
-        @Test
-        @DisplayName("Should return 200 when theme archived")
-        @WithMockConversationUser
-        void shouldReturn200OnArchive() throws Exception {
-            ConversationThemeResponse archived = ConversationThemeResponse.builder()
-                    .id(themeId).title("Daily Shopping").status(Course.ContentStatus.ARCHIVED).build();
-            given(themeService.updateStatus(eq(themeId), eq(Course.ContentStatus.ARCHIVED), any()))
-                    .willReturn(archived);
-
-            mockMvc.perform(patch("/api/v1/manager/conversation/themes/{themeId}/archive", themeId)
-                            .with(csrf()))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.status").value("ARCHIVED"));
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    @Nested
-    @DisplayName("DELETE /api/v1/manager/conversation/themes/{themeId}")
-    class DeleteThemeTests {
-
-        @Test
-        @DisplayName("Should return 200 on soft-delete")
-        @WithMockConversationUser
-        void shouldReturn200OnDelete() throws Exception {
-            doNothing().when(themeService).deleteTheme(eq(themeId), any());
-
-            mockMvc.perform(delete("/api/v1/manager/conversation/themes/{themeId}", themeId)
-                            .with(csrf()))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true));
-        }
-
-        @Test
-        @DisplayName("Should return 404 when not found")
-        @WithMockConversationUser
-        void shouldReturn404WhenNotFound() throws Exception {
-            doThrow(new ResourceNotFoundException("ConversationTheme", themeId))
-                    .when(themeService).deleteTheme(eq(themeId), any());
-
-            mockMvc.perform(delete("/api/v1/manager/conversation/themes/{themeId}", themeId)
-                            .with(csrf()))
-                    .andExpect(status().isNotFound());
         }
     }
 
@@ -430,11 +153,11 @@ class ManagerConversationControllerTest {
     class CreateTopicTests {
 
         @Test
-        @DisplayName("Should return 201 when topic created")
+        @DisplayName("Should return 201 with created topic for CONTENT_MANAGER")
         @WithMockConversationUser
-        void shouldReturn201OnCreate() throws Exception {
+        void shouldReturn201ForManager() throws Exception {
             CreateTopicRequest request = CreateTopicRequest.builder()
-                    .title("At the Convenience Store").build();
+                    .title("Daily Life").build();
             given(topicService.createTopic(any(), any())).willReturn(topicResponse);
 
             mockMvc.perform(post("/api/v1/manager/conversation/topics")
@@ -442,47 +165,21 @@ class ManagerConversationControllerTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isCreated())
-                    .andExpect(jsonPath("$.data.title").value("At the Convenience Store"));
+                    .andExpect(jsonPath("$.data.id").value(topicId.toString()))
+                    .andExpect(jsonPath("$.data.title").value("Daily Life"));
         }
 
         @Test
-        @DisplayName("Should return 400 when title blank")
+        @DisplayName("Should return 400 when title is missing")
         @WithMockConversationUser
-        void shouldReturn400WhenTitleBlank() throws Exception {
-            CreateTopicRequest request = CreateTopicRequest.builder().title("").build();
-
-            mockMvc.perform(post("/api/v1/manager/conversation/topics")
-                            .with(csrf())
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(objectMapper.writeValueAsString(request)))
-                    .andExpect(status().isBadRequest());
-        }
-
-        @Test
-        @DisplayName("Should return 400 when difficultyScore out of range")
-        @WithMockConversationUser
-        void shouldReturn400WhenDifficultyScoreOutOfRange() throws Exception {
-            // difficultyScore = 11 exceeds @Max(10)
-            String body = "{\"title\":\"Test\",\"difficultyScore\":11}";
+        void shouldReturn400WhenTitleMissing() throws Exception {
+            String body = "{}";
 
             mockMvc.perform(post("/api/v1/manager/conversation/topics")
                             .with(csrf())
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body))
                     .andExpect(status().isBadRequest());
-        }
-
-        @Test
-        @DisplayName("Should return 403 for LEARNER")
-        @WithMockConversationUser(roles = "LEARNER")
-        void shouldReturn403ForLearner() throws Exception {
-            CreateTopicRequest request = CreateTopicRequest.builder().title("Test").build();
-
-            mockMvc.perform(post("/api/v1/manager/conversation/topics")
-                            .with(csrf())
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(objectMapper.writeValueAsString(request)))
-                    .andExpect(status().isForbidden());
         }
     }
 
@@ -492,57 +189,39 @@ class ManagerConversationControllerTest {
     class GetAllTopicsTests {
 
         @Test
-        @DisplayName("Should return 200 with paginated topics")
+        @DisplayName("Should return paginated topics for CONTENT_MANAGER")
         @WithMockConversationUser
-        void shouldReturn200WithTopics() throws Exception {
+        void shouldReturnPaginatedTopics() throws Exception {
             given(topicService.getAllTopics(any(Pageable.class)))
                     .willReturn(new PageImpl<>(List.of(topicSummary)));
 
             mockMvc.perform(get("/api/v1/manager/conversation/topics"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content[0].title").value("At the Convenience Store"));
+                    .andExpect(jsonPath("$.data.content[0].id").value(topicId.toString()));
         }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    @Nested
-    @DisplayName("GET /api/v1/manager/conversation/themes/{themeId}/topics")
-    class GetTopicsByThemeTests {
 
         @Test
-        @DisplayName("Should return 200 with topics for theme")
+        @DisplayName("Should delegate to searchTopics when keyword provided")
         @WithMockConversationUser
-        void shouldReturn200WithTopicsByTheme() throws Exception {
-            given(topicService.getTopicsByTheme(eq(themeId), any(Pageable.class)))
+        void shouldDelegateToSearchWhenKeywordProvided() throws Exception {
+            given(topicService.searchTopics(eq("shop"), any(Pageable.class)))
                     .willReturn(new PageImpl<>(List.of(topicSummary)));
 
-            mockMvc.perform(get("/api/v1/manager/conversation/themes/{themeId}/topics", themeId))
+            mockMvc.perform(get("/api/v1/manager/conversation/topics").param("keyword", "shop"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content[0].title").value("At the Convenience Store"));
-        }
-
-        @Test
-        @DisplayName("Should return empty page when theme has no topics")
-        @WithMockConversationUser
-        void shouldReturnEmptyPageWhenNoTopics() throws Exception {
-            given(topicService.getTopicsByTheme(eq(themeId), any(Pageable.class)))
-                    .willReturn(new PageImpl<>(List.of()));
-
-            mockMvc.perform(get("/api/v1/manager/conversation/themes/{themeId}/topics", themeId))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content").isEmpty());
+                    .andExpect(jsonPath("$.data.content[0].id").value(topicId.toString()));
         }
     }
 
     // ════════════════════════════════════════════════════════════════════════
     @Nested
     @DisplayName("GET /api/v1/manager/conversation/topics/{topicId}")
-    class GetTopicByIdTests {
+    class GetTopicTests {
 
         @Test
-        @DisplayName("Should return 200 with topic")
+        @DisplayName("Should return topic when found")
         @WithMockConversationUser
-        void shouldReturn200WithTopic() throws Exception {
+        void shouldReturnTopicWhenFound() throws Exception {
             given(topicService.getTopic(topicId)).willReturn(topicResponse);
 
             mockMvc.perform(get("/api/v1/manager/conversation/topics/{topicId}", topicId))
@@ -553,9 +232,9 @@ class ManagerConversationControllerTest {
         @Test
         @DisplayName("Should return 404 when topic not found")
         @WithMockConversationUser
-        void shouldReturn404WhenNotFound() throws Exception {
+        void shouldReturn404WhenTopicNotFound() throws Exception {
             given(topicService.getTopic(topicId))
-                    .willThrow(new ResourceNotFoundException("ConversationTopic", topicId));
+                    .willThrow(new ResourceNotFoundException("ConversationTopic", "id", topicId.toString()));
 
             mockMvc.perform(get("/api/v1/manager/conversation/topics/{topicId}", topicId))
                     .andExpect(status().isNotFound());
@@ -568,30 +247,27 @@ class ManagerConversationControllerTest {
     class UpdateTopicTests {
 
         @Test
-        @DisplayName("Should return 200 on successful update")
+        @DisplayName("Should return 200 with updated topic")
         @WithMockConversationUser
-        void shouldReturn200OnUpdate() throws Exception {
-            UpdateTopicRequest request = UpdateTopicRequest.builder()
-                    .title("Updated Topic").build();
-            ConversationTopicResponse updated = ConversationTopicResponse.builder()
-                    .id(topicId).title("Updated Topic").status(Course.ContentStatus.DRAFT).build();
-            given(topicService.updateTopic(eq(topicId), any(), any())).willReturn(updated);
+        void shouldReturn200WithUpdatedTopic() throws Exception {
+            UpdateTopicRequest request = UpdateTopicRequest.builder().title("Updated").build();
+            given(topicService.updateTopic(eq(topicId), any(), any())).willReturn(topicResponse);
 
             mockMvc.perform(put("/api/v1/manager/conversation/topics/{topicId}", topicId)
                             .with(csrf())
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.title").value("Updated Topic"));
+                    .andExpect(jsonPath("$.data.id").value(topicId.toString()));
         }
 
         @Test
         @DisplayName("Should return 404 when topic not found")
         @WithMockConversationUser
-        void shouldReturn404WhenNotFound() throws Exception {
-            UpdateTopicRequest request = UpdateTopicRequest.builder().title("X").build();
+        void shouldReturn404WhenTopicNotFound() throws Exception {
+            UpdateTopicRequest request = UpdateTopicRequest.builder().title("Updated").build();
             given(topicService.updateTopic(eq(topicId), any(), any()))
-                    .willThrow(new ResourceNotFoundException("ConversationTopic", topicId));
+                    .willThrow(new ResourceNotFoundException("ConversationTopic", "id", topicId.toString()));
 
             mockMvc.perform(put("/api/v1/manager/conversation/topics/{topicId}", topicId)
                             .with(csrf())
@@ -607,11 +283,11 @@ class ManagerConversationControllerTest {
     class PublishTopicTests {
 
         @Test
-        @DisplayName("Should return 200 when topic published")
+        @DisplayName("Should return 200 with published topic")
         @WithMockConversationUser
-        void shouldReturn200OnPublish() throws Exception {
+        void shouldReturn200WithPublishedTopic() throws Exception {
             ConversationTopicResponse published = ConversationTopicResponse.builder()
-                    .id(topicId).title("Test").status(Course.ContentStatus.PUBLISHED).build();
+                    .id(topicId).status(Course.ContentStatus.PUBLISHED).title("Daily Life").build();
             given(topicService.updateStatus(eq(topicId), eq(Course.ContentStatus.PUBLISHED), any()))
                     .willReturn(published);
 
@@ -624,55 +300,13 @@ class ManagerConversationControllerTest {
 
     // ════════════════════════════════════════════════════════════════════════
     @Nested
-    @DisplayName("PATCH /api/v1/manager/conversation/topics/{topicId}/archive")
-    class ArchiveTopicTests {
-
-        @Test
-        @DisplayName("Should return 200 when topic archived")
-        @WithMockConversationUser
-        void shouldReturn200OnArchive() throws Exception {
-            ConversationTopicResponse archived = ConversationTopicResponse.builder()
-                    .id(topicId).title("Test").status(Course.ContentStatus.ARCHIVED).build();
-            given(topicService.updateStatus(eq(topicId), eq(Course.ContentStatus.ARCHIVED), any()))
-                    .willReturn(archived);
-
-            mockMvc.perform(patch("/api/v1/manager/conversation/topics/{topicId}/archive", topicId)
-                            .with(csrf()))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.status").value("ARCHIVED"));
-        }
-
-        @Test
-        @DisplayName("Should return 404 when topic not found")
-        @WithMockConversationUser
-        void shouldReturn404WhenNotFound() throws Exception {
-            given(topicService.updateStatus(eq(topicId), eq(Course.ContentStatus.ARCHIVED), any()))
-                    .willThrow(new ResourceNotFoundException("ConversationTopic", topicId));
-
-            mockMvc.perform(patch("/api/v1/manager/conversation/topics/{topicId}/archive", topicId)
-                            .with(csrf()))
-                    .andExpect(status().isNotFound());
-        }
-
-        @Test
-        @DisplayName("Should return 403 for LEARNER")
-        @WithMockConversationUser(roles = "LEARNER")
-        void shouldReturn403ForLearner() throws Exception {
-            mockMvc.perform(patch("/api/v1/manager/conversation/topics/{topicId}/archive", topicId)
-                            .with(csrf()))
-                    .andExpect(status().isForbidden());
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    @Nested
     @DisplayName("DELETE /api/v1/manager/conversation/topics/{topicId}")
     class DeleteTopicTests {
 
         @Test
-        @DisplayName("Should return 200 on soft-delete")
+        @DisplayName("Should return 200 when topic deleted")
         @WithMockConversationUser
-        void shouldReturn200OnDelete() throws Exception {
+        void shouldReturn200WhenTopicDeleted() throws Exception {
             doNothing().when(topicService).deleteTopic(eq(topicId), any());
 
             mockMvc.perform(delete("/api/v1/manager/conversation/topics/{topicId}", topicId)
@@ -684,22 +318,104 @@ class ManagerConversationControllerTest {
         @Test
         @DisplayName("Should return 404 when topic not found")
         @WithMockConversationUser
-        void shouldReturn404WhenNotFound() throws Exception {
-            doThrow(new ResourceNotFoundException("ConversationTopic", topicId))
+        void shouldReturn404WhenTopicNotFound() throws Exception {
+            doThrow(new ResourceNotFoundException("ConversationTopic", "id", topicId.toString()))
                     .when(topicService).deleteTopic(eq(topicId), any());
 
             mockMvc.perform(delete("/api/v1/manager/conversation/topics/{topicId}", topicId)
                             .with(csrf()))
                     .andExpect(status().isNotFound());
         }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    @Nested
+    @DisplayName("POST /api/v1/manager/conversation/conversations")
+    class CreateConversationTests {
 
         @Test
-        @DisplayName("Should return 403 for LEARNER")
-        @WithMockConversationUser(roles = "LEARNER")
-        void shouldReturn403ForLearner() throws Exception {
-            mockMvc.perform(delete("/api/v1/manager/conversation/topics/{topicId}", topicId)
-                            .with(csrf()))
-                    .andExpect(status().isForbidden());
+        @DisplayName("Should return 201 with created conversation")
+        @WithMockConversationUser
+        void shouldReturn201WithCreatedConversation() throws Exception {
+            CreateConversationRequest request = CreateConversationRequest.builder()
+                    .topicId(topicId).title("At the Store").build();
+            given(conversationService.createConversation(any(), any())).willReturn(conversationResponse);
+
+            mockMvc.perform(post("/api/v1/manager/conversation/conversations")
+                            .with(csrf())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(request)))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.data.id").value(conversationId.toString()));
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    @Nested
+    @DisplayName("POST /api/v1/manager/conversation/missions")
+    class CreateMissionTests {
+
+        @Test
+        @DisplayName("Should return 201 with created mission")
+        @WithMockConversationUser
+        void shouldReturn201WithCreatedMission() throws Exception {
+            CreateMissionRequest request = CreateMissionRequest.builder()
+                    .conversationId(conversationId)
+                    .title("Buy a snack")
+                    .build();
+            given(missionService.createMission(any(), any())).willReturn(missionResponse);
+
+            mockMvc.perform(post("/api/v1/manager/conversation/missions")
+                            .with(csrf())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(request)))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.data.conversationId").value(conversationId.toString()));
+        }
+
+        @Test
+        @DisplayName("Should return 400 when conversationId is missing")
+        @WithMockConversationUser
+        void shouldReturn400WhenConversationIdMissing() throws Exception {
+            String body = "{\"title\": \"Buy a snack\"}";
+
+            mockMvc.perform(post("/api/v1/manager/conversation/missions")
+                            .with(csrf())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isBadRequest());
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    @Nested
+    @DisplayName("GET /api/v1/manager/conversation/conversations/{conversationId}/missions")
+    class GetMissionsByConversationTests {
+
+        @Test
+        @DisplayName("Should return list of missions for a conversation")
+        @WithMockConversationUser
+        void shouldReturnMissionsForConversation() throws Exception {
+            given(missionService.getMissionsByConversation(conversationId))
+                    .willReturn(List.of(missionResponse));
+
+            mockMvc.perform(get("/api/v1/manager/conversation/conversations/{conversationId}/missions",
+                            conversationId))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[0].id").value(missionId.toString()));
+        }
+
+        @Test
+        @DisplayName("Should return empty list when conversation has no missions")
+        @WithMockConversationUser
+        void shouldReturnEmptyListWhenNoMissions() throws Exception {
+            given(missionService.getMissionsByConversation(conversationId))
+                    .willReturn(List.of());
+
+            mockMvc.perform(get("/api/v1/manager/conversation/conversations/{conversationId}/missions",
+                            conversationId))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data").isEmpty());
         }
     }
 }

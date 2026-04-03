@@ -2,23 +2,23 @@ package com.fu.conversation.controller;
 
 import com.fu.common.response.ApiResponse;
 import com.fu.common.response.PageResponse;
+import com.fu.conversation.dto.request.CreateConversationRequest;
 import com.fu.conversation.dto.request.CreateMissionRequest;
-import com.fu.conversation.dto.request.CreateThemeRequest;
 import com.fu.conversation.dto.request.CreateTopicRequest;
-import com.fu.conversation.dto.request.GenerateThemeRequest;
+import com.fu.conversation.dto.request.GenerateConversationRequest;
 import com.fu.conversation.dto.request.GenerateTopicRequest;
+import com.fu.conversation.dto.request.UpdateConversationRequest;
 import com.fu.conversation.dto.request.UpdateMissionRequest;
-import com.fu.conversation.dto.request.UpdateThemeRequest;
 import com.fu.conversation.dto.request.UpdateTopicRequest;
 import com.fu.conversation.dto.response.ConversationMissionResponse;
-import com.fu.conversation.dto.response.ConversationThemeResponse;
-import com.fu.conversation.dto.response.ConversationThemeSummaryResponse;
+import com.fu.conversation.dto.response.ConversationResponse;
+import com.fu.conversation.dto.response.ConversationSummaryResponse;
 import com.fu.conversation.dto.response.ConversationTopicResponse;
 import com.fu.conversation.dto.response.ConversationTopicSummaryResponse;
-import com.fu.conversation.dto.response.GeneratedThemeSuggestionResponse;
+import com.fu.conversation.dto.response.GeneratedConversationSuggestionResponse;
 import com.fu.conversation.dto.response.GeneratedTopicSuggestionResponse;
 import com.fu.conversation.service.ConversationMissionService;
-import com.fu.conversation.service.ConversationThemeService;
+import com.fu.conversation.service.ConversationService;
 import com.fu.conversation.service.ConversationTopicService;
 import com.fu.course.entity.Course;
 import jakarta.validation.Valid;
@@ -38,7 +38,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * REST Controller for Manager: Conversation themes and sub-topics.
+ * REST Controller for Manager: Conversation topics and conversations.
  * Base path: /api/v1/manager/conversation
  */
 @Slf4j
@@ -48,136 +48,28 @@ import java.util.UUID;
 @PreAuthorize("hasRole('CONTENT_MANAGER')")
 public class ManagerConversationController {
 
-    private final ConversationThemeService themeService;
     private final ConversationTopicService topicService;
+    private final ConversationService conversationService;
     private final ConversationMissionService missionService;
 
-    // ==================== THEME (Chủ đề lớn) ====================
+    // ==================== TOPIC (Chủ đề lớn) ====================
 
     /**
-     * AI-generate conversation theme suggestions from a course.
-     * POST /api/v1/manager/conversation/themes/generate
+     * AI-generate conversation topic suggestions.
+     * POST /api/v1/manager/conversation/topics/generate
      */
-    @PostMapping("/themes/generate")
-    public ResponseEntity<ApiResponse<List<GeneratedThemeSuggestionResponse>>> generateThemes(
-            @Valid @RequestBody GenerateThemeRequest request) {
+    @PostMapping("/topics/generate")
+    public ResponseEntity<ApiResponse<List<GeneratedTopicSuggestionResponse>>> generateTopics(
+            @Valid @RequestBody GenerateTopicRequest request) {
 
-        log.info("Generating theme suggestions (jlpt={}, category={})", request.getJlptLevel(), request.getCategory());
-        List<GeneratedThemeSuggestionResponse> suggestions = themeService.generateThemeSuggestions(request);
+        log.info("Generating topic suggestions (jlpt={}, category={})", request.getJlptLevel(), request.getCategory());
+        List<GeneratedTopicSuggestionResponse> suggestions = topicService.generateTopicSuggestions(request);
         return ResponseEntity.ok(ApiResponse.success(
-                "Generated " + suggestions.size() + " theme suggestions", suggestions));
+                "Generated " + suggestions.size() + " topic suggestions", suggestions));
     }
 
     /**
-     * Create a new conversation theme.
-     * POST /api/v1/manager/conversation/themes
-     */
-    @PostMapping("/themes")
-    public ResponseEntity<ApiResponse<ConversationThemeResponse>> createTheme(
-            @Valid @RequestBody CreateThemeRequest request,
-            @AuthenticationPrincipal(expression = "id") UUID managerId) {
-
-        log.info("Manager {} creating theme: {}", managerId, request.getTitle());
-        ConversationThemeResponse response = themeService.createTheme(request, managerId);
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success("Conversation theme created successfully", response));
-    }
-
-    /**
-     * Get all themes (paginated, includes all statuses). Supports keyword search.
-     * GET /api/v1/manager/conversation/themes?page=0&size=10&keyword=xxx
-     */
-    @GetMapping("/themes")
-    public ResponseEntity<ApiResponse<PageResponse<ConversationThemeSummaryResponse>>> getAllThemes(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size,
-            @RequestParam(required = false) String keyword) {
-
-        Pageable pageable = PageRequest.of(page, Math.min(size, 100),
-                Sort.by("orderIndex").ascending());
-
-        Page<ConversationThemeSummaryResponse> result;
-        if (keyword != null && !keyword.isBlank()) {
-            result = themeService.searchThemes(keyword.trim(), pageable);
-        } else {
-            result = themeService.getAllThemes(pageable);
-        }
-
-        return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
-                result.getContent(), result.getNumber(), result.getSize(),
-                result.getTotalElements(), result.getTotalPages())));
-    }
-
-    /**
-     * Get a theme by ID.
-     * GET /api/v1/manager/conversation/themes/{themeId}
-     */
-    @GetMapping("/themes/{themeId}")
-    public ResponseEntity<ApiResponse<ConversationThemeResponse>> getTheme(
-            @PathVariable UUID themeId) {
-
-        return ResponseEntity.ok(ApiResponse.success(themeService.getTheme(themeId)));
-    }
-
-    /**
-     * Update a theme.
-     * PUT /api/v1/manager/conversation/themes/{themeId}
-     */
-    @PutMapping("/themes/{themeId}")
-    public ResponseEntity<ApiResponse<ConversationThemeResponse>> updateTheme(
-            @PathVariable UUID themeId,
-            @Valid @RequestBody UpdateThemeRequest request,
-            @AuthenticationPrincipal(expression = "id") UUID managerId) {
-
-        ConversationThemeResponse response = themeService.updateTheme(themeId, request, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Theme updated successfully", response));
-    }
-
-    /**
-     * Publish a theme (status -> PUBLISHED).
-     * PATCH /api/v1/manager/conversation/themes/{themeId}/publish
-     */
-    @PatchMapping("/themes/{themeId}/publish")
-    public ResponseEntity<ApiResponse<ConversationThemeResponse>> publishTheme(
-            @PathVariable UUID themeId,
-            @AuthenticationPrincipal(expression = "id") UUID managerId) {
-
-        ConversationThemeResponse response = themeService.updateStatus(
-                themeId, Course.ContentStatus.PUBLISHED, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Theme published successfully", response));
-    }
-
-    /**
-     * Archive a theme.
-     * PATCH /api/v1/manager/conversation/themes/{themeId}/archive
-     */
-    @PatchMapping("/themes/{themeId}/archive")
-    public ResponseEntity<ApiResponse<ConversationThemeResponse>> archiveTheme(
-            @PathVariable UUID themeId,
-            @AuthenticationPrincipal(expression = "id") UUID managerId) {
-
-        ConversationThemeResponse response = themeService.updateStatus(
-                themeId, Course.ContentStatus.ARCHIVED, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Theme archived successfully", response));
-    }
-
-    /**
-     * Soft-delete a theme.
-     * DELETE /api/v1/manager/conversation/themes/{themeId}
-     */
-    @DeleteMapping("/themes/{themeId}")
-    public ResponseEntity<ApiResponse<Void>> deleteTheme(
-            @PathVariable UUID themeId,
-            @AuthenticationPrincipal(expression = "id") UUID managerId) {
-
-        themeService.deleteTheme(themeId, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Theme deleted successfully", null));
-    }
-
-    // ==================== TOPIC (Chủ đề nhỏ) ====================
-
-    /**
-     * Create a sub-topic under a theme.
+     * Create a new conversation topic.
      * POST /api/v1/manager/conversation/topics
      */
     @PostMapping("/topics")
@@ -192,35 +84,25 @@ public class ManagerConversationController {
     }
 
     /**
-     * Get all topics with pagination.
-     * GET /api/v1/manager/conversation/topics
+     * Get all topics (paginated). Supports keyword search.
+     * GET /api/v1/manager/conversation/topics?page=0&size=10&keyword=xxx
      */
     @GetMapping("/topics")
     public ResponseEntity<ApiResponse<PageResponse<ConversationTopicSummaryResponse>>> getAllTopics(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String keyword) {
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 100),
                 Sort.by("orderIndex").ascending());
-        Page<ConversationTopicSummaryResponse> result = topicService.getAllTopics(pageable);
-        return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
-                result.getContent(), result.getNumber(), result.getSize(),
-                result.getTotalElements(), result.getTotalPages())));
-    }
 
-    /**
-     * Get topics by theme.
-     * GET /api/v1/manager/conversation/themes/{themeId}/topics
-     */
-    @GetMapping("/themes/{themeId}/topics")
-    public ResponseEntity<ApiResponse<PageResponse<ConversationTopicSummaryResponse>>> getTopicsByTheme(
-            @PathVariable UUID themeId,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
+        Page<ConversationTopicSummaryResponse> result;
+        if (keyword != null && !keyword.isBlank()) {
+            result = topicService.searchTopics(keyword.trim(), pageable);
+        } else {
+            result = topicService.getAllTopics(pageable);
+        }
 
-        Pageable pageable = PageRequest.of(page, Math.min(size, 100),
-                Sort.by("orderIndex").ascending());
-        Page<ConversationTopicSummaryResponse> result = topicService.getTopicsByTheme(themeId, pageable);
         return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
                 result.getContent(), result.getNumber(), result.getSize(),
                 result.getTotalElements(), result.getTotalPages())));
@@ -252,7 +134,7 @@ public class ManagerConversationController {
     }
 
     /**
-     * Publish a topic.
+     * Publish a topic (status -> PUBLISHED).
      * PATCH /api/v1/manager/conversation/topics/{topicId}/publish
      */
     @PatchMapping("/topics/{topicId}/publish")
@@ -266,7 +148,7 @@ public class ManagerConversationController {
     }
 
     /**
-     * Archive a topic (status -> ARCHIVED).
+     * Archive a topic.
      * PATCH /api/v1/manager/conversation/topics/{topicId}/archive
      */
     @PatchMapping("/topics/{topicId}/archive")
@@ -292,27 +174,143 @@ public class ManagerConversationController {
         return ResponseEntity.ok(ApiResponse.success("Topic deleted successfully", null));
     }
 
-    // ==================== TOPIC GENERATION (AI) ====================
+    // ==================== CONVERSATION (Hội thoại cụ thể) ====================
 
     /**
-     * AI-generate topic suggestions for a theme.
-     * POST /api/v1/manager/conversation/topics/generate
+     * AI-generate conversation suggestions for a topic.
+     * POST /api/v1/manager/conversation/conversations/generate
      */
-    @PostMapping("/topics/generate")
-    public ResponseEntity<ApiResponse<List<GeneratedTopicSuggestionResponse>>> generateTopics(
-            @Valid @RequestBody GenerateTopicRequest request) {
+    @PostMapping("/conversations/generate")
+    public ResponseEntity<ApiResponse<List<GeneratedConversationSuggestionResponse>>> generateConversations(
+            @Valid @RequestBody GenerateConversationRequest request) {
 
-        log.info("Generating topic suggestions for theme: {}", request.getThemeId());
-        List<GeneratedTopicSuggestionResponse> suggestions =
-                topicService.generateTopicSuggestions(request);
+        log.info("Generating conversation suggestions for topic: {}", request.getTopicId());
+        List<GeneratedConversationSuggestionResponse> suggestions =
+                conversationService.generateConversationSuggestions(request);
         return ResponseEntity.ok(ApiResponse.success(
-                "Generated " + suggestions.size() + " topic suggestions", suggestions));
+                "Generated " + suggestions.size() + " conversation suggestions", suggestions));
+    }
+
+    /**
+     * Create a conversation under a topic.
+     * POST /api/v1/manager/conversation/conversations
+     */
+    @PostMapping("/conversations")
+    public ResponseEntity<ApiResponse<ConversationResponse>> createConversation(
+            @Valid @RequestBody CreateConversationRequest request,
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
+
+        log.info("Manager {} creating conversation: {}", managerId, request.getTitle());
+        ConversationResponse response = conversationService.createConversation(request, managerId);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("Conversation created successfully", response));
+    }
+
+    /**
+     * Get all conversations (paginated).
+     * GET /api/v1/manager/conversation/conversations
+     */
+    @GetMapping("/conversations")
+    public ResponseEntity<ApiResponse<PageResponse<ConversationSummaryResponse>>> getAllConversations(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100),
+                Sort.by("orderIndex").ascending());
+        Page<ConversationSummaryResponse> result = conversationService.getAllConversations(pageable);
+        return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
+                result.getContent(), result.getNumber(), result.getSize(),
+                result.getTotalElements(), result.getTotalPages())));
+    }
+
+    /**
+     * Get conversations by topic.
+     * GET /api/v1/manager/conversation/topics/{topicId}/conversations
+     */
+    @GetMapping("/topics/{topicId}/conversations")
+    public ResponseEntity<ApiResponse<PageResponse<ConversationSummaryResponse>>> getConversationsByTopic(
+            @PathVariable UUID topicId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100),
+                Sort.by("orderIndex").ascending());
+        Page<ConversationSummaryResponse> result = conversationService.getConversationsByTopic(topicId, pageable);
+        return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
+                result.getContent(), result.getNumber(), result.getSize(),
+                result.getTotalElements(), result.getTotalPages())));
+    }
+
+    /**
+     * Get a conversation by ID.
+     * GET /api/v1/manager/conversation/conversations/{conversationId}
+     */
+    @GetMapping("/conversations/{conversationId}")
+    public ResponseEntity<ApiResponse<ConversationResponse>> getConversation(
+            @PathVariable UUID conversationId) {
+
+        return ResponseEntity.ok(ApiResponse.success(conversationService.getConversation(conversationId)));
+    }
+
+    /**
+     * Update a conversation.
+     * PUT /api/v1/manager/conversation/conversations/{conversationId}
+     */
+    @PutMapping("/conversations/{conversationId}")
+    public ResponseEntity<ApiResponse<ConversationResponse>> updateConversation(
+            @PathVariable UUID conversationId,
+            @Valid @RequestBody UpdateConversationRequest request,
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
+
+        ConversationResponse response = conversationService.updateConversation(conversationId, request, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Conversation updated successfully", response));
+    }
+
+    /**
+     * Publish a conversation.
+     * PATCH /api/v1/manager/conversation/conversations/{conversationId}/publish
+     */
+    @PatchMapping("/conversations/{conversationId}/publish")
+    public ResponseEntity<ApiResponse<ConversationResponse>> publishConversation(
+            @PathVariable UUID conversationId,
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
+
+        ConversationResponse response = conversationService.updateStatus(
+                conversationId, Course.ContentStatus.PUBLISHED, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Conversation published successfully", response));
+    }
+
+    /**
+     * Archive a conversation.
+     * PATCH /api/v1/manager/conversation/conversations/{conversationId}/archive
+     */
+    @PatchMapping("/conversations/{conversationId}/archive")
+    public ResponseEntity<ApiResponse<ConversationResponse>> archiveConversation(
+            @PathVariable UUID conversationId,
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
+
+        ConversationResponse response = conversationService.updateStatus(
+                conversationId, Course.ContentStatus.ARCHIVED, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Conversation archived successfully", response));
+    }
+
+    /**
+     * Soft-delete a conversation.
+     * DELETE /api/v1/manager/conversation/conversations/{conversationId}
+     */
+    @DeleteMapping("/conversations/{conversationId}")
+    public ResponseEntity<ApiResponse<Void>> deleteConversation(
+            @PathVariable UUID conversationId,
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
+
+        conversationService.deleteConversation(conversationId, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Conversation deleted successfully", null));
     }
 
     // ==================== MISSION (Nhiệm vụ) ====================
 
     /**
-     * Create a new mission for a topic.
+     * Create a new mission for a conversation.
      * POST /api/v1/manager/conversation/missions
      */
     @PostMapping("/missions")
@@ -320,21 +318,21 @@ public class ManagerConversationController {
             @Valid @RequestBody CreateMissionRequest request,
             @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
-        log.info("Manager {} creating mission for topic: {}", managerId, request.getTopicId());
+        log.info("Manager {} creating mission for conversation: {}", managerId, request.getConversationId());
         ConversationMissionResponse response = missionService.createMission(request, managerId);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Mission created successfully", response));
     }
 
     /**
-     * Get all missions for a topic, sorted by order index.
-     * GET /api/v1/manager/conversation/topics/{topicId}/missions
+     * Get all missions for a conversation, sorted by order index.
+     * GET /api/v1/manager/conversation/conversations/{conversationId}/missions
      */
-    @GetMapping("/topics/{topicId}/missions")
-    public ResponseEntity<ApiResponse<List<ConversationMissionResponse>>> getMissionsByTopic(
-            @PathVariable UUID topicId) {
+    @GetMapping("/conversations/{conversationId}/missions")
+    public ResponseEntity<ApiResponse<List<ConversationMissionResponse>>> getMissionsByConversation(
+            @PathVariable UUID conversationId) {
 
-        List<ConversationMissionResponse> missions = missionService.getMissionsByTopic(topicId);
+        List<ConversationMissionResponse> missions = missionService.getMissionsByConversation(conversationId);
         return ResponseEntity.ok(ApiResponse.success(
                 "Retrieved " + missions.size() + " missions", missions));
     }

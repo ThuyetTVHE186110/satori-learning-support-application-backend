@@ -18,7 +18,7 @@ import java.util.UUID;
 @Table(name = "user_conversation_progress", schema = "speaking",
         uniqueConstraints = @UniqueConstraint(
                 name = "uq_user_conv_progress",
-                columnNames = {"user_id", "topic_id"}))
+                columnNames = {"user_id", "conversation_id"}))
 @Getter
 @Setter
 @NoArgsConstructor
@@ -29,8 +29,8 @@ public class UserConversationProgress extends BaseEntity {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
 
-    @Column(name = "topic_id", nullable = false)
-    private UUID topicId;
+    @Column(name = "conversation_id", nullable = false)
+    private UUID conversationId;
 
     @Column(name = "total_sessions", nullable = false)
     @Builder.Default

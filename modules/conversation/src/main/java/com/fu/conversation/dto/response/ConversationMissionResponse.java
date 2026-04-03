@@ -16,7 +16,7 @@ import java.util.UUID;
 public class ConversationMissionResponse {
 
     private UUID id;
-    private UUID topicId;
+    private UUID conversationId;
     private String title;
     private String titleJapanese;
     private String titleVi;

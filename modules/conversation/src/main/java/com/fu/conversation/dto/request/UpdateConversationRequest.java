@@ -1,6 +1,8 @@
 package com.fu.conversation.dto.request;
 
 import com.fu.course.entity.Course;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
@@ -14,10 +16,12 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class CreateThemeRequest {
+public class UpdateConversationRequest {
+
+    private UUID courseId;
 
     @NotBlank(message = "Title is required")
-    @Size(max = 255, message = "Title must not exceed 255 characters")
+    @Size(max = 255)
     private String title;
 
     @Size(max = 255)
@@ -27,15 +31,27 @@ public class CreateThemeRequest {
 
     private String descriptionVi;
 
+    private String scenario;
+
+    private String vocabularyHints;
+
+    private String grammarPoints;
+
+    private String usefulExpressions;
+
     @Size(max = 100)
     private String category;
 
-    private Course.JlptLevel jlptLevel;
+    @Min(1) @Max(10)
+    private Integer difficultyScore;
 
-    private UUID courseId;
+    private String aiRole;
+
+    private String learnerRole;
+
+    private String roleplayContext;
 
     private String thumbnailUrl;
 
-    @Builder.Default
-    private Integer orderIndex = 0;
+    private Integer orderIndex;
 }

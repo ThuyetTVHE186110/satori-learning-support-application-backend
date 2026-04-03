@@ -330,7 +330,7 @@ public class ExerciseGeneratorAgent {
             String text = null;
             boolean isCorrect = false;
             while (p.nextToken() != JsonToken.END_OBJECT) {
-                String field = p.getCurrentName();
+                String field = p.currentName();
                 p.nextToken();
                 switch (field) {
                     case "text"      -> text = p.getText();

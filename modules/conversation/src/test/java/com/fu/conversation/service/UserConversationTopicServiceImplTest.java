@@ -1,410 +1,266 @@
 package com.fu.conversation.service;
 
-import com.fu.common.exception.BusinessException;
-import com.fu.common.exception.ResourceNotFoundException;
-import com.fu.conversation.ai.ConversationGenerationService;
-import com.fu.conversation.dto.request.CreateUserTopicRequest;
-import com.fu.conversation.dto.request.UpdateUserTopicRequest;
-import com.fu.conversation.dto.response.UserConversationTopicResponse;
-import com.fu.conversation.entity.UserConversationTopic;
-import com.fu.conversation.mapper.UserConversationTopicMapper;
-import com.fu.conversation.repository.UserConversationTopicRepository;
-import com.fu.conversation.service.impl.UserConversationTopicServiceImpl;
+import com.fu.conversation.dto.request.CreateUserConversationRequest;
+import com.fu.conversation.dto.request.UpdateUserConversationRequest;
+import com.fu.conversation.dto.response.UserConversationResponse;
+import com.fu.conversation.entity.UserConversation;
+import com.fu.conversation.mapper.UserConversationMapper;
 import com.fu.course.entity.Course;
-import com.fu.course.repository.CourseRepository;
 import org.junit.jupiter.api.*;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.*;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.*;
+import org.mapstruct.factory.Mappers;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.*;
+import java.time.LocalDateTime;
+import java.util.UUID;
 
-import static org.assertj.core.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.assertj.core.api.Assertions.assertThat;
 
-@ExtendWith(MockitoExtension.class)
-@DisplayName("UserConversationTopicServiceImpl Tests")
-class UserConversationTopicServiceImplTest {
+@DisplayName("UserConversationMapper Tests")
+class UserConversationMapperTest {
 
-    @Mock private UserConversationTopicRepository userTopicRepository;
-    @Mock private UserConversationTopicMapper userTopicMapper;
-    @Mock private ConversationGenerationService generationService;
-    @Mock private CourseRepository courseRepository;
-
-    @InjectMocks
-    private UserConversationTopicServiceImpl userTopicService;
-
-    private UUID userId;
-    private UUID topicId;
-    private UUID courseId;
-    private UserConversationTopic ownedTopic;
-    private UserConversationTopicResponse topicResponse;
-    private Course course;
+    private UserConversationMapper mapper;
 
     @BeforeEach
     void setUp() {
-        userId   = UUID.randomUUID();
-        topicId  = UUID.randomUUID();
-        courseId = UUID.randomUUID();
-
-        ownedTopic = UserConversationTopic.builder()
-                .userId(userId)
-                .title("My Shopping Conversation")
-                .scenario("Practice buying clothes in a Japanese mall")
-                .jlptLevel(Course.JlptLevel.N4)
-                .courseId(courseId)
-                .aiGeneratedContext("{}")
-                .status(Course.ContentStatus.DRAFT)
-                .build();
-        ReflectionTestUtils.setField(ownedTopic, "id", topicId);
-
-        course = Course.builder().name("N4 Course").build();
-
-        topicResponse = UserConversationTopicResponse.builder()
-                .id(topicId)
-                .userId(userId)
-                .title("My Shopping Conversation")
-                .build();
+        mapper = Mappers.getMapper(UserConversationMapper.class);
     }
 
     // ════════════════════════════════════════════════════════════════════════
     @Nested
-    @DisplayName("createTopic")
-    class CreateTopicTests {
+    @DisplayName("toEntity - CreateUserConversationRequest → UserConversation")
+    class ToEntityTests {
 
         @Test
-        @DisplayName("Should save topic with userId set correctly")
-        void shouldCreateTopicWithUserIdSet() {
-            // Given
-            CreateUserTopicRequest request = CreateUserTopicRequest.builder()
+        @DisplayName("Should map all provided fields from CreateUserConversationRequest")
+        void shouldMapAllProvidedFields() {
+            UUID courseId = UUID.randomUUID();
+            CreateUserConversationRequest request = CreateUserConversationRequest.builder()
                     .title("My Shopping Conversation")
-                    .scenario("Practice buying clothes")
+                    .scenario("Buying clothes at a department store in Tokyo")
+                    .jlptLevel(Course.JlptLevel.N4)
                     .courseId(courseId)
                     .build();
-            when(userTopicMapper.toEntity(request)).thenReturn(ownedTopic);
-            when(userTopicRepository.save(ownedTopic)).thenReturn(ownedTopic);
-            when(userTopicMapper.toResponse(ownedTopic)).thenReturn(topicResponse);
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
 
-            // When
-            UserConversationTopicResponse result =
-                    userTopicService.createTopic(request, userId);
+            UserConversation entity = mapper.toEntity(request);
 
-            // Then
-            assertThat(result).isNotNull();
-            assertThat(ownedTopic.getUserId()).isEqualTo(userId);
-            verify(userTopicRepository).save(ownedTopic);
+            assertThat(entity).isNotNull();
+            assertThat(entity.getTitle()).isEqualTo("My Shopping Conversation");
+            assertThat(entity.getScenario()).isEqualTo("Buying clothes at a department store in Tokyo");
+            assertThat(entity.getJlptLevel()).isEqualTo(Course.JlptLevel.N4);
+            assertThat(entity.getCourseId()).isEqualTo(courseId);
         }
 
         @Test
-        @DisplayName("Should populate courseName when courseId is present")
-        void shouldPopulateCourseNameWhenCourseExists() {
-            CreateUserTopicRequest request = CreateUserTopicRequest.builder()
-                    .title("Test").courseId(courseId).build();
-            when(userTopicMapper.toEntity(request)).thenReturn(ownedTopic);
-            when(userTopicRepository.save(any())).thenReturn(ownedTopic);
-            when(userTopicMapper.toResponse(ownedTopic)).thenReturn(topicResponse);
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-
-            UserConversationTopicResponse result =
-                    userTopicService.createTopic(request, userId);
-
-            assertThat(result.getCourseName()).isEqualTo("N4 Course");
+        @DisplayName("Should not set id (generated by persistence)")
+        void shouldNotSetId() {
+            CreateUserConversationRequest request = CreateUserConversationRequest.builder()
+                    .title("Test").build();
+            UserConversation entity = mapper.toEntity(request);
+            assertThat(entity.getId()).isNull();
         }
 
         @Test
-        @DisplayName("Should not query courseRepository when courseId is null")
-        void shouldSkipCourseQueryWhenCourseIdNull() {
-            UserConversationTopic topicNoCourse = UserConversationTopic.builder()
-                    .userId(userId).title("No Course").build();
-            ReflectionTestUtils.setField(topicNoCourse, "id", topicId);
-
-            CreateUserTopicRequest request = CreateUserTopicRequest.builder()
-                    .title("No Course").build();
-            when(userTopicMapper.toEntity(request)).thenReturn(topicNoCourse);
-            when(userTopicRepository.save(any())).thenReturn(topicNoCourse);
-            when(userTopicMapper.toResponse(topicNoCourse)).thenReturn(topicResponse);
-
-            userTopicService.createTopic(request, userId);
-
-            verify(courseRepository, never()).findById(any());
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    @Nested
-    @DisplayName("updateTopic")
-    class UpdateTopicTests {
-
-        @Test
-        @DisplayName("Should update topic fields and save")
-        void shouldUpdateTopicSuccessfully() {
-            // Given
-            UpdateUserTopicRequest request = UpdateUserTopicRequest.builder()
-                    .title("Updated Title")
-                    .scenario("Updated scenario")
-                    .build();
-            when(userTopicRepository.findByIdAndUserId(topicId, userId))
-                    .thenReturn(Optional.of(ownedTopic));
-            when(userTopicRepository.save(ownedTopic)).thenReturn(ownedTopic);
-            when(userTopicMapper.toResponse(ownedTopic)).thenReturn(topicResponse);
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-
-            // When
-            UserConversationTopicResponse result =
-                    userTopicService.updateTopic(topicId, request, userId);
-
-            // Then
-            assertThat(result).isNotNull();
-            verify(userTopicMapper).updateEntity(ownedTopic, request);
-            verify(userTopicRepository).save(ownedTopic);
+        @DisplayName("Should not set userId (set by service from authentication)")
+        void shouldNotSetUserId() {
+            CreateUserConversationRequest request = CreateUserConversationRequest.builder()
+                    .title("Test").build();
+            UserConversation entity = mapper.toEntity(request);
+            assertThat(entity.getUserId()).isNull();
         }
 
         @Test
-        @DisplayName("Should throw ResourceNotFoundException when topic not owned by user")
-        void shouldThrowWhenTopicNotOwned() {
-            when(userTopicRepository.findByIdAndUserId(topicId, userId))
-                    .thenReturn(Optional.empty());
-
-            assertThatThrownBy(() ->
-                    userTopicService.updateTopic(topicId, new UpdateUserTopicRequest(), userId))
-                    .isInstanceOf(ResourceNotFoundException.class)
-                    .hasMessageContaining("UserConversationTopic");
+        @DisplayName("Should not set aiGeneratedContext (generated by AI service on demand)")
+        void shouldNotSetAiContext() {
+            CreateUserConversationRequest request = CreateUserConversationRequest.builder()
+                    .title("Test").build();
+            UserConversation entity = mapper.toEntity(request);
+            // mapper ignores it; @Builder.Default sets "{}"
+            assertThat(entity.getAiGeneratedContext()).isEqualTo("{}");
         }
 
         @Test
-        @DisplayName("Should throw when topic belongs to a different user")
-        void shouldThrowWhenTopicBelongsToDifferentUser() {
-            UUID anotherUser = UUID.randomUUID();
-            when(userTopicRepository.findByIdAndUserId(topicId, anotherUser))
-                    .thenReturn(Optional.empty());
+        @DisplayName("Should default status to DRAFT")
+        void shouldDefaultStatusToDraft() {
+            CreateUserConversationRequest request = CreateUserConversationRequest.builder()
+                    .title("Test").build();
+            UserConversation entity = mapper.toEntity(request);
+            assertThat(entity.getStatus()).isEqualTo(Course.ContentStatus.DRAFT);
+        }
 
-            assertThatThrownBy(() ->
-                    userTopicService.updateTopic(topicId, new UpdateUserTopicRequest(), anotherUser))
-                    .isInstanceOf(ResourceNotFoundException.class);
+        @Test
+        @DisplayName("Should map minimal request with only required title")
+        void shouldMapMinimalRequest() {
+            CreateUserConversationRequest request = CreateUserConversationRequest.builder()
+                    .title("Just a title").build();
+            UserConversation entity = mapper.toEntity(request);
+
+            assertThat(entity.getTitle()).isEqualTo("Just a title");
+            assertThat(entity.getScenario()).isNull();
+            assertThat(entity.getJlptLevel()).isNull();
+            assertThat(entity.getCourseId()).isNull();
         }
     }
 
     // ════════════════════════════════════════════════════════════════════════
     @Nested
-    @DisplayName("deleteTopic")
-    class DeleteTopicTests {
+    @DisplayName("updateEntity - UpdateUserConversationRequest → @MappingTarget UserConversation")
+    class UpdateEntityTests {
 
         @Test
-        @DisplayName("Should hard-delete topic (not soft delete)")
-        void shouldHardDeleteTopic() {
-            // Given
-            when(userTopicRepository.findByIdAndUserId(topicId, userId))
-                    .thenReturn(Optional.of(ownedTopic));
-
-            // When
-            userTopicService.deleteTopic(topicId, userId);
-
-            // Then — must call delete(), NOT save()
-            verify(userTopicRepository).delete(ownedTopic);
-            verify(userTopicRepository, never()).save(any());
-        }
-
-        @Test
-        @DisplayName("Should throw ResourceNotFoundException when topic not owned by user")
-        void shouldThrowWhenTopicNotOwned() {
-            when(userTopicRepository.findByIdAndUserId(topicId, userId))
-                    .thenReturn(Optional.empty());
-
-            assertThatThrownBy(() -> userTopicService.deleteTopic(topicId, userId))
-                    .isInstanceOf(ResourceNotFoundException.class);
-        }
-
-        @Test
-        @DisplayName("Should not delete a topic owned by another user")
-        void shouldNotDeleteAnotherUsersTopicl() {
-            UUID otherId = UUID.randomUUID();
-            when(userTopicRepository.findByIdAndUserId(topicId, otherId))
-                    .thenReturn(Optional.empty());
-
-            assertThatThrownBy(() -> userTopicService.deleteTopic(topicId, otherId))
-                    .isInstanceOf(ResourceNotFoundException.class);
-            verify(userTopicRepository, never()).delete(any());
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    @Nested
-    @DisplayName("generateContext")
-    class GenerateContextTests {
-
-        @Test
-        @DisplayName("Should generate context and persist aiGeneratedContext")
-        void shouldGenerateAndSaveContext() {
-            // Given
-            String generatedJson = "{\"vocabularyHints\":[\"ショッピング\"]}";
-            when(userTopicRepository.findByIdAndUserId(topicId, userId))
-                    .thenReturn(Optional.of(ownedTopic));
-            when(generationService.generateUserTopicContext(
-                    ownedTopic.getScenario(), courseId))
-                    .thenReturn(generatedJson);
-            when(userTopicRepository.save(ownedTopic)).thenReturn(ownedTopic);
-            when(userTopicMapper.toResponse(ownedTopic)).thenReturn(topicResponse);
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-
-            // When
-            userTopicService.generateContext(topicId, userId);
-
-            // Then
-            assertThat(ownedTopic.getAiGeneratedContext()).isEqualTo(generatedJson);
-            verify(generationService).generateUserTopicContext(
-                    ownedTopic.getScenario(), courseId);
-            verify(userTopicRepository).save(ownedTopic);
-        }
-
-        @Test
-        @DisplayName("Should throw BusinessException when scenario is null")
-        void shouldThrowWhenScenarioIsNull() {
-            UserConversationTopic topicNoScenario = UserConversationTopic.builder()
-                    .userId(userId).title("No Scenario").scenario(null).build();
-            ReflectionTestUtils.setField(topicNoScenario, "id", topicId);
-            when(userTopicRepository.findByIdAndUserId(topicId, userId))
-                    .thenReturn(Optional.of(topicNoScenario));
-
-            assertThatThrownBy(() -> userTopicService.generateContext(topicId, userId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("scenario");
-            verify(generationService, never()).generateUserTopicContext(any(), any());
-        }
-
-        @Test
-        @DisplayName("Should throw BusinessException when scenario is blank")
-        void shouldThrowWhenScenarioIsBlank() {
-            UserConversationTopic topicBlankScenario = UserConversationTopic.builder()
-                    .userId(userId).title("Blank Scenario").scenario("   ").build();
-            ReflectionTestUtils.setField(topicBlankScenario, "id", topicId);
-            when(userTopicRepository.findByIdAndUserId(topicId, userId))
-                    .thenReturn(Optional.of(topicBlankScenario));
-
-            assertThatThrownBy(() -> userTopicService.generateContext(topicId, userId))
-                    .isInstanceOf(BusinessException.class);
-            verify(generationService, never()).generateUserTopicContext(any(), any());
-        }
-
-        @Test
-        @DisplayName("Should throw ResourceNotFoundException when topic not found")
-        void shouldThrowWhenTopicNotFound() {
-            when(userTopicRepository.findByIdAndUserId(topicId, userId))
-                    .thenReturn(Optional.empty());
-
-            assertThatThrownBy(() -> userTopicService.generateContext(topicId, userId))
-                    .isInstanceOf(ResourceNotFoundException.class);
-        }
-
-        @Test
-        @DisplayName("Should pass null courseId to generation service when topic has no course")
-        void shouldPassNullCourseIdWhenNoCourse() {
-            UserConversationTopic topicNoCourse = UserConversationTopic.builder()
+        @DisplayName("Should update provided non-null fields only")
+        void shouldUpdateNonNullFields() {
+            UUID userId   = UUID.randomUUID();
+            UUID courseId = UUID.randomUUID();
+            UserConversation entity = UserConversation.builder()
                     .userId(userId)
-                    .title("No Course")
-                    .scenario("Just a scenario")
-                    .courseId(null)
-                    .aiGeneratedContext("{}")
+                    .title("Original Title")
+                    .scenario("Original scenario")
+                    .courseId(courseId)
                     .build();
-            ReflectionTestUtils.setField(topicNoCourse, "id", topicId);
 
-            String generatedJson = "{\"vocabularyHints\":[]}";
-            when(userTopicRepository.findByIdAndUserId(topicId, userId))
-                    .thenReturn(Optional.of(topicNoCourse));
-            when(generationService.generateUserTopicContext("Just a scenario", null))
-                    .thenReturn(generatedJson);
-            when(userTopicRepository.save(topicNoCourse)).thenReturn(topicNoCourse);
-            when(userTopicMapper.toResponse(topicNoCourse)).thenReturn(topicResponse);
+            UpdateUserConversationRequest request = UpdateUserConversationRequest.builder()
+                    .title("New Title")
+                    .jlptLevel(Course.JlptLevel.N3)
+                    // scenario and courseId intentionally null
+                    .build();
 
-            userTopicService.generateContext(topicId, userId);
+            mapper.updateEntity(entity, request);
 
-            verify(generationService).generateUserTopicContext("Just a scenario", null);
+            assertThat(entity.getTitle()).isEqualTo("New Title");
+            assertThat(entity.getJlptLevel()).isEqualTo(Course.JlptLevel.N3);
+            assertThat(entity.getScenario()).isEqualTo("Original scenario"); // not overwritten
+            assertThat(entity.getCourseId()).isEqualTo(courseId);            // not overwritten
+        }
+
+        @Test
+        @DisplayName("Should not change userId via updateEntity")
+        void shouldNotChangeUserId() {
+            UUID userId = UUID.randomUUID();
+            UserConversation entity = UserConversation.builder()
+                    .userId(userId).title("Test").build();
+
+            mapper.updateEntity(entity, UpdateUserConversationRequest.builder().title("New").build());
+
+            assertThat(entity.getUserId()).isEqualTo(userId);
+        }
+
+        @Test
+        @DisplayName("Should not change id via updateEntity")
+        void shouldNotChangeId() {
+            UUID existingId = UUID.randomUUID();
+            UserConversation entity = UserConversation.builder().title("Test").build();
+            ReflectionTestUtils.setField(entity, "id", existingId);
+
+            mapper.updateEntity(entity, UpdateUserConversationRequest.builder().title("New").build());
+
+            assertThat(entity.getId()).isEqualTo(existingId);
+        }
+
+        @Test
+        @DisplayName("Should not change aiGeneratedContext via updateEntity")
+        void shouldNotChangeAiContext() {
+            String originalContext = "{\"vocabularyHints\":[\"食べ物\"]}";
+            UserConversation entity = UserConversation.builder()
+                    .title("Test").aiGeneratedContext(originalContext).build();
+
+            mapper.updateEntity(entity, UpdateUserConversationRequest.builder().title("New").build());
+
+            assertThat(entity.getAiGeneratedContext()).isEqualTo(originalContext);
+        }
+
+        @Test
+        @DisplayName("Should update scenario when provided")
+        void shouldUpdateScenario() {
+            UserConversation entity = UserConversation.builder()
+                    .title("Test").scenario("Old scenario").build();
+
+            mapper.updateEntity(entity,
+                    UpdateUserConversationRequest.builder()
+                            .title("Test").scenario("New scenario").build());
+
+            assertThat(entity.getScenario()).isEqualTo("New scenario");
+        }
+
+        @Test
+        @DisplayName("Should not change status via updateEntity")
+        void shouldNotChangeStatus() {
+            UserConversation entity = UserConversation.builder()
+                    .title("Test").status(Course.ContentStatus.DRAFT).build();
+
+            mapper.updateEntity(entity, UpdateUserConversationRequest.builder().title("New").build());
+
+            assertThat(entity.getStatus()).isEqualTo(Course.ContentStatus.DRAFT);
         }
     }
 
     // ════════════════════════════════════════════════════════════════════════
     @Nested
-    @DisplayName("getMyTopics")
-    class GetMyTopicsTests {
+    @DisplayName("toResponse - UserConversation → UserConversationResponse")
+    class ToResponseTests {
 
         @Test
-        @DisplayName("Should return paginated personal topics for user")
-        void shouldReturnPaginatedTopicsForUser() {
-            Pageable pageable = PageRequest.of(0, 10);
-            when(userTopicRepository.findByUserId(userId, pageable))
-                    .thenReturn(new PageImpl<>(List.of(ownedTopic)));
-            when(userTopicMapper.toResponse(ownedTopic)).thenReturn(topicResponse);
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+        @DisplayName("Should map all entity fields to response")
+        void shouldMapAllFields() {
+            UUID id       = UUID.randomUUID();
+            UUID userId   = UUID.randomUUID();
+            UUID courseId = UUID.randomUUID();
+            LocalDateTime createdAt  = LocalDateTime.of(2026, 3, 1, 12, 0);
+            LocalDateTime updatedAt  = LocalDateTime.of(2026, 3, 5, 15, 30);
 
-            Page<UserConversationTopicResponse> result =
-                    userTopicService.getMyTopics(userId, pageable);
+            UserConversation entity = UserConversation.builder()
+                    .userId(userId)
+                    .title("My Conversation")
+                    .scenario("Practice at the station")
+                    .jlptLevel(Course.JlptLevel.N4)
+                    .courseId(courseId)
+                    .aiGeneratedContext("{\"hints\":[]}")
+                    .status(Course.ContentStatus.DRAFT)
+                    .build();
+            ReflectionTestUtils.setField(entity, "id", id);
+            ReflectionTestUtils.setField(entity, "createdAt", createdAt);
+            ReflectionTestUtils.setField(entity, "updatedAt", updatedAt);
 
-            assertThat(result.getContent()).hasSize(1);
-            verify(userTopicRepository).findByUserId(userId, pageable);
+            UserConversationResponse response = mapper.toResponse(entity);
+
+            assertThat(response.getId()).isEqualTo(id);
+            assertThat(response.getUserId()).isEqualTo(userId);
+            assertThat(response.getTitle()).isEqualTo("My Conversation");
+            assertThat(response.getScenario()).isEqualTo("Practice at the station");
+            assertThat(response.getJlptLevel()).isEqualTo(Course.JlptLevel.N4);
+            assertThat(response.getCourseId()).isEqualTo(courseId);
+            assertThat(response.getAiGeneratedContext()).isEqualTo("{\"hints\":[]}");
+            assertThat(response.getStatus()).isEqualTo(Course.ContentStatus.DRAFT);
+            assertThat(response.getCreatedAt()).isEqualTo(createdAt);
+            assertThat(response.getUpdatedAt()).isEqualTo(updatedAt);
         }
 
         @Test
-        @DisplayName("Should return empty page when user has no personal topics")
-        void shouldReturnEmptyPageWhenNoTopics() {
-            Pageable pageable = PageRequest.of(0, 10);
-            when(userTopicRepository.findByUserId(userId, pageable))
-                    .thenReturn(Page.empty());
+        @DisplayName("Should leave courseName null (computed by service)")
+        void shouldLeaveComputedCourseNameNull() {
+            UserConversation entity = UserConversation.builder().title("Test").build();
+            ReflectionTestUtils.setField(entity, "id", UUID.randomUUID());
 
-            Page<UserConversationTopicResponse> result =
-                    userTopicService.getMyTopics(userId, pageable);
+            UserConversationResponse response = mapper.toResponse(entity);
 
-            assertThat(result.getContent()).isEmpty();
+            assertThat(response.getCourseName()).isNull();
         }
 
         @Test
-        @DisplayName("Should only return topics belonging to the requesting user")
-        void shouldOnlyReturnTopicsForCorrectUser() {
-            UUID otherUser = UUID.randomUUID();
-            Pageable pageable = PageRequest.of(0, 10);
-            when(userTopicRepository.findByUserId(otherUser, pageable))
-                    .thenReturn(Page.empty());
+        @DisplayName("Should map null optional fields without error")
+        void shouldHandleNullOptionalFields() {
+            UUID id     = UUID.randomUUID();
+            UUID userId = UUID.randomUUID();
+            UserConversation entity = UserConversation.builder()
+                    .userId(userId).title("Minimal").build();
+            ReflectionTestUtils.setField(entity, "id", id);
 
-            Page<UserConversationTopicResponse> result =
-                    userTopicService.getMyTopics(otherUser, pageable);
+            UserConversationResponse response = mapper.toResponse(entity);
 
-            assertThat(result.getContent()).isEmpty();
-            verify(userTopicRepository).findByUserId(otherUser, pageable);
-            verify(userTopicRepository, never()).findByUserId(eq(userId), any());
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    @Nested
-    @DisplayName("getMyTopic")
-    class GetMyTopicTests {
-
-        @Test
-        @DisplayName("Should return topic response when user owns it")
-        void shouldReturnTopicWhenOwned() {
-            when(userTopicRepository.findByIdAndUserId(topicId, userId))
-                    .thenReturn(Optional.of(ownedTopic));
-            when(userTopicMapper.toResponse(ownedTopic)).thenReturn(topicResponse);
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-
-            UserConversationTopicResponse result =
-                    userTopicService.getMyTopic(topicId, userId);
-
-            assertThat(result).isNotNull();
-            assertThat(result.getId()).isEqualTo(topicId);
-        }
-
-        @Test
-        @DisplayName("Should throw ResourceNotFoundException when topic not found or not owned")
-        void shouldThrowWhenTopicNotOwnedByUser() {
-            when(userTopicRepository.findByIdAndUserId(topicId, userId))
-                    .thenReturn(Optional.empty());
-
-            assertThatThrownBy(() -> userTopicService.getMyTopic(topicId, userId))
-                    .isInstanceOf(ResourceNotFoundException.class)
-                    .hasMessageContaining("UserConversationTopic");
+            assertThat(response.getId()).isEqualTo(id);
+            assertThat(response.getTitle()).isEqualTo("Minimal");
+            assertThat(response.getScenario()).isNull();
+            assertThat(response.getJlptLevel()).isNull();
+            assertThat(response.getCourseId()).isNull();
         }
     }
 }

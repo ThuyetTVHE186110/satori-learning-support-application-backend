@@ -3,18 +3,15 @@ package com.fu.conversation.dto.request;
 import com.fu.course.entity.Course;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.util.UUID;
-
 /**
- * Request to AI-generate topic suggestions under a theme.
- * Topics are course-specific: the course's vocabulary and grammar are used as context
- * to generate relevant, level-appropriate topics and missions.
+ * Request to generate conversation topic suggestions using AI.
+ * Topics are course-agnostic (shared across all courses).
  */
 @Data
 @Builder
@@ -22,20 +19,13 @@ import java.util.UUID;
 @AllArgsConstructor
 public class GenerateTopicRequest {
 
-    @NotNull(message = "themeId is required")
-    private UUID themeId;
-
-    /**
-     * Course whose vocabulary and grammar are used as AI context for generating topics.
-     * Required — topics are course-specific.
-     */
-    @NotNull(message = "courseId is required")
-    private UUID courseId;
-
-    /**
-     * Override JLPT level (defaults to course's JLPT level if omitted).
-     */
     private Course.JlptLevel jlptLevel;
+
+    @Size(max = 100)
+    private String category;
+
+    @Size(max = 500)
+    private String hint;
 
     @Builder.Default
     @Min(1) @Max(5)

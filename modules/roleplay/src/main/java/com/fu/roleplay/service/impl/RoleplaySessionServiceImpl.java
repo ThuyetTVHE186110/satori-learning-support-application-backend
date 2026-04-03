@@ -6,10 +6,10 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
+import com.fu.conversation.entity.Conversation;
 import com.fu.conversation.entity.ConversationMission;
-import com.fu.conversation.entity.ConversationTopic;
 import com.fu.conversation.repository.ConversationMissionRepository;
-import com.fu.conversation.repository.ConversationTopicRepository;
+import com.fu.conversation.repository.ConversationRepository;
 import com.fu.conversation.repository.UserConversationProgressRepository;
 import com.fu.course.entity.Course;
 import com.fu.pronunciation.dto.AssessmentRequest;
@@ -62,7 +62,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     private final ConversationMissionRepository missionRepository;
     private final SessionMissionRepository sessionMissionRepository;
     private final MessagePronunciationRepository pronunciationRepository;
-    private final ConversationTopicRepository topicRepository;
+    private final ConversationRepository conversationRepository;
     private final UserConversationProgressRepository progressRepository;
 
     private final RoleplayAIService roleplayAIService;
@@ -84,7 +84,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             ConversationMissionRepository missionRepository,
             SessionMissionRepository sessionMissionRepository,
             MessagePronunciationRepository pronunciationRepository,
-            ConversationTopicRepository topicRepository,
+            ConversationRepository conversationRepository,
             UserConversationProgressRepository progressRepository,
             RoleplayAIService roleplayAIService,
             MissionEvaluatorAI missionEvaluatorAI,
@@ -101,7 +101,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         this.missionRepository = missionRepository;
         this.sessionMissionRepository = sessionMissionRepository;
         this.pronunciationRepository = pronunciationRepository;
-        this.topicRepository = topicRepository;
+        this.conversationRepository = conversationRepository;
         this.progressRepository = progressRepository;
         this.roleplayAIService = roleplayAIService;
         this.missionEvaluatorAI = missionEvaluatorAI;
@@ -118,12 +118,12 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     @Override
     @Transactional
     public SessionResponse startSession(StartSessionRequest request, UUID userId) {
-        // 1. Validate topic
-        ConversationTopic topic = topicRepository.findById(request.getTopicId())
-                .filter(t -> t.getDeletedAt() == null)
-                .filter(t -> Course.ContentStatus.PUBLISHED.equals(t.getStatus()))
+        // 1. Validate conversation
+        Conversation conversation = conversationRepository.findById(request.getConversationId())
+                .filter(c -> c.getDeletedAt() == null)
+                .filter(c -> Course.ContentStatus.PUBLISHED.equals(c.getStatus()))
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        "ConversationTopic", "id", request.getTopicId().toString()));
+                        "Conversation", "id", request.getConversationId().toString()));
 
         // 2. Check active sessions limit
         long activeSessions = sessionRepository.countByUserIdAndStatus(userId, ConversationSession.SessionStatus.ACTIVE.name());
@@ -131,18 +131,18 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             throw new BusinessException("SESSION_LIMIT", "Maximum active sessions reached (" + properties.getMaxActiveSessions() + ")");
         }
 
-        // 3. Load missions for topic
+        // 3. Load missions for conversation
         List<ConversationMission> missions = missionRepository
-                .findByTopicIdAndDeletedAtIsNullOrderByOrderIndexAsc(request.getTopicId());
+                .findByConversationIdAndDeletedAtIsNullOrderByOrderIndexAsc(request.getConversationId());
 
         // 4. Create session
         ConversationSession session = ConversationSession.builder()
                 .userId(userId)
                 .sessionType(ConversationSession.SessionType.ROLEPLAY)
-                .topicId(request.getTopicId())
+                .conversationId(request.getConversationId())
                 .status(ConversationSession.SessionStatus.ACTIVE)
                 .conversationPhase("CONVERSATION")
-                .context(topic.getRoleplayContext() != null ? topic.getRoleplayContext() : "{}")
+                .context(conversation.getRoleplayContext() != null ? conversation.getRoleplayContext() : "{}")
                 .build();
         session = sessionRepository.save(session);
 
@@ -172,9 +172,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         }
 
         // 6. Build and cache system prompt
-        String jlptLevel = topic.getJlptLevel() != null ? topic.getJlptLevel().name() : "N5";
+        String jlptLevel = conversation.getJlptLevel() != null ? conversation.getJlptLevel().name() : "N5";
         String systemPrompt = roleplayAIService.buildSystemPrompt(session,
-                topic.getAiRole(), topic.getLearnerRole(), topic.getScenario(),
+                conversation.getAiRole(), conversation.getLearnerRole(), conversation.getScenario(),
                 jlptLevel, sessionMissions);
         roleplayAIService.cacheSystemPrompt(session.getId(), systemPrompt);
 
@@ -198,9 +198,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 .collect(Collectors.toList()));
 
         // Update user_conversation_progress (upsert: increment total_sessions, update last_practiced_at)
-        progressRepository.upsertOnSessionStart(userId, request.getTopicId(), session.getCreatedAt());
+        progressRepository.upsertOnSessionStart(userId, request.getConversationId(), session.getCreatedAt());
 
-        log.info("Started roleplay session {} for user {} on topic {}", session.getId(), userId, request.getTopicId());
+        log.info("Started roleplay session {} for user {} on conversation {}", session.getId(), userId, request.getConversationId());
         return response;
     }
 
@@ -583,10 +583,10 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         sessionRepository.save(session);
 
         // Update user_conversation_progress if this was a topic-based session
-        if (session.getTopicId() != null) {
+        if (session.getConversationId() != null) {
             progressRepository.markCompleted(
                     session.getUserId(),
-                    session.getTopicId(),
+                    session.getConversationId(),
                     completedAt,
                     overallScore,
                     languageEval.getFluencyScore(),
@@ -976,19 +976,19 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
     /**
      * Rebuilds the system prompt from DB when the Redis cache has expired.
-     * For ROLEPLAY sessions: loads ConversationTopic to recover aiRole, learnerRole, scenario.
+     * For ROLEPLAY sessions: loads Conversation to recover aiRole, learnerRole, scenario.
      * For FREE_TALK CONVERSATION sessions: reads roles/scenario from session context JSON
      * (populated during PHASE_TRANSITION).
      * Returns null if no rebuild is possible (caller should use generic fallback).
      */
     private String rebuildSystemPrompt(ConversationSession session, List<SessionMission> missions) {
-        if (session.getTopicId() != null) {
-            return topicRepository.findById(session.getTopicId())
-                    .filter(t -> t.getDeletedAt() == null)
-                    .map(topic -> {
-                        String jlptLevel = topic.getJlptLevel() != null ? topic.getJlptLevel().name() : "N5";
+        if (session.getConversationId() != null) {
+            return conversationRepository.findById(session.getConversationId())
+                    .filter(c -> c.getDeletedAt() == null)
+                    .map(conv -> {
+                        String jlptLevel = conv.getJlptLevel() != null ? conv.getJlptLevel().name() : "N5";
                         return roleplayAIService.buildSystemPrompt(session,
-                                topic.getAiRole(), topic.getLearnerRole(), topic.getScenario(),
+                                conv.getAiRole(), conv.getLearnerRole(), conv.getScenario(),
                                 jlptLevel, missions);
                     })
                     .orElse(null);

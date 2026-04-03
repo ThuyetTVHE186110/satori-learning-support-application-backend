@@ -10,17 +10,16 @@ import org.hibernate.annotations.ColumnTransformer;
 import java.util.UUID;
 
 /**
- * ConversationTopic - Chủ đề hội thoại nhỏ.
- * Belongs to a ConversationTheme (chủ đề lớn) and optionally linked to a Course
- * for vocabulary/grammar context.
- * Maps to speaking.conversation_topics table (extended with theme_id, course_id).
+ * ConversationTopic - Chủ đề hội thoại lớn.
+ * Created by MANAGER, optionally with AI context generated from a course.
+ * Maps to speaking.conversation_topics table.
  */
 @Entity
 @Table(name = "conversation_topics", schema = "speaking",
         indexes = {
-                @Index(name = "idx_conv_topics_theme", columnList = "theme_id"),
                 @Index(name = "idx_conv_topics_course", columnList = "course_id"),
-                @Index(name = "idx_conv_topics_level", columnList = "jlpt_level")
+                @Index(name = "idx_conv_topics_jlpt", columnList = "jlpt_level"),
+                @Index(name = "idx_conv_topics_status", columnList = "status")
         })
 @Getter
 @Setter
@@ -29,18 +28,6 @@ import java.util.UUID;
 @SuperBuilder
 @ToString(callSuper = true)
 public class ConversationTopic extends SoftDeletableEntity {
-
-    /**
-     * Parent theme (chủ đề lớn).
-     */
-    @Column(name = "theme_id")
-    private UUID themeId;
-
-    /**
-     * Course linked for vocabulary/grammar context.
-     */
-    @Column(name = "course_id")
-    private UUID courseId;
 
     @Column(name = "title", nullable = false, length = 255)
     private String title;
@@ -54,24 +41,6 @@ public class ConversationTopic extends SoftDeletableEntity {
     @Column(name = "description_vi", columnDefinition = "TEXT")
     private String descriptionVi;
 
-    @Column(name = "scenario", columnDefinition = "TEXT")
-    private String scenario;
-
-    @Column(name = "vocabulary_hints", columnDefinition = "jsonb")
-    @ColumnTransformer(write = "CAST(? AS jsonb)")
-    @Builder.Default
-    private String vocabularyHints = "[]";
-
-    @Column(name = "grammar_points", columnDefinition = "jsonb")
-    @ColumnTransformer(write = "CAST(? AS jsonb)")
-    @Builder.Default
-    private String grammarPoints = "[]";
-
-    @Column(name = "useful_expressions", columnDefinition = "jsonb")
-    @ColumnTransformer(write = "CAST(? AS jsonb)")
-    @Builder.Default
-    private String usefulExpressions = "[]";
-
     @Column(name = "category", length = 100)
     private String category;
 
@@ -80,27 +49,19 @@ public class ConversationTopic extends SoftDeletableEntity {
     @ColumnTransformer(write = "CAST(? AS jlpt_level)")
     private Course.JlptLevel jlptLevel;
 
-    @Column(name = "difficulty_score")
-    @Builder.Default
-    private Integer difficultyScore = 1;
+    /**
+     * Reference to the course used as AI generation context.
+     */
+    @Column(name = "course_id")
+    private UUID courseId;
 
     /**
-     * Role of the AI character in this roleplay scenario.
-     * E.g. "a Japanese shopkeeper", "a hotel receptionist".
+     * AI-generated context: vocabulary hints, grammar points, scenario suggestions.
      */
-    @Column(name = "ai_role", columnDefinition = "TEXT")
-    private String aiRole;
-
-    /**
-     * Role of the learner in this roleplay scenario.
-     * E.g. "a customer", "a hotel guest".
-     */
-    @Column(name = "learner_role", columnDefinition = "TEXT")
-    private String learnerRole;
-
-    @Column(name = "roleplay_context", columnDefinition = "jsonb")
+    @Column(name = "ai_generated_context", columnDefinition = "jsonb")
     @ColumnTransformer(write = "CAST(? AS jsonb)")
-    private String roleplayContext;
+    @Builder.Default
+    private String aiGeneratedContext = "{}";
 
     @Column(name = "thumbnail_url", columnDefinition = "TEXT")
     private String thumbnailUrl;
