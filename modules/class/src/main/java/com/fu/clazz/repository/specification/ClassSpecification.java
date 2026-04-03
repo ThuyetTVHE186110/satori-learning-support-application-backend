@@ -1,5 +1,6 @@
 package com.fu.clazz.repository.specification;
 
+import com.fu.clazz.entity.ClassStatus;
 import com.fu.clazz.entity.Clazz;
 import jakarta.persistence.criteria.Root;
 import jakarta.persistence.criteria.Subquery;
@@ -35,12 +36,12 @@ public class ClassSpecification {
         };
     }
 
-    public static Specification<Clazz> hasIsActive(Boolean isActive) {
+    public static Specification<Clazz> hasStatus(ClassStatus status) {
         return (root, query, cb) -> {
-            if (isActive == null) {
+            if (status == null) {
                 return null;
             }
-            return cb.equal(root.get("isActive"), isActive);
+            return cb.equal(root.get("status"), status);
         };
     }
 

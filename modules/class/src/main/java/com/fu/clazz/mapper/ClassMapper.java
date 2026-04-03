@@ -19,7 +19,6 @@ public interface ClassMapper {
      * Map CreateClassRequest to Clazz entity
      */
     @Mapping(target = "id", ignore = true)
-    @Mapping(target = "isActive", ignore = true) // Defaults to true
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     @Mapping(target = "createdBy", ignore = true)
