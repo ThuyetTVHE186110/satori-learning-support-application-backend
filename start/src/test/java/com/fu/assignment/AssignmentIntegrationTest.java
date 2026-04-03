@@ -12,6 +12,7 @@ import com.fu.assignment.entity.*;
 import com.fu.assignment.repository.*;
 import com.fu.assignment.service.AssignmentService;
 import com.fu.clazz.entity.ClassMember;
+import com.fu.clazz.entity.ClassStatus;
 import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.repository.ClassMemberRepository;
 import com.fu.clazz.repository.ClassRepository;
@@ -140,9 +141,10 @@ class AssignmentIntegrationTest {
         return classRepository.save(Clazz.builder()
                 .name("Test Class 101").description("test class")
                 .courseId(course.getId())
-                .isActive(true).maxStudents(30)
+                .maxStudents(30)
                 .startDate(LocalDate.now().plusDays(1))
                 .endDate(LocalDate.now().plusMonths(3))
+                .status(ClassStatus.ACTIVE)
                 .build());
     }
 

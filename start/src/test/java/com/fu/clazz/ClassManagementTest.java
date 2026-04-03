@@ -273,7 +273,7 @@ class ClassManagementTest {
                     assertThat(classNode.path("courseName").asText()).isEqualTo("Japanese N5");
                     assertThat(classNode.path("courseLevel").asText()).isEqualTo("N5");
                     assertThat(classNode.path("courseStatus").asText()).isEqualTo("ACTIVE");
-                    assertThat(classNode.path("status").asBoolean()).isTrue();
+                    assertThat(classNode.path("status").asText()).isEqualTo("ACTIVE");
                     assertThat(classNode.path("memberCount").asInt()).isEqualTo(0);
                 }
             }
@@ -339,7 +339,7 @@ class ClassManagementTest {
                             .param("keyword", "N5")
                             .param("teacherId", t1.getId().toString())
                             .param("courseId", c1.getId().toString())
-                            .param("status", "true")
+                            .param("status", "ACTIVE")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.content.length()").value(1))
@@ -362,7 +362,7 @@ class ClassManagementTest {
             mockMvc.perform(get("/api/v1/classes")
                             .param("keyword", "  Kana  ")
                             .param("courseId", c1.getId().toString())
-                            .param("status", "false")
+                            .param("status", "NOT_STARTED")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.content.length()").value(1))
@@ -415,7 +415,7 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.data.maxStudents").value(8))
                     .andExpect(jsonPath("$.data.startDate").exists())
                     .andExpect(jsonPath("$.data.endDate").exists())
-                    .andExpect(jsonPath("$.data.status").value(true))
+                    .andExpect(jsonPath("$.data.status").value("ACTIVE"))
                     .andExpect(jsonPath("$.data.createdBy").doesNotExist())
                     .andExpect(jsonPath("$.data.updatedBy").doesNotExist())
                     .andExpect(jsonPath("$.data.createdAt").exists())
@@ -622,7 +622,7 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.id").isNotEmpty())
                     .andExpect(jsonPath("$.data.name").value("Japanese N5 Class"))
-                    .andExpect(jsonPath("$.data.status").value(true)) // Auto-activated since startDate ≤ current date
+                    .andExpect(jsonPath("$.data.status").value("ACTIVE")) // Auto-activated since startDate ≤ current date
                     .andExpect(jsonPath("$.data.teacherId").value(teacher.getId().toString()))
                     .andExpect(jsonPath("$.data.courseId").value(course.getId().toString()))
                     .andReturn();
@@ -654,7 +654,7 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.data.id").isNotEmpty())
                     .andExpect(jsonPath("$.data.name").value("Future Japanese N5 Class"))
                     .andExpect(jsonPath("$.data.teacherId").value(teacher.getId().toString()))
-                    .andExpect(jsonPath("$.data.status").value(false)) // Auto-inactive since startDate > current date
+                    .andExpect(jsonPath("$.data.status").value("NOT_STARTED")) // Auto-inactive since startDate > current date
                     .andExpect(jsonPath("$.data.courseId").value(course.getId().toString()))
                     .andReturn();
 
@@ -839,7 +839,7 @@ class ClassManagementTest {
             String tToken = loginAndGetToken("teacher@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
             Clazz clazz = saveClass("Deactivate Me", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
-            User learner = saveLearner("learner@test.com");
+            User learner = saveInactiveLearner("learner@test.com");
 
             // Add learner to class first
             String addBody = String.format("{\"userId\":\"%s\"}", learner.getId());
@@ -847,7 +847,7 @@ class ClassManagementTest {
                             .contentType(MediaType.APPLICATION_JSON).content(addBody)
                             .header("Authorization", "Bearer " + mgrToken))
                     .andExpect(status().isCreated())
-                    .andExpect(jsonPath("$.success").value(true));
+                    .andExpect(jsonPath("$.success").value("true"));
 
             // Verify learner is active in class before closing
             mockMvc.perform(get("/api/v1/classes/{classId}/members", clazz.getId())
@@ -861,7 +861,7 @@ class ClassManagementTest {
             mockMvc.perform(put("/api/v1/classes/{classId}/close", clazz.getId())
                             .header("Authorization", "Bearer " + mgrToken))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.status").value(false));
+                    .andExpect(jsonPath("$.data.status").value("CLOSED"));
 
             // Teacher list — class not visible (teacher sees only active)
             mockMvc.perform(get("/api/v1/classes").param("page", "0").param("size", "10")
@@ -908,7 +908,7 @@ class ClassManagementTest {
                             .contentType(MediaType.APPLICATION_JSON).content(body)
                             .header("Authorization", "Bearer " + mgrToken))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.status").value(true));
+                    .andExpect(jsonPath("$.data.status").value("ACTIVE"));
 
             // Teacher list — class now visible
             mockMvc.perform(get("/api/v1/classes").param("page", "0").param("size", "10")
@@ -917,7 +917,7 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.data.content.length()").value(1));
 
             // Assign a new learner — succeeds now that class is active
-            User newLearner = saveLearner("newlearner@test.com");
+            User newLearner = saveInactiveLearner("newlearner@test.com");
             String addBody = String.format("{\"userId\":\"%s\"}", newLearner.getId());
             mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(addBody)
@@ -965,7 +965,7 @@ class ClassManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
             Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
-            User learner = saveLearner("learner@test.com");
+            User learner = saveInactiveLearner("learner@test.com");
 
             String body = String.format("{\"userId\":\"%s\"}", learner.getId());
 
@@ -1059,7 +1059,8 @@ class ClassManagementTest {
                             .contentType(MediaType.APPLICATION_JSON).content(body)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("MEMBER_ALREADY_EXISTS"));
+                    .andExpect(jsonPath("$.code").value("INVALID_MEMBER_STATUS"))
+                    .andExpect(jsonPath("$.message").value("Chỉ có học viên hiện tại không học lớp nào mới được thêm vào lớp học."));
         }
 
         @Test
@@ -1319,7 +1320,7 @@ class ClassManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.status").value(false)) //  status = false when start date is in future
+                    .andExpect(jsonPath("$.data.status").value("NOT_STARTED")) //  status = false when start date is in future
                     .andExpect(jsonPath("$.data.name").value("No Desc Class"))
                     .andReturn();
 
@@ -1735,7 +1736,7 @@ class ClassManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
             Clazz clazz = saveClass("Rejoin Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
-            User learner = saveLearner("rejoin@test.com");
+            User learner = saveInactiveLearner("rejoin@test.com");
 
             // First, create and then remove the membership
             ClassMember original = saveRemovedClassMember(clazz.getId(), learner.getId());
