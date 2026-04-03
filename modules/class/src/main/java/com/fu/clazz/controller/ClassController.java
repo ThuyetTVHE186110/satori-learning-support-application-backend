@@ -62,7 +62,7 @@ public class ClassController {
             @AuthenticationPrincipal UUID userId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
-            @RequestParam(required = false) Boolean isActive,
+            @RequestParam(required = false) com.fu.clazz.entity.ClassStatus status,
             @RequestParam(required = false) UUID courseId,
             @RequestParam(required = false) UUID teacherId,
             @RequestParam(required = false) String keyword) {
@@ -72,10 +72,10 @@ public class ClassController {
 
         if (isManager()) {
             // OPERATION_MANAGER: full access with dynamic filters combined by AND
-            classPage = clazzService.getClasses(keyword, teacherId, courseId, isActive, pageable);
+            classPage = clazzService.getClasses(keyword, teacherId, courseId, status, pageable);
         } else {
             // TEACHER: only their own active classes (force filter)
-            classPage = clazzService.getClasses(keyword, userId, courseId, true, pageable);
+            classPage = clazzService.getClasses(keyword, userId, courseId, com.fu.clazz.entity.ClassStatus.ACTIVE, pageable);
         }
 
         PageResponse<ClassSummaryResponse> pageResponse = PageResponse.of(
