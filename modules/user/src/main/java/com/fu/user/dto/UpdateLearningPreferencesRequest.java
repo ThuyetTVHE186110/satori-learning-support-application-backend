@@ -21,9 +21,6 @@ import java.util.List;
 @AllArgsConstructor
 public class UpdateLearningPreferencesRequest {
 
-    @Pattern(regexp = "N[1-5]", message = "targetJlptLevel must be one of: N1, N2, N3, N4, N5")
-    private String targetJlptLevel;
-
     @Min(value = 5, message = "dailyStudyGoalMinutes must be at least 5")
     @Max(value = 480, message = "dailyStudyGoalMinutes must be at most 480")
     private Integer dailyStudyGoalMinutes;

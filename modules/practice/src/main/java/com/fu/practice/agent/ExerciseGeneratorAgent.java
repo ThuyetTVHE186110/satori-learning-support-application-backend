@@ -217,7 +217,8 @@ public class ExerciseGeneratorAgent {
                 "jlptLevel", jlptLevel != null ? jlptLevel : "N5",
                 "contentSummary", contentSummary,
                 "ragContext", ragContext,
-                "itemTypeInstruction", buildItemTypeInstruction(itemTypes)));
+                "itemTypeInstruction", buildItemTypeInstruction(itemTypes),
+                "itemTypeRules", buildItemTypeRules(itemTypes)));
     }
 
     private String buildSimplePrompt(int count, PracticeSessionType type, String jlptLevel,
@@ -226,7 +227,8 @@ public class ExerciseGeneratorAgent {
                 "count", String.valueOf(count),
                 "jlptLevel", jlptLevel != null ? jlptLevel : "N5",
                 "contentSummary", contentSummary,
-                "itemTypeInstruction", buildItemTypeInstruction(itemTypes)));
+                "itemTypeInstruction", buildItemTypeInstruction(itemTypes),
+                "exampleType", itemTypes.isEmpty() ? "MULTIPLE_CHOICE" : itemTypes.get(0).name()));
     }
 
     private String describeSessionType(PracticeSessionType type) {
@@ -244,23 +246,43 @@ public class ExerciseGeneratorAgent {
      */
     private String buildItemTypeInstruction(List<PracticeItemType> types) {
         if (types.size() == 1) {
-            return "Tất cả câu hỏi phải là dạng: " + describeSingleType(types.get(0));
+            PracticeItemType single = types.get(0);
+            return "CHỈ sinh dạng " + single.name() + ". NGHIÊM CẤM sinh bất kỳ dạng nào khác. " +
+                    "Trường itemType của MỌI câu hỏi phải là \"" + single.name() + "\".";
         }
         StringBuilder sb = new StringBuilder("Phân bổ đều các dạng sau (xen kẽ, không dồn vào 1 dạng):\n");
         for (PracticeItemType t : types) {
-            sb.append("  - ").append(t.name()).append(": ").append(describeSingleType(t)).append("\n");
+            sb.append("  - ").append(t.name()).append("\n");
+        }
+        sb.append("NGHIÊM CẤM sinh dạng nào không có trong danh sách trên.");
+        return sb.toString().trim();
+    }
+
+    /**
+     * Chỉ trả về quy tắc cho các dạng được yêu cầu, tránh LLM bị phân tâm bởi dạng khác.
+     */
+    private String buildItemTypeRules(List<PracticeItemType> types) {
+        StringBuilder sb = new StringBuilder();
+        for (PracticeItemType t : types) {
+            sb.append("- ").append(describeTypeRule(t)).append("\n");
         }
         return sb.toString().trim();
     }
 
-    private String describeSingleType(PracticeItemType type) {
+    private String describeTypeRule(PracticeItemType type) {
         return switch (type) {
-            case MULTIPLE_CHOICE -> "MULTIPLE_CHOICE — 4 lựa chọn object {text,isCorrect}, 1 đúng 3 sai";
-            case FILL_BLANK      -> "FILL_BLANK — điền vào chỗ trống trong câu, options=[]";
-            case TRANSLATION     -> "TRANSLATION — dịch câu Nhật↔Việt, options=[]";
-            case SENTENCE_ORDER  -> "SENTENCE_ORDER — options = danh sách từ cần sắp xếp (isCorrect=false), correctAnswer = câu hoàn chỉnh";
-            case MATCHING        -> "MATCHING — ghép cặp, 4 options (1 đúng isCorrect=true, 3 sai)";
-            case TRUE_FALSE      -> "TRUE_FALSE — phát biểu đúng/sai, options=[{\"text\":\"Đúng\",\"isCorrect\":X},{\"text\":\"Sai\",\"isCorrect\":Y}]";
+            case MULTIPLE_CHOICE ->
+                    "MULTIPLE_CHOICE: question = câu hỏi. options = 4 object {text,isCorrect}: đúng 1 (isCorrect=true), sai 3 (isCorrect=false). Dùng RAG context làm đáp án sai nhiễu. correctAnswer = text của đáp án đúng.";
+            case FILL_BLANK ->
+                    "FILL_BLANK: question = câu tiếng Nhật có ___ cần điền (ví dụ: 「___は学生です」). options = []. correctAnswer = từ cần điền.";
+            case TRANSLATION ->
+                    "TRANSLATION: question = câu tiếng Nhật cần dịch sang tiếng Việt (hoặc ngược lại). options = []. correctAnswer = bản dịch đúng.";
+            case SENTENCE_ORDER ->
+                    "SENTENCE_ORDER: question = hướng dẫn (ví dụ: 「次の単語を正しい順番に並べてください」). options = danh sách từ rời cần sắp xếp, TẤT CẢ isCorrect=false, thứ tự options phải XÁO TRỘN (không theo thứ tự đúng). correctAnswer = câu hoàn chỉnh đúng thứ tự.";
+            case MATCHING ->
+                    "MATCHING: question = từ/cụm từ tiếng Nhật cần ghép. options = 4 object: 1 nghĩa đúng (isCorrect=true), 3 nghĩa sai (isCorrect=false). correctAnswer = nghĩa đúng.";
+            case TRUE_FALSE ->
+                    "TRUE_FALSE: question = phát biểu về từ hoặc ngữ pháp (có thể đúng hoặc sai). options = [{\"text\":\"Đúng\",\"isCorrect\":X},{\"text\":\"Sai\",\"isCorrect\":Y}] — đúng 1, sai 1. correctAnswer = \"Đúng\" hoặc \"Sai\".";
         };
     }
 
