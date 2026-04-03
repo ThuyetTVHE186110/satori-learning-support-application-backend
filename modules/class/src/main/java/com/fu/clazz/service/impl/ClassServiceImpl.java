@@ -59,8 +59,8 @@ public class ClassServiceImpl implements ClassService {
     // =====================================================
     // CLASS CRUD
     // =====================================================
-
     @Override
+    @Transactional
     public ClassResponse closeClass(UUID classId, UUID managerId) {
         Clazz clazz = findClassOrThrow(classId);
         if (!clazz.getIsActive()) {
