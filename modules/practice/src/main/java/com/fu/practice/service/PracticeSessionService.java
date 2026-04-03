@@ -30,6 +30,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -483,7 +484,7 @@ public class PracticeSessionService {
                   AND c.course_id = ?
                   AND cm.removed_at IS NULL
                   AND c.deleted_at IS NULL
-                  AND c.is_active = true
+                  AND c.status = 'ACTIVE'
                 """,
                 Integer.class, userId, courseId
         );
@@ -505,14 +506,24 @@ public class PracticeSessionService {
     private PracticeItem buildItem(PracticeSession session,
                                     ExerciseGeneratorAgent.GeneratedItem gen,
                                     int index) {
+        PracticeItemType resolvedType = resolveItemType(session.getSessionType(), gen);
+
+        // Shuffle SENTENCE_ORDER options so words are not in the correct order
+        List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.options();
+        if (resolvedType == PracticeItemType.SENTENCE_ORDER
+                && options != null && options.size() > 1) {
+            options = new ArrayList<>(options);
+            Collections.shuffle(options);
+        }
+
         return PracticeItem.builder()
                 .sessionId(session.getId())
                 .itemIndex(index)
-                .itemType(resolveItemType(session.getSessionType(), gen))
+                .itemType(resolvedType)
                 .question(gen.question() != null ? gen.question() : "")
                 .questionJapanese(gen.questionJapanese())
                 .hint(gen.hint())
-                .options(buildOptionsJson(gen.options()))
+                .options(buildOptionsJson(options))
                 .correctAnswer(gen.correctAnswer() != null ? gen.correctAnswer() : "")
                 .explanation(gen.explanation())
                 .refContentId(parseUuid(gen.refContentId()))
@@ -700,12 +711,16 @@ public class PracticeSessionService {
             List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> raw =
                     objectMapper.readValue(optionsJson,
                             new TypeReference<List<ExerciseGeneratorAgent.GeneratedItem.OptionItem>>() {});
-            return raw.stream()
-                    .map(o -> OptionDto.builder()
-                            .text(o.text())
-                            .isCorrect(revealCorrect ? o.isCorrect() : null)
-                            .build())
-                    .collect(Collectors.toList());
+            List<OptionDto> result = new ArrayList<>();
+            for (int i = 0; i < raw.size(); i++) {
+                ExerciseGeneratorAgent.GeneratedItem.OptionItem o = raw.get(i);
+                result.add(OptionDto.builder()
+                        .id(i)
+                        .text(o.text())
+                        .isCorrect(revealCorrect ? o.isCorrect() : null)
+                        .build());
+            }
+            return result;
         } catch (Exception e) {
             return List.of();
         }

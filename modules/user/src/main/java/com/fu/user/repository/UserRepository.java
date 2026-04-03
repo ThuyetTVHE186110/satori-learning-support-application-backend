@@ -173,14 +173,14 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
                 co.name                                                 AS course_name,
                 c.start_date                                            AS start_date,
                 c.end_date                                              AS end_date,
-                                CASE WHEN c.is_active THEN 'ACTIVE' ELSE 'INACTIVE' END AS status
+                                c.status::TEXT                                          AS status
             FROM user_management.class_members cm
             JOIN user_management.classes c   ON c.id  = cm.class_id
             JOIN learning_content.courses co ON co.id = c.course_id
             WHERE cm.user_id    = :userId
               AND cm.removed_at IS NULL
               AND c.deleted_at  IS NULL
-              AND c.is_active   = true
+              AND c.status      = 'ACTIVE'
               AND co.deleted_at IS NULL
             LIMIT 1
             """, nativeQuery = true)
