@@ -32,7 +32,6 @@ import java.util.UUID;
 public class TeacherAssignmentController {
 
     private final AssignmentService assignmentService;
-    private final ObjectMapper objectMapper;
 
     // Helper method to extract user ID from UserDetails (assuming username is the UUID string)
     private UUID getUserId(UserDetails userDetails) {

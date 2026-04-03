@@ -174,4 +174,6 @@ public interface UserService {
     ImportUsersResult importUsersFromExcel(MultipartFile file, UUID adminID);
 
     ImportUserResponse approveImport(ApproveImportRequest request, UUID currentUserId);
+
+    List<UserResponse> getAllTeachers();
 }

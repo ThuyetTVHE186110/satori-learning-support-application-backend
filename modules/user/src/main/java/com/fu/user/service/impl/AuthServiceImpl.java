@@ -57,15 +57,16 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public LoginResponse login(LoginRequest request, String ipAddress, String userAgent) {
+        String trimedEmail = request.getEmail() != null ? request.getEmail().trim() : null;
         log.info("Login attempt for email: {}", request.getEmail());
         // Validate email format
-        if (request.getEmail() == null || request.getEmail().isBlank() || !Pattern.matches(EMAIL_REGEX, request.getEmail().trim())) {
+        if (request.getEmail() == null || request.getEmail().isBlank() || !Pattern.matches(EMAIL_REGEX, trimedEmail)) {
             throw new BusinessException("INVALID_INCREDENTIALS",
                     "Sai email hoặc mật khẩu. Hãy thử lại");
         }
 
         // Find user by email
-        User user = userRepository.findByEmail(request.getEmail())
+        User user = userRepository.findByEmail(trimedEmail)
                 .orElseThrow(() -> {
                     log.warn("Login failed - email not found: {}", request.getEmail());
                     return new BusinessException("INVALID_CREDENTIALS",
@@ -74,21 +75,21 @@ public class AuthServiceImpl implements AuthService {
 
         // Check if account is soft-deleted
         if (user.isDeleted()) {
-            log.warn("Login failed - account deleted: {}", request.getEmail());
+            log.warn("Login failed - account deleted: {}", trimedEmail);
             throw new BusinessException("ACCOUNT_DELETED",
                     "Tài khoản không tồn tại");
         }
 
         // E6.4: Check if account is suspended
         if (user.getStatus() == UserStatus.SUSPENDED) {
-            log.warn("Login failed - account suspended: {}", request.getEmail());
+            log.warn("Login failed - account suspended: {}", trimedEmail);
             throw new BusinessException("ACCOUNT_SUSPENDED",
                     "Tài khoản của bạn đã bị chặn. Hãy liên hệ quản lý");
         }
 
         // Check if account is pending activation
         if (user.getStatus() == UserStatus.PENDING_ACTIVATION) {
-            log.warn("Login failed - account pending activation: {}", request.getEmail());
+            log.warn("Login failed - account pending activation: {}", trimedEmail);
             throw new BusinessException("ACCOUNT_NOT_ACTIVATED",
                     "Tài khoản chưa được kích hoạt. Vui lòng kiểm tra email");
         }
@@ -105,11 +106,11 @@ public class AuthServiceImpl implements AuthService {
             loginAttemptService.handleFailedLogin(user);
 
             if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(LocalDateTime.now())) {
-                log.warn("Login failed - account just locked due to max attempts: {}", request.getEmail());
+                log.warn("Login failed - account just locked due to max attempts: {}", trimedEmail);
                 throw new BusinessException("ACCOUNT_LOCKED",
                         "Tài khoản đã bị khóa tạm thời. Vui lòng thử lại sau");
             } else {
-                log.warn("Login failed - wrong password for: {}", request.getEmail());
+                log.warn("Login failed - wrong password for: {}", trimedEmail);
                 throw new BusinessException("INVALID_CREDENTIALS",
                         "Sai email hoặc mật khẩu. Hãy thử lại");
             }

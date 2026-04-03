@@ -1,5 +1,6 @@
 package com.fu.clazz.service;
 
+import com.fu.clazz.entity.ClassStatus;
 import com.fu.clazz.dto.request.AddMemberRequest;
 import com.fu.clazz.dto.request.CreateClassRequest;
 import com.fu.clazz.dto.request.UpdateClassRequest;
@@ -15,6 +16,7 @@ import java.util.UUID;
  * Service interface for Class management
  */
 public interface ClassService {
+    ClassResponse closeClass(UUID classId, UUID managerId);
 
     /**
      * Create a new class (MANAGER only)
@@ -34,8 +36,8 @@ public interface ClassService {
     /**
      * Get classes with dynamic filters (combines all options with AND)
      */
-    Page<ClassSummaryResponse> getClasses(String keyword, UUID teacherId, UUID courseId, Boolean isActive,
-            Pageable pageable);
+    Page<ClassSummaryResponse> getClasses(String keyword, UUID teacherId, UUID courseId, ClassStatus status,
+                                          Pageable pageable);
 
     /**
      * Delete a class (MANAGER only) — soft delete: records deletion metadata

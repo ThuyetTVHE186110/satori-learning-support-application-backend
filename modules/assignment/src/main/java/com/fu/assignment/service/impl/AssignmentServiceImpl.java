@@ -18,6 +18,7 @@ import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.repository.ClassMemberRepository;
 import com.fu.clazz.repository.ClassRepository;
 import com.fu.assignment.util.MarkdownUtils;
+import com.fu.clazz.repository.ClassTeacherHistoryRepository;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.infrastructure.cloudinary.CloudinaryService;
@@ -61,7 +62,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     private final SubmissionService submissionService;
     private final AiGradingService aiGradingService;
     private final AssignmentScheduleManager scheduleManager;
-
+    private final ClassTeacherHistoryRepository classTeacherHistoryRepository;
     private static final String SUBMISSION_IMAGE_FOLDER = "satori/assignment-submissions";
     private static final String SUBMISSION_FAILED_MSG = "Không thể lưu hoặc chấm điểm bài nộp.";
     private static final int MAX_SUBMISSION_IMAGES = 10;
@@ -803,7 +804,10 @@ public class AssignmentServiceImpl implements AssignmentService {
     }
 
     private void verifyTeacherAccess(Clazz clazz, UUID teacherId) {
-        if (clazz != null && !clazz.getTeacherId().equals(teacherId)) {
+        if (clazz == null) return;
+        UUID currentTeacherId = classTeacherHistoryRepository.findCurrentTeacherIdByClassId(clazz.getId())
+                .orElse(null);
+        if (!teacherId.equals(currentTeacherId)) {
             throw new BusinessException("ACCESS_DENIED", "Bạn không phải là giáo viên của lớp này.");
         }
     }
