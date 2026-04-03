@@ -1,5 +1,6 @@
 package com.fu.assignment.dto.request;
 
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.*;
@@ -22,8 +23,8 @@ public class AiQuizGenerationRequest {
      * Teacher's custom instruction for AI.
      * Example: "Focus on て-form conjugation, use N4 vocabulary only"
      */
-    @NotNull(message = "Teacher prompt is required")
-    @Size(min = 5, max = 2000, message = "Prompt must be between 5 and 2000 characters")
+    @NotNull(message = "Yêu cầu giáo viên phải cung cấp yêu cầu cho AI để tạo câu hỏi.")
+    @Size(min = 5, max = 2000, message = "Yêu cầu của giáo viên phải có độ dài từ 5 đến 2000 ký tự.")
     private String teacherPrompt;
 
     /**
@@ -52,10 +53,12 @@ public class AiQuizGenerationRequest {
      * If provided, AI will try to match the level.
      */
     private com.fu.course.entity.Course.JlptLevel jlptLevel;
-    
+
     /**
      * Specific lessons to generate questions from.
      * If provided, these lessons will be used for context (Vocabulary/Grammar).
      */
+    @NotNull(message = "Danh sách bài học không được để trống")
+    @NotEmpty(message = "Danh sách bài học không được để trống")
     private List<UUID> lessonIds;
 }
