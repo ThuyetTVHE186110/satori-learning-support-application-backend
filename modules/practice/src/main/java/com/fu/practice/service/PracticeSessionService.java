@@ -1,6 +1,5 @@
 package com.fu.practice.service;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.common.exception.BusinessException;
 import com.fu.course.entity.Course;
@@ -12,6 +11,7 @@ import com.fu.practice.agent.ExerciseGeneratorAgent;
 import com.fu.practice.agent.SessionFeedbackAgent;
 import com.fu.practice.dto.request.StartPracticeRequest;
 import com.fu.practice.dto.request.SubmitAnswerRequest;
+import com.fu.practice.dto.request.VerifyPairRequest;
 import com.fu.practice.dto.response.*;
 import com.fu.practice.entity.*;
 import com.fu.practice.repository.LessonProgressRepository;
@@ -31,7 +31,9 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -156,6 +158,74 @@ public class PracticeSessionService {
 
         // Phase 3: Persist answer + fetch pre-generated next item — short write TX
         return persistAnswerResult(sessionId, itemId, request.getUserAnswer(), result, ctx);
+    }
+
+    /**
+     * Kiểm tra ngay lập tức một cặp MATCHING — không thay đổi trạng thái DB.
+     *
+     * UI gọi endpoint này mỗi khi learner kéo nối một cặp để hiển thị phản hồi tức thì.
+     * Khi {@code allPairsMatched = true}, UI tự động gọi {@code submitAnswer}
+     * với toàn bộ mapping để hoàn thành item.
+     *
+     * @param sessionId session đang chơi
+     * @param itemId    MATCHING item cần check
+     * @param userId    học viên
+     * @param request   leftId + rightId của cặp vừa kéo
+     * @param matchedSoFar tất cả cặp learner đã kéo đúng tính đến lúc này (leftId:rightId,...)
+     *                     — UI tự track và gửi lên để server tính allPairsMatched
+     */
+    @Transactional(readOnly = true)
+    public VerifyPairResponse verifyMatchingPair(UUID sessionId, UUID itemId,
+                                                  UUID userId, VerifyPairRequest request,
+                                                  String matchedSoFar) {
+        PracticeSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new BusinessException("SESSION_NOT_FOUND",
+                        "Không tìm thấy phiên luyện tập."));
+
+        if (!session.getUserId().equals(userId)) {
+            throw new BusinessException("SESSION_ACCESS_DENIED",
+                    "Bạn không có quyền truy cập phiên luyện tập này.");
+        }
+        if (session.getStatus() != PracticeStatus.IN_PROGRESS) {
+            throw new BusinessException("SESSION_NOT_ACTIVE", "Phiên luyện tập đã kết thúc.");
+        }
+
+        PracticeItem item = itemRepository.findById(itemId)
+                .orElseThrow(() -> new BusinessException("ITEM_NOT_FOUND",
+                        "Không tìm thấy câu hỏi."));
+
+        if (!item.getSessionId().equals(sessionId)) {
+            throw new BusinessException("ITEM_SESSION_MISMATCH",
+                    "Câu hỏi không thuộc phiên luyện tập này.");
+        }
+        if (item.getItemType() != PracticeItemType.MATCHING) {
+            throw new BusinessException("INVALID_ITEM_TYPE",
+                    "Endpoint này chỉ áp dụng cho câu hỏi dạng MATCHING.");
+        }
+        if (item.getUserAnswer() != null) {
+            throw new BusinessException("ITEM_ALREADY_ANSWERED",
+                    "Câu hỏi này đã được hoàn thành.");
+        }
+
+        // Parse correctAnswer "0:4,1:5,2:6,3:7"
+        Map<String, String> correctMap = parsePairMap(item.getCorrectAnswer());
+
+        String leftKey  = String.valueOf(request.getLeftId());
+        String rightVal = String.valueOf(request.getRightId());
+        boolean pairCorrect = rightVal.equals(correctMap.get(leftKey));
+
+        // Kiểm tra allPairsMatched: tất cả cặp đã confirm đúng chưa
+        boolean allMatched = false;
+        if (pairCorrect) {
+            Map<String, String> matchedMap = parsePairMap(matchedSoFar);
+            matchedMap.put(leftKey, rightVal); // thêm cặp vừa đúng
+            allMatched = matchedMap.equals(correctMap);
+        }
+
+        return VerifyPairResponse.builder()
+                .correct(pairCorrect)
+                .allPairsMatched(allMatched)
+                .build();
     }
 
     /**
@@ -508,7 +578,11 @@ public class PracticeSessionService {
                                     int index) {
         PracticeItemType resolvedType = resolveItemType(session.getSessionType(), gen);
 
-        // Shuffle SENTENCE_ORDER options so words are not in the correct order
+        if (resolvedType == PracticeItemType.MATCHING) {
+            return buildMatchingItem(session, gen, index);
+        }
+
+        // Shuffle SENTENCE_ORDER options so tokens are not in the correct order
         List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.options();
         if (resolvedType == PracticeItemType.SENTENCE_ORDER
                 && options != null && options.size() > 1) {
@@ -529,6 +603,105 @@ public class PracticeSessionService {
                 .refContentId(parseUuid(gen.refContentId()))
                 .refContentType(gen.refContentType())
                 .build();
+    }
+
+    /**
+     * Build một MATCHING PracticeItem từ danh sách pairs do LLM sinh ra.
+     *
+     * Cấu trúc options lưu DB:
+     *   id 0..N-1      → LEFT  (tiếng Nhật, giữ nguyên thứ tự)
+     *   id N..2N-1     → RIGHT (tiếng Việt, đã shuffle)
+     *
+     * correctAnswer = "0:X,1:Y,..." — ánh xạ left id → right id.
+     */
+    private PracticeItem buildMatchingItem(PracticeSession session,
+                                            ExerciseGeneratorAgent.GeneratedItem gen,
+                                            int index) {
+        List<ExerciseGeneratorAgent.GeneratedItem.MatchingPair> pairs = gen.pairs();
+        if (pairs == null || pairs.isEmpty()) {
+            // Fallback: LLM không trả về pairs — lưu item trống
+            log.warn("buildMatchingItem: LLM không trả về pairs cho MATCHING item {}", index);
+            return PracticeItem.builder()
+                    .sessionId(session.getId())
+                    .itemIndex(index)
+                    .itemType(PracticeItemType.MATCHING)
+                    .question(gen.question() != null ? gen.question() : "Nối từ tiếng Nhật với nghĩa tiếng Việt")
+                    .options("[]")
+                    .correctAnswer("")
+                    .build();
+        }
+
+        int n = pairs.size();
+
+        // Sinh thứ tự shuffle cho cột phải
+        List<Integer> shuffledPairIndices = new ArrayList<>();
+        for (int i = 0; i < n; i++) shuffledPairIndices.add(i);
+        Collections.shuffle(shuffledPairIndices);
+
+        // shuffledPairIndices[pos] = pairIdx → right option tại vị trí pos lấy nghĩa từ pairs[pairIdx]
+        // Để tính correctAnswer: với left id = i (pair i), right id = n + shufflePos của pair i
+        int[] rightIdForPair = new int[n];
+        for (int pos = 0; pos < n; pos++) {
+            rightIdForPair[shuffledPairIndices.get(pos)] = n + pos;
+        }
+
+        StringBuilder correctAnswer = new StringBuilder();
+        for (int i = 0; i < n; i++) {
+            if (i > 0) correctAnswer.append(",");
+            correctAnswer.append(i).append(":").append(rightIdForPair[i]);
+        }
+
+        // Build options list: LEFT trước, RIGHT (shuffled) sau
+        List<Map<String, Object>> optionsList = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            Map<String, Object> opt = new LinkedHashMap<>();
+            opt.put("text", pairs.get(i).left());
+            opt.put("isCorrect", false);
+            opt.put("side", "LEFT");
+            optionsList.add(opt);
+        }
+        for (int pos = 0; pos < n; pos++) {
+            int pairIdx = shuffledPairIndices.get(pos);
+            Map<String, Object> opt = new LinkedHashMap<>();
+            opt.put("text", pairs.get(pairIdx).right());
+            opt.put("isCorrect", false);
+            opt.put("side", "RIGHT");
+            optionsList.add(opt);
+        }
+
+        String optionsJson;
+        try {
+            optionsJson = objectMapper.writeValueAsString(optionsList);
+        } catch (Exception e) {
+            optionsJson = "[]";
+        }
+
+        return PracticeItem.builder()
+                .sessionId(session.getId())
+                .itemIndex(index)
+                .itemType(PracticeItemType.MATCHING)
+                .question(gen.question() != null ? gen.question() : "Nối từ tiếng Nhật với nghĩa tiếng Việt")
+                .questionJapanese(gen.questionJapanese())
+                .hint(gen.hint())
+                .options(optionsJson)
+                .correctAnswer(correctAnswer.toString())
+                .explanation(gen.explanation())
+                .refContentId(parseUuid(gen.refContentId()))
+                .refContentType(gen.refContentType())
+                .build();
+    }
+
+    /** Parse "0:4,1:5,2:6" → Map{"0"→"4","1"→"5","2"→"6"}. */
+    private Map<String, String> parsePairMap(String pairStr) {
+        Map<String, String> map = new LinkedHashMap<>();
+        if (pairStr == null || pairStr.isBlank()) return map;
+        for (String pair : pairStr.split(",")) {
+            String[] parts = pair.trim().split(":");
+            if (parts.length == 2) {
+                map.put(parts[0].trim(), parts[1].trim());
+            }
+        }
+        return map;
     }
 
     private String buildItemTypesJson(List<PracticeItemType> itemTypes) {
@@ -708,16 +881,19 @@ public class PracticeSessionService {
             return List.of();
         }
         try {
-            List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> raw =
-                    objectMapper.readValue(optionsJson,
-                            new TypeReference<List<ExerciseGeneratorAgent.GeneratedItem.OptionItem>>() {});
+            com.fasterxml.jackson.databind.JsonNode arr = objectMapper.readTree(optionsJson);
             List<OptionDto> result = new ArrayList<>();
-            for (int i = 0; i < raw.size(); i++) {
-                ExerciseGeneratorAgent.GeneratedItem.OptionItem o = raw.get(i);
+            for (int i = 0; i < arr.size(); i++) {
+                com.fasterxml.jackson.databind.JsonNode node = arr.get(i);
+                String text = node.path("text").asText(null);
+                boolean isCorrect = node.path("isCorrect").asBoolean(false);
+                String side = node.has("side") && !node.path("side").isNull()
+                        ? node.path("side").asText(null) : null;
                 result.add(OptionDto.builder()
                         .id(i)
-                        .text(o.text())
-                        .isCorrect(revealCorrect ? o.isCorrect() : null)
+                        .text(text)
+                        .side(side)
+                        .isCorrect(revealCorrect ? isCorrect : null)
                         .build());
             }
             return result;

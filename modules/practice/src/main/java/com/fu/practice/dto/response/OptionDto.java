@@ -24,6 +24,12 @@ public class OptionDto {
     private String text;
 
     /**
+     * Chỉ có giá trị với MATCHING: "LEFT" (tiếng Nhật) hoặc "RIGHT" (tiếng Việt, đã shuffle).
+     * null với các dạng khác.
+     */
+    private String side;
+
+    /**
      * null trước khi nộp câu trả lời; true/false sau khi nộp.
      */
     private Boolean isCorrect;
