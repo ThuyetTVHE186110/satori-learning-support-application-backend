@@ -69,3 +69,4 @@ release.properties
 .github/agents/**
 *.json
  environment/secrets/
+/.local.github/
