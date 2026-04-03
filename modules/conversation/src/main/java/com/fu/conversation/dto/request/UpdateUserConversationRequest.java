@@ -14,24 +14,15 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class UpdateThemeRequest {
+public class UpdateUserConversationRequest {
+
     @NotBlank(message = "Title is required")
     @Size(max = 255)
     private String title;
 
-    @Size(max = 255)
-    private String titleJapanese;
+    private String scenario;
 
-    private String description;
-
-    private String descriptionVi;
-
-    @Size(max = 100)
-    private String category;
+    private Course.JlptLevel jlptLevel;
 
     private UUID courseId;
-
-    private String thumbnailUrl;
-
-    private Integer orderIndex;
 }

@@ -1,6 +1,6 @@
 package com.fu.conversation.repository;
 
-import com.fu.conversation.entity.UserConversationTopic;
+import com.fu.conversation.entity.UserConversation;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -10,11 +10,11 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Repository
-public interface UserConversationTopicRepository extends JpaRepository<UserConversationTopic, UUID> {
+public interface UserConversationRepository extends JpaRepository<UserConversation, UUID> {
 
-    Page<UserConversationTopic> findByUserId(UUID userId, Pageable pageable);
+    Page<UserConversation> findByUserId(UUID userId, Pageable pageable);
 
-    Optional<UserConversationTopic> findByIdAndUserId(UUID id, UUID userId);
+    Optional<UserConversation> findByIdAndUserId(UUID id, UUID userId);
 
     boolean existsByIdAndUserId(UUID id, UUID userId);
 }

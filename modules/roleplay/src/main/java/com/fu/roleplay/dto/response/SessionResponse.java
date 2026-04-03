@@ -19,7 +19,7 @@ public class SessionResponse {
 
     private UUID id;
     private UUID userId;
-    private UUID topicId;
+    private UUID conversationId;
     private ConversationSession.SessionType sessionType;
     private ConversationSession.SessionStatus status;
     private Integer messageCount;

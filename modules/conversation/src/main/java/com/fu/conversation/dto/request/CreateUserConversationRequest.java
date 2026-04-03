@@ -11,13 +11,13 @@ import lombok.NoArgsConstructor;
 import java.util.UUID;
 
 /**
- * Request for learner to create a personal conversation topic.
+ * Request for learner to create a personal conversation.
  */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class CreateUserTopicRequest {
+public class CreateUserConversationRequest {
 
     @NotBlank(message = "Title is required")
     @Size(max = 255)

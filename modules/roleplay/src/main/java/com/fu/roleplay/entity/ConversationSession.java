@@ -15,7 +15,7 @@ import java.util.UUID;
         indexes = {
                 @Index(name = "idx_conversation_sessions_user", columnList = "user_id, created_at"),
                 @Index(name = "idx_conversation_sessions_status", columnList = "user_id, status"),
-                @Index(name = "idx_conversation_sessions_topic", columnList = "topic_id")
+                @Index(name = "idx_conversation_sessions_conversation", columnList = "conversation_id")
         })
 @Getter
 @Setter
@@ -33,8 +33,8 @@ public class ConversationSession extends BaseEntity {
     @ColumnTransformer(write = "CAST(? AS session_type)")
     private SessionType sessionType;
 
-    @Column(name = "topic_id")
-    private UUID topicId;
+    @Column(name = "conversation_id")
+    private UUID conversationId;
 
     @Column(name = "assignment_id")
     private UUID assignmentId;

@@ -1,9 +1,9 @@
 package com.fu.conversation.mapper;
 
-import com.fu.conversation.dto.request.CreateUserTopicRequest;
-import com.fu.conversation.dto.request.UpdateUserTopicRequest;
-import com.fu.conversation.dto.response.UserConversationTopicResponse;
-import com.fu.conversation.entity.UserConversationTopic;
+import com.fu.conversation.dto.request.CreateUserConversationRequest;
+import com.fu.conversation.dto.request.UpdateUserConversationRequest;
+import com.fu.conversation.dto.response.UserConversationResponse;
+import com.fu.conversation.entity.UserConversation;
 import org.mapstruct.*;
 
 @Mapper(
@@ -11,7 +11,7 @@ import org.mapstruct.*;
         unmappedTargetPolicy = ReportingPolicy.IGNORE,
         nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE
 )
-public interface UserConversationTopicMapper {
+public interface UserConversationMapper {
 
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "userId", ignore = true)
@@ -19,7 +19,7 @@ public interface UserConversationTopicMapper {
     @Mapping(target = "status", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
-    UserConversationTopic toEntity(CreateUserTopicRequest request);
+    UserConversation toEntity(CreateUserConversationRequest request);
 
     @BeanMapping(nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
     @Mapping(target = "id", ignore = true)
@@ -28,8 +28,8 @@ public interface UserConversationTopicMapper {
     @Mapping(target = "status", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
-    void updateEntity(@MappingTarget UserConversationTopic topic, UpdateUserTopicRequest request);
+    void updateEntity(@MappingTarget UserConversation conversation, UpdateUserConversationRequest request);
 
     @Mapping(target = "courseName", ignore = true)
-    UserConversationTopicResponse toResponse(UserConversationTopic topic);
+    UserConversationResponse toResponse(UserConversation conversation);
 }

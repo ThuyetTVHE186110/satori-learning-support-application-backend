@@ -6,7 +6,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Data
@@ -16,26 +15,13 @@ import java.util.UUID;
 public class ConversationTopicSummaryResponse {
 
     private UUID id;
-    private UUID themeId;
     private String title;
     private String titleJapanese;
     private String descriptionVi;
     private String category;
     private Course.JlptLevel jlptLevel;
-    private Integer difficultyScore;
     private String thumbnailUrl;
     private Course.ContentStatus status;
     private Integer orderIndex;
-
-    // Practice tracking — populated only for learner endpoints
-    private boolean isPracticed;
-    private int practiceCount;
-    private LocalDateTime lastPracticedAt;
-    private PracticeStatus practiceStatus;
-
-    public enum PracticeStatus {
-        NOT_STARTED,
-        IN_PROGRESS,
-        COMPLETED
-    }
+    private Long conversationCount;
 }
