@@ -14,6 +14,7 @@ import com.fu.clazz.exception.MemberAlreadyExistsException;
 import com.fu.clazz.mapper.ClassMapper;
 import com.fu.clazz.repository.ClassMemberRepository;
 import com.fu.clazz.repository.ClassRepository;
+import com.fu.clazz.scheduler.ClassScheduleManager;
 import com.fu.clazz.service.impl.ClassServiceImpl;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
@@ -21,6 +22,7 @@ import com.fu.course.entity.Course;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
+import com.fu.clazz.entity.ClassStatus;
 import com.fu.clazz.entity.ClassTeacherHistory;
 import com.fu.clazz.repository.ClassTeacherHistoryRepository;
 import com.fu.clazz.repository.specification.ClassSpecification;
@@ -86,6 +88,9 @@ class ClassServiceImplTest {
     @Mock
     private ClassTeacherHistoryRepository classTeacherHistoryRepository;
 
+    @Mock
+    private ClassScheduleManager classScheduleManager;
+
     @InjectMocks
     private ClassServiceImpl clazzService;
 
@@ -135,7 +140,7 @@ class ClassServiceImplTest {
                 .courseId(courseId)
                 .maxStudents(30)
                 .startDate(LocalDate.now().plusMonths(1))
-                .isActive(true)
+                .status(ClassStatus.NOT_STARTED)
                 .build();
         ReflectionTestUtils.setField(testClazz, "id", classId);
 
@@ -150,7 +155,7 @@ class ClassServiceImplTest {
                 .courseStatus("PUBLISHED")
                 .maxStudents(30)
                 .startDate(LocalDate.now().plusMonths(1))
-                .isActive(true)
+                .status(ClassStatus.NOT_STARTED)
                 .memberCount(0L)
                 .teacherPhoneNumber("0123456789")
                 .build();
@@ -163,7 +168,7 @@ class ClassServiceImplTest {
                 .courseName("N5 Beginners")
                 .courseLevel("N5")
                 .courseStatus("PUBLISHED")
-                .isActive(true)
+                .status(ClassStatus.NOT_STARTED)
                 .memberCount(0L)
                 .build();
 
@@ -210,7 +215,7 @@ class ClassServiceImplTest {
                 .firstName("Test")
                 .lastName("Student")
                 .role(UserRole.LEARNER)
-                .status(UserStatus.ACTIVE)
+                .status(UserStatus.INACTIVE)
                 .build();
         ReflectionTestUtils.setField(testStudent, "id", studentId);
     }
@@ -246,8 +251,8 @@ class ClassServiceImplTest {
             assertThat(result.getMemberCount()).isEqualTo(0L);
 
             verify(classMapper).toEntity(createRequest);
-            verify(classRepository).save(any(Clazz.class));
             verify(classRepository).save(clazzCaptor.capture());
+            verify(classScheduleManager).scheduleActivation(any(Clazz.class));
             Clazz savedClazz = clazzCaptor.getValue();
             assertThat(savedClazz.getCreatedBy()).isEqualTo(managerId);
             assertThat(savedClazz.getUpdatedBy()).isEqualTo(managerId);
@@ -274,12 +279,13 @@ class ClassServiceImplTest {
 
             // Then
             verify(classRepository).save(clazzCaptor.capture());
+            verify(classScheduleManager).scheduleActivation(any(Clazz.class));
             assertThat(clazzCaptor.getValue().getMaxStudents()).isEqualTo(8);
         }
 
         @Test
-        @DisplayName("TC03: Should set isActive to false when startDate is in the future")
-        void shouldSetIsActiveFalseWhenStartDateIsFuture() {
+        @DisplayName("TC03: Should set status to NOT_STARTED when startDate is in the future")
+        void shouldSetStatusNotStartedWhenStartDateIsFuture() {
             // Given
             createRequest.setStartDate(LocalDate.now().plusDays(5));
             given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
@@ -295,7 +301,8 @@ class ClassServiceImplTest {
 
             // Then
             verify(classRepository).save(clazzCaptor.capture());
-            assertThat(clazzCaptor.getValue().getIsActive()).isFalse();
+            verify(classScheduleManager).scheduleActivation(any(Clazz.class));
+            assertThat(clazzCaptor.getValue().getStatus()).isEqualTo(ClassStatus.NOT_STARTED);
         }
 
         @Test
@@ -416,6 +423,7 @@ class ClassServiceImplTest {
             assertThat(result).isNotNull();
             verify(classMapper).updateEntity(testClazz, updateRequest);
             verify(classRepository).save(clazzCaptor.capture());
+            verify(classScheduleManager).scheduleActivation(any(Clazz.class));
             assertThat(clazzCaptor.getValue().getUpdatedBy()).isEqualTo(managerId);
         }
 
@@ -571,7 +579,7 @@ class ClassServiceImplTest {
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
 
             // When
-            Page<ClassSummaryResponse> result = clazzService.getClasses("N5", teacherId, courseId, true, pageable);
+            Page<ClassSummaryResponse> result = clazzService.getClasses("N5", teacherId, courseId, ClassStatus.ACTIVE, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
@@ -589,14 +597,14 @@ class ClassServiceImplTest {
     class StatusManagementTests {
 
         @Test
-        @DisplayName("Should delete class successfully (soft delete only, isActive unchanged)")
+        @DisplayName("Should delete class successfully (soft delete only, status is deleted)")
         void shouldDeleteClassSuccessfully() {
             // Given
             given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
             given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
 
             ClassResponse deletedResponse = ClassResponse.builder()
-                    .id(classId).isActive(true).build();
+                    .id(classId).status(ClassStatus.DELETED).build();
             given(classMapper.toResponse(testClazz)).willReturn(deletedResponse);
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
 
@@ -609,8 +617,8 @@ class ClassServiceImplTest {
             assertThat(captured.getDeletedAt()).isNotNull();
             assertThat(captured.getDeletedBy()).isEqualTo(managerId);
             assertThat(captured.getUpdatedBy()).isEqualTo(managerId);
-            // isActive should NOT be changed by deleteClass
-            assertThat(captured.getIsActive()).isTrue();
+            // status should NOT be changed by deleteClass
+            assertThat(captured.getStatus()).isEqualTo(ClassStatus.DELETED);
         }
     }
 
@@ -974,7 +982,7 @@ class ClassServiceImplTest {
             given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
 
             // When
-            Page<ClassSummaryResponse> result = clazzService.getClasses(null, teacherId, null, true, pageable);
+            Page<ClassSummaryResponse> result = clazzService.getClasses(null, teacherId, null, ClassStatus.ACTIVE, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(1);
@@ -992,7 +1000,7 @@ class ClassServiceImplTest {
                     .willReturn(emptyPage);
 
             // When
-            Page<ClassSummaryResponse> result = clazzService.getClasses(null, teacherId, null, true, pageable);
+            Page<ClassSummaryResponse> result = clazzService.getClasses(null, teacherId, null, ClassStatus.ACTIVE, pageable);
 
             // Then
             assertThat(result.getTotalElements()).isEqualTo(0);
@@ -1198,7 +1206,7 @@ class ClassServiceImplTest {
             // Then
             assertThat(result).isNotNull();
             verify(classRepository).save(clazzCaptor.capture());
-            assertThat(clazzCaptor.getValue().getIsActive()).isFalse();
+            assertThat(clazzCaptor.getValue().getStatus()).isEqualTo(ClassStatus.CLOSED);
             assertThat(clazzCaptor.getValue().getEndDate()).isEqualTo(LocalDate.now());
             verify(userRepository).updateStatusByUserIdIn(anyList(), eq(UserStatus.INACTIVE));
         }
@@ -1206,7 +1214,7 @@ class ClassServiceImplTest {
         @Test
         @DisplayName("Should throw exception when closing already inactive class")
         void shouldThrowWhenClosingInactiveClass() {
-            testClazz.setIsActive(false);
+            testClazz.setStatus(ClassStatus.CLOSED);
             given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
 
             assertThatThrownBy(() -> clazzService.closeClass(classId, managerId))
@@ -1259,6 +1267,7 @@ class ClassServiceImplTest {
 
             // Then
             verify(classRepository).save(any(Clazz.class));
+            verify(classScheduleManager).scheduleActivation(any(Clazz.class));
         }
 
         @Test
@@ -1266,7 +1275,7 @@ class ClassServiceImplTest {
         void shouldAutoActivateWhenMovingStartDateToTodayNoMembers() {
             // Given
             testClazz.setStartDate(LocalDate.now().plusDays(10));
-            testClazz.setIsActive(false);
+            testClazz.setStatus(ClassStatus.NOT_STARTED);
             UpdateClassRequest req = UpdateClassRequest.builder()
                     .startDate(LocalDate.now()) // Today
                     .build();
@@ -1281,7 +1290,8 @@ class ClassServiceImplTest {
 
             // Then
             verify(classRepository).save(clazzCaptor.capture());
-            assertThat(clazzCaptor.getValue().getIsActive()).isTrue();
+            verify(classScheduleManager).scheduleActivation(any(Clazz.class));
+            assertThat(clazzCaptor.getValue().getStatus()).isEqualTo(ClassStatus.ACTIVE);
         }
     }
 }
