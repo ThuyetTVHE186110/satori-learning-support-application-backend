@@ -60,4 +60,8 @@ public interface ClassMemberRepository extends JpaRepository<ClassMember, UUID> 
 
     @Query("SELECT m.userId FROM ClassMember m WHERE m.classId = :classId AND m.removedAt IS NULL")
     java.util.List<UUID> findActiveUserIdsByClassId(@Param("classId") UUID classId);
+
+    @Query("SELECT CASE WHEN COUNT(m) > 0 THEN true ELSE false END FROM ClassMember m " +
+            "WHERE m.classId = :classId AND m.userId = :userId AND m.removedAt IS NULL")
+    boolean existsActiveByClassIdAndUserId(@Param("classId") UUID classId, @Param("userId") UUID userId);
 }

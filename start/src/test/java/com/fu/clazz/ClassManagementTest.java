@@ -2,6 +2,7 @@ package com.fu.clazz;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.clazz.entity.ClassMember;
+import com.fu.clazz.entity.ClassStatus;
 import com.fu.clazz.entity.ClassTeacherHistory;
 import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.repository.ClassMemberRepository;
@@ -56,18 +57,29 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DisplayName("Class Management — Integration Tests (PostgreSQL satori_test)")
 class ClassManagementTest {
 
-    @Autowired private MockMvc mockMvc;
-    @Autowired private ObjectMapper objectMapper;
-    @Autowired private ClassRepository classRepository;
-    @Autowired private ClassMemberRepository classMemberRepository;
-    @Autowired private ClassTeacherHistoryRepository teacherHistoryRepository;
-    @Autowired private CourseRepository courseRepository;
-    @Autowired private UserRepository userRepository;
-    @Autowired private UserSessionRepository sessionRepository;
-    @Autowired private PasswordEncoder passwordEncoder;
+    @Autowired
+    private MockMvc mockMvc;
+    @Autowired
+    private ObjectMapper objectMapper;
+    @Autowired
+    private ClassRepository classRepository;
+    @Autowired
+    private ClassMemberRepository classMemberRepository;
+    @Autowired
+    private ClassTeacherHistoryRepository teacherHistoryRepository;
+    @Autowired
+    private CourseRepository courseRepository;
+    @Autowired
+    private UserRepository userRepository;
+    @Autowired
+    private UserSessionRepository sessionRepository;
+    @Autowired
+    private PasswordEncoder passwordEncoder;
 
-    @MockBean private EmailService emailService;
-    @MockBean private CloudinaryService cloudinaryService;
+    @MockBean
+    private EmailService emailService;
+    @MockBean
+    private CloudinaryService cloudinaryService;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -134,13 +146,14 @@ class ClassManagementTest {
      * Use this wherever a class needs a current teacher.
      */
     private Clazz saveClass(String name, UUID teacherId, UUID courseId,
-                            boolean isActive, int maxStudents) {
+                            ClassStatus status, int maxStudents) {
         Clazz clazz = classRepository.save(Clazz.builder()
                 .name(name).description("Test class")
                 .courseId(courseId)
-                .isActive(isActive).maxStudents(maxStudents)
+                .maxStudents(maxStudents)
                 .startDate(LocalDate.now().plusDays(1))
                 .endDate(LocalDate.now().plusMonths(3))
+                .status(status)
                 .build());
         if (teacherId != null) {
             teacherHistoryRepository.save(ClassTeacherHistory.builder()
@@ -153,8 +166,8 @@ class ClassManagementTest {
     }
 
     private Clazz saveDeletedClass(String name, UUID teacherId, UUID courseId,
-                                   boolean isActive, int maxStudents, UUID deletedBy) {
-        Clazz clazz = saveClass(name, teacherId, courseId, isActive, maxStudents);
+                                   ClassStatus status, int maxStudents, UUID deletedBy) {
+        Clazz clazz = saveClass(name, teacherId, courseId, status, maxStudents);
         clazz.setDeletedAt(LocalDateTime.now().minusHours(1));
         clazz.setDeletedBy(deletedBy);
         return classRepository.save(clazz);
@@ -207,11 +220,11 @@ class ClassManagementTest {
 
             // Create classes with different timestamps to test sorting
             Thread.sleep(10); // Ensure different timestamps
-            Clazz classA = saveClass("Class A", teacher.getId(), course.getId(), true, 8);
+            Clazz classA = saveClass("Class A", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             Thread.sleep(10);
-            Clazz classB = saveClass("Class B", teacher.getId(), course.getId(), true, 8);
+            Clazz classB = saveClass("Class B", teacher.getId(), course.getId(), ClassStatus.CLOSED, 8);
             Thread.sleep(10);
-            Clazz classC = saveClass("Class C", teacher.getId(), course.getId(), false, 8);
+            Clazz classC = saveClass("Class C", teacher.getId(), course.getId(), ClassStatus.NOT_STARTED, 8);
 
             MvcResult result = mockMvc.perform(get("/api/v1/classes")
                             .param("page", "0").param("size", "10")
@@ -243,9 +256,9 @@ class ClassManagementTest {
                 assertThat(classNode.has("courseName")).isTrue();
                 assertThat(classNode.has("courseLevel")).isTrue();
                 assertThat(classNode.has("courseStatus")).isTrue();
-                assertThat(classNode.has("isActive")).isTrue();
+                assertThat(classNode.has("status")).isTrue();
                 assertThat(classNode.has("memberCount")).isTrue();
-                
+
                 // Verify specific values for Class A
                 if ("Class A".equals(classNode.path("name").asText())) {
                     assertThat(classNode.path("id").asText()).isEqualTo(classA.getId().toString());
@@ -254,7 +267,7 @@ class ClassManagementTest {
                     assertThat(classNode.path("courseName").asText()).isEqualTo("Japanese N5");
                     assertThat(classNode.path("courseLevel").asText()).isEqualTo("N5");
                     assertThat(classNode.path("courseStatus").asText()).isEqualTo("ACTIVE");
-                    assertThat(classNode.path("isActive").asBoolean()).isTrue();
+                    assertThat(classNode.path("status").asBoolean()).isTrue();
                     assertThat(classNode.path("memberCount").asInt()).isEqualTo(0);
                 }
             }
@@ -268,10 +281,10 @@ class ClassManagementTest {
             String token = loginAndGetToken("teacher1@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
 
-            saveClass("T1 Active 1", t1.getId(), course.getId(), true, 8);
-            saveClass("T1 Active 2", t1.getId(), course.getId(), true, 8);
-            saveClass("T1 Inactive", t1.getId(), course.getId(), false, 8);
-            saveClass("T2 Active", t2.getId(), course.getId(), true, 8);
+            saveClass("T1 Active 1", t1.getId(), course.getId(), ClassStatus.ACTIVE, 8);
+            saveClass("T1 Active 2", t1.getId(), course.getId(), ClassStatus.ACTIVE, 8);
+            saveClass("T1 Inactive", t1.getId(), course.getId(), ClassStatus.NOT_STARTED, 8);
+            saveClass("T2 Active", t2.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             MvcResult result = mockMvc.perform(get("/api/v1/classes")
                             .param("page", "0").param("size", "10")
@@ -289,13 +302,13 @@ class ClassManagementTest {
             var content = objectMapper.readTree(body).path("data").path("content");
             content.forEach(item -> {
                 assertThat(item.path("name").asText()).startsWith("T1 Active");
-                
+
                 // Verify each class content structure
                 assertThat(item.has("name")).isTrue();
                 assertThat(item.has("courseId")).isTrue();
                 assertThat(item.has("courseName")).isTrue();
                 assertThat(item.has("memberCount")).isTrue();
-                assertThat(item.has("isActive")).isTrue();
+                assertThat(item.has("status")).isTrue();
             });
         }
 
@@ -309,18 +322,18 @@ class ClassManagementTest {
             Course c1 = saveCourse("Japanese N5", CourseStatus.ACTIVE);
             Course c2 = saveCourse("Japanese N4", CourseStatus.ACTIVE);
 
-            saveClass("N5 A", t1.getId(), c1.getId(), true, 8);
-            saveClass("N5 B", t1.getId(), c1.getId(), false, 8);
-            saveClass("N5 C", t2.getId(), c1.getId(), true, 8);
-            saveClass("Other", t1.getId(), c1.getId(), true, 8);
-            saveClass("N5 D", t1.getId(), c2.getId(), true, 8);
-            saveDeletedClass("N5 Deleted", t1.getId(), c1.getId(), true, 8, manager.getId());
+            saveClass("N5 A", t1.getId(), c1.getId(), ClassStatus.ACTIVE, 8);
+            saveClass("N5 B", t1.getId(), c1.getId(), ClassStatus.NOT_STARTED, 8);
+            saveClass("N5 C", t2.getId(), c1.getId(), ClassStatus.ACTIVE, 8);
+            saveClass("Other", t1.getId(), c1.getId(), ClassStatus.ACTIVE, 8);
+            saveClass("N5 D", t1.getId(), c2.getId(), ClassStatus.ACTIVE, 8);
+            saveDeletedClass("N5 Deleted", t1.getId(), c1.getId(), ClassStatus.DELETED, 8, manager.getId());
 
             mockMvc.perform(get("/api/v1/classes")
                             .param("keyword", "N5")
                             .param("teacherId", t1.getId().toString())
                             .param("courseId", c1.getId().toString())
-                            .param("isActive", "true")
+                            .param("status", "true")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.content.length()").value(1))
@@ -335,15 +348,15 @@ class ClassManagementTest {
             Course c1 = saveCourse("Japanese N5", CourseStatus.ACTIVE);
             Course c2 = saveCourse("Japanese N4", CourseStatus.ACTIVE);
 
-            saveClass("Kana Basics", teacher.getId(), c1.getId(), true, 8);
-            saveClass("Kana Review", teacher.getId(), c2.getId(), true, 8);
-            saveClass("Grammar", teacher.getId(), c1.getId(), true, 8);
-            saveClass("Kana Inactive", teacher.getId(), c1.getId(), false, 8);
+            saveClass("Kana Basics", teacher.getId(), c1.getId(), ClassStatus.ACTIVE, 8);
+            saveClass("Kana Review", teacher.getId(), c2.getId(), ClassStatus.ACTIVE, 8);
+            saveClass("Grammar", teacher.getId(), c1.getId(), ClassStatus.ACTIVE, 8);
+            saveClass("Kana Inactive", teacher.getId(), c1.getId(), ClassStatus.NOT_STARTED, 8);
 
             mockMvc.perform(get("/api/v1/classes")
                             .param("keyword", "  Kana  ")
                             .param("courseId", c1.getId().toString())
-                            .param("isActive", "false")
+                            .param("status", "false")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.content.length()").value(1))
@@ -379,7 +392,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             mockMvc.perform(get("/api/v1/classes/{classId}", clazz.getId())
                             .header("Authorization", "Bearer " + token))
@@ -395,7 +408,7 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.data.maxStudents").value(8))
                     .andExpect(jsonPath("$.data.startDate").exists())
                     .andExpect(jsonPath("$.data.endDate").exists())
-                    .andExpect(jsonPath("$.data.isActive").value(true))
+                    .andExpect(jsonPath("$.data.status").value(true))
                     .andExpect(jsonPath("$.data.createdBy").doesNotExist())
                     .andExpect(jsonPath("$.data.updatedBy").doesNotExist())
                     .andExpect(jsonPath("$.data.createdAt").exists())
@@ -413,7 +426,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("teacher@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("My Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("My Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             mockMvc.perform(get("/api/v1/classes/{classId}", clazz.getId())
                             .header("Authorization", "Bearer " + token))
@@ -429,7 +442,7 @@ class ClassManagementTest {
             User t2 = saveTeacher("teacher2@test.com");
             String token = loginAndGetToken("teacher1@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("T2 Class", t2.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("T2 Class", t2.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             mockMvc.perform(get("/api/v1/classes/{classId}", clazz.getId())
                             .header("Authorization", "Bearer " + token))
@@ -467,7 +480,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             User l1 = saveLearner("learner1@test.com");
             User l2 = saveLearner("learner2@test.com");
@@ -509,7 +522,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("teacher@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("My Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("My Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             saveClassMember(clazz.getId(), saveLearner("l1@test.com").getId());
             saveClassMember(clazz.getId(), saveLearner("l2@test.com").getId());
@@ -528,7 +541,7 @@ class ClassManagementTest {
             User t2 = saveTeacher("teacher2@test.com");
             String token = loginAndGetToken("teacher1@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("T2 Class", t2.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("T2 Class", t2.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             mockMvc.perform(get("/api/v1/classes/{classId}/members", clazz.getId())
                             .header("Authorization", "Bearer " + token))
@@ -557,7 +570,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Empty Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Empty Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             mockMvc.perform(get("/api/v1/classes/{classId}/members", clazz.getId())
                             .param("page", "0").param("size", "10")
@@ -573,7 +586,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Search Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Search Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             User l1 = saveLearner("alice@test.com");
             User l2 = saveLearner("bob@test.com");
@@ -607,7 +620,7 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Japanese N5 Class\",\"description\":\"Comprehensive Japanese N5 course for beginners\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                            "\"maxStudents\":8,\"startDate\":\"%s\"}",
                     teacher.getId(), course.getId(), LocalDate.now());
 
             MvcResult result = mockMvc.perform(post("/api/v1/classes")
@@ -618,7 +631,7 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.id").isNotEmpty())
                     .andExpect(jsonPath("$.data.name").value("Japanese N5 Class"))
-                    .andExpect(jsonPath("$.data.isActive").value(true)) // Auto-activated since startDate ≤ current date
+                    .andExpect(jsonPath("$.data.status").value(true)) // Auto-activated since startDate ≤ current date
                     .andExpect(jsonPath("$.data.courseId").value(course.getId().toString()))
                     .andReturn();
 
@@ -637,7 +650,7 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Future Japanese N5 Class\",\"description\":\"Japanese N5 course starting next month\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                            "\"maxStudents\":8,\"startDate\":\"%s\"}",
                     teacher.getId(), course.getId(), LocalDate.now().plusDays(30));
 
             MvcResult result = mockMvc.perform(post("/api/v1/classes")
@@ -648,17 +661,17 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.id").isNotEmpty())
                     .andExpect(jsonPath("$.data.name").value("Future Japanese N5 Class"))
-                    .andExpect(jsonPath("$.data.isActive").value(false)) // Auto-inactive since startDate > current date
+                    .andExpect(jsonPath("$.data.status").value(false)) // Auto-inactive since startDate > current date
                     .andExpect(jsonPath("$.data.courseId").value(course.getId().toString()))
                     .andReturn();
 
             String id = objectMapper.readTree(result.getResponse().getContentAsString())
                     .path("data").path("id").asText();
             assertThat(classRepository.findByIdAndNotDeleted(UUID.fromString(id))).isPresent();
-            
+
             // Verify the class is indeed inactive in database
             Clazz savedClass = classRepository.findByIdAndNotDeleted(UUID.fromString(id)).orElseThrow();
-            assertThat(savedClass.getIsActive()).isFalse();
+            assertThat(savedClass.getStatus() == ClassStatus.NOT_STARTED).isTrue();
         }
 
         @Test
@@ -668,11 +681,11 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            saveClass("Japanese N5 Class", teacher.getId(), course.getId(), true, 8);
+            saveClass("Japanese N5 Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             String body = String.format(
                     "{\"name\":\"Japanese N5 Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                            "\"maxStudents\":8,\"startDate\":\"%s\"}",
                     teacher.getId(), course.getId(), LocalDate.now().plusDays(1));
 
             mockMvc.perform(post("/api/v1/classes")
@@ -715,7 +728,7 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Future Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                            "\"maxStudents\":8,\"startDate\":\"%s\"}",
                     teacher.getId(), course.getId(), LocalDate.now().plusDays(10));
 
             mockMvc.perform(post("/api/v1/classes")
@@ -724,7 +737,7 @@ class ClassManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.isActive").value(false));
+                    .andExpect(jsonPath("$.data.status").value(false));
         }
 
         @Test
@@ -737,7 +750,7 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Bad Teacher Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                            "\"maxStudents\":8,\"startDate\":\"%s\"}",
                     learner.getId(), course.getId(),
                     LocalDate.now().plusDays(1));
 
@@ -759,7 +772,7 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Inactive Course Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                            "\"maxStudents\":8,\"startDate\":\"%s\"}",
                     teacher.getId(), course.getId(), LocalDate.now().plusDays(1));
 
             mockMvc.perform(post("/api/v1/classes")
@@ -805,7 +818,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Old Name", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Old Name", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             // Add one member so memberCount = 1
             saveClassMember(clazz.getId(), saveLearner("learner@test.com").getId());
 
@@ -845,7 +858,7 @@ class ClassManagementTest {
             String t1Token = loginAndGetToken("teacher1@test.com", "ValidPass@1");
             String t2Token = loginAndGetToken("teacher2@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Swap Class", t1.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Swap Class", t1.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             // Update teacher to T2
             String body = String.format("{\"teacherId\":\"%s\"}", t2.getId());
@@ -876,7 +889,7 @@ class ClassManagementTest {
             String mgrToken = loginAndGetToken("manager@test.com", "ValidPass@1");
             String tToken = loginAndGetToken("teacher@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Deactivate Me", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Deactivate Me", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             User learner = saveLearner("learner@test.com");
 
             // Add learner to class first
@@ -899,7 +912,7 @@ class ClassManagementTest {
             mockMvc.perform(put("/api/v1/classes/{classId}/close", clazz.getId())
                             .header("Authorization", "Bearer " + mgrToken))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.isActive").value(false));
+                    .andExpect(jsonPath("$.data.status").value(false));
 
             // Teacher list — class not visible (teacher sees only active)
             mockMvc.perform(get("/api/v1/classes").param("page", "0").param("size", "10")
@@ -920,7 +933,7 @@ class ClassManagementTest {
 
             // Class is deactivated in DB
             Clazz closed = classRepository.findById(clazz.getId()).orElseThrow();
-            assertThat(closed.getIsActive()).isFalse();
+            assertThat(closed.getStatus() == ClassStatus.CLOSED).isTrue();
         }
 
         @Test
@@ -931,8 +944,8 @@ class ClassManagementTest {
             String mgrToken = loginAndGetToken("manager@test.com", "ValidPass@1");
             String tToken = loginAndGetToken("teacher@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            // Create an initially INACTIVE class (future startDate, isActive=false)
-            Clazz clazz = saveClass("Reactivate Me", teacher.getId(), course.getId(), false, 8);
+            // Create an initially INACTIVE class (future startDate, status=false)
+            Clazz clazz = saveClass("Reactivate Me", teacher.getId(), course.getId(), ClassStatus.NOT_STARTED, 8);
 
             // Teacher cannot see inactive class
             mockMvc.perform(get("/api/v1/classes").param("page", "0").param("size", "10")
@@ -946,7 +959,7 @@ class ClassManagementTest {
                             .contentType(MediaType.APPLICATION_JSON).content(body)
                             .header("Authorization", "Bearer " + mgrToken))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.isActive").value(true));
+                    .andExpect(jsonPath("$.data.status").value(true));
 
             // Teacher list — class now visible
             mockMvc.perform(get("/api/v1/classes").param("page", "0").param("size", "10")
@@ -971,7 +984,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Full Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Full Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             saveClassMember(clazz.getId(), saveLearner("l1@test.com").getId());
             saveClassMember(clazz.getId(), saveLearner("l2@test.com").getId());
@@ -1002,7 +1015,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             User learner = saveLearner("learner@test.com");
 
             String body = String.format("{\"userId\":\"%s\"}", learner.getId());
@@ -1027,7 +1040,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Full Class", teacher.getId(), course.getId(), true, 2);
+            Clazz clazz = saveClass("Full Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 2);
 
             saveClassMember(clazz.getId(), saveLearner("l1@test.com").getId());
             saveClassMember(clazz.getId(), saveLearner("l2@test.com").getId());
@@ -1049,7 +1062,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Inactive Class", teacher.getId(), course.getId(), false, 8);
+            Clazz clazz = saveClass("Inactive Class", teacher.getId(), course.getId(), ClassStatus.CLOSED, 8);
             User learner = saveLearner("learner@test.com");
 
             String body = String.format("{\"userId\":\"%s\"}", learner.getId());
@@ -1069,7 +1082,7 @@ class ClassManagementTest {
             User anotherTeacher = saveTeacher("teacher2@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             String body = String.format("{\"userId\":\"%s\"}", anotherTeacher.getId());
 
@@ -1087,7 +1100,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             User learner = saveLearner("learner@test.com");
             saveClassMember(clazz.getId(), learner.getId());
 
@@ -1106,7 +1119,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("teacher@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             User learner = saveLearner("learner@test.com");
 
             String body = String.format("{\"userId\":\"%s\"}", learner.getId());
@@ -1125,7 +1138,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             User inactiveLearner = saveLearner("inactive@test.com", UserStatus.INACTIVE);
 
             String body = String.format("{\"userId\":\"%s\"}", inactiveLearner.getId());
@@ -1158,7 +1171,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             User learner = saveLearner("learner@test.com");
             saveClassMember(clazz.getId(), learner.getId());
 
@@ -1187,7 +1200,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             User learner = saveLearner("learner@test.com");
             saveRemovedClassMember(clazz.getId(), learner.getId());
 
@@ -1205,7 +1218,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             User learner = saveLearner("learner@test.com");
 
             mockMvc.perform(delete("/api/v1/classes/{classId}/members/{userId}",
@@ -1231,7 +1244,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Delete Me", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Delete Me", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             mockMvc.perform(delete("/api/v1/classes/{classId}", clazz.getId())
                             .header("Authorization", "Bearer " + token))
@@ -1266,7 +1279,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("teacher@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             mockMvc.perform(delete("/api/v1/classes/{classId}", clazz.getId())
                             .header("Authorization", "Bearer " + token))
@@ -1281,14 +1294,14 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Cascade Test", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Cascade Test", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             User l1 = saveLearner("l1@test.com");
             User l2 = saveLearner("l2@test.com");
             // Add learners to class (they should be active)
             ClassMember m1 = saveClassMember(clazz.getId(), l1.getId());
             ClassMember m2 = saveClassMember(clazz.getId(), l2.getId());
-            
+
             // Verify learners are initially active
             assertThat(userRepository.findById(l1.getId()).orElseThrow().getStatus())
                     .isEqualTo(UserStatus.ACTIVE);
@@ -1324,8 +1337,8 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Inactive Class", teacher.getId(), course.getId(), false, 8); // Inactive class
-            
+            Clazz clazz = saveClass("Inactive Class", teacher.getId(), course.getId(), ClassStatus.DELETED, 8); // Inactive class
+
             // Create one active learner and one inactive learner
             User activeLearner = saveLearner("active@test.com", UserStatus.ACTIVE);
             User inactiveLearner = saveLearner("inactive@test.com", UserStatus.INACTIVE);
@@ -1355,7 +1368,7 @@ class ClassManagementTest {
             ClassMember savedActiveMember = classMemberRepository.findById(activeMember.getId()).orElseThrow();
             assertThat(savedActiveMember.getUserId()).isEqualTo(activeLearner.getId());
             assertThat(savedActiveMember.getRemovedAt()).isNull(); // historical data untouched
-            
+
             ClassMember savedInactiveMember = classMemberRepository.findById(inactiveMember.getId()).orElseThrow();
             assertThat(savedInactiveMember.getUserId()).isEqualTo(inactiveLearner.getId());
             assertThat(savedInactiveMember.getRemovedAt()).isNull(); // historical data untouched
@@ -1393,7 +1406,7 @@ class ClassManagementTest {
             // No description field in the payload
             String body = String.format(
                     "{\"name\":\"No Desc Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                            "\"maxStudents\":8,\"startDate\":\"%s\"}",
                     teacher.getId(), course.getId(), LocalDate.now().plusDays(1));
 
             MvcResult result = mockMvc.perform(post("/api/v1/classes")
@@ -1401,7 +1414,7 @@ class ClassManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.isActive").value(false)) //  isActive = false when start date is in future
+                    .andExpect(jsonPath("$.data.status").value(false)) //  status = false when start date is in future
                     .andExpect(jsonPath("$.data.name").value("No Desc Class"))
                     .andReturn();
 
@@ -1409,7 +1422,7 @@ class ClassManagementTest {
                     .path("data").path("id").asText();
             Clazz saved = classRepository.findByIdAndNotDeleted(UUID.fromString(id)).orElseThrow();
             assertThat(saved.getDescription()).isNullOrEmpty();
-            assertThat(saved.getIsActive()).isFalse(); // isActive = false when start date is in future
+            assertThat(saved.getStatus() == ClassStatus.NOT_STARTED).isTrue(); // status = false when start date is in future
         }
 
         @Test
@@ -1441,7 +1454,7 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Ghost Teacher Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                            "\"maxStudents\":8,\"startDate\":\"%s\"}",
                     UUID.randomUUID(), course.getId(), LocalDate.now().plusDays(1));
 
             mockMvc.perform(post("/api/v1/classes")
@@ -1462,7 +1475,7 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Ghost Course Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                            "\"maxStudents\":8,\"startDate\":\"%s\"}",
                     teacher.getId(), UUID.randomUUID(), LocalDate.now().plusDays(1));
 
             mockMvc.perform(post("/api/v1/classes")
@@ -1484,7 +1497,7 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Default Max Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                    "\"startDate\":\"%s\"}",
+                            "\"startDate\":\"%s\"}",
                     teacher.getId(), course.getId(), LocalDate.now().plusDays(1));
 
             MvcResult result = mockMvc.perform(post("/api/v1/classes")
@@ -1534,7 +1547,7 @@ class ClassManagementTest {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             String body = String.format("{\"teacherId\":\"%s\"}", learner.getId());
 
@@ -1557,7 +1570,7 @@ class ClassManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
             // Class starts today (startDate = now), is active
-            Clazz clazz = saveClass("Date Test", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Date Test", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             // Add a member so the INVALID_START_DATE guard is triggered
             saveClassMember(clazz.getId(), saveLearner("member@test.com").getId());
 
@@ -1580,7 +1593,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Valid Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Valid Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             // Blank name is explicitly sent — should fail validation
             mockMvc.perform(put("/api/v1/classes/{classId}", clazz.getId())
@@ -1603,8 +1616,8 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            saveClass("Existing Name", teacher.getId(), course.getId(), true, 8);
-            Clazz clazz = saveClass("Another Name", teacher.getId(), course.getId(), true, 8);
+            saveClass("Existing Name", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
+            Clazz clazz = saveClass("Another Name", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             mockMvc.perform(put("/api/v1/classes/{classId}", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON)
@@ -1621,7 +1634,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("teacher@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             mockMvc.perform(put("/api/v1/classes/{classId}", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON)
@@ -1639,7 +1652,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz deleted = saveDeletedClass("Deleted Class", teacher.getId(), course.getId(), true, 8, manager.getId());
+            Clazz deleted = saveDeletedClass("Deleted Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8, manager.getId());
 
             mockMvc.perform(put("/api/v1/classes/{classId}", deleted.getId())
                             .contentType(MediaType.APPLICATION_JSON)
@@ -1668,7 +1681,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Search Empty", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Search Empty", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             saveClassMember(clazz.getId(), saveLearner("existing@test.com").getId());
 
             mockMvc.perform(get("/api/v1/classes/{classId}/members", clazz.getId())
@@ -1697,7 +1710,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz deleted = saveDeletedClass("Deleted Class", teacher.getId(), course.getId(), true, 8, manager.getId());
+            Clazz deleted = saveDeletedClass("Deleted Class", teacher.getId(), course.getId(), ClassStatus.DELETED, 8, manager.getId());
 
             mockMvc.perform(get("/api/v1/classes/{classId}/members", deleted.getId())
                             .header("Authorization", "Bearer " + token))
@@ -1724,7 +1737,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             saveLearner("real@test.com"); // a real learner that won't match
 
             mockMvc.perform(get("/api/v1/classes/{classId}/eligible-learners", clazz.getId())
@@ -1741,7 +1754,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             saveLearner("alice.smith@test.com");
             saveLearner("bob.jones@test.com");
@@ -1778,7 +1791,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
             String body = String.format("{\"userId\":\"%s\"}", UUID.randomUUID());
 
@@ -1798,12 +1811,12 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Eligible Test", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Eligible Test", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
-            saveLearner("active@test.com",   UserStatus.ACTIVE);
+            saveLearner("active@test.com", UserStatus.ACTIVE);
             saveLearner("inactive@test.com", UserStatus.INACTIVE);
-            saveLearner("suspended@test.com",UserStatus.SUSPENDED);
-            saveLearner("pending@test.com",  UserStatus.PENDING_ACTIVATION);
+            saveLearner("suspended@test.com", UserStatus.SUSPENDED);
+            saveLearner("pending@test.com", UserStatus.PENDING_ACTIVATION);
 
             MvcResult result = mockMvc.perform(get("/api/v1/classes/{classId}/eligible-learners", clazz.getId())
                             .header("Authorization", "Bearer " + token))
@@ -1832,7 +1845,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Rejoin Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Rejoin Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             User learner = saveLearner("rejoin@test.com");
 
             // First, create and then remove the membership
@@ -1873,7 +1886,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Remove Test", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Remove Test", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             User learner = saveLearner("learner@test.com");
             saveClassMember(clazz.getId(), learner.getId());
 
@@ -1921,7 +1934,7 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("teacher@test.com", "ValidPass@1");
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
-            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), true, 8);
+            Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             User learner = saveLearner("learner@test.com");
             saveClassMember(clazz.getId(), learner.getId());
 
