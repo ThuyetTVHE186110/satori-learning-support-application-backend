@@ -278,9 +278,16 @@ public class ExerciseGeneratorAgent {
             case TRANSLATION ->
                     "TRANSLATION: question = câu tiếng Nhật cần dịch sang tiếng Việt (hoặc ngược lại). options = []. correctAnswer = bản dịch đúng.";
             case SENTENCE_ORDER ->
-                    "SENTENCE_ORDER: question = hướng dẫn (ví dụ: 「次の単語を正しい順番に並べてください」). options = danh sách từ rời cần sắp xếp, TẤT CẢ isCorrect=false, thứ tự options phải XÁO TRỘN (không theo thứ tự đúng). correctAnswer = câu hoàn chỉnh đúng thứ tự.";
+                    "SENTENCE_ORDER: question = câu tiếng VIỆT tham chiếu để học viên biết nghĩa (ví dụ: \"Tôi là học sinh.\"). " +
+                    "options = từng TOKEN tiếng Nhật riêng lẻ của câu đúng, TẤT CẢ isCorrect=false. " +
+                    "QUAN TRỌNG: options CHỈ chứa các từ của câu ĐÚNG — KHÔNG sinh câu sai hay cụm từ nhiều chữ. " +
+                    "Ví dụ câu \"わたし は 学生 です\" thì options = [{\"text\":\"わたし\",\"isCorrect\":false},{\"text\":\"は\",\"isCorrect\":false},{\"text\":\"学生\",\"isCorrect\":false},{\"text\":\"です\",\"isCorrect\":false}]. " +
+                    "correctAnswer = câu Nhật đúng thứ tự (ví dụ: \"わたし は 学生 です\"). hint = null.";
             case MATCHING ->
-                    "MATCHING: question = từ/cụm từ tiếng Nhật cần ghép. options = 4 object: 1 nghĩa đúng (isCorrect=true), 3 nghĩa sai (isCorrect=false). correctAnswer = nghĩa đúng.";
+                    "MATCHING: sinh 1 item chứa TẤT CẢ các cặp. Dùng trường \"pairs\" (KHÔNG dùng options). " +
+                    "pairs = array gồm 4 cặp, mỗi cặp: {\"left\": \"từ tiếng Nhật\", \"right\": \"nghĩa tiếng Việt\"}. " +
+                    "options = []. correctAnswer = null. " +
+                    "Ví dụ: \"pairs\":[{\"left\":\"わたし\",\"right\":\"Tôi\"},{\"left\":\"あなた\",\"right\":\"Bạn\"},{\"left\":\"先生\",\"right\":\"Giáo viên\"},{\"left\":\"何歳\",\"right\":\"Mấy tuổi\"}].";
             case TRUE_FALSE ->
                     "TRUE_FALSE: question = phát biểu về từ hoặc ngữ pháp (có thể đúng hoặc sai). options = [{\"text\":\"Đúng\",\"isCorrect\":X},{\"text\":\"Sai\",\"isCorrect\":Y}] — đúng 1, sai 1. correctAnswer = \"Đúng\" hoặc \"Sai\".";
         };
@@ -324,6 +331,7 @@ public class ExerciseGeneratorAgent {
             @JsonProperty("question") String question,
             @JsonProperty("questionJapanese") String questionJapanese,
             @JsonProperty("options") List<OptionItem> options,
+            @JsonProperty("pairs") List<MatchingPair> pairs,
             @JsonProperty("correctAnswer") String correctAnswer,
             @JsonProperty("hint") String hint,
             @JsonProperty("explanation") String explanation,
@@ -334,6 +342,12 @@ public class ExerciseGeneratorAgent {
         public record OptionItem(
                 @JsonProperty("text") String text,
                 @JsonProperty("isCorrect") boolean isCorrect
+        ) {}
+
+        /** Một cặp trong bài MATCHING: left = tiếng Nhật, right = tiếng Việt. */
+        public record MatchingPair(
+                @JsonProperty("left") String left,
+                @JsonProperty("right") String right
         ) {}
     }
 
