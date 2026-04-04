@@ -6,26 +6,24 @@ import com.fu.clazz.dto.request.UpdateClassRequest;
 import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
+import com.fu.clazz.dto.response.LearnerClassResponse;
 import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.entity.Clazz;
+import com.fu.clazz.entity.ClassStatus;
+import com.fu.clazz.entity.ClassTeacherHistory;
 import com.fu.clazz.exception.ClassFullException;
 import com.fu.clazz.exception.ClassNotFoundException;
 import com.fu.clazz.exception.MemberAlreadyExistsException;
 import com.fu.clazz.mapper.ClassMapper;
 import com.fu.clazz.repository.ClassMemberRepository;
 import com.fu.clazz.repository.ClassRepository;
+import com.fu.clazz.repository.ClassTeacherHistoryRepository;
+import com.fu.clazz.repository.specification.ClassSpecification;
 import com.fu.clazz.scheduler.ClassScheduleManager;
 import com.fu.clazz.service.impl.ClassServiceImpl;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.course.entity.Course;
-import com.fu.user.entity.User;
-import com.fu.user.entity.UserRole;
-import com.fu.user.entity.UserStatus;
-import com.fu.clazz.entity.ClassStatus;
-import com.fu.clazz.entity.ClassTeacherHistory;
-import com.fu.clazz.repository.ClassTeacherHistoryRepository;
-import com.fu.clazz.repository.specification.ClassSpecification;
 import com.fu.course.repository.CourseRepository;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
@@ -1292,6 +1290,137 @@ class ClassServiceImplTest {
             verify(classRepository).save(clazzCaptor.capture());
             verify(classScheduleManager).scheduleActivation(any(Clazz.class));
             assertThat(clazzCaptor.getValue().getStatus()).isEqualTo(ClassStatus.ACTIVE);
+        }
+    }
+
+    // =====================================================
+    // LEARNER QUERIES
+    // =====================================================
+    @Nested
+    @DisplayName("Get Learner Classes Tests")
+    class GetLearnerClassesTests {
+        private UUID learnerId;
+        private Clazz activeClass;
+        private Clazz closedClass;
+        private Clazz notStartedClass;
+        private LearnerClassResponse activeResponse;
+        private LearnerClassResponse closedResponse;
+
+        @BeforeEach
+        void setUp() {
+            learnerId = UUID.randomUUID();
+            
+            activeClass = Clazz.builder()
+                    .id(UUID.randomUUID())
+                    .name("Active Class")
+                    .status(ClassStatus.ACTIVE)
+                    .build();
+            
+            closedClass = Clazz.builder()
+                    .id(UUID.randomUUID())
+                    .name("Closed Class")
+                    .status(ClassStatus.CLOSED)
+                    .build();
+            
+            notStartedClass = Clazz.builder()
+                    .id(UUID.randomUUID())
+                    .name("Not Started Class")
+                    .status(ClassStatus.NOT_STARTED)
+                    .build();
+            
+            activeResponse = LearnerClassResponse.builder()
+                    .id(activeClass.getId())
+                    .name(activeClass.getName())
+                    .status(ClassStatus.ACTIVE)
+                    .build();
+            
+            closedResponse = LearnerClassResponse.builder()
+                    .id(closedClass.getId())
+                    .name(closedClass.getName())
+                    .status(ClassStatus.CLOSED)
+                    .build();
+        }
+
+        @Test
+        @DisplayName("Should return active and closed classes for learner")
+        void shouldReturnActiveAndClosedClasses() {
+            // Given
+            List<ClassStatus> allowedStatuses = List.of(ClassStatus.ACTIVE, ClassStatus.CLOSED);
+            List<Clazz> classes = List.of(activeClass, closedClass);
+            
+            given(classRepository.findLearnerClasses(learnerId, allowedStatuses))
+                    .willReturn(classes);
+            given(classMapper.toLearnerClassResponse(activeClass)).willReturn(activeResponse);
+            given(classMapper.toLearnerClassResponse(closedClass)).willReturn(closedResponse);
+
+            // When
+            List<LearnerClassResponse> result = clazzService.getLearnerClasses(learnerId);
+
+            // Then
+            assertThat(result)
+                    .hasSize(2)
+                    .containsExactly(activeResponse, closedResponse);
+            verify(classRepository).findLearnerClasses(learnerId, allowedStatuses);
+            verify(classMapper, times(2)).toLearnerClassResponse(any(Clazz.class));
+        }
+
+        @Test
+        @DisplayName("Should return empty list when learner has no classes")
+        void shouldReturnEmptyListWhenNoClasses() {
+            // Given
+            List<ClassStatus> allowedStatuses = List.of(ClassStatus.ACTIVE, ClassStatus.CLOSED);
+            given(classRepository.findLearnerClasses(learnerId, allowedStatuses))
+                    .willReturn(List.of());
+
+            // When
+            List<LearnerClassResponse> result = clazzService.getLearnerClasses(learnerId);
+
+            // Then
+            assertThat(result).isEmpty();
+            verify(classRepository).findLearnerClasses(learnerId, allowedStatuses);
+            verify(classMapper, never()).toLearnerClassResponse(any());
+        }
+
+        @Test
+        @DisplayName("Should only return active class when learner has only active enrollment")
+        void shouldReturnOnlyActiveClass() {
+            // Given
+            List<ClassStatus> allowedStatuses = List.of(ClassStatus.ACTIVE, ClassStatus.CLOSED);
+            List<Clazz> classes = List.of(activeClass);
+            
+            given(classRepository.findLearnerClasses(learnerId, allowedStatuses))
+                    .willReturn(classes);
+            given(classMapper.toLearnerClassResponse(activeClass)).willReturn(activeResponse);
+
+            // When
+            List<LearnerClassResponse> result = clazzService.getLearnerClasses(learnerId);
+
+            // Then
+            assertThat(result)
+                    .hasSize(1)
+                    .containsExactly(activeResponse);
+            assertThat(result.get(0).getStatus()).isEqualTo(ClassStatus.ACTIVE);
+        }
+
+        @Test
+        @DisplayName("Should only return closed class when learner has only historical enrollment")
+        void shouldReturnOnlyClosedClass() {
+            // Given
+            List<ClassStatus> allowedStatuses = List.of(ClassStatus.ACTIVE, ClassStatus.CLOSED);
+            List<Clazz> classes = List.of(closedClass);
+            
+            given(classRepository.findLearnerClasses(learnerId, allowedStatuses))
+                    .willReturn(classes);
+            given(classMapper.toLearnerClassResponse(closedClass)).willReturn(closedResponse);
+
+            // When
+            List<LearnerClassResponse> result = clazzService.getLearnerClasses(learnerId);
+
+            // Then
+            assertThat(result)
+                    .hasSize(1)
+                    .containsExactly(closedResponse);
+            assertThat(result.get(0).getStatus()).isEqualTo(ClassStatus.CLOSED);
         }
     }
 }
