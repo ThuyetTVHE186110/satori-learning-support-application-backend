@@ -22,6 +22,7 @@
         <module>modules/assignment</module>
         <module>modules/practice</module>
         <module>modules/achievement</module>
+        <module>modules/notification</module>
         <module>start</module>
     </modules>
 
@@ -129,6 +130,11 @@
             <dependency>
                 <groupId>com.fu</groupId>
                 <artifactId>achievement</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fu</groupId>
+                <artifactId>notification</artifactId>
                 <version>${project.version}</version>
             </dependency>
 
