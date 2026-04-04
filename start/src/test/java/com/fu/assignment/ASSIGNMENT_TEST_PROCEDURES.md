@@ -477,14 +477,12 @@
 5. AssignmentService → determine it is submitted late, setting status to `OVERDUE`.
 6. System → return HTTP 200 OK.
 
-#### TC_AS_L_DO_009 — Submit Writing on time → SUBMITTED (awaiting grading)
-1. Client → POST `/api/v1/learner/assignments/{id}/submit-writing` with `data` part and image attachments.
+#### TC_AS_L_DO_009 — Submit Writing with file too large (> 5MB) → 400 FILE_TOO_LARGE
+1. Client → POST `/api/v1/learner/assignments/{id}/submit-writing` with an image file larger than 5MB.
 2. AuthFilter → parse the token and resolve the user identity.
 3. LearnerAssignmentController → process multipart request and call `AssignmentService.submitWriting()`.
-4. AssignmentService → upload images if any, associate with Submission.
-5. AssignmentService → update Submission content and set status to `SUBMITTED`.
-6. AssignmentService → save to DB without auto-grading.
-7. System → return HTTP 200 OK.
+4. CloudinaryService.uploadImage() → validate file size and throw `BusinessException("FILE_TOO_LARGE")`.
+5. System → return HTTP 400 Bad Request with error code `FILE_TOO_LARGE`.
 
 #### TC_AS_L_DO_010 — Submit Writing past dueDate → OVERDUE
 1. Client → POST `/api/v1/learner/assignments/{id}/submit-writing` after `dueDate`.

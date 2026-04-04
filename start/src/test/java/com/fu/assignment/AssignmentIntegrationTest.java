@@ -2409,7 +2409,7 @@ class AssignmentIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_AS_L_DO_009 — Submit Writing đúng hạn → SUBMITTED (chờ teacher chấm)")
+        @DisplayName("TC_AS_L_DO_009 — Submit Writing với ảnh quá dung lượng (>5MB) → 400 FILE_TOO_LARGE")
         void tc_as_l_do_009() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
             User learner = saveLearner("learner@test.com");
@@ -2419,15 +2419,18 @@ class AssignmentIntegrationTest {
             startSubmission(a.getId(), learner.getId());
             String token = loginAndGetToken("learner@test.com");
     
-            MockMultipartFile imagePart = new MockMultipartFile(
-                    "images", "writing-image.jpg", "image/jpeg",
-                    "test image content".getBytes());
+            // Create a file larger than 5MB (5 * 1024 * 1024 + 1 byte)
+            byte[] largeFileContent = new byte[(int)(5 * 1024 * 1024 + 1)];
+            MockMultipartFile largeImagePart = new MockMultipartFile(
+                    "images", "large-image.jpg", "image/jpeg",
+                    largeFileContent);
 
             mockMvc.perform(multipart("/api/v1/learner/assignments/{id}/submit-writing", a.getId())
-                            .file(imagePart)
+                            .file(largeImagePart)
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.status").value("SUBMITTED"));
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("FILE_TOO_LARGE"))
+                    .andExpect(jsonPath("$.message").value("Kích thước tệp không được vượt quá 5MB"));
         }
 
         @Test

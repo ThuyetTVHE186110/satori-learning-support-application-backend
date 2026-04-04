@@ -58,39 +58,6 @@ Bước 2: Submit:
 - [ ] Mở từng URL → ảnh hiển thị đúng
 - [ ] `data.status` = `"SUBMITTED"`
 
----
-
-### PM_AS_CLOUD_003 — Upload file quá lớn
-
-```
-POST /api/v1/teacher/assignments/class/{classId}/quiz
-Content-Type: multipart/form-data
-Header: Authorization: Bearer {teacher_token}
-
-Part "audioFile": chọn file audio > 10MB (hoặc > giới hạn Cloudinary plan)
-```
-
-**Verify:**
-- [ ] Server trả lỗi hợp lý (không crash, không timeout vô hạn)
-- [ ] Error message rõ ràng cho client
-
----
-
-### PM_AS_CLOUD_004 — Update Quiz: thay audio (xoá cũ, upload mới)
-
-```
-Bước 1: Tạo quiz draft có audio (PM_AS_CLOUD_001) → ghi nhận audioUrl cũ
-Bước 2: PUT /api/v1/teacher/assignments/{id}/quiz
-   Part "audioFile": file .mp3 MỚI
-   Part "data": { "title": "...", "dueDate": "...", "status": "DRAFT", "questions": [] }
-```
-
-**Verify:**
-- [ ] `data.audioUrl` trỏ đến file mới (URL khác)
-- [ ] Audio cũ đã bị xoá trên Cloudinary dashboard
-- [ ] File mới phát được qua URL
-
----
 
 ## 2. OpenAI — Real AI Generation
 

@@ -2055,27 +2055,29 @@ Response JSON:
 
 ---
 
-### Test Case ID: TC_AS_L_DO_009
-**Test Case Description:** Submit Writing on time → SUBMITTED (wait for teacher to grade)
+    ### Test Case ID: TC_AS_L_DO_009
+**Test Case Description:** Submit Writing with file too large (> 5MB) → 400 FILE_TOO_LARGE
 
 **Pre-conditions:**
 - Learner accessToken is available (from prior login)
-- Published writing assignment with dueDate in the future
+- Published writing assignment
 - Submission started (IN_PROGRESS)
 
 **Test Case Procedure:**
 1. Client sends multipart POST /api/v1/learner/assignments/{assignmentId}/submit-writing with Authorization: Bearer {token}:
-   - images: image file
+   - images: image file larger than 5MB (e.g., 5.1MB PNG)
 2. AuthFilter validates token and resolves LEARNER identity.
-3. AssignmentController forwards the request to AssignmentService.
-4. AssignmentService validates assignment is not past due.
-5. AssignmentService updates submission status to SUBMITTED.
-6. System returns the submitted result.
+3. LearnerAssignmentController forwards the request to AssignmentService.
+4. AssignmentService calls CloudinaryService.uploadImage to validate the image.
+5. CloudinaryService detects file size exceeds 5MB limit.
+6. CloudinaryService throws BusinessException("FILE_TOO_LARGE").
+7. GlobalExceptionHandler catches the exception and returns 400 response.
 
-**Expected Results:** HTTP 200 OK
+**Expected Results:** HTTP 400 BAD REQUEST
 Response JSON:
-- success = true
-- data.status = "SUBMITTED"
+- success = false
+- code = "FILE_TOO_LARGE"
+- message = "Kích thước tệp không được vượt quá 5MB"
 
 ---
 
