@@ -11,12 +11,12 @@ import java.util.UUID;
 public interface ConversationMissionRepository extends JpaRepository<ConversationMission, UUID> {
 
     /**
-     * Returns all active (non-deleted) missions for a topic, sorted by order index ascending.
+     * Returns all active (non-deleted) missions for a conversation, sorted by order index ascending.
      */
-    List<ConversationMission> findByTopicIdAndDeletedAtIsNullOrderByOrderIndexAsc(UUID topicId);
+    List<ConversationMission> findByConversationIdAndDeletedAtIsNullOrderByOrderIndexAsc(UUID conversationId);
 
     /**
-     * Counts active (non-deleted) missions for a given topic.
+     * Counts active (non-deleted) missions for a given conversation.
      */
-    long countByTopicIdAndDeletedAtIsNull(UUID topicId);
+    long countByConversationIdAndDeletedAtIsNull(UUID conversationId);
 }

@@ -91,6 +91,6 @@ public class CustomUserDetails implements UserDetails, AuditingConfig.UserPrinci
     @Override
     public boolean isEnabled() {
         // Account is enabled only if status is ACTIVE
-        return status == UserStatus.ACTIVE;
+        return status == UserStatus.ACTIVE || status == UserStatus.INACTIVE;
     }
 }

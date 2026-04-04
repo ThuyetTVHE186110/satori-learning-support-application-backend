@@ -18,7 +18,16 @@ import lombok.NoArgsConstructor;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class OptionDto {
 
+    /** Index-based ID (0, 1, 2, ...) để frontend tham chiếu khi submit đáp án. */
+    private Integer id;
+
     private String text;
+
+    /**
+     * Chỉ có giá trị với MATCHING: "LEFT" (tiếng Nhật) hoặc "RIGHT" (tiếng Việt, đã shuffle).
+     * null với các dạng khác.
+     */
+    private String side;
 
     /**
      * null trước khi nộp câu trả lời; true/false sau khi nộp.

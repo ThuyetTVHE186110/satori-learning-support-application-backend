@@ -18,6 +18,7 @@ import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.repository.ClassMemberRepository;
 import com.fu.clazz.repository.ClassRepository;
 import com.fu.assignment.util.MarkdownUtils;
+import com.fu.clazz.entity.ClassStatus;
 import com.fu.clazz.repository.ClassTeacherHistoryRepository;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
@@ -567,16 +568,85 @@ public class AssignmentServiceImpl implements AssignmentService {
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Override
-    public Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, String title, AssignmentType type, SubmissionStatus status, Pageable pageable) {
-        List<UUID> classIds = classMemberRepository.findActiveClassIdsByUserId(learnerId);
+    public Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(
+            UUID learnerId, UUID classId, String title, AssignmentType type, 
+            SubmissionStatus status, Pageable pageable) {
+        
+        List<UUID> classIds;
+        
+        if (classId == null) {
+            // No classId provided: get THE single active enrolled class
+            Optional<UUID> activeClassId = getActiveEnrolledClassId(learnerId);
+            if (activeClassId.isEmpty()) {
+                // Learner has no active class - return empty page
+                log.info("Learner {} has no active enrolled class", learnerId);
+                return Page.empty(pageable);
+            }
+            classIds = List.of(activeClassId.get());
+        } else {
+            // Specific classId provided: validate learner has access
+            if (!isLearnerInClass(learnerId, classId)) {
+                log.warn("Learner {} attempted to access assignments from class {} but is not a member", 
+                        learnerId, classId);
+                return Page.empty(pageable);
+            }
+            classIds = List.of(classId);
+        }
 
         String titleStr = (title != null) ? title : "";
         String typeStr = (type != null) ? type.name() : "";
         String statusStr = (status != null) ? status.name() : "";
+        
         Page<Assignment> assignments = assignmentRepository
                 .findLearnerAssignmentsSorted(learnerId, classIds, titleStr, typeStr, statusStr, pageable);
 
         return populateLearnerSummaryResponses(assignments, learnerId);
+    }
+
+    /**
+     * Get the single active enrolled class for a learner.
+     * Business rule: Learners can only be enrolled in ONE active class at a time.
+     * 
+     * @param learnerId Learner's UUID
+     * @return Optional containing the active class ID, or empty if no active class
+     */
+    private Optional<UUID> getActiveEnrolledClassId(UUID learnerId) {
+        // Get all active class memberships
+        List<UUID> activeClassIds = classMemberRepository.findActiveClassIdsByUserId(learnerId);
+        
+        if (activeClassIds.isEmpty()) {
+            return Optional.empty();
+        }
+        
+        // Filter for classes with ACTIVE status
+        List<Clazz> activeClasses = classRepository.findAllById(activeClassIds).stream()
+                .filter(clazz -> clazz.getStatus() == ClassStatus.ACTIVE)
+                .filter(clazz -> clazz.getDeletedAt() == null)
+                .toList();
+        
+        if (activeClasses.isEmpty()) {
+            return Optional.empty();
+        }
+        
+        // Should only be one active class per learner (business rule)
+        if (activeClasses.size() > 1) {
+            log.warn("Learner {} has multiple active classes: {}. Using first one.", 
+                    learnerId, activeClasses.stream().map(Clazz::getId).toList());
+        }
+        
+        return Optional.of(activeClasses.get(0).getId());
+    }
+
+    /**
+     * Check if learner is an active member of a class.
+     * 
+     * @param learnerId Learner's UUID
+     * @param classId Class UUID
+     * @return true if learner is an active member (removedAt IS NULL)
+     */
+    private boolean isLearnerInClass(UUID learnerId, UUID classId) {
+        List<UUID> activeClassIds = classMemberRepository.findActiveClassIdsByUserId(learnerId);
+        return activeClassIds.contains(classId);
     }
 
 
@@ -804,7 +874,10 @@ public class AssignmentServiceImpl implements AssignmentService {
     }
 
     private void verifyTeacherAccess(Clazz clazz, UUID teacherId) {
-        if (clazz != null && !classTeacherHistoryRepository.findCurrentTeacherIdByClassId(clazz.getId()).get().equals(teacherId)) {
+        if (clazz == null) return;
+        UUID currentTeacherId = classTeacherHistoryRepository.findCurrentTeacherIdByClassId(clazz.getId())
+                .orElse(null);
+        if (!teacherId.equals(currentTeacherId)) {
             throw new BusinessException("ACCESS_DENIED", "Bạn không phải là giáo viên của lớp này.");
         }
     }

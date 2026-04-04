@@ -9,16 +9,11 @@ NỘI DUNG BÀI HỌC (chỉ dùng từ danh sách này):
 DẠNG CÂU HỎI CẦN SINH:
 {itemTypeInstruction}
 
-QUY TẮC TỪNG DẠNG (bắt buộc tuân thủ):
-- MULTIPLE_CHOICE: options = 4 object {text,isCorrect}, đúng 1 sai 3. Dùng từ trong "ngữ cảnh bổ sung" làm đáp án sai.
-- FILL_BLANK: câu có ___ cần điền, options = []
-- TRANSLATION: dịch câu Nhật→Việt hoặc Việt→Nhật, options = []
-- SENTENCE_ORDER: options = danh sách từ rời (isCorrect=false với mọi từ), correctAnswer = câu hoàn chỉnh đúng thứ tự
-- MATCHING: ghép từ với nghĩa, options = 4 object (1 đúng isCorrect=true, 3 sai isCorrect=false)
-- TRUE_FALSE: phát biểu về từ/ngữ pháp, options = [{"text":"Đúng","isCorrect":X},{"text":"Sai","isCorrect":Y}] — chỉ 1 true
+QUY TẮC DẠNG CÂU HỎI (bắt buộc tuân thủ):
+{itemTypeRules}
 
 QUAN TRỌNG:
-- Trường "itemType" phải khớp đúng tên dạng (MULTIPLE_CHOICE, FILL_BLANK, TRANSLATION, SENTENCE_ORDER, MATCHING, TRUE_FALSE)
+- Trường "itemType" phải khớp ĐÚNG với tên dạng được yêu cầu ở trên
 - Trả về JSON array THUẦN — không markdown, không text thừa, bắt đầu bằng "["
 - options PHẢI là array object {"text":"...","isCorrect":true/false}, KHÔNG được là array string
 

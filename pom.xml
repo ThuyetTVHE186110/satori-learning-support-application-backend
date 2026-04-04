@@ -22,6 +22,7 @@
         <module>modules/assignment</module>
         <module>modules/practice</module>
         <module>modules/achievement</module>
+        <module>modules/notification</module>
         <module>start</module>
     </modules>
 
@@ -35,6 +36,7 @@
         <lombok.version>1.18.34</lombok.version>
         <mapstruct.version>1.6.2</mapstruct.version>
         <cloudinary.version>2.0.0</cloudinary.version>
+        <poi.version>5.4.1</poi.version>
     </properties>
 
     <dependencyManagement>
@@ -130,6 +132,11 @@
                 <artifactId>achievement</artifactId>
                 <version>${project.version}</version>
             </dependency>
+            <dependency>
+                <groupId>com.fu</groupId>
+                <artifactId>notification</artifactId>
+                <version>${project.version}</version>
+            </dependency>
 
             <!-- MapStruct -->
             <dependency>
@@ -150,6 +157,18 @@
                 <groupId>org.jsoup</groupId>
                 <artifactId>jsoup</artifactId>
                 <version>1.18.1</version>
+            </dependency>
+
+            <!-- Apache POI (Excel / DOCX / PPTX processing) -->
+            <dependency>
+                <groupId>org.apache.poi</groupId>
+                <artifactId>poi</artifactId>
+                <version>${poi.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.poi</groupId>
+                <artifactId>poi-ooxml</artifactId>
+                <version>${poi.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

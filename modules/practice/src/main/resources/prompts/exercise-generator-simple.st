@@ -2,7 +2,7 @@ Tạo {count} câu hỏi tiếng Nhật cấp độ {jlptLevel} từ nội dung 
 
 {contentSummary}
 
-Dạng câu hỏi: {itemTypeInstruction}
+{itemTypeInstruction}
 
-Chỉ trả về JSON array thuần (không markdown). Mỗi phần tử:
-{"itemType":"MULTIPLE_CHOICE","question":"...","questionJapanese":null,"options":[{"text":"...","isCorrect":true},{"text":"...","isCorrect":false},{"text":"...","isCorrect":false},{"text":"...","isCorrect":false}],"correctAnswer":"...","hint":null,"explanation":"...","refContentId":null,"refContentType":null}
+Chỉ trả về JSON array thuần (không markdown). Ví dụ cấu trúc một phần tử:
+{"itemType":"{exampleType}","question":"...","questionJapanese":null,"options":[{"text":"...","isCorrect":true},{"text":"...","isCorrect":false}],"correctAnswer":"...","hint":null,"explanation":"...","refContentId":null,"refContentType":null}

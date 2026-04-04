@@ -123,6 +123,20 @@ app:
             credentials-file: ${FIREBASE_CREDENTIALS_FILE:}
             project-id: ${FIREBASE_PROJECT_ID:}
 
+    # Push Notification Configuration (FCM)
+    notification:
+        firebase:
+            enabled: ${FCM_ENABLED:false}
+            credentials-file: ${FIREBASE_CREDENTIALS_FILE:}
+            project-id: ${FIREBASE_PROJECT_ID:}
+        cleanup:
+            read-notification-retention-days: ${NOTIFICATION_READ_RETENTION_DAYS:30}
+            all-notification-retention-days: ${NOTIFICATION_ALL_RETENTION_DAYS:90}
+            inactive-token-retention-days: ${NOTIFICATION_TOKEN_RETENTION_DAYS:30}
+        batch:
+            max-batch-size: ${NOTIFICATION_BATCH_SIZE:500}
+            batch-delay-ms: ${NOTIFICATION_BATCH_DELAY_MS:100}
+
     # Email Configuration
     email:
         enabled: ${EMAIL_ENABLED:true}
