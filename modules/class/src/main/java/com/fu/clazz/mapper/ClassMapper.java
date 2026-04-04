@@ -5,6 +5,7 @@ import com.fu.clazz.dto.request.UpdateClassRequest;
 import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
+import com.fu.clazz.dto.response.LearnerClassResponse;
 import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.entity.Clazz;
 import org.mapstruct.*;
@@ -66,4 +67,9 @@ public interface ClassMapper {
      * Map ClassMember entity to ClassMemberResponse
      */
     ClassMemberResponse toMemberResponse(ClassMember member);
+
+    /**
+     * Map Clazz entity to LearnerClassResponse (lightweight)
+     */
+    LearnerClassResponse toLearnerClassResponse(Clazz clazz);
 }

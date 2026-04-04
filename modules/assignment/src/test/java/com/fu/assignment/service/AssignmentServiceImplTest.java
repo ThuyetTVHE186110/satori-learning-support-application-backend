@@ -112,6 +112,14 @@ class AssignmentServiceImplTest {
                 .name("N5 Morning Class")
                 .build();
         ReflectionTestUtils.setField(testClazz, "id", classId);
+        try {
+            // Set status to ACTIVE using reflection
+            Object activeStatus = Enum.valueOf(
+                    (Class<? extends Enum>) Class.forName("com.fu.clazz.entity.ClassStatus"), "ACTIVE");
+            ReflectionTestUtils.setField(testClazz, "status", activeStatus);
+        } catch (ClassNotFoundException e) {
+            throw new RuntimeException(e);
+        }
 
         testQuizAssignment = Assignment.builder()
                 .title("Japanese Quiz")
@@ -980,26 +988,86 @@ class AssignmentServiceImplTest {
     class GetLearnerAssignmentsTests {
 
         @Test
-        @DisplayName("Should return learner's available assignments with submission status")
-        void shouldReturnLearnerAssignments() {
+        @DisplayName("Should return assignments from active class when classId is null")
+        void shouldReturnAssignmentsFromActiveClassWhenClassIdNull() {
             Pageable pageable = PageRequest.of(0, 10);
             Page<Assignment> page = new PageImpl<>(List.of(testQuizAssignment), pageable, 1);
             
             given(classMemberRepository.findActiveClassIdsByUserId(learnerId)).willReturn(List.of(classId));
-            given(assignmentRepository.findLearnerAssignmentsSorted(eq(learnerId), anyList(), nullable(String.class), nullable(String.class), nullable(String.class), eq(pageable))).willReturn(page);
+            given(classRepository.findAllById(List.of(classId))).willReturn(List.of(testClazz));
+            given(assignmentRepository.findLearnerAssignmentsSorted(eq(learnerId), eq(List.of(classId)), 
+                    nullable(String.class), nullable(String.class), nullable(String.class), eq(pageable)))
+                    .willReturn(page);
             given(mapper.toLearnerSummaryResponse(any(Assignment.class))).willReturn(testLearnerSummaryResponse);
             
             UUID subId = UUID.randomUUID();
             List<Object[]> statuses = Collections.singletonList(new Object[]{assignmentId, "SUBMITTED", subId});
-            given(submissionRepository.findLatestStatusByAssignmentIdsAndUserId(anyList(), eq(learnerId))).willReturn(statuses);
+            given(submissionRepository.findLatestStatusByAssignmentIdsAndUserId(anyList(), eq(learnerId)))
+                    .willReturn(statuses);
 
             Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(
-                    learnerId, null, null, null, pageable);
+                    learnerId, null, null, null, null, pageable);
 
             assertThat(result.getTotalElements()).isEqualTo(1);
             LearnerAssignmentSummaryResponse r = result.getContent().get(0);
             assertThat(r.getLearnerSubmissionStatus()).isEqualTo(SubmissionStatus.SUBMITTED);
             assertThat(r.getLearnerSubmissionId()).isEqualTo(subId);
+            verify(classRepository).findAllById(List.of(classId));
+        }
+
+        @Test
+        @DisplayName("Should return empty page when learner has no active class and classId is null")
+        void shouldReturnEmptyWhenNoActiveClass() {
+            Pageable pageable = PageRequest.of(0, 10);
+            
+            given(classMemberRepository.findActiveClassIdsByUserId(learnerId)).willReturn(Collections.emptyList());
+
+            Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(
+                    learnerId, null, null, null, null, pageable);
+
+            assertThat(result).isEmpty();
+            assertThat(result.getTotalElements()).isZero();
+            verify(assignmentRepository, never()).findLearnerAssignmentsSorted(any(), any(), any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Should return assignments for specific class when classId is provided")
+        void shouldReturnAssignmentsForSpecificClass() {
+            Pageable pageable = PageRequest.of(0, 10);
+            UUID specificClassId = UUID.randomUUID();
+            Page<Assignment> page = new PageImpl<>(List.of(testQuizAssignment), pageable, 1);
+            
+            given(classMemberRepository.findActiveClassIdsByUserId(learnerId))
+                    .willReturn(List.of(classId, specificClassId));
+            given(assignmentRepository.findLearnerAssignmentsSorted(eq(learnerId), eq(List.of(specificClassId)), 
+                    nullable(String.class), nullable(String.class), nullable(String.class), eq(pageable)))
+                    .willReturn(page);
+            given(mapper.toLearnerSummaryResponse(any(Assignment.class))).willReturn(testLearnerSummaryResponse);
+            given(submissionRepository.findLatestStatusByAssignmentIdsAndUserId(anyList(), eq(learnerId)))
+                    .willReturn(Collections.emptyList());
+
+            Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(
+                    learnerId, specificClassId, null, null, null, pageable);
+
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            verify(assignmentRepository).findLearnerAssignmentsSorted(
+                    eq(learnerId), eq(List.of(specificClassId)), any(), any(), any(), eq(pageable));
+        }
+
+        @Test
+        @DisplayName("Should return empty when classId provided but learner is not a member")
+        void shouldReturnEmptyWhenNotMemberOfClass() {
+            Pageable pageable = PageRequest.of(0, 10);
+            UUID otherClassId = UUID.randomUUID();
+            
+            given(classMemberRepository.findActiveClassIdsByUserId(learnerId))
+                    .willReturn(List.of(classId));
+
+            Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(
+                    learnerId, otherClassId, null, null, null, pageable);
+
+            assertThat(result).isEmpty();
+            verify(assignmentRepository, never()).findLearnerAssignmentsSorted(any(), any(), any(), any(), any(), any());
         }
 
         @Test
@@ -1009,12 +1077,16 @@ class AssignmentServiceImplTest {
             Page<Assignment> page = new PageImpl<>(List.of(testQuizAssignment), pageable, 1);
             
             given(classMemberRepository.findActiveClassIdsByUserId(learnerId)).willReturn(List.of(classId));
-            given(assignmentRepository.findLearnerAssignmentsSorted(eq(learnerId), anyList(), nullable(String.class), nullable(String.class), nullable(String.class), eq(pageable))).willReturn(page);
+            given(classRepository.findAllById(List.of(classId))).willReturn(List.of(testClazz));
+            given(assignmentRepository.findLearnerAssignmentsSorted(eq(learnerId), anyList(), 
+                    nullable(String.class), nullable(String.class), nullable(String.class), eq(pageable)))
+                    .willReturn(page);
             given(mapper.toLearnerSummaryResponse(any(Assignment.class))).willReturn(testLearnerSummaryResponse);
-            given(submissionRepository.findLatestStatusByAssignmentIdsAndUserId(anyList(), eq(learnerId))).willReturn(Collections.emptyList());
+            given(submissionRepository.findLatestStatusByAssignmentIdsAndUserId(anyList(), eq(learnerId)))
+                    .willReturn(Collections.emptyList());
 
             Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(
-                    learnerId, null, null, null, pageable);
+                    learnerId, null, null, null, null, pageable);
 
             assertThat(result.getTotalElements()).isEqualTo(1);
             LearnerAssignmentSummaryResponse r = result.getContent().get(0);
