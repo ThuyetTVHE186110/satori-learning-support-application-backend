@@ -51,4 +51,21 @@ public interface ClassRepository extends JpaRepository<Clazz, UUID>, JpaSpecific
      * Find classes by status (non-deleted)
      */
     List<Clazz> findByStatusAndDeletedAtIsNull(ClassStatus status);
+
+    /**
+     * Find learner's enrolled classes (joined via ClassMember)
+     * Only returns classes where:
+     * - ClassMember.removedAt IS NULL (active membership)
+     * - Class.status IN provided statuses
+     * - Class.deletedAt IS NULL (not soft-deleted)
+     */
+    @Query("SELECT c FROM Clazz c " +
+            "JOIN ClassMember cm ON cm.classId = c.id " +
+            "WHERE cm.userId = :learnerId " +
+            "AND cm.removedAt IS NULL " +
+            "AND c.status IN :statuses " +
+            "AND c.deletedAt IS NULL " +
+            "ORDER BY c.status ASC, c.startDate DESC")
+    List<Clazz> findLearnerClasses(@Param("learnerId") UUID learnerId, 
+                                    @Param("statuses") List<ClassStatus> statuses);
 }

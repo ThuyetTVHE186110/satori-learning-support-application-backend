@@ -6,6 +6,7 @@ import com.fu.clazz.dto.request.UpdateClassRequest;
 import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
+import com.fu.clazz.dto.response.LearnerClassResponse;
 import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.entity.ClassStatus;
 import com.fu.clazz.entity.ClassTeacherHistory;
@@ -497,5 +498,22 @@ public class ClassServiceImpl implements ClassService {
         }
 
         return response;
+    }
+
+    // =====================================================
+    // LEARNER QUERIES
+    // =====================================================
+    @Override
+    public List<LearnerClassResponse> getLearnerClasses(UUID learnerId) {
+        log.info("Lấy danh sách lớp học của học viên: {}", learnerId);
+        
+        // Query for classes with status ACTIVE or CLOSED where learner is an active member
+        List<ClassStatus> allowedStatuses = List.of(ClassStatus.ACTIVE, ClassStatus.CLOSED);
+        List<Clazz> classes = classRepository.findLearnerClasses(learnerId, allowedStatuses);
+        
+        // Map to lightweight response
+        return classes.stream()
+                .map(classMapper::toLearnerClassResponse)
+                .collect(Collectors.toList());
     }
 }
