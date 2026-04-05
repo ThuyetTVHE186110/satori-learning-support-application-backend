@@ -55,8 +55,18 @@ Other intents:
 - EXAMPLE → ["EXAMPLE", "DIALOG"]
 - COUNT, GENERAL → []
 
+Recent conversation (last few turns — use ONLY for resolving references in the current question):
+{recentHistory}
+
 User question: {question}
 Detected script: {detectedLanguage}
+
+**IMPORTANT — Reference resolution:**
+If the user question contains pronouns or vague references (Vietnamese: "đó", "chúng", "những cái đó", "các điểm đó", "cái đó"; Japanese: "それ", "あれ", "その") that point to something mentioned in the recent conversation, resolve them before extracting the searchKeyword.
+Examples:
+- History: "Bài 1 có 6 điểm ngữ pháp." | Question: "Những ngữ pháp đó là gì?" → searchKeyword: "ngữ pháp bài 1" (intent: LOOKUP, preferredTypes: ["GRAMMAR", "GRAMMAR_EXPLANATION"])
+- History: "食べる means to eat." | Question: "Cho ví dụ về nó." → searchKeyword: "食べる" (intent: EXAMPLE)
+- No relevant history → analyze question as-is.
 
 Respond in JSON only:
 {

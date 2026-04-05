@@ -295,30 +295,31 @@ public class ExerciseGeneratorAgent {
      * Item types hợp lệ cho từng session type.
      *
      * Ràng buộc dựa trên nội dung được nạp:
-     * - VOCAB_DRILL / KANJI_READING : chỉ có vocab → SENTENCE_ORDER không hợp lệ
-     * - GRAMMAR_DRILL               : chỉ có grammar → SENTENCE_ORDER và MATCHING không hợp lệ
-     * - SENTENCE_BUILD              : tập trung xây dựng câu → chỉ SENTENCE_ORDER + FILL_BLANK
-     * - MIXED_LESSON                : có cả vocab + grammar → tất cả đều hợp lệ
+     * - VOCAB_DRILL    : vocab only → tất cả item types từ vựng (bao gồm SENTENCE_ORDER, TRANSLATION)
+     * - GRAMMAR_DRILL  : grammar only → tất cả item types ngữ pháp (bao gồm SENTENCE_ORDER, TRANSLATION)
+     * - KANJI_READING  : vocab only, tập trung đọc → MC, FILL_BLANK, MATCHING
+     * - MIXED_LESSON   : vocab + grammar → tất cả item types
      */
     private static final Map<PracticeSessionType, List<PracticeItemType>> ALLOWED_ITEM_TYPES =
             Map.of(
-                    PracticeSessionType.VOCAB_DRILL,    List.of(
+                    PracticeSessionType.VOCAB_DRILL,   List.of(
                             PracticeItemType.MULTIPLE_CHOICE,
                             PracticeItemType.FILL_BLANK,
                             PracticeItemType.MATCHING,
-                            PracticeItemType.TRUE_FALSE),
-                    PracticeSessionType.KANJI_READING,  List.of(
+                            PracticeItemType.TRUE_FALSE,
+                            PracticeItemType.SENTENCE_ORDER,
+                            PracticeItemType.TRANSLATION),
+                    PracticeSessionType.GRAMMAR_DRILL, List.of(
+                            PracticeItemType.MULTIPLE_CHOICE,
+                            PracticeItemType.FILL_BLANK,
+                            PracticeItemType.TRUE_FALSE,
+                            PracticeItemType.SENTENCE_ORDER,
+                            PracticeItemType.TRANSLATION),
+                    PracticeSessionType.KANJI_READING, List.of(
                             PracticeItemType.MULTIPLE_CHOICE,
                             PracticeItemType.FILL_BLANK,
                             PracticeItemType.MATCHING),
-                    PracticeSessionType.GRAMMAR_DRILL,  List.of(
-                            PracticeItemType.MULTIPLE_CHOICE,
-                            PracticeItemType.FILL_BLANK,
-                            PracticeItemType.TRUE_FALSE),
-                    PracticeSessionType.SENTENCE_BUILD, List.of(
-                            PracticeItemType.SENTENCE_ORDER,
-                            PracticeItemType.FILL_BLANK),
-                    PracticeSessionType.MIXED_LESSON,   List.of(
+                    PracticeSessionType.MIXED_LESSON,  List.of(
                             PracticeItemType.MULTIPLE_CHOICE,
                             PracticeItemType.FILL_BLANK,
                             PracticeItemType.TRUE_FALSE,
@@ -430,7 +431,6 @@ public class ExerciseGeneratorAgent {
             case VOCAB_DRILL    -> "Từ vựng — nghĩa, cách đọc, cách dùng của từng từ";
             case GRAMMAR_DRILL  -> "Ngữ pháp — cấu trúc câu, ứng dụng mẫu ngữ pháp";
             case KANJI_READING  -> "Hán tự — cách đọc on/kun-yomi và nghĩa của Kanji";
-            case SENTENCE_BUILD -> "Xây dựng câu — ghép từ vựng và ngữ pháp thành câu đúng";
             case MIXED_LESSON   -> "Tổng hợp — kết hợp từ vựng lẫn ngữ pháp của bài học";
         };
     }
