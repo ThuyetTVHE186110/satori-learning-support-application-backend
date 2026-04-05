@@ -422,7 +422,7 @@ class PracticeIntegrationTest {
                     .status(status)
                     .totalItems(totalItems)
                     .completedItems(completedCount)
-                    .score(completedCount * 10)
+                    .score(java.math.BigDecimal.valueOf(completedCount * 10))
                     .build());
                     
             for (int i = 0; i < totalItems; i++) {
