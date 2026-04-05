@@ -85,6 +85,10 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>com.fu</groupId>
+            <artifactId>curriculum-import</artifactId>
+        </dependency>
     </dependencies>
 
     <build>
