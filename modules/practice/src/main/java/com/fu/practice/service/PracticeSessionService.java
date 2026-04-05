@@ -739,7 +739,6 @@ public class PracticeSessionService {
             return PracticeItemType.MULTIPLE_CHOICE;
         }
         return switch (sessionType) {
-            case SENTENCE_BUILD -> PracticeItemType.SENTENCE_ORDER;
             case KANJI_READING  -> PracticeItemType.FILL_BLANK;
             case VOCAB_DRILL    -> PracticeItemType.FILL_BLANK;
             case GRAMMAR_DRILL  -> PracticeItemType.FILL_BLANK;
@@ -812,7 +811,6 @@ public class PracticeSessionService {
         }
 
         if (session.getSessionType() == PracticeSessionType.GRAMMAR_DRILL
-                || session.getSessionType() == PracticeSessionType.SENTENCE_BUILD
                 || session.getSessionType() == PracticeSessionType.MIXED_LESSON) {
             BigDecimal newGrammar = rollingAverage(progress.getGrammarMastery(), session.getScore());
             progress.setGrammarMastery(newGrammar);
