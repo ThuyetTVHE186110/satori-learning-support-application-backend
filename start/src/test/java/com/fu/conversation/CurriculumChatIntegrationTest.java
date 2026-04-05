@@ -1,6 +1,5 @@
 package com.fu.conversation;
 
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.entity.ClassStatus;
@@ -27,6 +26,12 @@ import com.fu.user.entity.UserStatus;
 import com.fu.user.repository.UserRepository;
 import com.fu.user.repository.UserSessionRepository;
 import org.junit.jupiter.api.*;
+import org.mockito.Mockito;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -69,20 +74,9 @@ class CurriculumChatIntegrationTest {
     @Autowired private ClassMemberRepository classMemberRepository;
     @Autowired private UserSessionRepository sessionRepository;
 
-    // ── Mocked external services (prevent real HTTP calls outside the system) ───
-    // External services = những service nào gọi ra ngoài hệ thống (external APIs, DBs)
-    // 
-    // Mock ONLY services that are direct external calls:
-    // 1. EmbeddingService - calls embedding model + vector DB (external AI service)
-    // 2. ChatRateLimiter - infrastructure (mock to allow all in tests)
-    //
-    // Note: OpenAiChatModel is NOT mocked here because:
-    // - It's a Spring AI component that provides LLM access
-    // - In integration tests, we need real ChatClient behavior with advisors
-    // - The test environment can disable real OpenAI calls via SPRING_AI_OPENAI_API_KEY=null
-    @MockBean private EmbeddingService embeddingService;            // External: embedding service + vector DB
-    @MockBean private ChatRateLimiter chatRateLimiter;              // Infrastructure: rate limiting
-
+    @MockBean private EmbeddingService embeddingService;
+    @MockBean private ChatRateLimiter chatRateLimiter;
+    @MockBean private OpenAiChatModel chatModel;
 
     private User learner;
     private Course course;
@@ -91,15 +85,7 @@ class CurriculumChatIntegrationTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        // Clean up any leftover data from previous tests
-        chatMessageRepository.deleteAll();
-        chatSessionRepository.deleteAll();
-        lessonRepository.deleteAll();
-        classMemberRepository.deleteAll();
-        classRepository.deleteAll();
-        courseRepository.deleteAll();
-        sessionRepository.deleteAll();
-        userRepository.deleteAll();
+        clearAllData();
 
         // Create fresh test data
         learner = saveLearner("learner@test.com");
@@ -127,49 +113,46 @@ class CurriculumChatIntegrationTest {
                 .build());
         learnerToken = loginAndGetToken("learner@test.com", "ValidPass@1");
         
-        // Setup mock behavior for external services
+        // Setup mock behaviors
         setupEmbeddingServiceMock();
         setupChatRateLimiterMock();
+        setupChatModelMock("This is a deterministic AI mock response.");
     }
 
-    /**
-     * Mock EmbeddingService to return curriculum context without calling actual embedding API.
-     * This prevents real HTTP calls to vector DB / embedding service.
+    @AfterEach
+    void tearDown() {
+        clearAllData();
+    }
 
-    /**
-     * Mock EmbeddingService to return curriculum context without calling actual embedding API.
-     * This prevents real HTTP calls to vector DB / embedding service.
-     * 
-     * The mock returns an empty RagContext to let the AI respond generically,
-     * simulating cases where the query doesn't match any curriculum content.
-     */
+    private void clearAllData() {
+        chatMessageRepository.deleteAllInBatch();
+        chatSessionRepository.deleteAllInBatch();
+        lessonRepository.deleteAllInBatch();
+        classMemberRepository.deleteAllInBatch();
+        classRepository.deleteAllInBatch();
+        courseRepository.deleteAllInBatch();
+        sessionRepository.deleteAllInBatch();
+        userRepository.deleteAllInBatch();
+    }
+
     private void setupEmbeddingServiceMock() {
-        // Mock retrieveContext(String, ChatbotFilter) → returns empty RagContext
-        // This simulates a case where no relevant curriculum content is found
+        Mockito.reset(embeddingService);
         when(embeddingService.retrieveContext(any(String.class), any()))
                 .thenReturn(RagContext.empty());
-        
-        // Mock retrieveContext(String) → returns empty RagContext
         when(embeddingService.retrieveContext(any(String.class)))
                 .thenReturn(RagContext.empty());
     }
 
-    /**
-     * Mock ChatRateLimiter to allow all requests during test.
-     */
     private void setupChatRateLimiterMock() {
+        Mockito.reset(chatRateLimiter);
         doNothing().when(chatRateLimiter).checkRateLimit(any(UUID.class));
     }
 
-
-    @AfterEach
-    void tearDown() {
-        // Clean up after test to prevent cascading failures
-        chatMessageRepository.deleteAll();
-        chatSessionRepository.deleteAll();
-        lessonRepository.deleteAll();
-        courseRepository.deleteAll();
-        userRepository.deleteAll();
+    private void setupChatModelMock(String responseMessage) {
+        Mockito.reset(chatModel);
+        Generation generation = new Generation(new AssistantMessage(responseMessage));
+        ChatResponse chatResponse = new ChatResponse(List.of(generation));
+        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse);
     }
 
     private User saveLearner(String email) {
@@ -251,6 +234,18 @@ class CurriculumChatIntegrationTest {
                     .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true));
+
+            // Verify two-point assertion: Database persistence updated explicitly
+            ChatSession updatedSession = chatSessionRepository.findById(session.getId()).orElseThrow();
+            assertThat(updatedSession.getMessageCount()).isEqualTo(2); // 1 user + 1 assistant
+            assertThat(updatedSession.getUserMessageCount()).isEqualTo(1);
+            
+            List<ChatMessage> persistedMessages = chatMessageRepository.findBySessionIdOrderByCreatedAtAsc(session.getId(), PageRequest.of(0, 10)).getContent();
+            assertThat(persistedMessages).hasSize(2);
+            assertThat(persistedMessages.get(0).getRole()).isEqualTo("USER");
+            assertThat(persistedMessages.get(0).getContent()).isEqualTo("この文法は何ですか？");
+            assertThat(persistedMessages.get(1).getRole()).isEqualTo("ASSISTANT");
+            assertThat(persistedMessages.get(1).getContent()).isEqualTo("This is a deterministic AI mock response.");
         }
     }
 
@@ -288,7 +283,8 @@ class CurriculumChatIntegrationTest {
                     .param("page", "0")
                     .param("size", "50"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true));
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.content.length()").value(2));
         }
     }
 
@@ -314,7 +310,8 @@ class CurriculumChatIntegrationTest {
                     .param("page", "0")
                     .param("size", "10"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true));
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.content.length()").value(2));
         }
     }
 
@@ -368,7 +365,9 @@ class CurriculumChatIntegrationTest {
                     .status("ACTIVE")
                     .build());
 
-            // ...mock setup skipped: let the service throw on its own...
+            // Mock an exception thrown from the AI model
+            when(chatModel.call(any(Prompt.class))).thenThrow(new RuntimeException("OpenAI API Timeout Error"));
+
             SendChatMessageRequest request = new SendChatMessageRequest();
             request.setMessage("Test message");
 
@@ -378,9 +377,8 @@ class CurriculumChatIntegrationTest {
                     .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isInternalServerError())
                     .andExpect(jsonPath("$.success").value(false));
-                    // MSG-158 verification (error handling works)
 
-            // Verify NO message saved (transaction rollback)
+            // Verify NO message saved
             List<ChatMessage> messages = chatMessageRepository.findAll();
             assertThat(messages).isEmpty();
 
@@ -398,6 +396,10 @@ class CurriculumChatIntegrationTest {
                     .status("ACTIVE")
                     .build());
 
+            // Stub EmbeddingService to throw exception
+            when(embeddingService.retrieveContext(any(String.class), any()))
+                    .thenThrow(new RuntimeException("Pinecone Error"));
+
             SendChatMessageRequest request = new SendChatMessageRequest();
             request.setMessage("Test message");
 
@@ -407,17 +409,15 @@ class CurriculumChatIntegrationTest {
                     .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isInternalServerError())
                     .andExpect(jsonPath("$.success").value(false));
-                    // MSG-159 verification (KB error handling works)
 
-            // Verify NO message saved
             List<ChatMessage> messages = chatMessageRepository.findAll();
             assertThat(messages).isEmpty();
 
-            // Verify session state unchanged
             ChatSession updatedSession = chatSessionRepository.findById(session.getId()).orElseThrow();
             assertThat(updatedSession.getMessageCount()).isEqualTo(0);
         }
     }
+
     @Nested
     @DisplayName("A1: No Relevant Knowledge - Fallback Response")
     class TestAlternativeA1 {
@@ -437,7 +437,8 @@ class CurriculumChatIntegrationTest {
             SendChatMessageRequest request = new SendChatMessageRequest();
             request.setMessage("Hôm nay trời thế nào?");
 
-            // Send message - AI will respond with fallback (generic) response
+            setupChatModelMock("I am afraid I do not know this from the knowledge base.");
+
             mockMvc.perform(post("/api/v1/learner/curriculum-chat/sessions/{sessionId}/messages", session.getId())
                     .header("Authorization", "Bearer " + learnerToken)
                     .contentType(MediaType.APPLICATION_JSON)
@@ -446,11 +447,11 @@ class CurriculumChatIntegrationTest {
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.answer").isNotEmpty());
 
-            // Verify messages saved (both USER and ASSISTANT)
             List<ChatMessage> messages = chatMessageRepository.findBySessionIdOrderByCreatedAtAsc(session.getId(), PageRequest.of(0, 50)).getContent();
             assertThat(messages).hasSize(2);
             assertThat(messages.get(0).getRole()).isEqualTo("USER");
             assertThat(messages.get(1).getRole()).isEqualTo("ASSISTANT");
+            assertThat(messages.get(1).getContent()).isEqualTo("I am afraid I do not know this from the knowledge base.");
         }
     }
 
@@ -472,8 +473,9 @@ class CurriculumChatIntegrationTest {
 
             SendChatMessageRequest request = new SendChatMessageRequest();
             request.setMessage("Hôm nay trời đẹp quá");
+            
+            setupChatModelMock("Guidance response for out of scope.");
 
-            // Send out-of-scope question
             mockMvc.perform(post("/api/v1/learner/curriculum-chat/sessions/{sessionId}/messages", session.getId())
                     .header("Authorization", "Bearer " + learnerToken)
                     .contentType(MediaType.APPLICATION_JSON)
@@ -481,7 +483,6 @@ class CurriculumChatIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true));
 
-            // Verify message still saved even if out-of-scope
             List<ChatMessage> messages = chatMessageRepository.findBySessionIdOrderByCreatedAtAsc(session.getId(), PageRequest.of(0, 50)).getContent();
             assertThat(messages).hasSize(2);
             assertThat(messages.getFirst().getContent()).isEqualTo("Hôm nay trời đẹp quá");
@@ -509,7 +510,6 @@ class CurriculumChatIntegrationTest {
                     .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isOk());
 
-            // Retrieve from DB and verify structure
             List<ChatMessage> messages = chatMessageRepository.findBySessionIdOrderByCreatedAtAsc(session.getId(), PageRequest.of(0, 50)).getContent();
             assertThat(messages).hasSize(2);
 
@@ -543,7 +543,7 @@ class CurriculumChatIntegrationTest {
                     .build());
 
             SendChatMessageRequest request = new SendChatMessageRequest();
-            request.setMessage("");  // Empty message
+            request.setMessage("");
 
             mockMvc.perform(post("/api/v1/learner/curriculum-chat/sessions/{sessionId}/messages", session.getId())
                     .header("Authorization", "Bearer " + learnerToken)
@@ -552,11 +552,9 @@ class CurriculumChatIntegrationTest {
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false));
 
-            // Verify NO message saved
             List<ChatMessage> messages = chatMessageRepository.findBySessionIdOrderByCreatedAtAsc(session.getId(), PageRequest.of(0, 50)).getContent();
             assertThat(messages).isEmpty();
 
-            // Verify session not updated
             ChatSession updatedSession = chatSessionRepository.findById(session.getId()).orElseThrow();
             assertThat(updatedSession.getMessageCount()).isEqualTo(0);
         }
@@ -568,7 +566,6 @@ class CurriculumChatIntegrationTest {
         @Test
         @DisplayName("Should list sessions in descending order by updated_at")
         void tc_list_002_sessionsOrderedDescByUpdatedAt() throws Exception {
-            // Create sessions with delays
             ChatSession session1 = chatSessionRepository.save(ChatSession.builder()
                     .userId(learner.getId())
                     .sessionType("CURRICULUM_QA")
@@ -600,7 +597,6 @@ class CurriculumChatIntegrationTest {
                     .getResponse()
                     .getContentAsString();
 
-            // Extract UUIDs from response
             List<UUID> sessionIds = objectMapper.readTree(responseBody)
                     .path("data").path("content")
                     .findValues("id")
@@ -608,11 +604,10 @@ class CurriculumChatIntegrationTest {
                     .map(node -> UUID.fromString(node.asText()))
                     .collect(Collectors.toList());
 
-            // Verify order: newest first (DESC)
             assertThat(sessionIds).containsExactly(
-                    session3.getId(),  // Position 0 (newest)
-                    session2.getId(),  // Position 1
-                    session1.getId()   // Position 2 (oldest)
+                    session3.getId(),
+                    session2.getId(),
+                    session1.getId()
             );
         }
     }
@@ -631,7 +626,6 @@ class CurriculumChatIntegrationTest {
                     .userMessageCount(1)
                     .build());
 
-            // Add previous messages
             chatMessageRepository.save(ChatMessage.builder()
                     .sessionId(session.getId())
                     .role("USER")
@@ -645,10 +639,10 @@ class CurriculumChatIntegrationTest {
                     .sequenceNumber(2)
                     .build());
 
-            // Send new message
-
             SendChatMessageRequest newMessage = new SendChatMessageRequest();
             newMessage.setMessage("Follow-up question");
+
+            setupChatModelMock("Follow up AI response");
 
             mockMvc.perform(post("/api/v1/learner/curriculum-chat/sessions/{sessionId}/messages", session.getId())
                     .header("Authorization", "Bearer " + learnerToken)
@@ -657,13 +651,11 @@ class CurriculumChatIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true));
 
-            // Verify all messages present
             List<ChatMessage> allMessages = chatMessageRepository.findBySessionIdOrderByCreatedAtAsc(session.getId(), PageRequest.of(0, 100)).getContent();
-            assertThat(allMessages).hasSize(4);  // 2 old + 2 new
+            assertThat(allMessages).hasSize(4);
             assertThat(allMessages.get(2).getContent()).isEqualTo("Follow-up question");
             assertThat(allMessages.get(3).getRole()).isEqualTo("ASSISTANT");
 
-            // Verify session counters incremented
             ChatSession updatedSession = chatSessionRepository.findById(session.getId()).orElseThrow();
             assertThat(updatedSession.getMessageCount()).isEqualTo(4);
             assertThat(updatedSession.getUserMessageCount()).isEqualTo(2);
@@ -686,12 +678,7 @@ class CurriculumChatIntegrationTest {
 
             mockMvc.perform(get("/api/v1/learner/curriculum-chat/sessions/{sessionId}/messages", session.getId())
                     .header("Authorization", "Bearer " + learnerToken))
-                    .andExpect(status().isNotFound());
+                    .andExpect(status().isNotFound()); // Expect 404 per Satori's generic ResourceNotOwned exception handling
         }
     }
 }
-
-
-
-
-
