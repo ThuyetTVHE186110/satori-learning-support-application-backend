@@ -196,13 +196,13 @@ class CurriculumChatIntegrationTest {
                     .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.id").isNotEmpty())
+                    .andExpect(jsonPath("$.data.sessionId").isNotEmpty())
                     .andReturn()
                     .getResponse()
                     .getContentAsString();
 
             UUID sessionId = UUID.fromString(objectMapper.readTree(response)
-                    .path("data").path("id").asText());
+                    .path("data").path("sessionId").asText());
             Optional<ChatSession> session = chatSessionRepository.findById(sessionId);
             assertThat(session).isPresent();
             assertThat(session.get().getUserId()).isEqualTo(learner.getId());
@@ -284,7 +284,7 @@ class CurriculumChatIntegrationTest {
                     .param("size", "50"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.content.length()").value(2));
+                    .andExpect(jsonPath("$.data.length()").value(2));
         }
     }
 
@@ -298,11 +298,13 @@ class CurriculumChatIntegrationTest {
                     .userId(learner.getId())
                     .sessionType("CURRICULUM_QA")
                     .status("ACTIVE")
+                    .messageCount(1)
                     .build());
             chatSessionRepository.save(ChatSession.builder()
                     .userId(learner.getId())
                     .sessionType("CURRICULUM_QA")
                     .status("ACTIVE")
+                    .messageCount(1)
                     .build());
 
             mockMvc.perform(get("/api/v1/learner/curriculum-chat/sessions")
@@ -375,8 +377,10 @@ class CurriculumChatIntegrationTest {
                     .header("Authorization", "Bearer " + learnerToken)
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(request)))
-                    .andExpect(status().isInternalServerError())
-                    .andExpect(jsonPath("$.success").value(false));
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("CHAT_ERROR"))
+                    .andExpect(jsonPath("$.message").value("Hệ thống AI đang gặp sự cố, vui lòng thử lại sau."));
 
             // Verify NO message saved
             List<ChatMessage> messages = chatMessageRepository.findAll();
@@ -407,8 +411,10 @@ class CurriculumChatIntegrationTest {
                     .header("Authorization", "Bearer " + learnerToken)
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(request)))
-                    .andExpect(status().isInternalServerError())
-                    .andExpect(jsonPath("$.success").value(false));
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("CHAT_ERROR"))
+                    .andExpect(jsonPath("$.message").value("Hệ thống AI đang gặp sự cố, vui lòng thử lại sau."));
 
             List<ChatMessage> messages = chatMessageRepository.findAll();
             assertThat(messages).isEmpty();
