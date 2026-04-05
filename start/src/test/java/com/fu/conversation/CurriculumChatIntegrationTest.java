@@ -178,6 +178,23 @@ class CurriculumChatIntegrationTest {
                 .path("data").path("accessToken").asText();
     }
 
+    private ChatSession createChatSession(User user, int messageCount, int userMessageCount, String context) {
+        return chatSessionRepository.save(ChatSession.builder()
+                .userId(user.getId())
+                .sessionType("CURRICULUM_QA")
+                .status("ACTIVE")
+                .messageCount(messageCount)
+                .userMessageCount(userMessageCount)
+                .hintsUsed(0)
+                .correctionsCount(0)
+                .context(context)
+                .build());
+    }
+
+    private ChatSession createDefaultChatSession() {
+        return createChatSession(learner, 0, 0, null);
+    }
+
     @Nested
     @DisplayName("TC-1: Create Chat Session")
     class TestCreateChatSession {
@@ -216,14 +233,7 @@ class CurriculumChatIntegrationTest {
         @Test
         @DisplayName("Should send message and receive AI response")
         void tc_msg_001_sendMessageSuccessfully() throws Exception {
-            ChatSession session = chatSessionRepository.save(ChatSession.builder()
-                    .userId(learner.getId())
-                    .sessionType("CURRICULUM_QA")
-                    .context("{\"courseId\":\"" + course.getId() + "\"}")
-                    .status("ACTIVE")
-                    .messageCount(0)
-                    .userMessageCount(0)
-                    .build());
+            ChatSession session = createChatSession(learner, 0, 0, "{\"courseId\":\"" + course.getId() + "\"}");
 
             SendChatMessageRequest request = new SendChatMessageRequest();
             request.setMessage("この文法は何ですか？");
@@ -255,15 +265,7 @@ class CurriculumChatIntegrationTest {
         @Test
         @DisplayName("Should retrieve chat history with pagination")
         void tc_hist_001_getChatHistorySuccessfully() throws Exception {
-            ChatSession session = chatSessionRepository.save(ChatSession.builder()
-                    .userId(learner.getId())
-                    .sessionType("CURRICULUM_QA")
-                    .status("ACTIVE")
-                    .messageCount(0)
-                    .userMessageCount(0)
-                    .hintsUsed(0)
-                    .correctionsCount(0)
-                    .build());
+            ChatSession session = createDefaultChatSession();
 
             chatMessageRepository.save(ChatMessage.builder()
                     .sessionId(session.getId())
@@ -294,18 +296,8 @@ class CurriculumChatIntegrationTest {
         @Test
         @DisplayName("Should list all sessions for learner with pagination")
         void tc_list_001_listSessionsSuccessfully() throws Exception {
-            chatSessionRepository.save(ChatSession.builder()
-                    .userId(learner.getId())
-                    .sessionType("CURRICULUM_QA")
-                    .status("ACTIVE")
-                    .messageCount(1)
-                    .build());
-            chatSessionRepository.save(ChatSession.builder()
-                    .userId(learner.getId())
-                    .sessionType("CURRICULUM_QA")
-                    .status("ACTIVE")
-                    .messageCount(1)
-                    .build());
+            createChatSession(learner, 1, 0, null);
+            createChatSession(learner, 1, 0, null);
 
             mockMvc.perform(get("/api/v1/learner/curriculum-chat/sessions")
                     .header("Authorization", "Bearer " + learnerToken)
@@ -361,11 +353,7 @@ class CurriculumChatIntegrationTest {
         @Test
         @DisplayName("Should handle AI service timeout and return MSG-158")
         void tc_err_002_aiServiceTimeoutReturnsMsg158() throws Exception {
-            ChatSession session = chatSessionRepository.save(ChatSession.builder()
-                    .userId(learner.getId())
-                    .sessionType("CURRICULUM_QA")
-                    .status("ACTIVE")
-                    .build());
+            ChatSession session = createDefaultChatSession();
 
             // Mock an exception thrown from the AI model
             when(chatModel.call(any(Prompt.class))).thenThrow(new RuntimeException("OpenAI API Timeout Error"));
@@ -394,11 +382,7 @@ class CurriculumChatIntegrationTest {
         @Test
         @DisplayName("Should handle KB unavailable and return MSG-159")
         void tc_err_003_kbUnavailableReturnsMsg159() throws Exception {
-            ChatSession session = chatSessionRepository.save(ChatSession.builder()
-                    .userId(learner.getId())
-                    .sessionType("CURRICULUM_QA")
-                    .status("ACTIVE")
-                    .build());
+            ChatSession session = createDefaultChatSession();
 
             // Stub EmbeddingService to throw exception
             when(embeddingService.retrieveContext(any(String.class), any()))
@@ -430,15 +414,7 @@ class CurriculumChatIntegrationTest {
         @Test
         @DisplayName("Should return fallback response when no relevant knowledge found")
         void tc_alt_001_noRelevantKnowledgeReturnsFallback() throws Exception {
-            ChatSession session = chatSessionRepository.save(ChatSession.builder()
-                    .userId(learner.getId())
-                    .sessionType("CURRICULUM_QA")
-                    .status("ACTIVE")
-                    .messageCount(0)
-                    .userMessageCount(0)
-                    .hintsUsed(0)
-                    .correctionsCount(0)
-                    .build());
+            ChatSession session = createDefaultChatSession();
 
             SendChatMessageRequest request = new SendChatMessageRequest();
             request.setMessage("Hôm nay trời thế nào?");
@@ -467,15 +443,7 @@ class CurriculumChatIntegrationTest {
         @Test
         @DisplayName("Should return guidance response for out-of-scope question")
         void tc_alt_002_outOfScopeQuestionReturnsGuidance() throws Exception {
-            ChatSession session = chatSessionRepository.save(ChatSession.builder()
-                    .userId(learner.getId())
-                    .sessionType("CURRICULUM_QA")
-                    .status("ACTIVE")
-                    .messageCount(0)
-                    .userMessageCount(0)
-                    .hintsUsed(0)
-                    .correctionsCount(0)
-                    .build());
+            ChatSession session = createDefaultChatSession();
 
             SendChatMessageRequest request = new SendChatMessageRequest();
             request.setMessage("Hôm nay trời đẹp quá");
@@ -501,11 +469,7 @@ class CurriculumChatIntegrationTest {
         @Test
         @DisplayName("Should store chat history with correct structure in database")
         void tc_hist_002_chatHistoryStoredWithCorrectStructure() throws Exception {
-            ChatSession session = chatSessionRepository.save(ChatSession.builder()
-                    .userId(learner.getId())
-                    .sessionType("CURRICULUM_QA")
-                    .status("ACTIVE")
-                    .build());
+            ChatSession session = createDefaultChatSession();
 
             SendChatMessageRequest request = new SendChatMessageRequest();
             request.setMessage("これは何ですか？");
@@ -542,11 +506,7 @@ class CurriculumChatIntegrationTest {
         @Test
         @DisplayName("Should reject empty message")
         void tc_val_001_rejectEmptyMessage() throws Exception {
-            ChatSession session = chatSessionRepository.save(ChatSession.builder()
-                    .userId(learner.getId())
-                    .sessionType("CURRICULUM_QA")
-                    .status("ACTIVE")
-                    .build());
+            ChatSession session = createDefaultChatSession();
 
             SendChatMessageRequest request = new SendChatMessageRequest();
             request.setMessage("");
@@ -572,25 +532,13 @@ class CurriculumChatIntegrationTest {
         @Test
         @DisplayName("Should list sessions in descending order by updated_at")
         void tc_list_002_sessionsOrderedDescByUpdatedAt() throws Exception {
-            ChatSession session1 = chatSessionRepository.save(ChatSession.builder()
-                    .userId(learner.getId())
-                    .sessionType("CURRICULUM_QA")
-                    .status("ACTIVE")
-                    .build());
+            ChatSession session1 = createDefaultChatSession();
             Thread.sleep(50);
 
-            ChatSession session2 = chatSessionRepository.save(ChatSession.builder()
-                    .userId(learner.getId())
-                    .sessionType("CURRICULUM_QA")
-                    .status("ACTIVE")
-                    .build());
+            ChatSession session2 = createDefaultChatSession();
             Thread.sleep(50);
 
-            ChatSession session3 = chatSessionRepository.save(ChatSession.builder()
-                    .userId(learner.getId())
-                    .sessionType("CURRICULUM_QA")
-                    .status("ACTIVE")
-                    .build());
+            ChatSession session3 = createDefaultChatSession();
 
             String responseBody = mockMvc.perform(get("/api/v1/learner/curriculum-chat/sessions")
                     .header("Authorization", "Bearer " + learnerToken)
@@ -624,13 +572,7 @@ class CurriculumChatIntegrationTest {
         @Test
         @DisplayName("Should allow adding message to existing session")
         void tc_cont_001_continueExistingConversation() throws Exception {
-            ChatSession session = chatSessionRepository.save(ChatSession.builder()
-                    .userId(learner.getId())
-                    .sessionType("CURRICULUM_QA")
-                    .status("ACTIVE")
-                    .messageCount(2)
-                    .userMessageCount(1)
-                    .build());
+            ChatSession session = createChatSession(learner, 2, 1, null);
 
             chatMessageRepository.save(ChatMessage.builder()
                     .sessionId(session.getId())
@@ -676,11 +618,7 @@ class CurriculumChatIntegrationTest {
         @DisplayName("Should prevent learner from accessing other learner's session")
         void tc_access_001_cannotAccessOtherUserSession() throws Exception {
             User otherLearner = saveLearner("other@test.com");
-            ChatSession session = chatSessionRepository.save(ChatSession.builder()
-                    .userId(otherLearner.getId())
-                    .sessionType("CURRICULUM_QA")
-                    .status("ACTIVE")
-                    .build());
+            ChatSession session = createChatSession(otherLearner, 0, 0, null);
 
             mockMvc.perform(get("/api/v1/learner/curriculum-chat/sessions/{sessionId}/messages", session.getId())
                     .header("Authorization", "Bearer " + learnerToken))
