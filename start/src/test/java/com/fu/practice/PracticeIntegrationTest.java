@@ -294,10 +294,10 @@ class PracticeIntegrationTest {
                     .content(objectMapper.writeValueAsString(defaultRequest())))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.id").isNotEmpty())
+                    .andExpect(jsonPath("$.data.session.sessionId").isNotEmpty())
                     .andReturn().getResponse().getContentAsString();
 
-            UUID sessionId = UUID.fromString(objectMapper.readTree(response).path("data").path("id").asText());
+            UUID sessionId = UUID.fromString(objectMapper.readTree(response).path("data").path("session").path("sessionId").asText());
             Optional<PracticeSession> session = practiceSessionRepository.findById(sessionId);
             assertThat(session).isPresent();
             assertThat(session.get().getUserId()).isEqualTo(learner.getId());
@@ -318,7 +318,9 @@ class PracticeIntegrationTest {
                     .header("Authorization", "Bearer " + learnerToken)
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(req)))
-                    .andExpect(status().isNotFound()); // Checking standard format
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("LESSON_NOT_FOUND"))
+                    .andExpect(jsonPath("$.message").value("Không tìm thấy bài học. Vui lòng thử lại.")); // Checking standard format
         }
 
         @Test
@@ -531,7 +533,9 @@ class PracticeIntegrationTest {
                     .header("Authorization", "Bearer " + learnerToken)
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(request)))
-                    .andExpect(status().isNotFound());
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("SESSION_NOT_FOUND"))
+                    .andExpect(jsonPath("$.message").value("Không tìm thấy phiên luyện tập."));
         }
 
         @Test
@@ -550,7 +554,9 @@ class PracticeIntegrationTest {
                     .header("Authorization", "Bearer " + learnerToken)
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(request)))
-                    .andExpect(status().isNotFound()); // Or 400 Bad Request
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("ITEM_SESSION_MISMATCH"))
+                    .andExpect(jsonPath("$.message").value("Câu hỏi không thuộc phiên luyện tập này.")); // Or 400 Bad Request
         }
 
         @Test
@@ -582,7 +588,9 @@ class PracticeIntegrationTest {
                     .header("Authorization", "Bearer " + learnerToken) // Requesting as 'learner'
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(request)))
-                    .andExpect(status().isNotFound()); // Or Forbidden depending on standard service implementation (Satori often returns 404 for missing resource checks)
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("SESSION_ACCESS_DENIED"))
+                    .andExpect(jsonPath("$.message").value("Bạn không có quyền truy cập phiên luyện tập này.")); // Or Forbidden depending on standard service implementation (Satori often returns 404 for missing resource checks)
         }
 
         @Test
