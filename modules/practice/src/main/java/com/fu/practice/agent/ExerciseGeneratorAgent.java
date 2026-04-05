@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 
@@ -24,11 +25,15 @@ import com.fu.practice.entity.PracticeSessionType;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.openai.api.ResponseFormat;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,7 +71,7 @@ public class ExerciseGeneratorAgent {
             GrammarPointRepository grammarPointRepository,
             ObjectMapper objectMapper,
             PromptTemplateLoader promptLoader,
-            @Qualifier("importTaskExecutor") Executor taskExecutor) {
+            @Qualifier("practiceTaskExecutor") Executor taskExecutor) {
         this.chatClient = ChatClient.builder(openAiChatModel).build();
         this.embeddingService = embeddingService;
         this.vocabularyRepository = vocabularyRepository;
@@ -126,33 +131,75 @@ public class ExerciseGeneratorAgent {
         Collections.shuffle(shuffledGrammar);
 
         String contentSummary = buildContentSummary(shuffledVocab, shuffledGrammar);
-        String ragContext = buildRagContext(contentSummary, courseId, lessonId);
 
-        // Generate each item type in a separate, focused LLM call — run in parallel.
-        // This eliminates options-format confusion between types and reduces total latency.
+        // RAG runs in a virtual thread in parallel with the LLM batch calls below.
+        // We give it 3 s to complete; if it misses the window we use "" (distractors
+        // from contentSummary are sufficient for practice anyway).
+        CompletableFuture<String> ragFuture = CompletableFuture
+                .supplyAsync(() -> buildRagContext(contentSummary, courseId, lessonId), taskExecutor)
+                .completeOnTimeout("", 3, TimeUnit.SECONDS);
+
+        // Build all LLM batch tasks upfront, then run ALL in parallel via virtual threads.
+        // 20 MC items / 5 per call = 4 futures all in flight simultaneously.
+        // Wall time ≈ max(individual call times), not their sum.
         Map<PracticeItemType, Integer> distribution = distributeCount(count, resolvedTypes);
-
         List<PracticeItemType> distinctTypes = resolvedTypes.stream().distinct().collect(Collectors.toList());
-        List<CompletableFuture<Map.Entry<PracticeItemType, List<GeneratedItem>>>> futures =
-                distinctTypes.stream()
-                        .filter(t -> distribution.getOrDefault(t, 0) > 0)
-                        .map(itemType -> CompletableFuture.supplyAsync(() -> {
-                            int n = distribution.get(itemType);
-                            List<GeneratedItem> result = generateForSingleType(
-                                    n, type, jlptLevel, contentSummary, ragContext, itemType);
-                            return Map.entry(itemType, result);
-                        }, taskExecutor))
-                        .collect(Collectors.toList());
 
-        // Collect results grouped by type
-        Map<PracticeItemType, List<GeneratedItem>> byType = new LinkedHashMap<>();
-        for (CompletableFuture<Map.Entry<PracticeItemType, List<GeneratedItem>>> f : futures) {
-            try {
-                Map.Entry<PracticeItemType, List<GeneratedItem>> entry = f.get(120, TimeUnit.SECONDS);
-                byType.put(entry.getKey(), entry.getValue());
-            } catch (Exception e) {
-                log.warn("ExerciseGeneratorAgent: Lỗi sinh câu hỏi: {}", e.getMessage());
+        List<BatchTask> tasks = new ArrayList<>();
+        for (PracticeItemType itemType : distinctTypes) {
+            int typeCount = distribution.getOrDefault(itemType, 0);
+            int cap = maxPerCall(itemType);
+            int offset = 0, batchIdx = 0;
+            while (offset < typeCount) {
+                int batchSize = Math.min(cap, typeCount - offset);
+                tasks.add(new BatchTask(itemType, batchIdx++, batchSize));
+                offset += batchSize;
             }
+        }
+
+        List<CompletableFuture<BatchResult>> futures = tasks.stream()
+                .map(task -> CompletableFuture.supplyAsync(() -> {
+                    // Use ragContext if it is ready; otherwise fall back to "" so this
+                    // batch is never blocked waiting for the embedding search.
+                    String rag = ragFuture.isDone() ? ragFuture.join() : "";
+                    List<GeneratedItem> result = generateSingleBatch(
+                            task.batchSize(), type, jlptLevel, contentSummary, rag, task.itemType());
+                    return new BatchResult(task.itemType(), task.batchIndex(), result);
+                }, taskExecutor))
+                .collect(Collectors.toList());
+
+        // Wait for ALL futures in parallel, then collect results.
+        // allOf() lets every future run to completion (or timeout) concurrently;
+        // individual exceptions are caught per-future so one failed batch
+        // doesn't cancel the others.
+        Map<PracticeItemType, List<BatchResult>> resultsByType = new LinkedHashMap<>();
+        CompletableFuture<Void> all = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+        try {
+            all.get(120, TimeUnit.SECONDS);
+        } catch (Exception ignored) {
+            // Some futures may have timed out — we still collect whatever finished.
+        }
+        for (CompletableFuture<BatchResult> f : futures) {
+            if (f.isDone() && !f.isCompletedExceptionally()) {
+                try {
+                    BatchResult r = f.getNow(null);
+                    if (r != null) {
+                        resultsByType.computeIfAbsent(r.itemType(), k -> new ArrayList<>()).add(r);
+                    }
+                } catch (Exception e) {
+                    log.warn("ExerciseGeneratorAgent: Lỗi lấy kết quả batch: {}", e.getMessage());
+                }
+            }
+        }
+
+        Map<PracticeItemType, List<GeneratedItem>> byType = new LinkedHashMap<>();
+        for (PracticeItemType t : distinctTypes) {
+            List<BatchResult> batches = resultsByType.getOrDefault(t, List.of());
+            batches.sort(Comparator.comparingInt(BatchResult::batchIndex));
+            List<GeneratedItem> merged = batches.stream()
+                    .flatMap(r -> r.items().stream())
+                    .collect(Collectors.toList());
+            if (!merged.isEmpty()) byType.put(t, merged);
         }
 
         List<GeneratedItem> items = interleaveItems(byType, resolvedTypes, count);
@@ -166,38 +213,31 @@ public class ExerciseGeneratorAgent {
     }
 
     /**
-     * Max items per single LLM call.
-     * MATCHING items are large (4 pairs each), so a cap of 5 keeps the response
-     * well within the model's reliable output range and avoids JSON truncation.
+     * Max items per single LLM call, keyed by item type.
+     *
+     * Rationale — keep per-call output tokens small to avoid JSON truncation:
+     * - MULTIPLE_CHOICE / TRUE_FALSE: 4 options × N items can grow fast → cap at 5
+     * - FILL_BLANK / TRANSLATION: medium output → 5 is safe
+     * - SENTENCE_ORDER: token arrays per item → 4
+     * - MATCHING: 4 pairs per item, most verbose → 3
+     *
+     * Smaller cap = more parallel virtual-thread futures = lower risk of truncation/retry.
+     * Wall time = max(all futures), so more futures does NOT increase total time.
      */
-    private static final int MAX_PER_CALL = 5;
+    private static final Map<PracticeItemType, Integer> MAX_PER_CALL_BY_TYPE;
+    static {
+        Map<PracticeItemType, Integer> m = new EnumMap<>(PracticeItemType.class);
+        m.put(PracticeItemType.MULTIPLE_CHOICE, 5);
+        m.put(PracticeItemType.TRUE_FALSE,      5);
+        m.put(PracticeItemType.FILL_BLANK,      5);
+        m.put(PracticeItemType.TRANSLATION,     5);
+        m.put(PracticeItemType.SENTENCE_ORDER,  4);
+        m.put(PracticeItemType.MATCHING,        3);
+        MAX_PER_CALL_BY_TYPE = m;
+    }
 
-    /**
-     * Sinh câu hỏi cho DUY NHẤT một loại item type.
-     * Tự động tách thành nhiều batch nếu count > MAX_PER_CALL để tránh JSON bị truncate.
-     */
-    private List<GeneratedItem> generateForSingleType(int count, PracticeSessionType sessionType,
-                                                       String jlptLevel, String contentSummary,
-                                                       String ragContext, PracticeItemType itemType) {
-        if (count <= MAX_PER_CALL) {
-            return generateSingleBatch(count, sessionType, jlptLevel, contentSummary, ragContext, itemType);
-        }
-
-        // Batch: split into multiple sequential calls, each ≤ MAX_PER_CALL
-        List<GeneratedItem> all = new ArrayList<>();
-        int remaining = count;
-        while (remaining > 0 && all.size() < count) {
-            int batchSize = Math.min(remaining, MAX_PER_CALL);
-            List<GeneratedItem> batch = generateSingleBatch(
-                    batchSize, sessionType, jlptLevel, contentSummary, ragContext, itemType);
-            if (batch.isEmpty()) {
-                log.warn("ExerciseGeneratorAgent: Batch rỗng cho dạng {}, dừng batch.", itemType);
-                break;
-            }
-            all.addAll(batch);
-            remaining -= batch.size();
-        }
-        return all.size() <= count ? all : all.subList(0, count);
+    private static int maxPerCall(PracticeItemType type) {
+        return MAX_PER_CALL_BY_TYPE.getOrDefault(type, 5);
     }
 
     /**
@@ -524,10 +564,28 @@ public class ExerciseGeneratorAgent {
         };
     }
 
+    /**
+     * OpenAI JSON mode: constrains token sampling so the model can ONLY produce valid JSON.
+     * Eliminates malformed-JSON errors (missing commas, truncated arrays) at the API level.
+     *
+     * json_object mode requires the output to be a JSON object {}, not an array [].
+     * The prompt instructs the model to wrap the array as {"items": [...]}.
+     */
+    private static final OpenAiChatOptions JSON_MODE_OPTIONS = OpenAiChatOptions.builder()
+            .responseFormat(ResponseFormat.builder().type(ResponseFormat.Type.JSON_OBJECT).build())
+            .build();
+
     private List<GeneratedItem> callLlm(String prompt, int count) {
+        // Append wrapper instruction required by json_object mode
+        String wrappedPrompt = prompt
+                + "\nQUAN TRỌNG: Đặt toàn bộ array câu hỏi trong một JSON object: "
+                + "{\"items\": [ ...array câu hỏi... ]}. "
+                + "KHÔNG trả về bare array [].";
+
         try {
             String raw = chatClient.prompt()
-                    .user(prompt)
+                    .user(wrappedPrompt)
+                    .options(JSON_MODE_OPTIONS)
                     .call()
                     .content();
 
@@ -535,20 +593,66 @@ public class ExerciseGeneratorAgent {
                 return List.of();
             }
 
-            // Loại bỏ markdown code fence nếu LLM vẫn thêm vào
             String cleaned = raw.trim();
             if (cleaned.startsWith("```")) {
                 cleaned = cleaned.replaceAll("^```[a-z]*\\n?", "").replaceAll("```$", "").trim();
             }
 
-            List<GeneratedItem> items = objectMapper.readValue(cleaned,
-                    new TypeReference<List<GeneratedItem>>() {});
-            return items != null ? items : List.of();
+            // Extract the "items" array from the wrapper object.
+            // Fall back to direct array parsing in case model ignored the wrapper instruction.
+            try {
+                JsonNode root = objectMapper.readTree(cleaned);
+                JsonNode arr = root.isArray() ? root : root.path("items");
+                if (!arr.isMissingNode() && arr.isArray()) {
+                    List<GeneratedItem> items = objectMapper.convertValue(arr,
+                            new TypeReference<List<GeneratedItem>>() {});
+                    return items != null ? items : List.of();
+                }
+            } catch (Exception firstEx) {
+                // JSON mode guarantees valid JSON, but apply repair as last-resort safety net
+                String repaired = repairJson(cleaned);
+                try {
+                    List<GeneratedItem> items = objectMapper.readValue(repaired,
+                            new TypeReference<List<GeneratedItem>>() {});
+                    if (items != null && !items.isEmpty()) {
+                        log.debug("ExerciseGeneratorAgent: JSON repair succeeded ({} items)", items.size());
+                        return items;
+                    }
+                } catch (Exception ignored) {}
+                log.warn("ExerciseGeneratorAgent: Lỗi parse JSON từ LLM: {}", firstEx.getMessage());
+                return null;
+            }
 
+            return List.of();
         } catch (Exception e) {
-            log.warn("ExerciseGeneratorAgent: Lỗi parse JSON từ LLM: {}", e.getMessage());
+            log.warn("ExerciseGeneratorAgent: Lỗi gọi LLM: {}", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Repairs the most common LLM JSON formatting errors without a second LLM call.
+     *
+     * GPT-4o-mini occasionally omits commas between consecutive fields inside a JSON object,
+     * producing output like:
+     *   "explanation": "some text"          ← no comma here
+     *   "refContentId": null
+     *
+     * This method inserts missing commas by detecting any JSON value token (string, boolean,
+     * null, number) followed by a newline and then the start of the next token (", {, [).
+     * The fix is safe: in valid JSON, a value token immediately followed by a newline and
+     * another token is ALWAYS a missing-comma case.
+     */
+    private String repairJson(String json) {
+        return json
+            // string value → next field or value
+            .replaceAll("\"([ \\t]*\\r?\\n[ \\t]*)\"", "\",\n\"")
+            // true / false / null → next field
+            .replaceAll("\\b(true|false|null)([ \\t]*\\r?\\n[ \\t]*)\"", "$1,\n\"")
+            // number → next field
+            .replaceAll("(\\d)([ \\t]*\\r?\\n[ \\t]*)\"", "$1,\n\"")
+            // } (end of object) → next object in array
+            .replaceAll("\\}([ \\t]*\\r?\\n[ \\t]*)\\{", "},\n{");
     }
 
     // ── Inner record ───────────────────────────────────────────────────────
@@ -586,6 +690,9 @@ public class ExerciseGeneratorAgent {
      * Tolerates both object form {"text":"...","isCorrect":true} and bare string form "..."
      * (LLM occasionally omits the object wrapper; treat bare strings as incorrect options).
      */
+    private record BatchTask(PracticeItemType itemType, int batchIndex, int batchSize) {}
+    private record BatchResult(PracticeItemType itemType, int batchIndex, List<GeneratedItem> items) {}
+
     public static class OptionItemDeserializer extends StdDeserializer<GeneratedItem.OptionItem> {
         public OptionItemDeserializer() { super(GeneratedItem.OptionItem.class); }
 
