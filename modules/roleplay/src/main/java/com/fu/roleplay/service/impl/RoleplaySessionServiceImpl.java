@@ -4,6 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fu.achievement.config.ActivityExpConfig;
+import com.fu.achievement.service.AchievementService;
+import com.fu.achievement.service.LearningLevelService;
+import com.fu.achievement.dto.response.UserAchievementResponse;
+import com.fu.achievement.enums.BadgeType;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.conversation.entity.Conversation;
@@ -77,6 +82,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     private final RoleplayProperties properties;
     private final ObjectMapper objectMapper;
     private final Executor roleplayTaskExecutor;
+    private final AchievementService achievementService;
+    private final LearningLevelService learningLevelService;
 
     public RoleplaySessionServiceImpl(
             ConversationSessionRepository sessionRepository,
@@ -95,7 +102,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             RoleplayMissionMapper missionMapper,
             RoleplayProperties properties,
             ObjectMapper objectMapper,
-            @Qualifier("roleplayTaskExecutor") Executor roleplayTaskExecutor) {
+            @Qualifier("roleplayTaskExecutor") Executor roleplayTaskExecutor,
+            AchievementService achievementService,
+            LearningLevelService learningLevelService) {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
         this.missionRepository = missionRepository;
@@ -113,6 +122,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.roleplayTaskExecutor = roleplayTaskExecutor;
+        this.achievementService = achievementService;
+        this.learningLevelService = learningLevelService;
     }
 
     @Override
@@ -593,6 +604,27 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     languageEval.getAccuracyScore(),
                     languageEval.getVocabularyScore());
         }
+        
+        // Award direct EXP for speaking session completion
+        try {
+            int expToAward = ActivityExpConfig.ActivityType.SPEAKING.getExpReward();
+            learningLevelService.awardExpAndCheckLevelUp(userId, expToAward);
+            log.info("Awarded {} EXP for speaking session to user {}", expToAward, userId);
+        } catch (Exception e) {
+            log.error("Error awarding EXP for speaking session to user {}", userId, e);
+            // Continue even if EXP fails - don't break speaking session
+        }
+        
+        // Check and award achievements for speaking completion
+        try {
+            long speakingCount = sessionRepository.countByUserIdAndStatus(
+                    userId, ConversationSession.SessionStatus.COMPLETED.name());
+            achievementService.checkAndAwardBadges(userId, BadgeType.AI_SPEAKING_COUNT, (int) speakingCount);
+            log.debug("Achievement check completed for user: {} with speaking count: {}", userId, speakingCount);
+        } catch (Exception e) {
+            log.error("Error checking achievements for speaking session", e);
+            // Don't fail the speaking session if achievement check fails
+        }
 
         // 7. Clear Redis cache
         roleplayAIService.clearSessionCache(sessionId);
@@ -609,6 +641,18 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                         .build())
                 .collect(Collectors.toList());
 
+        // Retrieve earned badges from session completion (if any)
+        List<UserAchievementResponse> earnedBadges = new ArrayList<>();
+        try {
+            earnedBadges = achievementService.getUserEarnedBadges(userId).stream()
+                    .filter(badge -> badge.getEarnedAt() != null && 
+                            badge.getEarnedAt().isAfter(session.getCreatedAt()) &&
+                            badge.getEarnedAt().isBefore(completedAt.plusSeconds(10)))
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.error("Error retrieving earned badges for session evaluation", e);
+        }
+
         return SessionEvaluationResponse.builder()
                 .sessionId(sessionId)
                 .missionScore(missionScore)
@@ -618,6 +662,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 .missionDetails(missionDetails)
                 .pronunciationSummary(pronunciationSummary)
                 .languageEvaluation(languageEval)
+                .earnedBadges(earnedBadges)
                 .build();
     }
 

@@ -1,6 +1,12 @@
 package com.fu.practice.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.achievement.config.ActivityExpConfig;
+import com.fu.achievement.service.AchievementService;
+import com.fu.achievement.service.LearningLevelService;
+import com.fu.achievement.dto.response.UserAchievementResponse;
+import com.fu.achievement.dto.response.LevelUpNotificationResponse;
+import com.fu.achievement.enums.BadgeType;
 import com.fu.common.exception.BusinessException;
 import com.fu.course.entity.Course;
 import com.fu.course.entity.Lesson;
@@ -54,6 +60,8 @@ public class PracticeSessionService {
     private final SessionFeedbackAgent sessionFeedbackAgent;
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbcTemplate;
+    private final AchievementService achievementService;
+    private final LearningLevelService learningLevelService;
 
     // ── Start Session ─────────────────────────────────────────────────────
 
@@ -375,6 +383,27 @@ public class PracticeSessionService {
         if (session.getLessonId() != null) {
             upsertLessonProgress(session);
         }
+        
+        // Award direct EXP for practice completion
+        try {
+            int expToAward = ActivityExpConfig.ActivityType.PRACTICE_AI.getExpReward();
+            learningLevelService.awardExpAndCheckLevelUp(session.getUserId(), expToAward);
+            log.info("Awarded {} EXP for practice session to user {}", expToAward, session.getUserId());
+        } catch (Exception e) {
+            log.error("Error awarding EXP for practice session to user {}", session.getUserId(), e);
+            // Continue even if EXP fails - don't break practice session
+        }
+        
+        // Check and award achievements for practice completion
+        try {
+            // Count total completed practice sessions for this user to check badge requirements
+            long practiceCount = sessionRepository.countByUserIdAndStatus(session.getUserId(), PracticeStatus.COMPLETED);
+            achievementService.checkAndAwardBadges(session.getUserId(), BadgeType.AI_PRACTICE_COUNT, (int) practiceCount);
+            log.debug("Achievement check completed for user: {} with practice count: {}", session.getUserId(), practiceCount);
+        } catch (Exception e) {
+            log.error("Error checking achievements for practice session", e);
+            // Don't fail the practice session if achievement check fails
+        }
     }
 
     /**
@@ -432,6 +461,39 @@ public class PracticeSessionService {
 
         String feedbackText = extractFeedbackSummary(session.getAiFeedback());
 
+        // Retrieve earned badges from session completion (if any)
+        // Badges earned within a small time window after session completion
+        List<UserAchievementResponse> earnedBadges = Collections.emptyList();
+        LevelUpNotificationResponse levelUpInfo = null;
+        
+        if (session.getCompletedAt() != null) {
+            try {
+                earnedBadges = achievementService.getUserEarnedBadges(userId).stream()
+                        .filter(badge -> badge.getEarnedAt() != null && 
+                                badge.getEarnedAt().isAfter(session.getCreatedAt()) &&
+                                badge.getEarnedAt().isBefore(session.getCompletedAt().plusSeconds(10)))
+                        .collect(Collectors.toList());
+            } catch (Exception e) {
+                log.error("Error retrieving earned badges for session summary", e);
+            }
+            
+            // Retrieve level-up information
+            try {
+                LearningLevelService.LevelProgressInfo progressInfo = learningLevelService.getProgressToNextLevel(userId);
+                
+                levelUpInfo = LevelUpNotificationResponse.builder()
+                        .previousLevel(progressInfo.currentLevel() - 1)
+                        .newLevel(progressInfo.currentLevel())
+                        .totalExp(progressInfo.totalExp())
+                        .expToNextLevel(progressInfo.expToNextLevel())
+                        .progressPercentage(progressInfo.percentToNextLevel())
+                        .isLevelUp(true)
+                        .build();
+            } catch (Exception e) {
+                log.error("Error retrieving level-up info for session summary", e);
+            }
+        }
+
         return SessionSummaryResponse.builder()
                 .sessionId(sessionId)
                 .score(session.getScore())
@@ -439,6 +501,8 @@ public class PracticeSessionService {
                 .totalItems(session.getTotalItems())
                 .aiFeedback(feedbackText)
                 .items(results)
+                .earnedBadges(earnedBadges)
+                .levelUpInfo(levelUpInfo)
                 .build();
     }
 

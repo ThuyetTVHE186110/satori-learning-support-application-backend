@@ -2,6 +2,10 @@ package com.fu.assignment.service.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.achievement.config.ActivityExpConfig;
+import com.fu.achievement.service.StreakService;
+import com.fu.achievement.service.LearningLevelService;
+import com.fu.achievement.dto.response.LevelUpNotificationResponse;
 import com.fu.assignment.ai.AiGradingService;
 import com.fu.assignment.ai.QuizAiGenerationService;
 import com.fu.assignment.ai.QuizExplanationService;
@@ -64,9 +68,13 @@ public class AssignmentServiceImpl implements AssignmentService {
     private final AiGradingService aiGradingService;
     private final AssignmentScheduleManager scheduleManager;
     private final ClassTeacherHistoryRepository classTeacherHistoryRepository;
+    private final StreakService streakService;
+    private final LearningLevelService learningLevelService;
     private static final String SUBMISSION_IMAGE_FOLDER = "satori/assignment-submissions";
     private static final String SUBMISSION_FAILED_MSG = "Không thể lưu hoặc chấm điểm bài nộp.";
-    private static final int MAX_SUBMISSION_IMAGES = 10;
+    private static final int MAX_SUBMISSION_IMAGES = 3;
+    private static final long MAX_IMAGE_SIZE_MB = 5;
+    private static final long MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // AI QUESTION GENERATION
@@ -532,7 +540,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         AssignmentSubmission submission = findSubmissionOrThrow(submissionId);
         Assignment assignment = findAssignmentOrThrow(submission.getAssignmentId());
         verifyAssignmentAccess(assignment, teacherId);
-        return enrichSubmissionResponse(submission);
+        return enrichSubmissionResponseForDetail(submission);
     }
 
     @Override
@@ -560,7 +568,13 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         submissionRepository.save(submission);
         log.info("Writing submission {} graded by teacher {} with score {}", submissionId, teacherId, request.getTeacherScore());
-        return enrichSubmissionResponse(submission);
+        
+        // NOTE: Streak is NOT recorded here because:
+        // 1. Streak already counted when learner submitted (submitWriting)
+        // 2. Teacher grading is not a learner activity
+        // 3. Teacher may grade days later, not reflecting learner's actual activity date
+        
+        return enrichSubmissionResponseForDetail(submission);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -729,7 +743,25 @@ public class AssignmentServiceImpl implements AssignmentService {
             submission.setStatus(SubmissionStatus.GRADED); // Quiz: auto-graded immediately
             submissionRepository.save(submission);
             log.info("Learner {} submitted quiz {}, score={}", learnerId, submission.getAssignmentId(), BigDecimal.valueOf(scored.earnedPoints));
-            return enrichSubmissionResponse(submission);
+            
+            // Record daily activity for streak tracking
+            try {
+                streakService.recordDailyActivity(learnerId, "ASSIGNMENT");
+            } catch (Exception e) {
+                log.error("Error recording daily activity for learner: {}", learnerId, e);
+            }
+            
+            // Award direct EXP for quiz completion
+            try {
+                int expToAward = ActivityExpConfig.ActivityType.QUIZ_ASSIGNMENT.getExpReward();
+                learningLevelService.awardExpAndCheckLevelUp(learnerId, expToAward);
+                log.info("Awarded {} EXP for quiz completion to user {}", expToAward, learnerId);
+            } catch (Exception e) {
+                log.error("Error awarding EXP for quiz completion to user {}", learnerId, e);
+                // Continue even if EXP fails - don't break submission flow
+            }
+            
+            return enrichSubmissionResponseForSubmit(submission);
         }
     }
 
@@ -744,6 +776,13 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         if (hasImages && images.length > MAX_SUBMISSION_IMAGES) {
             throw new BusinessException("TOO_MANY_IMAGES", "Tối đa " + MAX_SUBMISSION_IMAGES + " hình ảnh cho mỗi bài nộp.");
+        }
+
+        // Validate each image size
+        for (MultipartFile image : images) {
+            if (image != null && !image.isEmpty() && image.getSize() > MAX_IMAGE_SIZE_BYTES) {
+                throw new BusinessException("IMAGE_TOO_LARGE", "Mỗi hình ảnh không được vượt quá " + MAX_IMAGE_SIZE_MB + "MB. File: " + image.getOriginalFilename() + " có kích thước " + (image.getSize() / (1024 * 1024)) + "MB.");
+            }
         }
 
         // Find the active IN_PROGRESS submission for this assignment+learner
@@ -775,7 +814,25 @@ public class AssignmentServiceImpl implements AssignmentService {
             submission.setStatus(SubmissionStatus.SUBMITTED); // waiting for teacher grading
             submissionRepository.save(submission);
             log.info("Learner {} submitted writing for assignment {} (images: {})", learnerId, assignmentId, hasImages ? images.length : 0);
-            return enrichSubmissionResponse(submission);
+            
+            // Record daily activity for streak tracking (writing/translation submission)
+            try {
+                streakService.recordDailyActivity(learnerId, "ASSIGNMENT");
+            } catch (Exception e) {
+                log.error("Error recording daily activity for learner: {}", learnerId, e);
+            }
+            
+            // Award direct EXP for writing submission
+            try {
+                int expToAward = ActivityExpConfig.ActivityType.WRITING_ASSIGNMENT.getExpReward();
+                learningLevelService.awardExpAndCheckLevelUp(learnerId, expToAward);
+                log.info("Awarded {} EXP for writing submission to user {}", expToAward, learnerId);
+            } catch (Exception e) {
+                log.error("Error awarding EXP for writing submission to user {}", learnerId, e);
+                // Continue even if EXP fails - don't break submission flow
+            }
+            
+            return enrichSubmissionResponseForSubmit(submission);
         }
     }
 
@@ -818,7 +875,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         log.info("Learner {} canceled submission for assignment {}", learnerId, assignmentId);
         deleteSubmittedImages(submission);
         submissionRepository.save(submission);
-        return enrichSubmissionResponse(submission);
+        return enrichSubmissionResponseForDetail(submission);
     }
 
     private void deleteSubmittedImages(AssignmentSubmission submission) {
@@ -845,7 +902,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         if (!submission.getUserId().equals(learnerId)) {
             throw new BusinessException("ACCESS_DENIED", "Bạn chỉ có thể xem bài nộp của chính mình.");
         }
-        return enrichSubmissionResponse(submission);
+        return enrichSubmissionResponseForDetail(submission);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -994,7 +1051,11 @@ public class AssignmentServiceImpl implements AssignmentService {
         return response;
     }
 
-    private SubmissionResponse enrichSubmissionResponse(AssignmentSubmission s) {
+    /**
+     * Enrich submission response for DETAIL/VIEW operations (GET endpoints, teacher view)
+     * Does NOT include levelUp or badges - these are user's old data, not a new event
+     */
+    private SubmissionResponse enrichSubmissionResponseForDetail(AssignmentSubmission s) {
         SubmissionResponse response = mapper.toResponse(s);
         Assignment assignment = assignmentRepository.findByIdAndNotDeleted(s.getAssignmentId()).orElse(null);
         if (assignment != null) {
@@ -1011,9 +1072,51 @@ public class AssignmentServiceImpl implements AssignmentService {
         });
         // Parse imageUrls JSON string → List<String>
         response.setImageUrls(parseImageUrls(s.getImageUrls()));
+        
+        // NO levelUp or badges - this is detail view, not a new submission event
         return response;
     }
 
+    /**
+     * Enrich submission response for SUBMIT operations (POST endpoints)
+     * Includes levelUp and badges - user just completed an action
+     */
+    private SubmissionResponse enrichSubmissionResponseForSubmit(AssignmentSubmission s) {
+        SubmissionResponse response = mapper.toResponse(s);
+        Assignment assignment = assignmentRepository.findByIdAndNotDeleted(s.getAssignmentId()).orElse(null);
+        if (assignment != null) {
+            response.setAssignmentTitle(assignment.getTitle());
+            // Enrich quiz details if completed
+            if (assignment.isQuiz() && (s.getStatus() == SubmissionStatus.GRADED || s.getStatus() == SubmissionStatus.OVERDUE)) {
+                response.setQuizDetails(enrichQuizDetails(s.getAnswers()));
+            }
+        }
+
+        userRepository.findById(s.getUserId()).ifPresent(u -> {
+            response.setUserFullName(u.getFullName());
+            response.setUserEmail(u.getEmail());
+        });
+        // Parse imageUrls JSON string → List<String>
+        response.setImageUrls(parseImageUrls(s.getImageUrls()));
+        
+        // Add level-up information (only for submit operations)
+        try {
+            LearningLevelService.LevelProgressInfo progressInfo = learningLevelService.getProgressToNextLevel(s.getUserId());
+            LevelUpNotificationResponse levelUpInfo = LevelUpNotificationResponse.builder()
+                    .previousLevel(progressInfo.currentLevel() - 1)
+                    .newLevel(progressInfo.currentLevel())
+                    .totalExp(progressInfo.totalExp())
+                    .expToNextLevel(progressInfo.expToNextLevel())
+                    .progressPercentage(progressInfo.percentToNextLevel())
+                    .isLevelUp(true)
+                    .build();
+            response.setLevelUpInfo(levelUpInfo);
+        } catch (Exception e) {
+            log.debug("Error retrieving level-up info for submission", e);
+        }
+        
+        return response;
+    }
     private List<QuizSubmissionDetailResponse> enrichQuizDetails(String answersJson) {
         List<QuizSubmissionDetailResponse> details = new ArrayList<>();
         if (answersJson == null || answersJson.isBlank()) return details;

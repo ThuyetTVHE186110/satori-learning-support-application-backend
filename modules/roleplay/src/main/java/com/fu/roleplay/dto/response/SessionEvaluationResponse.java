@@ -1,5 +1,8 @@
 package com.fu.roleplay.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fu.achievement.dto.response.UserAchievementResponse;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -13,6 +16,7 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class SessionEvaluationResponse {
 
     private UUID sessionId;
@@ -31,6 +35,10 @@ public class SessionEvaluationResponse {
 
     // Language evaluation
     private LanguageEvaluationDetail languageEvaluation;
+
+    /** Badges earned when completing this session. */
+    @JsonProperty("newBadgesEarned")
+    private List<UserAchievementResponse> earnedBadges;
 
     @Data
     @Builder
