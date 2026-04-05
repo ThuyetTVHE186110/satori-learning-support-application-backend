@@ -370,9 +370,17 @@ public class PracticeSessionService {
             return;
         }
 
-        double scoreValue = session.getTotalItems() > 0
-                ? ((double) session.getCorrectItems() / session.getTotalItems()) * 100.0
-                : 0.0;
+        // Weighted average of per-item scores (0–100 each).
+        // More fair than binary correct/total: partial MATCHING credit and LLM partial
+        // scores for TRANSLATION/FILL_BLANK are properly reflected in the session score.
+        double scoreValue = 0.0;
+        if (session.getTotalItems() > 0) {
+            List<PracticeItem> items = itemRepository.findBySessionIdOrderByItemIndex(session.getId());
+            double sumScores = items.stream()
+                    .mapToInt(PracticeItem::getScore)
+                    .sum();
+            scoreValue = sumScores / session.getTotalItems();
+        }
 
         BigDecimal score = BigDecimal.valueOf(scoreValue).setScale(2, RoundingMode.HALF_UP);
         session.setScore(score);
@@ -429,7 +437,9 @@ public class PracticeSessionService {
         double scoreValue = session.getScore() != null ? session.getScore().doubleValue() : 0.0;
         try {
             List<PracticeItem> allItems = itemRepository.findBySessionIdOrderByItemIndex(sessionId);
-            String feedback = sessionFeedbackAgent.generateFeedback(sessionId, scoreValue, allItems);
+            String sessionType = session.getSessionType() != null
+                    ? session.getSessionType().name() : "MIXED_LESSON";
+            String feedback = sessionFeedbackAgent.generateFeedback(sessionId, scoreValue, allItems, sessionType);
             session.setAiFeedback(feedback);
             sessionRepository.save(session);
         } catch (Exception e) {
@@ -646,10 +656,10 @@ public class PracticeSessionService {
             return buildMatchingItem(session, gen, index);
         }
 
-        // Shuffle SENTENCE_ORDER options so tokens are not in the correct order
+        // Shuffle options so the correct answer is never predictably at position 0
         List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.options();
-        if (resolvedType == PracticeItemType.SENTENCE_ORDER
-                && options != null && options.size() > 1) {
+        if (options != null && options.size() > 1
+                && resolvedType != PracticeItemType.TRUE_FALSE) {
             options = new ArrayList<>(options);
             Collections.shuffle(options);
         }
@@ -803,7 +813,6 @@ public class PracticeSessionService {
             return PracticeItemType.MULTIPLE_CHOICE;
         }
         return switch (sessionType) {
-            case SENTENCE_BUILD -> PracticeItemType.SENTENCE_ORDER;
             case KANJI_READING  -> PracticeItemType.FILL_BLANK;
             case VOCAB_DRILL    -> PracticeItemType.FILL_BLANK;
             case GRAMMAR_DRILL  -> PracticeItemType.FILL_BLANK;
@@ -876,7 +885,6 @@ public class PracticeSessionService {
         }
 
         if (session.getSessionType() == PracticeSessionType.GRAMMAR_DRILL
-                || session.getSessionType() == PracticeSessionType.SENTENCE_BUILD
                 || session.getSessionType() == PracticeSessionType.MIXED_LESSON) {
             BigDecimal newGrammar = rollingAverage(progress.getGrammarMastery(), session.getScore());
             progress.setGrammarMastery(newGrammar);
