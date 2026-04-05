@@ -134,9 +134,10 @@ public class AnswerEvaluatorAgent {
 
     private String buildEvaluationPrompt(PracticeItem item, String userAnswer) {
         return promptLoader.render("prompts/answer-evaluator-system.st", Map.of(
-                "question", item.getQuestion(),
-                "correctAnswer", item.getCorrectAnswer(),
-                "userAnswer", userAnswer));
+                "itemType", item.getItemType().name(),
+                "question", item.getQuestion() != null ? item.getQuestion() : "",
+                "correctAnswer", item.getCorrectAnswer() != null ? item.getCorrectAnswer() : "",
+                "userAnswer", userAnswer != null ? userAnswer : ""));
     }
 
     private EvaluationResult parseEvaluationResponse(String raw, PracticeItem item, String userAnswer) {

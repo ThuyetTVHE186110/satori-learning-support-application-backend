@@ -166,12 +166,46 @@ public class ExerciseGeneratorAgent {
     }
 
     /**
+     * Max items per single LLM call.
+     * MATCHING items are large (4 pairs each), so a cap of 5 keeps the response
+     * well within the model's reliable output range and avoids JSON truncation.
+     */
+    private static final int MAX_PER_CALL = 5;
+
+    /**
      * Sinh câu hỏi cho DUY NHẤT một loại item type.
-     * Mỗi LLM call chỉ focus vào 1 dạng → không bị nhầm cấu trúc options.
+     * Tự động tách thành nhiều batch nếu count > MAX_PER_CALL để tránh JSON bị truncate.
      */
     private List<GeneratedItem> generateForSingleType(int count, PracticeSessionType sessionType,
                                                        String jlptLevel, String contentSummary,
                                                        String ragContext, PracticeItemType itemType) {
+        if (count <= MAX_PER_CALL) {
+            return generateSingleBatch(count, sessionType, jlptLevel, contentSummary, ragContext, itemType);
+        }
+
+        // Batch: split into multiple sequential calls, each ≤ MAX_PER_CALL
+        List<GeneratedItem> all = new ArrayList<>();
+        int remaining = count;
+        while (remaining > 0 && all.size() < count) {
+            int batchSize = Math.min(remaining, MAX_PER_CALL);
+            List<GeneratedItem> batch = generateSingleBatch(
+                    batchSize, sessionType, jlptLevel, contentSummary, ragContext, itemType);
+            if (batch.isEmpty()) {
+                log.warn("ExerciseGeneratorAgent: Batch rỗng cho dạng {}, dừng batch.", itemType);
+                break;
+            }
+            all.addAll(batch);
+            remaining -= batch.size();
+        }
+        return all.size() <= count ? all : all.subList(0, count);
+    }
+
+    /**
+     * Một LLM call duy nhất cho count ≤ MAX_PER_CALL items.
+     */
+    private List<GeneratedItem> generateSingleBatch(int count, PracticeSessionType sessionType,
+                                                     String jlptLevel, String contentSummary,
+                                                     String ragContext, PracticeItemType itemType) {
         String prompt = buildSingleTypePrompt(count, sessionType, jlptLevel, contentSummary, ragContext, itemType);
         List<GeneratedItem> items = callLlm(prompt, count);
         if (items == null || items.isEmpty()) {
@@ -180,7 +214,6 @@ public class ExerciseGeneratorAgent {
                     List.of(itemType)), count);
         }
         if (items == null) return List.of();
-        // Cap to allocated count — LLM sometimes returns more than requested
         return items.size() <= count ? items : items.subList(0, count);
     }
 
