@@ -70,7 +70,7 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, UUID> 
               AND c.course_id = :courseId
               AND cm.removed_at IS NULL
               AND c.deleted_at IS NULL
-              AND c.is_active = true
+              AND c.status = 'ACTIVE'
             """, nativeQuery = true)
     boolean isEnrolledInCourse(@Param("userId") UUID userId, @Param("courseId") UUID courseId);
 
@@ -95,7 +95,7 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, UUID> 
             WHERE cm.user_id    = :userId
               AND cm.removed_at IS NULL
               AND c.deleted_at  IS NULL
-              AND c.is_active   = true
+              AND c.status      = 'ACTIVE'
               AND co.deleted_at IS NULL
             GROUP BY co.id, co.name, co.jlpt_level
             LIMIT 1

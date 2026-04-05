@@ -1,14 +1,17 @@
 package com.fu.clazz.service;
 
+import com.fu.clazz.entity.ClassStatus;
 import com.fu.clazz.dto.request.AddMemberRequest;
 import com.fu.clazz.dto.request.CreateClassRequest;
 import com.fu.clazz.dto.request.UpdateClassRequest;
 import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
+import com.fu.clazz.dto.response.LearnerClassResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -35,7 +38,7 @@ public interface ClassService {
     /**
      * Get classes with dynamic filters (combines all options with AND)
      */
-    Page<ClassSummaryResponse> getClasses(String keyword, UUID teacherId, UUID courseId, Boolean isActive,
+    Page<ClassSummaryResponse> getClasses(String keyword, UUID teacherId, UUID courseId, ClassStatus status,
                                           Pageable pageable);
 
     /**
@@ -73,4 +76,10 @@ public interface ClassService {
      * Get eligible learners to add to a class (Active or Inactive, and not currently an active member)
      */
     Page<com.fu.user.dto.UserResponse> getEligibleLearners(UUID classId, String keyword, Pageable pageable);
+
+    /**
+     * Get learner's enrolled classes (ACTIVE or CLOSED status, active membership only)
+     * Returns classes where ClassMember.removedAt IS NULL
+     */
+    List<LearnerClassResponse> getLearnerClasses(UUID learnerId);
 }

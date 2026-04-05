@@ -9,14 +9,14 @@ import org.hibernate.annotations.ColumnTransformer;
 import java.util.UUID;
 
 /**
- * ConversationMission - A specific task or goal within a ConversationTopic.
+ * ConversationMission - A specific task or goal within a Conversation.
  * Learners must complete missions during a practice session.
  * Maps to speaking.conversation_missions table.
  */
 @Entity
 @Table(name = "conversation_missions", schema = "speaking",
         indexes = {
-                @Index(name = "idx_conv_missions_topic", columnList = "topic_id"),
+                @Index(name = "idx_conv_missions_conversation", columnList = "conversation_id"),
                 @Index(name = "idx_conv_missions_type", columnList = "mission_type")
         })
 @Getter
@@ -28,10 +28,10 @@ import java.util.UUID;
 public class ConversationMission extends SoftDeletableEntity {
 
     /**
-     * Parent topic this mission belongs to.
+     * Parent conversation this mission belongs to.
      */
-    @Column(name = "topic_id", nullable = false)
-    private UUID topicId;
+    @Column(name = "conversation_id", nullable = false)
+    private UUID conversationId;
 
     @Column(name = "title", nullable = false, length = 255)
     private String title;

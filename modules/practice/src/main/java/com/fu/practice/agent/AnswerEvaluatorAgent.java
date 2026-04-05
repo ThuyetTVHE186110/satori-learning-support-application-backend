@@ -10,6 +10,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -42,12 +43,11 @@ public class AnswerEvaluatorAgent {
      * @return kết quả đánh giá
      */
     public EvaluationResult evaluate(PracticeItem item, String userAnswer) {
-        if (item.getItemType() == PracticeItemType.MULTIPLE_CHOICE
-                || item.getItemType() == PracticeItemType.MATCHING
-                || item.getItemType() == PracticeItemType.TRUE_FALSE) {
-            return evaluateByRule(item, userAnswer);
-        }
-        return evaluateByLlm(item, userAnswer);
+        return switch (item.getItemType()) {
+            case MULTIPLE_CHOICE, TRUE_FALSE -> evaluateByRule(item, userAnswer);
+            case MATCHING                    -> evaluateMatching(item, userAnswer);
+            default                          -> evaluateByLlm(item, userAnswer);
+        };
     }
 
     // ── Rule-based evaluation ─────────────────────────────────────────────
@@ -58,6 +58,60 @@ public class AnswerEvaluatorAgent {
                 ? "Chính xác!"
                 : "Đáp án đúng là: " + item.getCorrectAnswer();
         return new EvaluationResult(correct, correct ? 100 : 0, feedback, correct ? null : item.getCorrectAnswer());
+    }
+
+    /**
+     * Đánh giá MATCHING: so sánh ánh xạ "leftId:rightId" do học viên gửi
+     * với correctAnswer lưu trong DB.
+     *
+     * userAnswer format: "0:4,1:5,2:6,3:7"
+     * correctAnswer format: "0:4,1:5,2:6,3:7"
+     *
+     * Tính partial score: N cặp đúng / tổng cặp × 100.
+     * Chỉ isCorrect=true khi TẤT CẢ cặp đúng.
+     */
+    private EvaluationResult evaluateMatching(PracticeItem item, String userAnswer) {
+        try {
+            Map<String, String> userMap    = parsePairMap(userAnswer);
+            Map<String, String> correctMap = parsePairMap(item.getCorrectAnswer());
+
+            if (userMap.isEmpty()) {
+                return new EvaluationResult(false, 0,
+                        "Bạn chưa nối cặp nào.", item.getCorrectAnswer());
+            }
+
+            long correctPairs = userMap.entrySet().stream()
+                    .filter(e -> e.getValue().equals(correctMap.get(e.getKey())))
+                    .count();
+            int total = correctMap.size();
+            int score = total > 0 ? (int) (correctPairs * 100L / total) : 0;
+            boolean allCorrect = correctPairs == total;
+
+            String feedback = allCorrect
+                    ? "Chính xác! Bạn đã nối đúng tất cả " + total + " cặp."
+                    : String.format("Đúng %d/%d cặp.", correctPairs, total);
+
+            return new EvaluationResult(allCorrect, score, feedback,
+                    allCorrect ? null : item.getCorrectAnswer());
+
+        } catch (Exception e) {
+            log.warn("evaluateMatching: Không parse được userAnswer '{}': {}", userAnswer, e.getMessage());
+            return new EvaluationResult(false, 0,
+                    "Không thể đánh giá câu trả lời.", item.getCorrectAnswer());
+        }
+    }
+
+    /** Parse "0:4,1:5,2:6" → Map{0→4, 1→5, 2→6}. */
+    private Map<String, String> parsePairMap(String pairStr) {
+        Map<String, String> map = new HashMap<>();
+        if (pairStr == null || pairStr.isBlank()) return map;
+        for (String pair : pairStr.split(",")) {
+            String[] parts = pair.trim().split(":");
+            if (parts.length == 2) {
+                map.put(parts[0].trim(), parts[1].trim());
+            }
+        }
+        return map;
     }
 
     // ── LLM evaluation ────────────────────────────────────────────────────
@@ -80,9 +134,10 @@ public class AnswerEvaluatorAgent {
 
     private String buildEvaluationPrompt(PracticeItem item, String userAnswer) {
         return promptLoader.render("prompts/answer-evaluator-system.st", Map.of(
-                "question", item.getQuestion(),
-                "correctAnswer", item.getCorrectAnswer(),
-                "userAnswer", userAnswer));
+                "itemType", item.getItemType().name(),
+                "question", item.getQuestion() != null ? item.getQuestion() : "",
+                "correctAnswer", item.getCorrectAnswer() != null ? item.getCorrectAnswer() : "",
+                "userAnswer", userAnswer != null ? userAnswer : ""));
     }
 
     private EvaluationResult parseEvaluationResponse(String raw, PracticeItem item, String userAnswer) {

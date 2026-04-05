@@ -1,5 +1,6 @@
 package com.fu.clazz.dto.response;
 
+import com.fu.clazz.entity.ClassStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -29,7 +30,7 @@ public class ClassResponse {
     private Integer maxStudents;
     private LocalDate startDate;
     private LocalDate endDate;
-    private Boolean isActive;
+    private ClassStatus status;
 
     private UUID createdBy;
     private UUID updatedBy;

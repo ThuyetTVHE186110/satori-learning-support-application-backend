@@ -88,7 +88,23 @@ public interface AssignmentService {
 
     // ── Submissions — Learner Flow ────────────────────────────────────────────
 
-    Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, String title, AssignmentType type, SubmissionStatus status, Pageable pageable);
+    /**
+     * Get learner's available assignments with optional class filter.
+     * @param learnerId Current learner ID
+     * @param classId Optional class filter. If null, shows assignments from THE single active enrolled class.
+     *                If provided, shows assignments from that specific class.
+     * @param title Optional title search filter
+     * @param type Optional assignment type filter
+     * @param status Optional submission status filter
+     * @param pageable Pagination parameters
+     */
+    Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(
+            UUID learnerId, 
+            UUID classId, 
+            String title, 
+            AssignmentType type, 
+            SubmissionStatus status, 
+            Pageable pageable);
 
 
     /** Start or Resume assignment → returns full assignment details + current session */

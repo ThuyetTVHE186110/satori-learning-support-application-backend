@@ -129,7 +129,6 @@ public class ProfileServiceImpl implements ProfileService {
                             .build();
                 });
 
-        if (request.getTargetJlptLevel() != null)     prefs.setTargetJlptLevel(request.getTargetJlptLevel());
         if (request.getDailyStudyGoalMinutes() != null) prefs.setDailyStudyGoalMinutes(request.getDailyStudyGoalMinutes());
         if (request.getPreferredStudyTime() != null)  prefs.setPreferredStudyTime(request.getPreferredStudyTime());
         if (request.getLearningPace() != null)        prefs.setLearningPace(request.getLearningPace());

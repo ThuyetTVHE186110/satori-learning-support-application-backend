@@ -15,6 +15,8 @@ import java.util.UUID;
 
 public interface ConversationTopicService {
 
+    List<GeneratedTopicSuggestionResponse> generateTopicSuggestions(GenerateTopicRequest request);
+
     ConversationTopicResponse createTopic(CreateTopicRequest request, UUID managerId);
 
     ConversationTopicResponse updateTopic(UUID id, UpdateTopicRequest request, UUID managerId);
@@ -25,25 +27,11 @@ public interface ConversationTopicService {
 
     ConversationTopicResponse getTopic(UUID id);
 
-    Page<ConversationTopicSummaryResponse> getTopicsByTheme(UUID themeId, Pageable pageable);
-
-    /**
-     * Returns published topics for a theme, enriched with the learner's practice history.
-     *
-     * @param themeId the theme to fetch topics for
-     * @param userId  the learner's user ID used to look up practice stats; may be null
-     *                (manager view — practice fields will be left at defaults)
-     */
-    List<ConversationTopicSummaryResponse> getPublishedTopicsByTheme(UUID themeId, UUID userId);
-
-    /** Returns an active, published topic — throws 404 for drafts/archived/deleted. */
-    ConversationTopicResponse getPublishedTopic(UUID id);
-
     Page<ConversationTopicSummaryResponse> getAllTopics(Pageable pageable);
 
-    /**
-     * Uses AI to generate topic suggestions for a theme.
-     * Suggestions are not persisted — the manager reviews and saves them manually.
-     */
-    List<GeneratedTopicSuggestionResponse> generateTopicSuggestions(GenerateTopicRequest request);
+    Page<ConversationTopicSummaryResponse> searchTopics(String keyword, Pageable pageable);
+
+    Page<ConversationTopicSummaryResponse> getPublishedTopics(Course.JlptLevel jlptLevel, Pageable pageable);
+
+    Page<ConversationTopicSummaryResponse> searchPublishedTopics(String keyword, Pageable pageable);
 }

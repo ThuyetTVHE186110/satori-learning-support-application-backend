@@ -17,5 +17,5 @@ public interface ConversationMissionService {
 
     ConversationMissionResponse getMission(UUID id);
 
-    List<ConversationMissionResponse> getMissionsByTopic(UUID topicId);
+    List<ConversationMissionResponse> getMissionsByConversation(UUID conversationId);
 }

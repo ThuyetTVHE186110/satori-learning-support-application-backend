@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.common.ai.PromptUtils;
+import com.fu.curriculumimport.service.CurriculumStatsService;
 import com.fu.curriculumimport.service.embedding.ChatbotFilter;
 import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import com.fu.curriculumimport.service.embedding.RagContext;
@@ -18,6 +19,8 @@ import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
 import org.springframework.stereotype.Component;
+
+import org.springframework.ai.chat.messages.MessageType;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -86,15 +89,19 @@ public class RetrievalAdvisor implements BaseAdvisor {
     // ── Dependencies ───────────────────────────────────────────────────────
 
     private final EmbeddingService embeddingService;
+    private final CurriculumStatsService statsService;
     private final ChatRagProperties ragProperties;
     private final ChatClient analyzeClient;
     private final ObjectMapper objectMapper;
     private final PromptTemplateLoader promptLoader;
 
-    public RetrievalAdvisor(EmbeddingService embeddingService, ChatRagProperties ragProperties,
+    public RetrievalAdvisor(EmbeddingService embeddingService,
+                             CurriculumStatsService statsService,
+                             ChatRagProperties ragProperties,
                              OpenAiChatModel chatModel, ObjectMapper objectMapper,
                              PromptTemplateLoader promptLoader) {
         this.embeddingService = embeddingService;
+        this.statsService = statsService;
         this.ragProperties = ragProperties;
         this.analyzeClient = ChatClient.builder(chatModel).build();
         this.objectMapper = objectMapper;
@@ -128,8 +135,11 @@ public class RetrievalAdvisor implements BaseAdvisor {
         }
 
         // ── Step 2: Analyze query intent + translation ─────────────────────
+        // Include recent conversation history so pronoun/reference resolution works
+        // (e.g. "Những ngữ pháp đó là gì?" → resolves "đó" from prior turn)
+        String recentHistory = extractRecentHistory(request, 3);
         QueryAnalysis analysis = (ragProperties.isQueryAnalysisEnabled() && question.length() > 2)
-                ? analyzeQuery(question)
+                ? analyzeQuery(question, recentHistory)
                 : fallbackAnalysis(question);
 
         // LLM may still classify as COUNT for paraphrases not caught by keywords
@@ -199,10 +209,11 @@ public class RetrievalAdvisor implements BaseAdvisor {
 
     /**
      * Single LLM call that returns intent + translated query + preferred content types.
+     * Includes recent conversation history for pronoun/reference resolution.
      * Uses gpt-4o-mini at temperature=0 for deterministic classification.
      * Cost: ~$0.0001/call (30 input tokens + 50 output tokens).
      */
-    private QueryAnalysis analyzeQuery(String question) {
+    private QueryAnalysis analyzeQuery(String question, String recentHistory) {
         try {
             QueryLanguage lang = detectLanguage(question);
             String langLabel = switch (lang) {
@@ -213,7 +224,8 @@ public class RetrievalAdvisor implements BaseAdvisor {
 
             String prompt = promptLoader.render("prompts/query-analysis.st", Map.of(
                     "question", question,
-                    "detectedLanguage", langLabel));
+                    "detectedLanguage", langLabel,
+                    "recentHistory", recentHistory.isBlank() ? "(none)" : recentHistory));
 
             String raw = analyzeClient.prompt()
                     .user(prompt)
@@ -297,7 +309,10 @@ public class RetrievalAdvisor implements BaseAdvisor {
 
     private ChatClientRequest handleCountIntent(ChatClientRequest request,
                                                  UUID courseId, UUID lessonId) {
-        EmbeddingService.ContentCount count = embeddingService.countContent(courseId, lessonId);
+        // Use CurriculumStatsService (entity join tables) — source of truth.
+        // EmbeddingService.countContent() counts rows in the vector store, which
+        // can under-count when metadata is missing or embeddings are not yet generated.
+        CurriculumStatsService.ContentCount count = statsService.countContent(courseId, lessonId);
 
         String scope = lessonId != null ? "bài học hiện tại" : "khóa học hiện tại";
         String countContext = "Phạm vi: " + scope
@@ -409,6 +424,47 @@ public class RetrievalAdvisor implements BaseAdvisor {
                             meta);
                 })
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Extract the last {@code maxExchanges} conversation turns (user + assistant pairs)
+     * from the prompt — already injected by MessageChatMemoryAdvisor (order=10).
+     *
+     * Excludes the current user question (last message) and all system messages.
+     * Used by {@link #analyzeQuery} to resolve pronouns/references in follow-up questions.
+     */
+    private String extractRecentHistory(ChatClientRequest request, int maxExchanges) {
+        var messages = request.prompt().getInstructions();
+        if (messages == null || messages.size() <= 1) return "";
+
+        // Filter to USER + ASSISTANT messages only, skip SYSTEM
+        var conversation = messages.stream()
+                .filter(m -> m.getMessageType() == MessageType.USER
+                        || m.getMessageType() == MessageType.ASSISTANT)
+                .collect(Collectors.toList());
+
+        // Drop last message — that is the current user question being processed
+        if (!conversation.isEmpty()
+                && conversation.get(conversation.size() - 1).getMessageType() == MessageType.USER) {
+            conversation = conversation.subList(0, conversation.size() - 1);
+        }
+
+        if (conversation.isEmpty()) return "";
+
+        int start = Math.max(0, conversation.size() - maxExchanges * 2);
+        var recent = conversation.subList(start, conversation.size());
+
+        StringBuilder sb = new StringBuilder();
+        for (var m : recent) {
+            String role = m.getMessageType() == MessageType.USER ? "User" : "Assistant";
+            String text = m.getText() != null ? m.getText() : "";
+            sb.append(role).append(": ").append(truncate(text, 300)).append("\n");
+        }
+        return sb.toString().trim();
+    }
+
+    private String truncate(String text, int maxChars) {
+        return text.length() <= maxChars ? text : text.substring(0, maxChars) + "...";
     }
 
     private UUID getUuidParam(ChatClientRequest request, String key) {

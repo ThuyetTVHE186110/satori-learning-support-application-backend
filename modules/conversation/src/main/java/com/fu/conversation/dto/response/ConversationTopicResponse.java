@@ -7,7 +7,6 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -17,32 +16,23 @@ import java.util.UUID;
 public class ConversationTopicResponse {
 
     private UUID id;
-    private UUID themeId;
-    private String themeName;
-    private UUID courseId;
-    private String courseName;
     private String title;
     private String titleJapanese;
     private String description;
     private String descriptionVi;
-    private String scenario;
-    private String vocabularyHints;
-    private String grammarPoints;
-    private String usefulExpressions;
     private String category;
     private Course.JlptLevel jlptLevel;
-    private Integer difficultyScore;
-    private String aiRole;
-    private String learnerRole;
-    private String roleplayContext;
+    private UUID courseId;
+    private String courseName;
+    private String aiGeneratedContext;
     private String thumbnailUrl;
     private Course.ContentStatus status;
     private Integer orderIndex;
-
-    private List<ConversationMissionResponse> missions;
 
     private UUID createdBy;
     private UUID updatedBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+
+    private Long conversationCount;
 }

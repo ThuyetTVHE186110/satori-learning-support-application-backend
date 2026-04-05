@@ -17,7 +17,7 @@ import java.util.UUID;
 public class SessionSummaryResponse {
 
     private UUID id;
-    private UUID topicId;
+    private UUID conversationId;
     private ConversationSession.SessionType sessionType;
     private ConversationSession.SessionStatus status;
     private Integer messageCount;

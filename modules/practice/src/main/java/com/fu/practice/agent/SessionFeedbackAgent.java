@@ -42,13 +42,14 @@ public class SessionFeedbackAgent {
      * @param items     danh sách câu hỏi đã trả lời
      * @return JSON string chứa feedback
      */
-    public String generateFeedback(UUID sessionId, double score, List<PracticeItem> items) {
+    public String generateFeedback(UUID sessionId, double score, List<PracticeItem> items,
+                                     String sessionType) {
         try {
             List<PracticeItem> wrongItems = items.stream()
                     .filter(i -> Boolean.FALSE.equals(i.getIsCorrect()))
                     .collect(Collectors.toList());
 
-            String prompt = buildFeedbackPrompt(score, items.size(), wrongItems);
+            String prompt = buildFeedbackPrompt(score, items.size(), wrongItems, sessionType);
 
             String raw = chatClient.prompt()
                     .user(prompt)
@@ -76,22 +77,26 @@ public class SessionFeedbackAgent {
 
     // ── Private helpers ────────────────────────────────────────────────────
 
-    private String buildFeedbackPrompt(double score, int totalItems, List<PracticeItem> wrongItems) {
+    private String buildFeedbackPrompt(double score, int totalItems, List<PracticeItem> wrongItems,
+                                         String sessionType) {
         StringBuilder wrongSummary = new StringBuilder();
-        if (!wrongItems.isEmpty()) {
-            wrongSummary.append("Các câu sai:\n");
+        if (wrongItems.isEmpty()) {
+            wrongSummary.append("(Không có câu sai — đạt điểm tuyệt đối)");
+        } else {
             wrongItems.forEach(item ->
-                    wrongSummary.append(String.format("- Câu %d: %s (Đúng: %s, Trả lời: %s)\n",
+                    wrongSummary.append(String.format("- [%s] Câu %d: %s | Đúng: %s | Trả lời: %s\n",
+                            item.getItemType() != null ? item.getItemType().name() : "?",
                             item.getItemIndex() + 1,
                             item.getQuestion(),
                             item.getCorrectAnswer(),
-                            item.getUserAnswer() != null ? item.getUserAnswer() : "(chưa trả lời)")));
+                            item.getUserAnswer() != null ? item.getUserAnswer() : "(bỏ trống)")));
         }
 
         return promptLoader.render("prompts/session-feedback-system.st", Map.of(
                 "score", String.format("%.1f", score),
                 "correctCount", String.valueOf(totalItems - wrongItems.size()),
                 "totalItems", String.valueOf(totalItems),
+                "sessionType", sessionType != null ? sessionType : "MIXED_LESSON",
                 "wrongSummary", wrongSummary.toString()));
     }
 
