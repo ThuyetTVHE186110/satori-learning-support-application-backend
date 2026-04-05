@@ -12,7 +12,10 @@ public interface LearningLevelService {
     
     /**
      * Get user's current level based on total EXP
-     * Formula: level = floor(sqrt(totalExp / 100)) + 1
+     * 
+     * Uses hybrid formula:
+     * - Early (EXP < 500): level = floor(totalExp / 40) + 1 (linear progression)
+     * - Late (EXP >= 500): level = 13 + floor(√((totalExp - 500) / 18.5)) (curved progression)
      */
     int getCurrentLevel(UUID userId);
 
@@ -33,7 +36,7 @@ public interface LearningLevelService {
 
     /**
      * Award EXP to user and check for level-up badges
-     * Called by AchievementService when badges are earned
+     * Called when activities are completed or badges are earned
      * 
      * @param userId User ID
      * @param expAmount EXP to award
@@ -43,13 +46,27 @@ public interface LearningLevelService {
 
     /**
      * Calculate what level a user should be at based on total EXP
-     * Formula: level = floor(sqrt(totalExp / 100)) + 1
+     * 
+     * Uses hybrid formula:
+     * - Early (EXP < 500): level = floor(totalExp / 40) + 1 → Level 10 in ~6 days
+     * - Late (EXP >= 500): level = 13 + floor(√((totalExp - 500) / 18.5)) → Level 50 in ~1 year
+     * 
+     * Threshold at 500 EXP = Level 13 ensures smooth transition between phases.
      */
     int calculateLevelFromExp(int totalExp);
 
     /**
      * Calculate total EXP required to reach a specific level
-     * Formula: exp = (level - 1)^2 * 100
+     * This is the INVERSE of calculateLevelFromExp() and MUST match exactly.
+     * 
+     * Inverse formula:
+     * - For level <= 13: totalExp = (level - 1) * 40
+     * - For level > 13: totalExp = 500 + ((level - 13)² × 18.5)
+     * 
+     * Example:
+     * - Level 5 → 160 EXP (early phase)
+     * - Level 13 → 500 EXP (threshold)
+     * - Level 20 → ~1407 EXP (late phase, curved)
      */
     int calculateExpForLevel(int level);
 

@@ -8,6 +8,7 @@ import com.fu.achievement.service.AchievementService;
 import com.fu.achievement.service.LearningLevelService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,7 +22,8 @@ import java.util.UUID;
 public class LearningLevelServiceImpl implements LearningLevelService {
 
     private final UserStatsRepository userStatsRepository;
-    private final AchievementService achievementService;
+    private final ObjectProvider<AchievementService> achievementServiceProvider;
+
 
     @Override
     @Transactional(readOnly = true)
@@ -110,14 +112,19 @@ public class LearningLevelServiceImpl implements LearningLevelService {
 
             // Check for level-based badges (milestones at 10, 50, 100, etc.)
             try {
-                List<BadgeResponse> earnedBadges = 
-                    achievementService.checkAndAwardBadges(userId, BadgeType.LEARNING_LEVEL, newLevel);
-                
-                if (!earnedBadges.isEmpty()) {
-                    log.info("User {} earned {} level-based badges at level {}", userId, earnedBadges.size(), newLevel);
+                AchievementService achievementService = achievementServiceProvider.getIfAvailable();
+                if (achievementService != null) {
+                    List<BadgeResponse> earnedBadges = 
+                        achievementService.checkAndAwardBadges(userId, BadgeType.LEARNING_LEVEL, newLevel);
+                    
+                    if (!earnedBadges.isEmpty()) {
+                        log.info("User {} earned {} level-based badges at level {}", userId, earnedBadges.size(), newLevel);
+                    }
+                    
+                    return earnedBadges;
+                } else {
+                    log.warn("AchievementService not available for level up check");
                 }
-                
-                return earnedBadges;
             } catch (Exception e) {
                 log.error("Error checking level badges for user: {}", userId, e);
                 return Collections.emptyList();
@@ -166,11 +173,33 @@ public class LearningLevelServiceImpl implements LearningLevelService {
 
     @Override
     public int calculateExpForLevel(int level) {
-        // Inverse formula: exp = (level - 1)^2 * 100
-        // This is the total EXP needed to reach the given level
+        // Inverse formula for hybrid progression
+        // Must match calculateLevelFromExp() exactly
+        // - THRESHOLD_EXP = 500: Switch point from linear to root progression
+        // - INITIAL_DIVISOR = 40: Early levels progress quickly
+        // - LATE_DIVISOR = 18.5: Late levels require exponentially more EXP
+        // - LEVEL_AT_THRESHOLD = 13: Level when reaching threshold
+        
         if (level <= 1) {
             return 0;
         }
-        return (level - 1) * (level - 1) * 100;
+        
+        final int THRESHOLD_EXP = 500;
+        final int INITIAL_DIVISOR = 40;
+        final double LATE_DIVISOR = 18.5;
+        final int LEVEL_AT_THRESHOLD = 13;
+        
+        if (level <= LEVEL_AT_THRESHOLD) {
+            // Early phase: Inverse of linear formula
+            // Forward: level = (totalExp / 40) + 1
+            // Inverse: totalExp = (level - 1) * 40
+            return (level - 1) * INITIAL_DIVISOR;
+        } else {
+            // Late phase: Inverse of root formula
+            // Forward: level = 13 + floor(√((totalExp - 500) / 18.5))
+            // Inverse: totalExp = 500 + ((level - 13)² × 18.5)
+            int levelDiff = level - LEVEL_AT_THRESHOLD;
+            return THRESHOLD_EXP + (int) Math.round(levelDiff * levelDiff * LATE_DIVISOR);
+        }
     }
 }

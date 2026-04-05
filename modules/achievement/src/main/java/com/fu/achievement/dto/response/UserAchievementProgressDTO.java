@@ -1,5 +1,6 @@
 package com.fu.achievement.dto.response;
 
+import com.fu.achievement.enums.BadgeType;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -36,6 +37,7 @@ public class UserAchievementProgressDTO {
     public static class BadgeProgressItem {
         UUID badgeId;
         String badgeName;
+        BadgeType badgeType;
         Integer requirementValue;
         Integer currentValue;
         Boolean earned;

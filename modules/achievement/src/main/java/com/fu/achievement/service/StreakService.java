@@ -59,7 +59,21 @@ public interface StreakService {
 
     /**
      * Calculate what level a user should be at based on their total EXP
-     * Formula: level = floor(sqrt(totalExp / 100)) + 1
+     * 
+     * DEPRECATED: This method exists for backward compatibility only.
+     * New implementations should use LearningLevelService.calculateLevelFromExp() which uses
+     * a hybrid formula for better progression curve.
+     * 
+     * Old formula (kept for compatibility): level = floor(sqrt(totalExp / 100)) + 1
      */
     int calculateLevelFromExp(int totalExp);
+
+    /**
+     * Get current streak directly from streak_history records (source of truth).
+     * Used as fallback if UserStats.currentStreak appears stale or zero.
+     * 
+     * @param userId User ID
+     * @return Current streak count from most recent streak history record, or 0 if no records exist
+     */
+    int getCurrentStreakFromHistory(UUID userId);
 }

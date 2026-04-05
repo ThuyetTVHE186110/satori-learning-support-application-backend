@@ -170,29 +170,30 @@ public class StreakServiceImpl implements StreakService {
     }
 
     @Override
+    @Deprecated(since = "2.0", forRemoval = true)
     public int calculateLevelFromExp(int totalExp) {
-        // Formula: level = floor(sqrt(exp / 100)) + 1
-        // This creates exponential progression: 
-        // Level 1: 0 EXP
-        // Level 2: 100 EXP
-        // Level 3: 400 EXP
-        // Level 10: 8100 EXP
-        // Level 50: 240100 EXP
-        // Level 100: 990100 EXP
+        // DEPRECATED: Use LearningLevelService.calculateLevelFromExp() instead
+        // This old formula (quadratic) has been replaced with a hybrid formula
+        // in LearningLevelService for better progression curve
+        log.warn("StreakService.calculateLevelFromExp() is deprecated. Use LearningLevelService instead.");
+        
         if (totalExp <= 0) {
             return 1;
         }
         return (int) Math.floor(Math.sqrt(totalExp / 100.0)) + 1;
     }
 
-    /**
-     * Calculate EXP required to reach a specific level
-     * Formula: exp = (level - 1)^2 * 100
-     */
-    private int calculateExpForLevel(int level) {
-        if (level <= 1) {
+    @Override
+    @Transactional(readOnly = true)
+    public int getCurrentStreakFromHistory(UUID userId) {
+        Optional<StreakHistory> mostRecent = streakHistoryRepository.findMostRecentByUserId(userId);
+        
+        if (mostRecent.isEmpty()) {
             return 0;
         }
-        return (level - 1) * (level - 1) * 100;
+        
+        StreakHistory recentRecord = mostRecent.get();
+        Integer streakCount = recentRecord.getStreakCount();
+        return streakCount != null ? streakCount : 0;
     }
 }

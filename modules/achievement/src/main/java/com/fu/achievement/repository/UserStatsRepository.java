@@ -6,7 +6,6 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.Optional;
@@ -24,8 +23,7 @@ public interface UserStatsRepository extends JpaRepository<UserStats, UUID> {
     /**
      * Update current streak and related fields (atomic operation)
      */
-    @Modifying
-    @Transactional
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
             UPDATE UserStats us SET 
             us.currentStreak = :newStreak,
@@ -39,8 +37,7 @@ public interface UserStatsRepository extends JpaRepository<UserStats, UUID> {
     /**
      * Use a freeze token (decrease freeze count by 1)
      */
-    @Modifying
-    @Transactional
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
             UPDATE UserStats us SET 
             us.streakFreezeCount = GREATEST(0, us.streakFreezeCount - 1),
@@ -52,8 +49,7 @@ public interface UserStatsRepository extends JpaRepository<UserStats, UUID> {
     /**
      * Add EXP to user and update level
      */
-    @Modifying
-    @Transactional
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
             UPDATE UserStats us SET 
             us.totalExp = us.totalExp + :expAmount,
@@ -65,8 +61,7 @@ public interface UserStatsRepository extends JpaRepository<UserStats, UUID> {
     /**
      * Increment practice count (stored in user_stats or derived from daily_activity)
      */
-    @Modifying
-    @Transactional
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
             UPDATE UserStats us SET 
             us.updatedAt = CURRENT_TIMESTAMP
