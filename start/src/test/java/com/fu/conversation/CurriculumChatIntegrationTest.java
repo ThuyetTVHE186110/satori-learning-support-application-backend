@@ -183,11 +183,11 @@ class CurriculumChatIntegrationTest {
                 .userId(user.getId())
                 .sessionType("CURRICULUM_QA")
                 .status("ACTIVE")
+                .context("{\"courseId\":\"" + course.getId() + "\"}")
                 .messageCount(messageCount)
                 .userMessageCount(userMessageCount)
                 .hintsUsed(0)
                 .correctionsCount(0)
-                .context(context)
                 .build());
     }
 
@@ -224,6 +224,7 @@ class CurriculumChatIntegrationTest {
             assertThat(session).isPresent();
             assertThat(session.get().getUserId()).isEqualTo(learner.getId());
             assertThat(session.get().getStatus()).isEqualTo("ACTIVE");
+            assertThat(session.get().getSessionType()).isEqualTo("CURRICULUM_QA");
         }
     }
 
@@ -243,7 +244,8 @@ class CurriculumChatIntegrationTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true));
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.content").value("This is a deterministic AI mock response."));
 
             // Verify two-point assertion: Database persistence updated explicitly
             ChatSession updatedSession = chatSessionRepository.findById(session.getId()).orElseThrow();
@@ -286,7 +288,9 @@ class CurriculumChatIntegrationTest {
                     .param("size", "50"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.length()").value(2));
+                    .andExpect(jsonPath("$.data.length()").value(2))
+                    .andExpect(jsonPath("$.data[0].content").value("これは何ですか？"))
+                    .andExpect(jsonPath("$.data[1].content").value("これは日本語です。"));
         }
     }
 
@@ -427,7 +431,7 @@ class CurriculumChatIntegrationTest {
                     .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.answer").isNotEmpty());
+                    .andExpect(jsonPath("$.data.content").value("I am afraid I do not know this from the knowledge base."));
 
             List<ChatMessage> messages = chatMessageRepository.findBySessionIdOrderByCreatedAtAsc(session.getId(), PageRequest.of(0, 50)).getContent();
             assertThat(messages).hasSize(2);
@@ -455,11 +459,13 @@ class CurriculumChatIntegrationTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true));
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.content").value("Guidance response for out of scope."));
 
             List<ChatMessage> messages = chatMessageRepository.findBySessionIdOrderByCreatedAtAsc(session.getId(), PageRequest.of(0, 50)).getContent();
             assertThat(messages).hasSize(2);
             assertThat(messages.getFirst().getContent()).isEqualTo("Hôm nay trời đẹp quá");
+            assertThat(messages.get(1).getContent()).isEqualTo("Guidance response for out of scope.");
         }
     }
 
@@ -532,13 +538,13 @@ class CurriculumChatIntegrationTest {
         @Test
         @DisplayName("Should list sessions in descending order by updated_at")
         void tc_list_002_sessionsOrderedDescByUpdatedAt() throws Exception {
-            ChatSession session1 = createDefaultChatSession();
+            ChatSession session1 = createChatSession(learner, 1, 1, null);
             Thread.sleep(50);
 
-            ChatSession session2 = createDefaultChatSession();
+            ChatSession session2 = createChatSession(learner, 1, 1, null);
             Thread.sleep(50);
 
-            ChatSession session3 = createDefaultChatSession();
+            ChatSession session3 = createChatSession(learner, 1, 1, null);
 
             String responseBody = mockMvc.perform(get("/api/v1/learner/curriculum-chat/sessions")
                     .header("Authorization", "Bearer " + learnerToken)
@@ -553,7 +559,7 @@ class CurriculumChatIntegrationTest {
 
             List<UUID> sessionIds = objectMapper.readTree(responseBody)
                     .path("data").path("content")
-                    .findValues("id")
+                    .findValues("sessionId")
                     .stream()
                     .map(node -> UUID.fromString(node.asText()))
                     .collect(Collectors.toList());
