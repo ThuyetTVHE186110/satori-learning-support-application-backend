@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.common.ai.PromptUtils;
+import com.fu.curriculumimport.service.CurriculumStatsService;
 import com.fu.curriculumimport.service.embedding.ChatbotFilter;
 import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import com.fu.curriculumimport.service.embedding.RagContext;
@@ -88,15 +89,19 @@ public class RetrievalAdvisor implements BaseAdvisor {
     // ── Dependencies ───────────────────────────────────────────────────────
 
     private final EmbeddingService embeddingService;
+    private final CurriculumStatsService statsService;
     private final ChatRagProperties ragProperties;
     private final ChatClient analyzeClient;
     private final ObjectMapper objectMapper;
     private final PromptTemplateLoader promptLoader;
 
-    public RetrievalAdvisor(EmbeddingService embeddingService, ChatRagProperties ragProperties,
+    public RetrievalAdvisor(EmbeddingService embeddingService,
+                             CurriculumStatsService statsService,
+                             ChatRagProperties ragProperties,
                              OpenAiChatModel chatModel, ObjectMapper objectMapper,
                              PromptTemplateLoader promptLoader) {
         this.embeddingService = embeddingService;
+        this.statsService = statsService;
         this.ragProperties = ragProperties;
         this.analyzeClient = ChatClient.builder(chatModel).build();
         this.objectMapper = objectMapper;
@@ -304,7 +309,10 @@ public class RetrievalAdvisor implements BaseAdvisor {
 
     private ChatClientRequest handleCountIntent(ChatClientRequest request,
                                                  UUID courseId, UUID lessonId) {
-        EmbeddingService.ContentCount count = embeddingService.countContent(courseId, lessonId);
+        // Use CurriculumStatsService (entity join tables) — source of truth.
+        // EmbeddingService.countContent() counts rows in the vector store, which
+        // can under-count when metadata is missing or embeddings are not yet generated.
+        CurriculumStatsService.ContentCount count = statsService.countContent(courseId, lessonId);
 
         String scope = lessonId != null ? "bài học hiện tại" : "khóa học hiện tại";
         String countContext = "Phạm vi: " + scope

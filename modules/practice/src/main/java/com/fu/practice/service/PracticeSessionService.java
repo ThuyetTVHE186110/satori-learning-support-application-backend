@@ -362,9 +362,17 @@ public class PracticeSessionService {
             return;
         }
 
-        double scoreValue = session.getTotalItems() > 0
-                ? ((double) session.getCorrectItems() / session.getTotalItems()) * 100.0
-                : 0.0;
+        // Weighted average of per-item scores (0–100 each).
+        // More fair than binary correct/total: partial MATCHING credit and LLM partial
+        // scores for TRANSLATION/FILL_BLANK are properly reflected in the session score.
+        double scoreValue = 0.0;
+        if (session.getTotalItems() > 0) {
+            List<PracticeItem> items = itemRepository.findBySessionIdOrderByItemIndex(session.getId());
+            double sumScores = items.stream()
+                    .mapToInt(PracticeItem::getScore)
+                    .sum();
+            scoreValue = sumScores / session.getTotalItems();
+        }
 
         BigDecimal score = BigDecimal.valueOf(scoreValue).setScale(2, RoundingMode.HALF_UP);
         session.setScore(score);
@@ -400,7 +408,9 @@ public class PracticeSessionService {
         double scoreValue = session.getScore() != null ? session.getScore().doubleValue() : 0.0;
         try {
             List<PracticeItem> allItems = itemRepository.findBySessionIdOrderByItemIndex(sessionId);
-            String feedback = sessionFeedbackAgent.generateFeedback(sessionId, scoreValue, allItems);
+            String sessionType = session.getSessionType() != null
+                    ? session.getSessionType().name() : "MIXED_LESSON";
+            String feedback = sessionFeedbackAgent.generateFeedback(sessionId, scoreValue, allItems, sessionType);
             session.setAiFeedback(feedback);
             sessionRepository.save(session);
         } catch (Exception e) {
