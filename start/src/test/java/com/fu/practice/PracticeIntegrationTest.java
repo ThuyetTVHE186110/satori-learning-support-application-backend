@@ -214,10 +214,11 @@ class PracticeIntegrationTest {
         @Test
         @DisplayName("IT-02: Gửi request with TEACHER role -> 403")
         void it02_teacherRoleReturns403() throws Exception {
+            String validPayload = String.format("{\"lessonId\":\"%s\",\"sessionType\":\"MIXED_LESSON\",\"itemCount\":5}", lesson.getId());
             mockMvc.perform(post("/api/v1/learner/practice/sessions")
                     .header("Authorization", "Bearer " + teacherToken)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{}"))
+                    .content(validPayload))
                     .andExpect(status().isForbidden());
         }
     }
