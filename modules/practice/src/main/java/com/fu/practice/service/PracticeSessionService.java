@@ -592,10 +592,10 @@ public class PracticeSessionService {
             return buildMatchingItem(session, gen, index);
         }
 
-        // Shuffle SENTENCE_ORDER options so tokens are not in the correct order
+        // Shuffle options so the correct answer is never predictably at position 0
         List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.options();
-        if (resolvedType == PracticeItemType.SENTENCE_ORDER
-                && options != null && options.size() > 1) {
+        if (options != null && options.size() > 1
+                && resolvedType != PracticeItemType.TRUE_FALSE) {
             options = new ArrayList<>(options);
             Collections.shuffle(options);
         }
