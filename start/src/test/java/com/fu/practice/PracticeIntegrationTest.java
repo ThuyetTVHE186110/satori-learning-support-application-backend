@@ -194,8 +194,7 @@ class PracticeIntegrationTest {
         EvaluationResult evalResult = new EvaluationResult(true, 100, "Correct", null);
         when(answerEvaluatorAgent.evaluate(any(), any())).thenReturn(evalResult);
 
-        // Feedback behavior
-        doNothing().when(sessionFeedbackAgent).generateSessionFeedback(any(), any(), any(), any(), any(), any(), any());
+        when(sessionFeedbackAgent.generateFeedback(any(), anyDouble(), anyList())).thenReturn("{}");
     }
 
     // ── SECURITY ─────────────────────────────────────────────────────────
@@ -275,7 +274,7 @@ class PracticeIntegrationTest {
         private StartPracticeRequest defaultRequest() {
             StartPracticeRequest req = new StartPracticeRequest();
             req.setLessonId(lesson.getId());
-            req.setPracticeType(PracticeSessionType.MIXED_LESSON);
+            req.setSessionType(PracticeSessionType.MIXED_LESSON);
             req.setItemCount(5);
             return req;
         }
@@ -305,9 +304,8 @@ class PracticeIntegrationTest {
             assertThat(session.get().getStatus()).isEqualTo(PracticeStatus.IN_PROGRESS);
             assertThat(session.get().getTotalItems()).isEqualTo(2);
 
-            long itemsCount = practiceItemRepository.countBySessionId(sessionId);
-            assertThat(itemsCount).isEqualTo(10); // Check DB directly, Wait! The generator returned 2, total items=2.
-            assertThat(practiceItemRepository.countBySessionId(sessionId)).isEqualTo(2);
+            long itemsCount = practiceItemRepository.findBySessionIdOrderByItemIndex(sessionId).size();
+            assertThat(itemsCount).isEqualTo(2); // Check DB directly, generator returned 2, total items=2.
         }
 
         @Test
@@ -431,12 +429,13 @@ class PracticeIntegrationTest {
                 practiceItemRepository.save(PracticeItem.builder()
                         .sessionId(session.getId())
                         .itemType(PracticeItemType.MULTIPLE_CHOICE)
-                        .sequenceNumber(i + 1)
+                        .itemIndex(i)
                         .question("Question " + i)
-                        .optionsJson("[\"A\", \"B\"]")
+                        .options("[\"A\", \"B\"]")
                         .correctAnswer("A")
-                        .status(i < completedCount ? PracticeStatus.COMPLETED : PracticeStatus.IN_PROGRESS)
+                        .userAnswer(i < completedCount ? "A" : null)
                         .isCorrect(i < completedCount)
+                        .score(i < completedCount ? 100 : 0)
                         .build());
             }
             return session;
@@ -448,13 +447,13 @@ class PracticeIntegrationTest {
             PracticeSession session = createTestSession(learner, PracticeStatus.IN_PROGRESS, 2, 1);
             // Lay cau hoi cuoi chua tra loi
             PracticeItem itemToAnswer = practiceItemRepository.findAll()
-                .stream().filter(i -> i.getStatus() == PracticeStatus.IN_PROGRESS).findFirst().orElseThrow();
+                .stream().filter(i -> i.getUserAnswer() == null).findFirst().orElseThrow();
 
             // Mock Evaluation OK
             when(answerEvaluatorAgent.evaluate(any(), any())).thenReturn(new EvaluationResult(true, 100, "Good job!", null));
 
             SubmitAnswerRequest request = new SubmitAnswerRequest();
-            request.setAnswer("A");
+            request.setUserAnswer("A");
 
             mockMvc.perform(post("/api/v1/learner/practice/sessions/{sessionId}/items/{itemId}/answer", session.getId(), itemToAnswer.getId())
                     .header("Authorization", "Bearer " + learnerToken)
@@ -472,7 +471,6 @@ class PracticeIntegrationTest {
             assertThat(dbSession.getCompletedItems()).isEqualTo(2);
 
             PracticeItem dbItem = practiceItemRepository.findById(itemToAnswer.getId()).orElseThrow();
-            assertThat(dbItem.getStatus()).isEqualTo(PracticeStatus.COMPLETED);
             assertThat(dbItem.getIsCorrect()).isTrue();
             assertThat(dbItem.getUserAnswer()).isEqualTo("A");
         }
@@ -481,12 +479,12 @@ class PracticeIntegrationTest {
         @DisplayName("IT-14: Learner dừng ngang (partial submit), hệ thống lưu điểm một nửa an toàn")
         void it14_partialSubmitTracksProperly() throws Exception {
             PracticeSession session = createTestSession(learner, PracticeStatus.IN_PROGRESS, 5, 0);
-            PracticeItem itemToAnswer = practiceItemRepository.findBySessionIdOrderBySequenceNumberAsc(session.getId()).get(0);
+            PracticeItem itemToAnswer = practiceItemRepository.findBySessionIdOrderByItemIndex(session.getId()).get(0);
 
             when(answerEvaluatorAgent.evaluate(any(), any())).thenReturn(new EvaluationResult(false, 0, "Wrong", "A"));
 
             SubmitAnswerRequest request = new SubmitAnswerRequest();
-            request.setAnswer("B");
+            request.setUserAnswer("B");
 
             mockMvc.perform(post("/api/v1/learner/practice/sessions/{sessionId}/items/{itemId}/answer", session.getId(), itemToAnswer.getId())
                     .header("Authorization", "Bearer " + learnerToken)
@@ -509,7 +507,7 @@ class PracticeIntegrationTest {
             when(answerEvaluatorAgent.evaluate(any(), any())).thenThrow(new RuntimeException("OpenAI Timeout"));
 
             SubmitAnswerRequest request = new SubmitAnswerRequest();
-            request.setAnswer("A");
+            request.setUserAnswer("A");
 
             mockMvc.perform(post("/api/v1/learner/practice/sessions/{sessionId}/items/{itemId}/answer", session.getId(), item.getId())
                     .header("Authorization", "Bearer " + learnerToken)
@@ -527,7 +525,7 @@ class PracticeIntegrationTest {
             PracticeItem item = practiceItemRepository.findAll().get(0);
 
             SubmitAnswerRequest request = new SubmitAnswerRequest();
-            request.setAnswer("A");
+            request.setUserAnswer("A");
 
             mockMvc.perform(post("/api/v1/learner/practice/sessions/{sessionId}/items/{itemId}/answer", UUID.randomUUID(), item.getId())
                     .header("Authorization", "Bearer " + learnerToken)
@@ -540,12 +538,12 @@ class PracticeIntegrationTest {
         @DisplayName("IT-16B: Submit ID câu hỏi thuộc về session khác -> Trả lỗi toàn vẹn")
         void it16b_submitItemFromDifferentSessionReturnsError() throws Exception {
             PracticeSession session1 = createTestSession(learner, PracticeStatus.IN_PROGRESS, 1, 0);
-            PracticeItem itemSession1 = practiceItemRepository.findBySessionIdOrderBySequenceNumberAsc(session1.getId()).get(0);
+            PracticeItem itemSession1 = practiceItemRepository.findBySessionIdOrderByItemIndex(session1.getId()).get(0);
 
             PracticeSession session2 = createTestSession(learner, PracticeStatus.IN_PROGRESS, 1, 0);
 
             SubmitAnswerRequest request = new SubmitAnswerRequest();
-            request.setAnswer("A");
+            request.setUserAnswer("A");
 
             // Guing item cua Session 1 vao URL api cua Session 2
             mockMvc.perform(post("/api/v1/learner/practice/sessions/{sessionId}/items/{itemId}/answer", session2.getId(), itemSession1.getId())
@@ -562,7 +560,7 @@ class PracticeIntegrationTest {
             PracticeItem item = practiceItemRepository.findAll().get(0);
 
             SubmitAnswerRequest request = new SubmitAnswerRequest();
-            request.setAnswer("A");
+            request.setUserAnswer("A");
 
             mockMvc.perform(post("/api/v1/learner/practice/sessions/{sessionId}/items/{itemId}/answer", session.getId(), item.getId())
                     .header("Authorization", "Bearer " + learnerToken)
@@ -578,7 +576,7 @@ class PracticeIntegrationTest {
             PracticeItem item = practiceItemRepository.findAll().get(0);
 
             SubmitAnswerRequest request = new SubmitAnswerRequest();
-            request.setAnswer("A");
+            request.setUserAnswer("A");
 
             mockMvc.perform(post("/api/v1/learner/practice/sessions/{sessionId}/items/{itemId}/answer", session.getId(), item.getId())
                     .header("Authorization", "Bearer " + learnerToken) // Requesting as 'learner'
