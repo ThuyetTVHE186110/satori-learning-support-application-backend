@@ -42,4 +42,9 @@ public interface PracticeSessionRepository extends JpaRepository<PracticeSession
      * Kiểm tra session có thuộc user không.
      */
     boolean existsByIdAndUserId(UUID id, UUID userId);
+    
+    /**
+     * Count completed practice sessions for a user (for achievement tracking)
+     */
+    long countByUserIdAndStatus(UUID userId, PracticeStatus status);
 }

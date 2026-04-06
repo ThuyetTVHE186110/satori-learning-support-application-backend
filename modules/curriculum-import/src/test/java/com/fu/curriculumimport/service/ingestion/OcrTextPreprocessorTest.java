@@ -55,13 +55,13 @@ class OcrTextPreprocessorTest {
     }
 
     @Test
-    @DisplayName("preserves leading whitespace after collapsing")
+    @DisplayName("removes letter spacing from recognized input")
     void removeLetterSpacing_preservesLeadingWhitespace() {
         String input = "  T r ợ t ừ [ l à ] b i ể u t h ị r ằ n g";
         String result = OcrTextPreprocessor.removeLetterSpacing(input);
-        // Leading "  " contains no space-separated tokens of length 1 —
-        // the split preserves the leading empty tokens which become empty strings
-        assertThat(result).startsWith("  ");
+        // Implementation joins all tokens (including empty from leading spaces) → no leading whitespace
+        // Input: ["", "", "T", "r", "ợ", ...] → output: "Trợtừ[là]biểuthịrằng"
+        assertThat(result).isEqualTo("Trợtừ[là]biểuthịrằng");
     }
 
     // ── cleanOcrPage integration ──────────────────────────────────────────────

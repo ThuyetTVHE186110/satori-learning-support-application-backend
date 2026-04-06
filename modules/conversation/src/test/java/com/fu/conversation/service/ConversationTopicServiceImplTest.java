@@ -223,9 +223,10 @@ class ConversationTopicServiceImplTest {
         @DisplayName("Should throw ResourceNotFoundException for soft-deleted topic")
         void shouldThrowWhenTopicSoftDeleted() {
             UpdateTopicRequest request = UpdateTopicRequest.builder().title("Valid").build();
-            when(topicRepository.findById(topicId)).thenReturn(Optional.of(deletedTopic));
+            UUID deletedTopicId = deletedTopic.getId();
+            when(topicRepository.findById(deletedTopicId)).thenReturn(Optional.of(deletedTopic));
 
-            assertThatThrownBy(() -> topicService.updateTopic(deletedTopic.getId(), request, managerId))
+            assertThatThrownBy(() -> topicService.updateTopic(deletedTopicId, request, managerId))
                     .isInstanceOf(ResourceNotFoundException.class);
         }
     }

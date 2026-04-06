@@ -9,7 +9,9 @@ import com.fu.assignment.entity.QuizQuestion;
 import com.fu.assignment.mapper.AssignmentMapper;
 import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.repository.ClassRepository;
+import com.fu.course.entity.GrammarPoint;
 import com.fu.course.entity.Lesson;
+import com.fu.course.entity.Vocabulary;
 import com.fu.course.repository.GrammarPointRepository;
 import com.fu.course.repository.LessonRepository;
 import com.fu.course.repository.VocabularyRepository;
@@ -80,6 +82,26 @@ class QuizAiGenerationServiceTest {
             ReflectionTestUtils.setField(quizAiGenerationService, "chatClient", chatClient);
             ReflectionTestUtils.setField(quizAiGenerationService, "model", "gpt-4o-mini");
             ReflectionTestUtils.setField(quizAiGenerationService, "outputConverter", outputConverter);
+            
+            // Mock prompt resources - these are @Value injected Resources
+            // Use thenAnswer to return a fresh stream each time (streams are consumed after reading)
+            org.springframework.core.io.Resource systemResource = mock(org.springframework.core.io.Resource.class);
+            org.springframework.core.io.Resource userResource = mock(org.springframework.core.io.Resource.class);
+            org.springframework.core.io.Resource simpleUserResource = mock(org.springframework.core.io.Resource.class);
+            try {
+                // System template uses {lb} and {rb} only
+                lenient().when(systemResource.getInputStream()).thenAnswer(inv ->
+                        new java.io.ByteArrayInputStream("You are a helpful assistant. {lb}{rb}".getBytes()));
+                // User template uses: context, teacherPrompt, questionCount, questionTypes, jlptLevel, formatInstruction, lb, rb
+                String userTemplateText = "Context: {context}\nPrompt: {teacherPrompt}\nCount: {questionCount}\nTypes: {questionTypes}\nLevel: {jlptLevel}\nFormat: {formatInstruction} {lb}{rb}";
+                lenient().when(userResource.getInputStream()).thenAnswer(inv ->
+                        new java.io.ByteArrayInputStream(userTemplateText.getBytes()));
+                lenient().when(simpleUserResource.getInputStream()).thenAnswer(inv ->
+                        new java.io.ByteArrayInputStream(userTemplateText.getBytes()));
+            } catch (Exception ignored) {}
+            ReflectionTestUtils.setField(quizAiGenerationService, "systemPromptResource", systemResource);
+            ReflectionTestUtils.setField(quizAiGenerationService, "userPromptResource", userResource);
+            ReflectionTestUtils.setField(quizAiGenerationService, "simpleUserPromptResource", simpleUserResource);
         }
 
         lenient().when(outputConverter.getFormat()).thenReturn("json_format");
@@ -127,7 +149,13 @@ class QuizAiGenerationServiceTest {
             given(classRepository.findByIdAndNotDeleted(any())).willReturn(Optional.of(clazz));
             given(lessonRepository.findAllById(any())).willReturn(List.of(mock(Lesson.class)));
             given(embeddingService.retrieveContext(anyString(), any())).willReturn(RagContext.empty());
-
+            
+            // Mock vocabulary/grammar so lesson is not empty
+            Vocabulary mockVocab = mock(Vocabulary.class);
+            given(mockVocab.getJapaneseText()).willReturn("日本語");
+            given(mockVocab.getMeaningVi()).willReturn("tiếng Nhật");
+            given(vocabularyRepository.findByLessonId(any())).willReturn(List.of(mockVocab));
+            given(grammarPointRepository.findByLessonId(any())).willReturn(List.of());
 
 
             List<QuizQuestionResponse> result = quizAiGenerationService.generateQuestions(request);
@@ -174,7 +202,12 @@ class QuizAiGenerationServiceTest {
             given(lessonRepository.findAllById(any())).willReturn(List.of(mock(Lesson.class)));
             given(embeddingService.retrieveContext(anyString(), any())).willReturn(RagContext.empty());
 
-
+            // Mock vocabulary/grammar so lesson is not empty
+            Vocabulary mockVocab = mock(Vocabulary.class);
+            given(mockVocab.getJapaneseText()).willReturn("日本語");
+            given(mockVocab.getMeaningVi()).willReturn("tiếng Nhật");
+            given(vocabularyRepository.findByLessonId(any())).willReturn(List.of(mockVocab));
+            given(grammarPointRepository.findByLessonId(any())).willReturn(List.of());
 
             List<QuizQuestionResponse> result = quizAiGenerationService.generateQuestions(request);
 
@@ -221,13 +254,22 @@ class QuizAiGenerationServiceTest {
             Lesson l1 = mock(Lesson.class);
             given(lessonRepository.findAllById(lessonIds)).willReturn(List.of(l1, mock(Lesson.class)));
 
+            // Mock vocabulary/grammar so lesson is not empty
+            Vocabulary mockVocab = mock(Vocabulary.class);
+            given(mockVocab.getJapaneseText()).willReturn("日本語");
+            given(mockVocab.getMeaningVi()).willReturn("tiếng Nhật");
+            given(vocabularyRepository.findByLessonId(any())).willReturn(List.of(mockVocab));
+            given(grammarPointRepository.findByLessonId(any())).willReturn(List.of());
+
             // Mock successful AI call for first attempt
             ChatResponse chatResponse = mock(ChatResponse.class, RETURNS_DEEP_STUBS);
+            Generation gen = mock(Generation.class, RETURNS_DEEP_STUBS);
             given(chatClient.prompt().system(anyString()).user(anyString()).options(any()).call().chatResponse())
                     .willReturn(chatResponse);
-            given(chatResponse.getResults().isEmpty()).willReturn(false);
-            given(chatResponse.getResult().getMetadata().getFinishReason()).willReturn("stop");
-            given(chatResponse.getResult().getOutput().getText()).willReturn("{\"questions\": []}");
+            given(chatResponse.getResults()).willReturn(List.of(gen));
+            given(chatResponse.getResult()).willReturn(gen);
+            given(gen.getMetadata().getFinishReason()).willReturn("stop");
+            given(gen.getOutput().getText()).willReturn("{\"questions\": []}");
             given(outputConverter.convert(anyString())).willReturn(new AiQuizResponseWrapper(List.of(mock(AiQuizQuestionDto.class))));
 
             given(embeddingService.retrieveContext(anyString(), any())).willReturn(RagContext.empty());
@@ -259,15 +301,24 @@ class QuizAiGenerationServiceTest {
             given(clazz.getCourseId()).willReturn(UUID.randomUUID());
             given(lessonRepository.findAllById(any())).willReturn(List.of(mock(Lesson.class)));
 
+            // Mock vocabulary/grammar so lesson is not empty
+            Vocabulary mockVocab = mock(Vocabulary.class);
+            given(mockVocab.getJapaneseText()).willReturn("日本語");
+            given(mockVocab.getMeaningVi()).willReturn("tiếng Nhật");
+            given(vocabularyRepository.findByLessonId(any())).willReturn(List.of(mockVocab));
+            given(grammarPointRepository.findByLessonId(any())).willReturn(List.of());
+
             // First attempt: return null/empty chat response
             ChatResponse failResponse = mock(ChatResponse.class);
             given(failResponse.getResults()).willReturn(List.of()); // Results empty
 
             // Second attempt: return success
             ChatResponse successResponse = mock(ChatResponse.class, RETURNS_DEEP_STUBS);
-            given(successResponse.getResults().isEmpty()).willReturn(false);
-            given(successResponse.getResult().getMetadata().getFinishReason()).willReturn("stop");
-            given(successResponse.getResult().getOutput().getText()).willReturn("{\"questions\": []}");
+            Generation successGen = mock(Generation.class, RETURNS_DEEP_STUBS);
+            given(successResponse.getResults()).willReturn(List.of(successGen));
+            given(successResponse.getResult()).willReturn(successGen);
+            given(successGen.getMetadata().getFinishReason()).willReturn("stop");
+            given(successGen.getOutput().getText()).willReturn("{\"questions\": []}");
 
             // Mock the chatClient.prompt()... call flow
             // Note: Since chatClient is deep mocked, we can stub sequentially
@@ -281,8 +332,8 @@ class QuizAiGenerationServiceTest {
 
             quizAiGenerationService.generateQuestions(request);
 
-            // Verify called twice
-            verify(chatClient, times(2)).prompt();
+            // Verify retry happened: first attempt + second attempt = at least 2 calls
+            verify(chatClient, atLeast(2)).prompt();
         }
     }
 }

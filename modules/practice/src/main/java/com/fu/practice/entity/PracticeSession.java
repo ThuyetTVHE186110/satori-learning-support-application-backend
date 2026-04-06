@@ -68,6 +68,14 @@ public class PracticeSession extends BaseEntity {
     private BigDecimal score = BigDecimal.ZERO;
 
     /**
+     * Tổng cộng điểm của từng item (0–100 mỗi item), cộng dồn sau mỗi lần submitAnswer.
+     * Dùng để tính final score mà không cần re-read toàn bộ items khi finishSession().
+     */
+    @Column(name = "running_score_sum", nullable = false)
+    @Builder.Default
+    private int runningScoreSum = 0;
+
+    /**
      * Context JSON: thông tin bài học, JLPT level, v.v.
      */
     @Column(name = "context", columnDefinition = "jsonb")

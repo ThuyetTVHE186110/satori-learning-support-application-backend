@@ -3,7 +3,6 @@ package com.fu.practice.controller;
 import com.fu.common.response.ApiResponse;
 import com.fu.practice.dto.request.StartPracticeRequest;
 import com.fu.practice.dto.request.SubmitAnswerRequest;
-import com.fu.practice.dto.request.VerifyPairRequest;
 import com.fu.practice.dto.response.*;
 import com.fu.practice.service.PracticeSessionService;
 import jakarta.validation.Valid;
@@ -69,31 +68,6 @@ public class PracticeController {
         }
 
         return ResponseEntity.ok(ApiResponse.success("Đã nhận câu trả lời.", response));
-    }
-
-    /**
-     * Kiểm tra ngay lập tức một cặp MATCHING — không thay đổi trạng thái DB.
-     *
-     * UI gọi mỗi khi learner kéo nối một cặp.
-     * Khi response trả về {@code allPairsMatched = true}, UI gọi tiếp
-     * {@code submitAnswer} với toàn bộ mapping để hoàn thành item.
-     *
-     * POST /api/v1/learner/practice/sessions/{sessionId}/items/{itemId}/verify-pair
-     *
-     * @param matchedSoFar chuỗi "leftId:rightId,..." gồm tất cả cặp đúng UI đã track
-     *                     (không tính cặp hiện tại — server sẽ tự thêm vào nếu đúng)
-     */
-    @PostMapping("/sessions/{sessionId}/items/{itemId}/verify-pair")
-    public ResponseEntity<ApiResponse<VerifyPairResponse>> verifyPair(
-            @AuthenticationPrincipal(expression = "id") UUID userId,
-            @PathVariable UUID sessionId,
-            @PathVariable UUID itemId,
-            @RequestParam(required = false, defaultValue = "") String matchedSoFar,
-            @Valid @RequestBody VerifyPairRequest request) {
-
-        VerifyPairResponse response = practiceSessionService.verifyMatchingPair(
-                sessionId, itemId, userId, request, matchedSoFar);
-        return ResponseEntity.ok(ApiResponse.success("Kết quả kiểm tra cặp.", response));
     }
 
     /**

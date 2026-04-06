@@ -95,4 +95,7 @@ public interface CourseRepository extends JpaRepository<Course, UUID>, JpaSpecif
      * Count courses by JLPT level
      */
     long countByJlptLevelAndDeletedAtIsNull(JlptLevel jlptLevel);
+
+
+
 }
