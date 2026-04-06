@@ -65,6 +65,7 @@ public class PracticeSessionService {
     private final AchievementService achievementService;
     private final LearningLevelService learningLevelService;
     private final StreakService streakService;
+    private final ApplicationEventPublisher eventPublisher;
 
     // ── Start Session ─────────────────────────────────────────────────────
 
