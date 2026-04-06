@@ -69,7 +69,7 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
             "AND (:#{#status == null} = true OR u.status = :status)")
     Page<User> searchUsers(
             @Param("keyword") String keyword,
-            @Param("role") UserRole role,
+            @Param("role" ) UserRole role,
             @Param("status") UserStatus status,
             Pageable pageable
     );
@@ -219,7 +219,7 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
     /**
      * Find daily new user registration trend for admin dashboard
      */
-    @Query("SELECT FUNCTION('DATE', u.createdAt) as date, COUNT(u) FROM User u WHERE u.createdAt >= :startDate AND u.createdAt <= :endDate AND u.deletedAt IS NULL GROUP BY FUNCTION('DATE', u.createdAt) ORDER BY date DESC")
+    @Query("SELECT FUNCTION('DATE', u.createdAt) as date, COUNT(u) FROM User u WHERE FUNCTION('DATE', u.createdAt) >= :startDate AND FUNCTION('DATE', u.createdAt) <= :endDate AND u.deletedAt IS NULL GROUP BY FUNCTION('DATE', u.createdAt) ORDER BY FUNCTION('DATE', u.createdAt) DESC")
     List<Object[]> findNewUserTrendByDateRange(@Param("startDate") java.time.LocalDate startDate, @Param("endDate") java.time.LocalDate endDate);
 
     /**
@@ -234,27 +234,22 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
     @Query("SELECT COUNT(u) FROM User u WHERE u.failedLoginAttempts > 0 AND u.lockedUntil > CURRENT_TIMESTAMP AND u.deletedAt IS NULL")
     long countLockedAccounts();
 
-    /**
-     * Count suspended accounts
-     */
-    @Query("SELECT COUNT(u) FROM User u WHERE u.status = 'SUSPENDED' AND u.deletedAt IS NULL")
-    long countSuspendedAccounts();
 
     /**
      * Daily failed login trend
      */
-    @Query("SELECT FUNCTION('DATE', u.updatedAt) as date, COUNT(u) FROM User u WHERE u.failedLoginAttempts > 0 AND u.updatedAt >= :startDate AND u.updatedAt <= :endDate AND u.deletedAt IS NULL GROUP BY FUNCTION('DATE', u.updatedAt) ORDER BY date DESC")
+    @Query("SELECT FUNCTION('DATE', u.updatedAt) as date, COUNT(u) FROM User u WHERE u.failedLoginAttempts > 0 AND FUNCTION('DATE', u.updatedAt) >= :startDate AND FUNCTION('DATE', u.updatedAt) <= :endDate AND u.deletedAt IS NULL GROUP BY FUNCTION('DATE', u.updatedAt) ORDER BY FUNCTION('DATE', u.updatedAt) DESC")
     List<Object[]> findFailedLoginTrendByDateRange(@Param("startDate") java.time.LocalDate startDate, @Param("endDate") java.time.LocalDate endDate);
 
     /**
      * Count users active (last login) in a date range
      */
-    @Query("SELECT COUNT(u) FROM User u WHERE u.lastLoginAt >= :startDate AND u.lastLoginAt <= :endDate AND u.deletedAt IS NULL")
-    long countActiveUsersByDateRange(@Param("startDate") java.time.LocalDate startDate, @Param("endDate") java.time.LocalDate endDate);
+    @Query("SELECT COUNT(u) FROM User u WHERE u.lastLoginAt >= :startDate AND u.lastLoginAt < :endDate AND u.deletedAt IS NULL")
+    long countActiveUsersByDateRange(@Param("startDate") java.time.LocalDateTime startDate, @Param("endDate") java.time.LocalDateTime endDate);
 
     /**
      * Daily active user trend
      */
-    @Query("SELECT FUNCTION('DATE', u.lastLoginAt) as date, COUNT(u) FROM User u WHERE u.lastLoginAt >= :startDate AND u.lastLoginAt <= :endDate AND u.deletedAt IS NULL GROUP BY FUNCTION('DATE', u.lastLoginAt) ORDER BY date DESC")
+    @Query("SELECT FUNCTION('DATE', u.lastLoginAt) as date, COUNT(u) FROM User u WHERE FUNCTION('DATE', u.lastLoginAt) >= :startDate AND FUNCTION('DATE', u.lastLoginAt) <= :endDate AND u.deletedAt IS NULL GROUP BY FUNCTION('DATE', u.lastLoginAt) ORDER BY FUNCTION('DATE', u.lastLoginAt) DESC")
     List<Object[]> findActiveUsersTrendByDateRange(@Param("startDate") java.time.LocalDate startDate, @Param("endDate") java.time.LocalDate endDate);
 }

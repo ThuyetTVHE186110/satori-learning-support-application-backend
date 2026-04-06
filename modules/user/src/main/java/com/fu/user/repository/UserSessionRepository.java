@@ -91,19 +91,19 @@ public interface UserSessionRepository extends JpaRepository<UserSession, UUID> 
     /**
      * Group active sessions by device type (for admin dashboard)
      */
-    @Query(value = "SELECT json_extract(device_info, '$.device_type') as deviceType, COUNT(*) FROM user_management.user_sessions WHERE revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP GROUP BY json_extract(device_info, '$.device_type')", nativeQuery = true)
+    @Query(value = "SELECT device_info->>'device_type' as deviceType, COUNT(*) FROM user_management.user_sessions WHERE revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP GROUP BY device_info->>'device_type'", nativeQuery = true)
     List<Object[]> findActiveSessionsGroupByDeviceType();
 
     /**
      * Group active sessions by operating system (for admin dashboard)
      */
-    @Query(value = "SELECT json_extract(device_info, '$.os') as os, COUNT(*) FROM user_management.user_sessions WHERE revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP GROUP BY json_extract(device_info, '$.os')", nativeQuery = true)
+    @Query(value = "SELECT device_info->>'os' as os, COUNT(*) FROM user_management.user_sessions WHERE revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP GROUP BY device_info->>'os'", nativeQuery = true)
     List<Object[]> findActiveSessionsGroupByOs();
 
     /**
      * Group active sessions by browser (for admin dashboard)
      */
-    @Query(value = "SELECT json_extract(device_info, '$.browser') as browser, COUNT(*) FROM user_management.user_sessions WHERE revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP GROUP BY json_extract(device_info, '$.browser')", nativeQuery = true)
+    @Query(value = "SELECT device_info->>'browser' as browser, COUNT(*) FROM user_management.user_sessions WHERE revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP GROUP BY device_info->>'browser'", nativeQuery = true)
     List<Object[]> findActiveSessionsGroupByBrowser();
 
     /**

@@ -126,9 +126,22 @@ public class AdminUserServiceImpl implements AdminUserService {
     private Map<LocalDate, Long> convertTrendData(List<Object[]> trendData) {
         return trendData.stream()
                 .collect(Collectors.toMap(
-                        row -> (LocalDate) row[0],
+                        row -> toLocalDate(row[0]),
                         row -> row[1] != null ? ((Number) row[1]).longValue() : 0L
                 ));
+    }
+
+    private LocalDate toLocalDate(Object value) {
+        if (value instanceof LocalDate localDate) {
+            return localDate;
+        }
+        if (value instanceof java.sql.Date sqlDate) {
+            return sqlDate.toLocalDate();
+        }
+        if (value instanceof LocalDateTime localDateTime) {
+            return localDateTime.toLocalDate();
+        }
+        throw new IllegalArgumentException("Unsupported trend date type: " + (value == null ? "null" : value.getClass().getName()));
     }
 
     private AdminUserStatsDTO.SessionMetrics getSessionMetrics() {
@@ -164,7 +177,7 @@ public class AdminUserServiceImpl implements AdminUserService {
 
         long failedLogins24h = userRepository.countFailedLoginsInPeriod(since24h);
         long lockedAccounts = userRepository.countLockedAccounts();
-        long suspendedAccounts = userRepository.countSuspendedAccounts();
+        long suspendedAccounts = userRepository.countByStatus(UserStatus.SUSPENDED);
 
         Map<LocalDate, Long> failedLoginTrend = convertTrendData(
                 userRepository.findFailedLoginTrendByDateRange(sevenDaysAgo, today)
@@ -183,9 +196,18 @@ public class AdminUserServiceImpl implements AdminUserService {
         LocalDate startOfWeek = today.minusDays(today.getDayOfWeek().getValue() - 1);
         LocalDate startOfMonth = today.withDayOfMonth(1);
 
-        long activeToday = userRepository.countActiveUsersByDateRange(today, today);
-        long activeThisWeek = userRepository.countActiveUsersByDateRange(startOfWeek, today);
-        long activeThisMonth = userRepository.countActiveUsersByDateRange(startOfMonth, today);
+        long activeToday = userRepository.countActiveUsersByDateRange(
+                LocalDateTime.of(today, LocalTime.MIDNIGHT),
+                LocalDateTime.of(today.plusDays(1), LocalTime.MIDNIGHT)
+        );
+        long activeThisWeek = userRepository.countActiveUsersByDateRange(
+                LocalDateTime.of(startOfWeek, LocalTime.MIDNIGHT),
+                LocalDateTime.of(today.plusDays(1), LocalTime.MIDNIGHT)
+        );
+        long activeThisMonth = userRepository.countActiveUsersByDateRange(
+                LocalDateTime.of(startOfMonth, LocalTime.MIDNIGHT),
+                LocalDateTime.of(today.plusDays(1), LocalTime.MIDNIGHT)
+        );
 
         return AdminUserStatsDTO.ActivityMetrics.builder()
                 .usersActiveToday(activeToday)
