@@ -21,6 +21,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
 /**
@@ -58,8 +59,8 @@ class ContentClassifierAgentTest {
 
     @BeforeEach
     void setUp() {
-        given(promptLoader.load(anyString())).willReturn("system prompt");
-        given(promptLoader.render(anyString(), anyMap())).willReturn("user prompt");
+        lenient().when(promptLoader.load(anyString())).thenReturn("system prompt");
+        lenient().when(promptLoader.render(anyString(), anyMap())).thenReturn("user prompt");
         agent = new ContentClassifierAgent(chatModel, objectMapper, promptLoader);
     }
 

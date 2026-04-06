@@ -106,9 +106,11 @@ class ImportOrchestratorTest {
     }
 
     private DocumentChunk docChunk(int index) {
+        // Content must have >= 60 meaningful (non-whitespace, non-punctuation) chars
+        // to pass OcrTextPreprocessor.isTrivial() check and trigger agent processing
         return DocumentChunk.builder()
                 .chunkIndex(index)
-                .content("Japanese lesson content 食べる N5 vocabulary")
+                .content("Japanese lesson content 食べる 飲む 勉強する 読む 書く vocabulary N5 grammar particles は が を に で と へ from まで")
                 .pageStart(1).pageEnd(3)
                 .chunkType("TEXT")
                 .estimatedTokenCount(100)
@@ -232,7 +234,7 @@ class ImportOrchestratorTest {
             orchestrator.processImportAsync(IMPORT_ID, file);
 
             // Assert
-            assertThat(entity.getStatus()).isEqualTo(ImportStatus.COMPLETED);
+            assertThat(entity.getStatus()).isEqualTo(ImportStatus.PENDING_APPROVAL);
             then(persistenceService).should(atLeastOnce()).updateImportProgress(entity);
             then(persistenceService).should().persistExtractedContent(eq(entity), any());
         }
@@ -292,7 +294,7 @@ class ImportOrchestratorTest {
             orchestrator.processImportAsync(IMPORT_ID, file);
 
             // Should complete without consulting courseRepository
-            assertThat(entity.getStatus()).isEqualTo(ImportStatus.COMPLETED);
+            assertThat(entity.getStatus()).isEqualTo(ImportStatus.PENDING_APPROVAL);
             then(courseRepository).should(never()).findById(any());
         }
 
@@ -367,7 +369,7 @@ class ImportOrchestratorTest {
 
             then(vocabularyAgent).should(never()).extractVocabulary(any(), any(), any());
             then(grammarAgent).should(never()).extractGrammar(any(), any(), any());
-            assertThat(entity.getStatus()).isEqualTo(ImportStatus.COMPLETED);
+            assertThat(entity.getStatus()).isEqualTo(ImportStatus.PENDING_APPROVAL);
         }
 
         @Test
@@ -382,7 +384,7 @@ class ImportOrchestratorTest {
 
             orchestrator.processImportAsync(IMPORT_ID, mock(MultipartFile.class));
 
-            assertThat(entity.getStatus()).isEqualTo(ImportStatus.COMPLETED);
+            assertThat(entity.getStatus()).isEqualTo(ImportStatus.PENDING_APPROVAL);
             then(classifierAgent).should(never()).classify(any());
             then(persistenceService).should().persistExtractedContent(eq(entity), any());
         }
@@ -445,7 +447,7 @@ class ImportOrchestratorTest {
 
             orchestrator.processRetryAsync(IMPORT_ID);
 
-            assertThat(entity.getStatus()).isEqualTo(ImportStatus.COMPLETED);
+            assertThat(entity.getStatus()).isEqualTo(ImportStatus.PENDING_APPROVAL);
             then(classifierAgent).should().classify(any());
             then(persistenceService).should().persistExtractedContent(eq(entity), any());
         }
@@ -477,3 +479,4 @@ class ImportOrchestratorTest {
         }
     }
 }
+
