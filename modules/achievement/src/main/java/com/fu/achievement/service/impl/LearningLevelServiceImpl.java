@@ -97,6 +97,15 @@ public class LearningLevelServiceImpl implements LearningLevelService {
         int previousLevel = stats.getCurrentLevel();
         int newTotalExp = stats.getTotalExp() + expAmount;
         int newLevel = calculateLevelFromExp(newTotalExp);
+        
+        // Enforce MAX_LEVEL cap
+        if (newLevel > com.fu.achievement.config.LevelExpTierConfig.MAX_LEVEL) {
+            newLevel = com.fu.achievement.config.LevelExpTierConfig.MAX_LEVEL;
+            // If at max level, calculate max EXP for that level
+            newTotalExp = calculateExpForLevel(com.fu.achievement.config.LevelExpTierConfig.MAX_LEVEL + 1) - 1;
+            log.info("User {} reached MAX_LEVEL ({}), capping EXP at {}", 
+                    userId, com.fu.achievement.config.LevelExpTierConfig.MAX_LEVEL, newTotalExp);
+        }
 
         stats.setTotalExp(newTotalExp);
         stats.setCurrentLevel(newLevel);

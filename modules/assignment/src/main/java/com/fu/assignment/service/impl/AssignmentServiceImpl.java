@@ -751,11 +751,14 @@ public class AssignmentServiceImpl implements AssignmentService {
                 log.error("Error recording daily activity for learner: {}", learnerId, e);
             }
             
-            // Award direct EXP for quiz completion
+            // Award direct EXP for quiz completion (with level tier + score bonus)
             try {
-                int expToAward = ActivityExpConfig.ActivityType.QUIZ_ASSIGNMENT.getExpReward();
+                int currentLevel = learningLevelService.getCurrentLevel(learnerId);
+                Integer score = submission.getScore() != null ? submission.getScore().intValue() : null;
+                int expToAward = ActivityExpConfig.ActivityType.QUIZ_ASSIGNMENT.getExpReward(currentLevel, score);
                 learningLevelService.awardExpAndCheckLevelUp(learnerId, expToAward);
-                log.info("Awarded {} EXP for quiz completion to user {}", expToAward, learnerId);
+                log.info("Awarded {} EXP for quiz completion to user {} (level {}, score {}%)", 
+                        expToAward, learnerId, currentLevel, score);
             } catch (Exception e) {
                 log.error("Error awarding EXP for quiz completion to user {}", learnerId, e);
                 // Continue even if EXP fails - don't break submission flow
@@ -822,11 +825,13 @@ public class AssignmentServiceImpl implements AssignmentService {
                 log.error("Error recording daily activity for learner: {}", learnerId, e);
             }
             
-            // Award direct EXP for writing submission
+            // Award direct EXP for writing submission (no score yet - graded by teacher later)
             try {
-                int expToAward = ActivityExpConfig.ActivityType.WRITING_ASSIGNMENT.getExpReward();
+                int currentLevel = learningLevelService.getCurrentLevel(learnerId);
+                int expToAward = ActivityExpConfig.ActivityType.WRITING_ASSIGNMENT.getExpReward(currentLevel, null);
                 learningLevelService.awardExpAndCheckLevelUp(learnerId, expToAward);
-                log.info("Awarded {} EXP for writing submission to user {}", expToAward, learnerId);
+                log.info("Awarded {} EXP for writing submission to user {} (level {}, score not yet graded)", 
+                        expToAward, learnerId, currentLevel);
             } catch (Exception e) {
                 log.error("Error awarding EXP for writing submission to user {}", learnerId, e);
                 // Continue even if EXP fails - don't break submission flow

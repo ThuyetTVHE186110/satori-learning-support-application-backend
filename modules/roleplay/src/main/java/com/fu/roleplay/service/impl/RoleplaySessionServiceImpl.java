@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fu.achievement.config.ActivityExpConfig;
+import com.fu.achievement.dto.response.LevelUpNotificationResponse;
 import com.fu.achievement.service.AchievementService;
 import com.fu.achievement.service.LearningLevelService;
 import com.fu.achievement.dto.response.UserAchievementResponse;
@@ -359,12 +360,12 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 @Override
                 public void afterCommit() {
                     CompletableFuture.supplyAsync(() ->
-                            pronunciationProvider.assess(AssessmentRequest.builder()
-                                    .audioData(audioBytesRef)
-                                    .audioFormat(audioFormatRef)
-                                    .referenceText(request.getContent())
-                                    .build()),
-                            roleplayTaskExecutor)
+                                            pronunciationProvider.assess(AssessmentRequest.builder()
+                                                    .audioData(audioBytesRef)
+                                                    .audioFormat(audioFormatRef)
+                                                    .referenceText(request.getContent())
+                                                    .build()),
+                                    roleplayTaskExecutor)
                             .thenAccept(result -> savePronunciationResult(result, userMessageId, sessionId))
                             .exceptionally(ex -> {
                                 log.error("Pronunciation assessment failed for message {}: {}", userMessageId, ex.getMessage());
@@ -376,8 +377,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         // Task B: AI response
         CompletableFuture<String> aiResponseFuture = CompletableFuture.supplyAsync(() ->
-                roleplayAIService.generateResponse(sessionId, cachedPrompt, history, request.getContent()),
-                roleplayTaskExecutor)
+                                roleplayAIService.generateResponse(sessionId, cachedPrompt, history, request.getContent()),
+                        roleplayTaskExecutor)
                 .exceptionally(ex -> {
                     log.error("AI response generation failed for session {}: {}", sessionId, ex.getMessage());
                     return "[{\"type\":\"DIALOGUE\",\"japanese_content\":\"すみません、もう一度お願いします。\",\"translation\":\"Xin lỗi, bạn có thể nói lại không?\",\"romaji\":\"Sumimasen, mou ichido onegai shimasu.\",\"corrections\":[]}]";
@@ -388,12 +389,12 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         CompletableFuture<List<MissionEvaluatorAI.MissionProgress>> missionFuture = isSetupPhase
                 ? CompletableFuture.completedFuture(new ArrayList<>())
                 : CompletableFuture.supplyAsync(() ->
-                        missionEvaluatorAI.evaluateProgress(history, request.getContent(), sessionMissions),
+                                missionEvaluatorAI.evaluateProgress(history, request.getContent(), sessionMissions),
                         roleplayTaskExecutor)
-                        .exceptionally(ex -> {
-                            log.error("Mission evaluation failed for session {}: {}", sessionId, ex.getMessage());
-                            return new ArrayList<>();
-                        });
+                .exceptionally(ex -> {
+                    log.error("Mission evaluation failed for session {}: {}", sessionId, ex.getMessage());
+                    return new ArrayList<>();
+                });
 
         // 4. Wait for AI + mission
         CompletableFuture.allOf(aiResponseFuture, missionFuture).join();
@@ -604,17 +605,20 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     languageEval.getAccuracyScore(),
                     languageEval.getVocabularyScore());
         }
-        
-        // Award direct EXP for speaking session completion
+
+        // Award direct EXP for speaking session completion (with level tier + overall score bonus)
         try {
-            int expToAward = ActivityExpConfig.ActivityType.SPEAKING.getExpReward();
+            int currentLevel = learningLevelService.getCurrentLevel(userId);
+            Integer score = overallScore != null ? overallScore.intValue() : null;
+            int expToAward = ActivityExpConfig.ActivityType.SPEAKING.getExpReward(currentLevel, score);
             learningLevelService.awardExpAndCheckLevelUp(userId, expToAward);
-            log.info("Awarded {} EXP for speaking session to user {}", expToAward, userId);
+            log.info("Awarded {} EXP for speaking session to user {} (level {}, score {}%)", 
+                    expToAward, userId, currentLevel, score);
         } catch (Exception e) {
             log.error("Error awarding EXP for speaking session to user {}", userId, e);
             // Continue even if EXP fails - don't break speaking session
         }
-        
+
         // Check and award achievements for speaking completion
         try {
             long speakingCount = sessionRepository.countByUserIdAndStatus(
@@ -645,14 +649,28 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         List<UserAchievementResponse> earnedBadges = new ArrayList<>();
         try {
             earnedBadges = achievementService.getUserEarnedBadges(userId).stream()
-                    .filter(badge -> badge.getEarnedAt() != null && 
+                    .filter(badge -> badge.getEarnedAt() != null &&
                             badge.getEarnedAt().isAfter(session.getCreatedAt()) &&
                             badge.getEarnedAt().isBefore(completedAt.plusSeconds(10)))
                     .collect(Collectors.toList());
         } catch (Exception e) {
             log.error("Error retrieving earned badges for session evaluation", e);
         }
-
+        LevelUpNotificationResponse levelUpInfo = null;
+        // Retrieve level-up information
+        try {
+            LearningLevelService.LevelProgressInfo progressInfo = learningLevelService.getProgressToNextLevel(userId);
+            levelUpInfo = LevelUpNotificationResponse.builder()
+                    .previousLevel(progressInfo.currentLevel() - 1)
+                    .newLevel(progressInfo.currentLevel())
+                    .totalExp(progressInfo.totalExp())
+                    .expToNextLevel(progressInfo.expToNextLevel())
+                    .progressPercentage(progressInfo.percentToNextLevel())
+                    .isLevelUp(true)
+                    .build();
+        } catch (Exception e) {
+            log.error("Error retrieving level-up info for session summary", e);
+        }
         return SessionEvaluationResponse.builder()
                 .sessionId(sessionId)
                 .missionScore(missionScore)
@@ -663,6 +681,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 .pronunciationSummary(pronunciationSummary)
                 .languageEvaluation(languageEval)
                 .earnedBadges(earnedBadges)
+                .levelUpInfo(levelUpInfo)
                 .build();
     }
 
@@ -859,7 +878,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     }
 
     private void updateSessionMissions(List<SessionMission> sessionMissions,
-                                        List<MissionEvaluatorAI.MissionProgress> progressList) {
+                                       List<MissionEvaluatorAI.MissionProgress> progressList) {
         List<SessionMission> updatedMissions = new ArrayList<>();
         for (MissionEvaluatorAI.MissionProgress progress : progressList) {
             sessionMissions.stream()
@@ -1065,10 +1084,10 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 ObjectNode newCtx = objectMapper.createObjectNode();
                 existingCtx.fields().forEachRemaining(e -> newCtx.set(e.getKey(), e.getValue()));
 
-                String aiRole  = node.path("aiRole").asText(null);
+                String aiRole = node.path("aiRole").asText(null);
                 String userRole = node.path("userRole").asText(null);
                 String scenario = node.path("scenario").asText(null);
-                if (aiRole  != null && !aiRole.isBlank())  newCtx.put("aiRole",   aiRole);
+                if (aiRole != null && !aiRole.isBlank()) newCtx.put("aiRole", aiRole);
                 if (userRole != null && !userRole.isBlank()) newCtx.put("userRole", userRole);
                 if (scenario != null && !scenario.isBlank()) newCtx.put("scenario", scenario);
 

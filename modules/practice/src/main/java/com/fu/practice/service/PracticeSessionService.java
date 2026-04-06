@@ -392,11 +392,14 @@ public class PracticeSessionService {
             upsertLessonProgress(session);
         }
         
-        // Award direct EXP for practice completion
+        // Award direct EXP for practice completion (with level tier + score bonus)
         try {
-            int expToAward = ActivityExpConfig.ActivityType.PRACTICE_AI.getExpReward();
+            int currentLevel = learningLevelService.getCurrentLevel(session.getUserId());
+            Integer scoreForExp = session.getScore() != null ? session.getScore().intValue() : null;
+            int expToAward = ActivityExpConfig.ActivityType.PRACTICE_AI.getExpReward(currentLevel, scoreForExp);
             learningLevelService.awardExpAndCheckLevelUp(session.getUserId(), expToAward);
-            log.info("Awarded {} EXP for practice session to user {}", expToAward, session.getUserId());
+            log.info("Awarded {} EXP for practice session to user {} (level {}, score {}%)", 
+                    expToAward, session.getUserId(), currentLevel, scoreForExp);
         } catch (Exception e) {
             log.error("Error awarding EXP for practice session to user {}", session.getUserId(), e);
             // Continue even if EXP fails - don't break practice session

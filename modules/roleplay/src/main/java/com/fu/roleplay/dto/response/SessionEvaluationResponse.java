@@ -2,6 +2,7 @@ package com.fu.roleplay.dto.response;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fu.achievement.dto.response.LevelUpNotificationResponse;
 import com.fu.achievement.dto.response.UserAchievementResponse;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -36,9 +37,17 @@ public class SessionEvaluationResponse {
     // Language evaluation
     private LanguageEvaluationDetail languageEvaluation;
 
-    /** Badges earned when completing this session. */
+    /**
+     * Badges earned when completing this session.
+     */
     @JsonProperty("newBadgesEarned")
     private List<UserAchievementResponse> earnedBadges;
+
+    /**
+     * Level-up notification if user leveled up during submission.
+     */
+    @JsonProperty("levelUp")
+    private LevelUpNotificationResponse levelUpInfo;
 
     @Data
     @Builder
