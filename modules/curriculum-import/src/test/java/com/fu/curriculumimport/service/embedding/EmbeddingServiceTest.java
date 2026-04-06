@@ -212,7 +212,7 @@ class EmbeddingServiceTest {
         void storeVocabularyEmbeddings_singleItem_embeddingStored() throws Exception {
             // Arrange
             ExtractionResult.ExtractedVocabulary vocab = buildVocabulary("読む");
-            given(embeddingModel.embed(anyString())).willReturn(SAMPLE_EMBEDDING);
+            given(embeddingModel.embed(anyList())).willReturn(List.of(SAMPLE_EMBEDDING));
             given(jdbcTemplate.update(anyString(), any(), any(), any(), any(), any(), any(), any(), any())).willReturn(1);
 
             // Act
@@ -220,7 +220,7 @@ class EmbeddingServiceTest {
 
             // Assert
             assertThat(count).isEqualTo(1);
-            then(embeddingModel).should().embed(anyString());
+            then(embeddingModel).should().embed(anyList());
             then(jdbcTemplate).should().update(anyString(), any(), any(), any(), any(), any(), any(), any(), any());
         }
 
@@ -229,7 +229,7 @@ class EmbeddingServiceTest {
         void storeVocabularyEmbeddings_embeddingFails_itemSkipped() throws Exception {
             // Arrange
             ExtractionResult.ExtractedVocabulary vocab = buildVocabulary("書く");
-            given(embeddingModel.embed(anyString()))
+            given(embeddingModel.embed(anyList()))
                     .willThrow(new RuntimeException("OpenAI rate limit exceeded"));
 
             // Act
@@ -247,9 +247,11 @@ class EmbeddingServiceTest {
             ExtractionResult.ExtractedVocabulary first = buildVocabulary("食べる");
             ExtractionResult.ExtractedVocabulary second = buildVocabulary("飲む");
 
-            given(embeddingModel.embed(anyString()))
-                    .willReturn(SAMPLE_EMBEDDING)                              // first item succeeds
-                    .willThrow(new RuntimeException("Network error"));          // second item fails
+            // Batch call returns both embeddings, but second is null (individual fallback failed)
+            List<float[]> embeddings = new java.util.ArrayList<>();
+            embeddings.add(SAMPLE_EMBEDDING);
+            embeddings.add(null);
+            given(embeddingModel.embed(anyList())).willReturn(embeddings);
 
             given(jdbcTemplate.update(anyString(), any(), any(), any(), any(), any(), any(), any(), any())).willReturn(1);
 
@@ -287,7 +289,7 @@ class EmbeddingServiceTest {
         void storeGrammarEmbeddings_singleItem_embeddingStored() throws Exception {
             // Arrange
             ExtractionResult.ExtractedGrammar grammar = buildGrammar("〜なければならない");
-            given(embeddingModel.embed(anyString())).willReturn(SAMPLE_EMBEDDING);
+            given(embeddingModel.embed(anyList())).willReturn(List.of(SAMPLE_EMBEDDING));
             given(jdbcTemplate.update(anyString(), any(), any(), any(), any(), any(), any(), any(), any())).willReturn(1);
 
             // Act
@@ -295,7 +297,7 @@ class EmbeddingServiceTest {
 
             // Assert
             assertThat(count).isEqualTo(1);
-            then(embeddingModel).should().embed(anyString());
+            then(embeddingModel).should().embed(anyList());
             then(jdbcTemplate).should().update(anyString(), any(), any(), any(), any(), any(), any(), any(), any());
         }
     }

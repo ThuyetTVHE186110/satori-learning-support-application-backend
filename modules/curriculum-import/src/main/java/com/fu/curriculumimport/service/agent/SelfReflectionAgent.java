@@ -55,7 +55,13 @@ public class SelfReflectionAgent {
     public SelfReflectionAgent(OpenAiChatModel chatModel, ObjectMapper objectMapper,
                                 AgenticRagProperties ragProperties,
                                 PromptTemplateLoader promptLoader) {
-        this.chatClient = ChatClient.builder(chatModel).build();
+        this(ChatClient.builder(chatModel).build(), objectMapper, ragProperties, promptLoader);
+    }
+
+    SelfReflectionAgent(ChatClient chatClient, ObjectMapper objectMapper,
+                        AgenticRagProperties ragProperties,
+                        PromptTemplateLoader promptLoader) {
+        this.chatClient = chatClient;
         this.objectMapper = objectMapper;
         this.ragProperties = ragProperties;
         this.promptLoader = promptLoader;

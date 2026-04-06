@@ -190,18 +190,18 @@ class PdfIngestionServiceTest {
         }
 
         @Test
-        @DisplayName("file size > 50 MB → throws InvalidImportFileException containing '50MB'")
+        @DisplayName("file size > 100 MB → throws InvalidImportFileException containing '100MB'")
         void oversizedFile_throwsInvalidImportFileException() throws IOException {
-            // Mock so getSize() returns > 50 MB without allocating real memory
+            // Mock so getSize() returns > 100 MB without allocating real memory
             MultipartFile oversized = mock(MultipartFile.class);
             given(oversized.isEmpty()).willReturn(false);
             given(oversized.getContentType()).willReturn("application/pdf");
             given(oversized.getOriginalFilename()).willReturn("large.pdf");
-            given(oversized.getSize()).willReturn(51L * 1024 * 1024); // 51 MB
+            given(oversized.getSize()).willReturn(101L * 1024 * 1024); // 101 MB (max is 100MB)
 
             assertThatThrownBy(() -> service.parsePdf(oversized))
                     .isInstanceOf(InvalidImportFileException.class)
-                    .hasMessageContaining("50MB");
+                    .hasMessageContaining("100MB");
         }
     }
 

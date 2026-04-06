@@ -51,7 +51,20 @@ class QuizExplanationServiceTest {
 
             ReflectionTestUtils.setField(quizExplanationService, "chatClient", chatClient);
             ReflectionTestUtils.setField(quizExplanationService, "model", "gpt-4o-mini");
+            ReflectionTestUtils.setField(quizExplanationService, "temperature", 0.7);
             ReflectionTestUtils.setField(quizExplanationService, "outputConverter", outputConverter);
+            
+            // Mock prompt resources - these are @Value injected Resources
+            org.springframework.core.io.Resource systemResource = mock(org.springframework.core.io.Resource.class);
+            org.springframework.core.io.Resource userResource = mock(org.springframework.core.io.Resource.class);
+            try {
+                lenient().when(systemResource.getInputStream()).thenReturn(
+                        new java.io.ByteArrayInputStream("You are a helpful assistant.".getBytes()));
+                lenient().when(userResource.getInputStream()).thenReturn(
+                        new java.io.ByteArrayInputStream("Generate explanation for: {questionText}".getBytes()));
+            } catch (Exception ignored) {}
+            ReflectionTestUtils.setField(quizExplanationService, "systemPromptResource", systemResource);
+            ReflectionTestUtils.setField(quizExplanationService, "userPromptResource", userResource);
         }
 
         lenient().when(outputConverter.getFormat()).thenReturn("json_format");
