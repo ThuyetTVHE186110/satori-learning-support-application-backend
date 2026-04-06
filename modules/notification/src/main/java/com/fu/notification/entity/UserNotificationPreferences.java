@@ -112,14 +112,15 @@ public class UserNotificationPreferences extends BaseEntity {
 
         return switch (type) {
             case DAILY_REMINDER, STREAK_ALERT, LEARNING_GOAL_REACHED -> dailyReminderEnabled;
-            case ASSIGNMENT_CREATED, ASSIGNMENT_DUE_SOON, ASSIGNMENT_OVERDUE, 
+            case ASSIGNMENT_CREATED, ASSIGNMENT_DUE_SOON, ASSIGNMENT_OVERDUE,
                  ASSIGNMENT_GRADED, SUBMISSION_RECEIVED -> assignmentNotifications;
-            case ACHIEVEMENT_UNLOCKED, LESSON_COMPLETE -> achievementNotifications;
+            case ACHIEVEMENT_UNLOCKED, LESSON_COMPLETE, PRACTICE_FEEDBACK_READY -> achievementNotifications;
             case NEW_MESSAGE, ROLEPLAY_FEEDBACK, PRONUNCIATION_RESULT,
                  CLASS_JOINED, CLASS_REMOVED, CLASS_ANNOUNCEMENT -> socialNotifications;
             case NEW_CONTENT_AVAILABLE, SYSTEM_UPDATE -> marketingNotifications;
-            // Security notifications are always enabled
-            case ACCOUNT_SECURITY, PASSWORD_CHANGED, MAINTENANCE_NOTICE, WELCOME -> true;
+            // Always-on: security + import status (manager workflow critical path)
+            case ACCOUNT_SECURITY, PASSWORD_CHANGED, MAINTENANCE_NOTICE, WELCOME,
+                 CURRICULUM_IMPORT_PENDING_APPROVAL, CURRICULUM_IMPORT_FAILED -> true;
         };
     }
 }

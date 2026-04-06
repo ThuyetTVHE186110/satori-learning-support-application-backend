@@ -12,7 +12,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalTime;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Implementation of NotificationPreferencesService.
@@ -100,6 +103,13 @@ public class NotificationPreferencesServiceImpl implements NotificationPreferenc
                     UserNotificationPreferences newPrefs = UserNotificationPreferences.createDefault(userId);
                     return preferencesRepository.save(newPrefs);
                 });
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, UserNotificationPreferences> getPreferencesByUserIds(List<UUID> userIds) {
+        return preferencesRepository.findByUserIds(userIds).stream()
+                .collect(Collectors.toMap(UserNotificationPreferences::getUserId, p -> p));
     }
 
     private NotificationPreferencesResponse mapToResponse(UserNotificationPreferences prefs) {

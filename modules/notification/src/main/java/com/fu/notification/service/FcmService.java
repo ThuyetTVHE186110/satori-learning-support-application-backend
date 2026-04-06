@@ -53,22 +53,4 @@ public interface FcmService {
      * @return true if sent successfully
      */
     boolean sendToTopic(String topic, String title, String body, Map<String, String> data, String imageUrl);
-
-    /**
-     * Subscribe devices to a topic.
-     *
-     * @param fcmTokens the FCM tokens to subscribe
-     * @param topic     the topic name
-     * @return number of successfully subscribed tokens
-     */
-    int subscribeToTopic(List<String> fcmTokens, String topic);
-
-    /**
-     * Unsubscribe devices from a topic.
-     *
-     * @param fcmTokens the FCM tokens to unsubscribe
-     * @param topic     the topic name
-     * @return number of successfully unsubscribed tokens
-     */
-    int unsubscribeFromTopic(List<String> fcmTokens, String topic);
 }

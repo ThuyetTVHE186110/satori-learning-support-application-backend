@@ -6,7 +6,6 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -35,12 +34,6 @@ public interface UserNotificationPreferencesRepository extends JpaRepository<Use
         AND p.dailyReminderTime = :reminderTime
         """)
     List<UUID> findUsersWithDailyReminderAt(@Param("reminderTime") LocalTime reminderTime);
-
-    /**
-     * Find users with push notifications enabled.
-     */
-    @Query("SELECT p.userId FROM UserNotificationPreferences p WHERE p.pushEnabled = true")
-    List<UUID> findUsersWithPushEnabled();
 
     /**
      * Find preferences for multiple users.

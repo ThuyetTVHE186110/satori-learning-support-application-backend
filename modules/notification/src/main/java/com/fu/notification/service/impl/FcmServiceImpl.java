@@ -136,42 +136,6 @@ public class FcmServiceImpl implements FcmService {
         }
     }
 
-    @Override
-    public int subscribeToTopic(List<String> fcmTokens, String topic) {
-        if (!isAvailable() || fcmTokens == null || fcmTokens.isEmpty()) {
-            return 0;
-        }
-
-        try {
-            TopicManagementResponse response = firebaseMessaging.get()
-                    .subscribeToTopic(fcmTokens, topic);
-            log.debug("Subscribed {} tokens to topic '{}', {} failures",
-                    response.getSuccessCount(), topic, response.getFailureCount());
-            return response.getSuccessCount();
-        } catch (FirebaseMessagingException e) {
-            log.error("Failed to subscribe to topic: {}", e.getMessage());
-            return 0;
-        }
-    }
-
-    @Override
-    public int unsubscribeFromTopic(List<String> fcmTokens, String topic) {
-        if (!isAvailable() || fcmTokens == null || fcmTokens.isEmpty()) {
-            return 0;
-        }
-
-        try {
-            TopicManagementResponse response = firebaseMessaging.get()
-                    .unsubscribeFromTopic(fcmTokens, topic);
-            log.debug("Unsubscribed {} tokens from topic '{}', {} failures",
-                    response.getSuccessCount(), topic, response.getFailureCount());
-            return response.getSuccessCount();
-        } catch (FirebaseMessagingException e) {
-            log.error("Failed to unsubscribe from topic: {}", e.getMessage());
-            return 0;
-        }
-    }
-
     // ── Private Helpers ───────────────────────────────────────────────────────
 
     private Message buildMessage(String token, String topic, String title, String body,

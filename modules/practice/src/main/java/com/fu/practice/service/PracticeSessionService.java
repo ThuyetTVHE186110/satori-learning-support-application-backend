@@ -1,6 +1,7 @@
 package com.fu.practice.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.common.event.PracticeFeedbackReadyEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.course.entity.Course;
 import com.fu.course.entity.Lesson;
@@ -18,6 +19,7 @@ import com.fu.practice.repository.PracticeItemRepository;
 import com.fu.practice.repository.PracticeSessionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -53,6 +55,7 @@ public class PracticeSessionService {
     private final SessionFeedbackAgent sessionFeedbackAgent;
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbcTemplate;
+    private final ApplicationEventPublisher eventPublisher;
 
     // ── Start Session ─────────────────────────────────────────────────────
 
@@ -312,6 +315,8 @@ public class PracticeSessionService {
             String feedback = sessionFeedbackAgent.generateFeedback(sessionId, scoreValue, allItems, sessionType);
             session.setAiFeedback(feedback);
             sessionRepository.save(session);
+            eventPublisher.publishEvent(new PracticeFeedbackReadyEvent(
+                    this, sessionId, session.getUserId(), session.getLessonId(), scoreValue));
         } catch (Exception e) {
             log.warn("generateAndSaveFeedback: Không sinh được AI feedback cho session {}: {}",
                     sessionId, e.getMessage());
