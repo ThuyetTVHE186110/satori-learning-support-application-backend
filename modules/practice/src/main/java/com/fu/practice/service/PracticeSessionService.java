@@ -1,7 +1,13 @@
 package com.fu.practice.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fu.common.event.PracticeFeedbackReadyEvent;
+import com.fu.achievement.config.ActivityExpConfig;
+import com.fu.achievement.service.AchievementService;
+import com.fu.achievement.service.LearningLevelService;
+import com.fu.achievement.dto.response.UserAchievementResponse;
+import com.fu.achievement.dto.response.LevelUpNotificationResponse;
+import com.fu.achievement.enums.BadgeType;
+import com.fu.achievement.service.StreakService;
 import com.fu.common.exception.BusinessException;
 import com.fu.course.entity.Course;
 import com.fu.course.entity.Lesson;
@@ -55,13 +61,15 @@ public class PracticeSessionService {
     private final SessionFeedbackAgent sessionFeedbackAgent;
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbcTemplate;
-    private final ApplicationEventPublisher eventPublisher;
+    private final AchievementService achievementService;
+    private final LearningLevelService learningLevelService;
+    private final StreakService streakService;
 
     // ── Start Session ─────────────────────────────────────────────────────
 
     /**
      * Bắt đầu phiên luyện tập mới.
-     *
+     * <p>
      * Sinh toàn bộ câu hỏi ngay khi start để submitAnswer không phải chờ LLM nữa.
      * LLM call runs OUTSIDE the transaction to avoid holding a DB connection for 5-30 seconds.
      */
@@ -102,8 +110,8 @@ public class PracticeSessionService {
 
     @Transactional
     public StartPracticeResponse persistNewSession(UUID userId, StartPracticeRequest request,
-                                                    LessonContext lessonCtx,
-                                                    List<ExerciseGeneratorAgent.GeneratedItem> firstItemList) {
+                                                   LessonContext lessonCtx,
+                                                   List<ExerciseGeneratorAgent.GeneratedItem> firstItemList) {
         // Lưu jlptLevel + itemTypes vào context JSON để dùng lại khi sinh câu tiếp theo
         String itemTypesJson = buildItemTypesJson(request.getItemTypes());
         String contextJson = String.format("{\"jlptLevel\":\"%s\",\"itemTypes\":%s}",
@@ -138,7 +146,8 @@ public class PracticeSessionService {
                 .build();
     }
 
-    private record LessonContext(UUID courseId, String jlptLevel) {}
+    private record LessonContext(UUID courseId, String jlptLevel) {
+    }
 
     // ── Submit Answer ─────────────────────────────────────────────────────
 
@@ -258,6 +267,17 @@ public class PracticeSessionService {
                 .build();
     }
 
+    /**
+     * Context từ session cần thiết để persist kết quả câu trả lời.
+     */
+    public record SessionItemContext(
+            PracticeItem item,
+            int completedItemsSnapshot,
+            int totalItems,
+            PracticeSessionType sessionType
+    ) {
+    }
+
     // ── Complete Session ──────────────────────────────────────────────────
 
     /**
@@ -284,6 +304,35 @@ public class PracticeSessionService {
 
         if (session.getLessonId() != null) {
             upsertLessonProgress(session);
+        }
+        // Record daily activity for streak tracking
+        try {
+            streakService.recordDailyActivity(session.getUserId(), "PRACTICE");
+        } catch (Exception e) {
+            log.error("Error recording daily activity for learner: {}", session.getUserId(), e);
+        }
+        // Award direct EXP for practice completion (with level tier + score bonus)
+        try {
+            int currentLevel = learningLevelService.getCurrentLevel(session.getUserId());
+            Integer scoreForExp = session.getScore() != null ? session.getScore().intValue() : null;
+            int expToAward = ActivityExpConfig.ActivityType.PRACTICE_AI.getExpReward(currentLevel, scoreForExp);
+            learningLevelService.awardExpAndCheckLevelUp(session.getUserId(), expToAward);
+            log.info("Awarded {} EXP for practice session to user {} (level {}, score {}%)",
+                    expToAward, session.getUserId(), currentLevel, scoreForExp);
+        } catch (Exception e) {
+            log.error("Error awarding EXP for practice session to user {}", session.getUserId(), e);
+            // Continue even if EXP fails - don't break practice session
+        }
+
+        // Check and award achievements for practice completion
+        try {
+            // Count total completed practice sessions for this user to check badge requirements
+            long practiceCount = sessionRepository.countByUserIdAndStatus(session.getUserId(), PracticeStatus.COMPLETED);
+            achievementService.checkAndAwardBadges(session.getUserId(), BadgeType.AI_PRACTICE_COUNT, (int) practiceCount);
+            log.debug("Achievement check completed for user: {} with practice count: {}", session.getUserId(), practiceCount);
+        } catch (Exception e) {
+            log.error("Error checking achievements for practice session", e);
+            // Don't fail the practice session if achievement check fails
         }
     }
 
@@ -346,6 +395,70 @@ public class PracticeSessionService {
 
         String feedbackText = extractFeedbackSummary(session.getAiFeedback());
 
+        // Retrieve earned badges from session completion (if any)
+        // Badges earned within a small time window after session completion
+        List<UserAchievementResponse> earnedBadges = Collections.emptyList();
+        LevelUpNotificationResponse levelUpInfo = null;
+
+        // Calculate EXP earned and get old total
+        int expEarned = 0;
+        Integer oldTotalExp = null;
+
+        if (session.getCompletedAt() != null) {
+            try {
+                // Get current total EXP
+                int currentTotalExp = learningLevelService.getTotalExp(userId);
+                int currentLevel = learningLevelService.getCurrentLevel(userId);
+                Integer sessionScore = session.getScore() != null ? session.getScore().intValue() : null;
+
+                // Calculate EXP that was awarded
+                expEarned = ActivityExpConfig.ActivityType.PRACTICE_AI.getExpReward(currentLevel, sessionScore);
+
+                // Calculate what it was before
+                oldTotalExp = currentTotalExp - expEarned;
+
+            } catch (Exception e) {
+                log.debug("Error calculating EXP details for session summary", e);
+            }
+
+            try {
+                earnedBadges = achievementService.getUserEarnedBadges(userId).stream()
+                        .filter(badge -> badge.getEarnedAt() != null &&
+                                badge.getEarnedAt().isAfter(session.getCreatedAt()) &&
+                                badge.getEarnedAt().isBefore(session.getCompletedAt().plusSeconds(10)))
+                        .collect(Collectors.toList());
+            } catch (Exception e) {
+                log.error("Error retrieving earned badges for session summary", e);
+            }
+
+            // Retrieve level-up information
+            try {
+                LearningLevelService.LevelProgressInfo progressInfo = learningLevelService.getProgressToNextLevel(userId);
+
+                // Calculate previous level from oldTotalExp
+                int previousLevel = 0;
+                if (oldTotalExp != null && oldTotalExp >= 0) {
+                    previousLevel = learningLevelService.calculateLevelFromExp(oldTotalExp);
+                }
+
+                int currentLevel = progressInfo.currentLevel();
+                boolean actuallyLeveledUp = previousLevel < currentLevel;
+
+                levelUpInfo = LevelUpNotificationResponse.builder()
+                        .previousLevel(previousLevel)
+                        .newLevel(currentLevel)
+                        .expEarned(expEarned)
+                        .oldTotalExp(oldTotalExp)
+                        .totalExp(progressInfo.totalExp())
+                        .expToNextLevel(progressInfo.expToNextLevel())
+                        .progressPercentage(progressInfo.percentToNextLevel())
+                        .isLevelUp(actuallyLeveledUp)
+                        .build();
+            } catch (Exception e) {
+                log.error("Error retrieving level-up info for session summary", e);
+            }
+        }
+
         return SessionSummaryResponse.builder()
                 .sessionId(sessionId)
                 .score(session.getScore())
@@ -353,6 +466,8 @@ public class PracticeSessionService {
                 .totalItems(session.getTotalItems())
                 .aiFeedback(feedbackText)
                 .items(results)
+                .earnedBadges(earnedBadges)
+                .levelUpInfo(levelUpInfo)
                 .build();
     }
 
@@ -461,15 +576,15 @@ public class PracticeSessionService {
     private void validateEnrollment(UUID userId, UUID courseId) {
         Integer count = jdbcTemplate.queryForObject(
                 """
-                SELECT COUNT(*)
-                FROM user_management.class_members cm
-                JOIN user_management.classes c ON c.id = cm.class_id
-                WHERE cm.user_id = ?
-                  AND c.course_id = ?
-                  AND cm.removed_at IS NULL
-                  AND c.deleted_at IS NULL
-                  AND c.status = 'ACTIVE'
-                """,
+                        SELECT COUNT(*)
+                        FROM user_management.class_members cm
+                        JOIN user_management.classes c ON c.id = cm.class_id
+                        WHERE cm.user_id = ?
+                          AND c.course_id = ?
+                          AND cm.removed_at IS NULL
+                          AND c.deleted_at IS NULL
+                          AND c.status = 'ACTIVE'
+                        """,
                 Integer.class, userId, courseId
         );
         if (count == null || count == 0) {
@@ -488,8 +603,8 @@ public class PracticeSessionService {
     }
 
     private PracticeItem buildItem(PracticeSession session,
-                                    ExerciseGeneratorAgent.GeneratedItem gen,
-                                    int index) {
+                                   ExerciseGeneratorAgent.GeneratedItem gen,
+                                   int index) {
         PracticeItemType resolvedType = resolveItemType(session.getSessionType(), gen);
 
         if (resolvedType == PracticeItemType.MATCHING) {
@@ -644,16 +759,16 @@ public class PracticeSessionService {
 
     /**
      * Build một MATCHING PracticeItem từ danh sách pairs do LLM sinh ra.
-     *
+     * <p>
      * Cấu trúc options lưu DB:
-     *   id 0..N-1      → LEFT  (tiếng Nhật, giữ nguyên thứ tự)
-     *   id N..2N-1     → RIGHT (tiếng Việt, đã shuffle)
-     *
+     * id 0..N-1      → LEFT  (tiếng Nhật, giữ nguyên thứ tự)
+     * id N..2N-1     → RIGHT (tiếng Việt, đã shuffle)
+     * <p>
      * correctAnswer = "0:X,1:Y,..." — ánh xạ left id → right id.
      */
     private PracticeItem buildMatchingItem(PracticeSession session,
-                                            ExerciseGeneratorAgent.GeneratedItem gen,
-                                            int index) {
+                                           ExerciseGeneratorAgent.GeneratedItem gen,
+                                           int index) {
         List<ExerciseGeneratorAgent.GeneratedItem.MatchingPair> pairs = gen.pairs();
         if (pairs == null || pairs.isEmpty()) {
             // Fallback: LLM không trả về pairs — lưu item trống
@@ -728,7 +843,9 @@ public class PracticeSessionService {
                 .build();
     }
 
-    /** Parse "0:4,1:5,2:6" → Map{"0"→"4","1"→"5","2"→"6"}. */
+    /**
+     * Parse "0:4,1:5,2:6" → Map{"0"→"4","1"→"5","2"→"6"}.
+     */
     private Map<String, String> parsePairMap(String pairStr) {
         Map<String, String> map = new LinkedHashMap<>();
         if (pairStr == null || pairStr.isBlank()) return map;
@@ -758,7 +875,7 @@ public class PracticeSessionService {
      * 3. Fallback cuối: dựa theo sessionType
      */
     private PracticeItemType resolveItemType(PracticeSessionType sessionType,
-                                              ExerciseGeneratorAgent.GeneratedItem gen) {
+                                             ExerciseGeneratorAgent.GeneratedItem gen) {
         if (gen.itemType() != null && !gen.itemType().isBlank()) {
             try {
                 return PracticeItemType.valueOf(gen.itemType().trim().toUpperCase());
@@ -776,10 +893,10 @@ public class PracticeSessionService {
             return PracticeItemType.MULTIPLE_CHOICE;
         }
         return switch (sessionType) {
-            case KANJI_READING  -> PracticeItemType.FILL_BLANK;
-            case VOCAB_DRILL    -> PracticeItemType.FILL_BLANK;
-            case GRAMMAR_DRILL  -> PracticeItemType.FILL_BLANK;
-            default             -> PracticeItemType.TRANSLATION;
+            case KANJI_READING -> PracticeItemType.FILL_BLANK;
+            case VOCAB_DRILL -> PracticeItemType.FILL_BLANK;
+            case GRAMMAR_DRILL -> PracticeItemType.FILL_BLANK;
+            default -> PracticeItemType.TRANSLATION;
         };
     }
 
