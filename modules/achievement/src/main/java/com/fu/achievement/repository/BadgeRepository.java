@@ -11,6 +11,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.UUID;
 
 @Repository
@@ -30,4 +31,28 @@ public interface BadgeRepository extends JpaRepository<Badge, UUID> {
             @Param("badgeType") BadgeType badgeType,
             Pageable pageable
     );
+    
+    /**
+     * Find all active badges of a specific type
+     */
+    @Query("SELECT b FROM Badge b WHERE b.badgeType = :badgeType AND b.status = 'ACTIVE' ORDER BY b.requirementValue ASC")
+    List<Badge> findActiveBadgesByType(@Param("badgeType") BadgeType badgeType);
+
+    /**
+     * Find all active badges with pagination
+     */
+    @Query("SELECT b FROM Badge b WHERE b.status = 'ACTIVE' ORDER BY b.name ASC")
+    Page<Badge> findAllActiveBadges(Pageable pageable);
+
+    /**
+     * Find all active badges filtered by type with pagination
+     */
+    @Query("SELECT b FROM Badge b WHERE b.status = 'ACTIVE' AND b.badgeType = :badgeType ORDER BY b.name ASC")
+    Page<Badge> findAllActiveBadgesByType(@Param("badgeType") BadgeType badgeType, Pageable pageable);
+
+    /**
+     * Count how many users earned a specific badge
+     */
+    @Query("SELECT COUNT(ub) FROM UserBadges ub WHERE ub.badgeId = :badgeId")
+    Long countEarnersByBadgeId(@Param("badgeId") UUID badgeId);
 }

@@ -30,6 +30,10 @@
             <groupId>com.fu</groupId>
             <artifactId>curriculum-import</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.fu</groupId>
+            <artifactId>achievement</artifactId>
+        </dependency>
 
         <!-- Spring AI for exercise generation and evaluation -->
         <dependency>
