@@ -10,6 +10,7 @@ import com.fu.achievement.service.AchievementService;
 import com.fu.achievement.service.LearningLevelService;
 import com.fu.achievement.dto.response.UserAchievementResponse;
 import com.fu.achievement.enums.BadgeType;
+import com.fu.achievement.service.impl.StreakServiceImpl;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.conversation.entity.Conversation;
@@ -84,6 +85,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     private final ObjectMapper objectMapper;
     private final Executor roleplayTaskExecutor;
     private final AchievementService achievementService;
+    private final StreakServiceImpl streakService;
+
     private final LearningLevelService learningLevelService;
 
     public RoleplaySessionServiceImpl(
@@ -105,7 +108,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             ObjectMapper objectMapper,
             @Qualifier("roleplayTaskExecutor") Executor roleplayTaskExecutor,
             AchievementService achievementService,
-            LearningLevelService learningLevelService) {
+            LearningLevelService learningLevelService,
+            StreakServiceImpl streakService
+    ) {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
         this.missionRepository = missionRepository;
@@ -125,6 +130,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         this.roleplayTaskExecutor = roleplayTaskExecutor;
         this.achievementService = achievementService;
         this.learningLevelService = learningLevelService;
+        this.streakService = streakService;
     }
 
     @Override
@@ -605,15 +611,24 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     languageEval.getAccuracyScore(),
                     languageEval.getVocabularyScore());
         }
+        // Record daily activity for streak tracking
+        try {
+            streakService.recordDailyActivity(userId, "SPEAKING");
+        } catch (Exception e) {
+            log.error("Error recording daily activity for learner: {}", userId, e);
+        }
 
         // Award direct EXP for speaking session completion (with level tier + overall score bonus)
+        int expEarned = 0;
+        Integer oldTotalExp = null;
         try {
+            oldTotalExp = learningLevelService.getTotalExp(userId);
             int currentLevel = learningLevelService.getCurrentLevel(userId);
             Integer score = overallScore != null ? overallScore.intValue() : null;
-            int expToAward = ActivityExpConfig.ActivityType.SPEAKING.getExpReward(currentLevel, score);
-            learningLevelService.awardExpAndCheckLevelUp(userId, expToAward);
-            log.info("Awarded {} EXP for speaking session to user {} (level {}, score {}%)", 
-                    expToAward, userId, currentLevel, score);
+            expEarned = ActivityExpConfig.ActivityType.SPEAKING.getExpReward(currentLevel, score);
+            learningLevelService.awardExpAndCheckLevelUp(userId, expEarned);
+            log.info("Awarded {} EXP for speaking session to user {} (level {}, score {}%)",
+                    expEarned, userId, currentLevel, score);
         } catch (Exception e) {
             log.error("Error awarding EXP for speaking session to user {}", userId, e);
             // Continue even if EXP fails - don't break speaking session
@@ -660,13 +675,25 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // Retrieve level-up information
         try {
             LearningLevelService.LevelProgressInfo progressInfo = learningLevelService.getProgressToNextLevel(userId);
+            
+            // Calculate previous level from oldTotalExp
+            int previousLevel = 0;
+            if (oldTotalExp != null && oldTotalExp >= 0) {
+                previousLevel = learningLevelService.calculateLevelFromExp(oldTotalExp);
+            }
+            
+            int currentLevel = progressInfo.currentLevel();
+            boolean actuallyLeveledUp = previousLevel < currentLevel;
+            
             levelUpInfo = LevelUpNotificationResponse.builder()
-                    .previousLevel(progressInfo.currentLevel() - 1)
-                    .newLevel(progressInfo.currentLevel())
+                    .previousLevel(previousLevel)
+                    .newLevel(currentLevel)
+                    .expEarned(expEarned)
+                    .oldTotalExp(oldTotalExp)
                     .totalExp(progressInfo.totalExp())
                     .expToNextLevel(progressInfo.expToNextLevel())
                     .progressPercentage(progressInfo.percentToNextLevel())
-                    .isLevelUp(true)
+                    .isLevelUp(actuallyLeveledUp)
                     .build();
         } catch (Exception e) {
             log.error("Error retrieving level-up info for session summary", e);

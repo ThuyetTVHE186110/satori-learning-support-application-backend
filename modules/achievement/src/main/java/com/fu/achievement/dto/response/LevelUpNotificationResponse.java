@@ -23,10 +23,13 @@ public class LevelUpNotificationResponse {
     /** New level after this action */
     private Integer newLevel;
     
-    /** EXP gained from this action */
-    private Integer expGained;
+    /** EXP gained from this action (submission/session) */
+    private Integer expEarned;
     
-    /** Total EXP accumulated */
+    /** Total EXP before this action */
+    private Integer oldTotalExp;
+    
+    /** Total EXP accumulated after this action */
     private Integer totalExp;
     
     /** EXP needed to reach next level */

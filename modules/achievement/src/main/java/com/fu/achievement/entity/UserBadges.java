@@ -3,6 +3,8 @@ package com.fu.achievement.entity;
 import com.fu.infrastructure.persistence.AuditableEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.AccessLevel;
@@ -25,6 +27,7 @@ import java.util.UUID;
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public class UserBadges {
     @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
     UUID id;
     @Column(name = "user_id", nullable = false)
     UUID userId;

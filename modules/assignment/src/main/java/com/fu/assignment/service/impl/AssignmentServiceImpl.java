@@ -3,9 +3,11 @@ package com.fu.assignment.service.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.achievement.config.ActivityExpConfig;
+import com.fu.achievement.service.AchievementService;
 import com.fu.achievement.service.StreakService;
 import com.fu.achievement.service.LearningLevelService;
 import com.fu.achievement.dto.response.LevelUpNotificationResponse;
+import com.fu.achievement.dto.response.UserAchievementResponse;
 import com.fu.assignment.ai.AiGradingService;
 import com.fu.assignment.ai.QuizAiGenerationService;
 import com.fu.assignment.ai.QuizExplanationService;
@@ -43,6 +45,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -70,6 +73,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     private final ClassTeacherHistoryRepository classTeacherHistoryRepository;
     private final StreakService streakService;
     private final LearningLevelService learningLevelService;
+    private final AchievementService achievementService;
     private static final String SUBMISSION_IMAGE_FOLDER = "satori/assignment-submissions";
     private static final String SUBMISSION_FAILED_MSG = "Không thể lưu hoặc chấm điểm bài nộp.";
     private static final int MAX_SUBMISSION_IMAGES = 3;
@@ -568,12 +572,12 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         submissionRepository.save(submission);
         log.info("Writing submission {} graded by teacher {} with score {}", submissionId, teacherId, request.getTeacherScore());
-        
+
         // NOTE: Streak is NOT recorded here because:
         // 1. Streak already counted when learner submitted (submitWriting)
         // 2. Teacher grading is not a learner activity
         // 3. Teacher may grade days later, not reflecting learner's actual activity date
-        
+
         return enrichSubmissionResponseForDetail(submission);
     }
 
@@ -583,11 +587,11 @@ public class AssignmentServiceImpl implements AssignmentService {
 
     @Override
     public Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(
-            UUID learnerId, UUID classId, String title, AssignmentType type, 
+            UUID learnerId, UUID classId, String title, AssignmentType type,
             SubmissionStatus status, Pageable pageable) {
-        
+
         List<UUID> classIds;
-        
+
         if (classId == null) {
             // No classId provided: get THE single active enrolled class
             Optional<UUID> activeClassId = getActiveEnrolledClassId(learnerId);
@@ -600,7 +604,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         } else {
             // Specific classId provided: validate learner has access
             if (!isLearnerInClass(learnerId, classId)) {
-                log.warn("Learner {} attempted to access assignments from class {} but is not a member", 
+                log.warn("Learner {} attempted to access assignments from class {} but is not a member",
                         learnerId, classId);
                 return Page.empty(pageable);
             }
@@ -610,7 +614,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         String titleStr = (title != null) ? title : "";
         String typeStr = (type != null) ? type.name() : "";
         String statusStr = (status != null) ? status.name() : "";
-        
+
         Page<Assignment> assignments = assignmentRepository
                 .findLearnerAssignmentsSorted(learnerId, classIds, titleStr, typeStr, statusStr, pageable);
 
@@ -620,42 +624,42 @@ public class AssignmentServiceImpl implements AssignmentService {
     /**
      * Get the single active enrolled class for a learner.
      * Business rule: Learners can only be enrolled in ONE active class at a time.
-     * 
+     *
      * @param learnerId Learner's UUID
      * @return Optional containing the active class ID, or empty if no active class
      */
     private Optional<UUID> getActiveEnrolledClassId(UUID learnerId) {
         // Get all active class memberships
         List<UUID> activeClassIds = classMemberRepository.findActiveClassIdsByUserId(learnerId);
-        
+
         if (activeClassIds.isEmpty()) {
             return Optional.empty();
         }
-        
+
         // Filter for classes with ACTIVE status
         List<Clazz> activeClasses = classRepository.findAllById(activeClassIds).stream()
                 .filter(clazz -> clazz.getStatus() == ClassStatus.ACTIVE)
                 .filter(clazz -> clazz.getDeletedAt() == null)
                 .toList();
-        
+
         if (activeClasses.isEmpty()) {
             return Optional.empty();
         }
-        
+
         // Should only be one active class per learner (business rule)
         if (activeClasses.size() > 1) {
-            log.warn("Learner {} has multiple active classes: {}. Using first one.", 
+            log.warn("Learner {} has multiple active classes: {}. Using first one.",
                     learnerId, activeClasses.stream().map(Clazz::getId).toList());
         }
-        
+
         return Optional.of(activeClasses.get(0).getId());
     }
 
     /**
      * Check if learner is an active member of a class.
-     * 
+     *
      * @param learnerId Learner's UUID
-     * @param classId Class UUID
+     * @param classId   Class UUID
      * @return true if learner is an active member (removedAt IS NULL)
      */
     private boolean isLearnerInClass(UUID learnerId, UUID classId) {
@@ -743,28 +747,45 @@ public class AssignmentServiceImpl implements AssignmentService {
             submission.setStatus(SubmissionStatus.GRADED); // Quiz: auto-graded immediately
             submissionRepository.save(submission);
             log.info("Learner {} submitted quiz {}, score={}", learnerId, submission.getAssignmentId(), BigDecimal.valueOf(scored.earnedPoints));
-            
+
             // Record daily activity for streak tracking
             try {
                 streakService.recordDailyActivity(learnerId, "ASSIGNMENT");
             } catch (Exception e) {
                 log.error("Error recording daily activity for learner: {}", learnerId, e);
             }
-            
+
             // Award direct EXP for quiz completion (with level tier + score bonus)
+            int expEarned = 0;
+            Integer oldTotalExp = null;
             try {
+                oldTotalExp = learningLevelService.getTotalExp(learnerId);
                 int currentLevel = learningLevelService.getCurrentLevel(learnerId);
                 Integer score = submission.getScore() != null ? submission.getScore().intValue() : null;
-                int expToAward = ActivityExpConfig.ActivityType.QUIZ_ASSIGNMENT.getExpReward(currentLevel, score);
-                learningLevelService.awardExpAndCheckLevelUp(learnerId, expToAward);
-                log.info("Awarded {} EXP for quiz completion to user {} (level {}, score {}%)", 
-                        expToAward, learnerId, currentLevel, score);
+                expEarned = ActivityExpConfig.ActivityType.QUIZ_ASSIGNMENT.getExpReward(currentLevel, score);
+                learningLevelService.awardExpAndCheckLevelUp(learnerId, expEarned);
+                log.info("Awarded {} EXP for quiz completion to user {} (level {}, score {}%)",
+                        expEarned, learnerId, currentLevel, score);
             } catch (Exception e) {
                 log.error("Error awarding EXP for quiz completion to user {}", learnerId, e);
                 // Continue even if EXP fails - don't break submission flow
             }
-            
-            return enrichSubmissionResponseForSubmit(submission);
+
+            // Retrieve badges earned during this quiz submission
+            List<UserAchievementResponse> earnedBadges = Collections.emptyList();
+            try {
+                earnedBadges = achievementService.getUserEarnedBadges(learnerId).stream()
+                        .filter(badge -> badge.getEarnedAt() != null
+                                && badge.getEarnedAt().isAfter(submission.getStartedAt())
+                                && badge.getEarnedAt().isBefore(submission.getSubmittedAt().plusSeconds(5)))
+                        .collect(Collectors.toList());
+                log.info("Retrieved {} earned badges for quiz submission by user {}", earnedBadges.size(), learnerId);
+            } catch (Exception e) {
+                log.error("Error retrieving earned badges for quiz submission", e);
+                // Continue even if badge retrieval fails
+            }
+
+            return enrichSubmissionResponseForSubmit(submission, earnedBadges, expEarned, oldTotalExp);
         }
     }
 
@@ -817,27 +838,44 @@ public class AssignmentServiceImpl implements AssignmentService {
             submission.setStatus(SubmissionStatus.SUBMITTED); // waiting for teacher grading
             submissionRepository.save(submission);
             log.info("Learner {} submitted writing for assignment {} (images: {})", learnerId, assignmentId, hasImages ? images.length : 0);
-            
+
             // Record daily activity for streak tracking (writing/translation submission)
             try {
                 streakService.recordDailyActivity(learnerId, "ASSIGNMENT");
             } catch (Exception e) {
                 log.error("Error recording daily activity for learner: {}", learnerId, e);
             }
-            
+
             // Award direct EXP for writing submission (no score yet - graded by teacher later)
+            int expEarned = 0;
+            Integer oldTotalExp = null;
             try {
+                oldTotalExp = learningLevelService.getTotalExp(learnerId);
                 int currentLevel = learningLevelService.getCurrentLevel(learnerId);
-                int expToAward = ActivityExpConfig.ActivityType.WRITING_ASSIGNMENT.getExpReward(currentLevel, null);
-                learningLevelService.awardExpAndCheckLevelUp(learnerId, expToAward);
-                log.info("Awarded {} EXP for writing submission to user {} (level {}, score not yet graded)", 
-                        expToAward, learnerId, currentLevel);
+                expEarned = ActivityExpConfig.ActivityType.WRITING_ASSIGNMENT.getExpReward(currentLevel, null);
+                learningLevelService.awardExpAndCheckLevelUp(learnerId, expEarned);
+                log.info("Awarded {} EXP for writing submission to user {} (level {}, score not yet graded)",
+                        expEarned, learnerId, currentLevel);
             } catch (Exception e) {
                 log.error("Error awarding EXP for writing submission to user {}", learnerId, e);
                 // Continue even if EXP fails - don't break submission flow
             }
-            
-            return enrichSubmissionResponseForSubmit(submission);
+
+            // Retrieve badges earned during this writing submission
+            List<UserAchievementResponse> earnedBadges = Collections.emptyList();
+            try {
+                earnedBadges = achievementService.getUserEarnedBadges(learnerId).stream()
+                        .filter(badge -> badge.getEarnedAt() != null
+                                && badge.getEarnedAt().isAfter(submission.getStartedAt())
+                                && badge.getEarnedAt().isBefore(submission.getSubmittedAt().plusSeconds(5)))
+                        .collect(Collectors.toList());
+                log.info("Retrieved {} earned badges for writing submission by user {}", earnedBadges.size(), learnerId);
+            } catch (Exception e) {
+                log.error("Error retrieving earned badges for writing submission", e);
+                // Continue even if badge retrieval fails
+            }
+
+            return enrichSubmissionResponseForSubmit(submission, earnedBadges, expEarned, oldTotalExp);
         }
     }
 
@@ -1077,7 +1115,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         });
         // Parse imageUrls JSON string → List<String>
         response.setImageUrls(parseImageUrls(s.getImageUrls()));
-        
+
         // NO levelUp or badges - this is detail view, not a new submission event
         return response;
     }
@@ -1086,7 +1124,7 @@ public class AssignmentServiceImpl implements AssignmentService {
      * Enrich submission response for SUBMIT operations (POST endpoints)
      * Includes levelUp and badges - user just completed an action
      */
-    private SubmissionResponse enrichSubmissionResponseForSubmit(AssignmentSubmission s) {
+    private SubmissionResponse enrichSubmissionResponseForSubmit(AssignmentSubmission s, List<UserAchievementResponse> earnedBadges, int expEarned, Integer oldTotalExp) {
         SubmissionResponse response = mapper.toResponse(s);
         Assignment assignment = assignmentRepository.findByIdAndNotDeleted(s.getAssignmentId()).orElse(null);
         if (assignment != null) {
@@ -1103,23 +1141,39 @@ public class AssignmentServiceImpl implements AssignmentService {
         });
         // Parse imageUrls JSON string → List<String>
         response.setImageUrls(parseImageUrls(s.getImageUrls()));
-        
+
+        // Add earned badges from this submission
+        if (earnedBadges != null && !earnedBadges.isEmpty()) {
+            response.setEarnedBadges(earnedBadges);
+        }
+
         // Add level-up information (only for submit operations)
         try {
             LearningLevelService.LevelProgressInfo progressInfo = learningLevelService.getProgressToNextLevel(s.getUserId());
+            
+            // Calculate previous level from oldTotalExp
+            int previousLevel = 0;
+            if (oldTotalExp != null && oldTotalExp >= 0) {
+                previousLevel = learningLevelService.calculateLevelFromExp(oldTotalExp);
+            }
+            
+            int currentLevel = progressInfo.currentLevel();
+            boolean actuallyLeveledUp = previousLevel < currentLevel;
+            
             LevelUpNotificationResponse levelUpInfo = LevelUpNotificationResponse.builder()
-                    .previousLevel(progressInfo.currentLevel() - 1)
-                    .newLevel(progressInfo.currentLevel())
+                    .previousLevel(previousLevel)
+                    .newLevel(currentLevel)
+                    .expEarned(expEarned)
+                    .oldTotalExp(oldTotalExp)
                     .totalExp(progressInfo.totalExp())
                     .expToNextLevel(progressInfo.expToNextLevel())
                     .progressPercentage(progressInfo.percentToNextLevel())
-                    .isLevelUp(true)
+                    .isLevelUp(actuallyLeveledUp)
                     .build();
             response.setLevelUpInfo(levelUpInfo);
         } catch (Exception e) {
             log.debug("Error retrieving level-up info for submission", e);
         }
-        
         return response;
     }
     private List<QuizSubmissionDetailResponse> enrichQuizDetails(String answersJson) {
