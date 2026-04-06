@@ -11,7 +11,6 @@ import com.fu.practice.agent.ExerciseGeneratorAgent;
 import com.fu.practice.agent.SessionFeedbackAgent;
 import com.fu.practice.dto.request.StartPracticeRequest;
 import com.fu.practice.dto.request.SubmitAnswerRequest;
-import com.fu.practice.dto.request.VerifyPairRequest;
 import com.fu.practice.dto.response.*;
 import com.fu.practice.entity.*;
 import com.fu.practice.repository.LessonProgressRepository;
@@ -143,106 +142,50 @@ public class PracticeSessionService {
     /**
      * Nộp câu trả lời cho một câu hỏi.
      *
-     * 1. Validate (short read TX)
-     * 2. Evaluate via LLM (no TX)
-     * 3. Persist answer + fetch pre-generated next item from DB (short write TX)
+     * DB roundtrips: 3 (item read → evaluate → write TX: session + item re-read).
+     * Trước đây: 4 (read TX: session + item + write TX: session + item).
+     *
+     * Session ownership/status validation chuyển vào write TX để đảm bảo
+     * consistency dưới optimistic lock. Item read ngoài TX chỉ để cung cấp
+     * dữ liệu cho evaluation mà không giữ connection pool.
      */
     public AnswerFeedbackResponse submitAnswer(UUID sessionId, UUID itemId,
                                                UUID userId, SubmitAnswerRequest request) {
-        // Phase 1: validate — short read TX
-        SessionItemContext ctx = validateAndLoadItem(sessionId, itemId, userId);
-
-        // Phase 2: LLM evaluation — NO transaction held
-        AnswerEvaluatorAgent.EvaluationResult result =
-                answerEvaluatorAgent.evaluate(ctx.item(), request.getUserAnswer());
-
-        // Phase 3: Persist answer + fetch pre-generated next item — short write TX
-        return persistAnswerResult(sessionId, itemId, request.getUserAnswer(), result, ctx);
-    }
-
-    /**
-     * Kiểm tra ngay lập tức một cặp MATCHING — không thay đổi trạng thái DB.
-     *
-     * UI gọi endpoint này mỗi khi learner kéo nối một cặp để hiển thị phản hồi tức thì.
-     * Khi {@code allPairsMatched = true}, UI tự động gọi {@code submitAnswer}
-     * với toàn bộ mapping để hoàn thành item.
-     *
-     * @param sessionId session đang chơi
-     * @param itemId    MATCHING item cần check
-     * @param userId    học viên
-     * @param request   leftId + rightId của cặp vừa kéo
-     * @param matchedSoFar tất cả cặp learner đã kéo đúng tính đến lúc này (leftId:rightId,...)
-     *                     — UI tự track và gửi lên để server tính allPairsMatched
-     */
-    @Transactional(readOnly = true)
-    public VerifyPairResponse verifyMatchingPair(UUID sessionId, UUID itemId,
-                                                  UUID userId, VerifyPairRequest request,
-                                                  String matchedSoFar) {
-        PracticeSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new BusinessException("SESSION_NOT_FOUND",
-                        "Không tìm thấy phiên luyện tập."));
-
-        if (!session.getUserId().equals(userId)) {
-            throw new BusinessException("SESSION_ACCESS_DENIED",
-                    "Bạn không có quyền truy cập phiên luyện tập này.");
-        }
-        if (session.getStatus() != PracticeStatus.IN_PROGRESS) {
-            throw new BusinessException("SESSION_NOT_ACTIVE", "Phiên luyện tập đã kết thúc.");
-        }
-
-        PracticeItem item = itemRepository.findById(itemId)
+        // Phase 1: load item cho evaluation — 1 read, không giữ TX
+        PracticeItem itemSnapshot = itemRepository.findById(itemId)
                 .orElseThrow(() -> new BusinessException("ITEM_NOT_FOUND",
                         "Không tìm thấy câu hỏi."));
-
-        if (!item.getSessionId().equals(sessionId)) {
+        if (!itemSnapshot.getSessionId().equals(sessionId)) {
             throw new BusinessException("ITEM_SESSION_MISMATCH",
                     "Câu hỏi không thuộc phiên luyện tập này.");
         }
-        if (item.getItemType() != PracticeItemType.MATCHING) {
-            throw new BusinessException("INVALID_ITEM_TYPE",
-                    "Endpoint này chỉ áp dụng cho câu hỏi dạng MATCHING.");
-        }
-        if (item.getUserAnswer() != null) {
+        if (itemSnapshot.getUserAnswer() != null) {
             throw new BusinessException("ITEM_ALREADY_ANSWERED",
-                    "Câu hỏi này đã được hoàn thành.");
+                    "Câu hỏi này đã được trả lời.");
         }
 
-        // Parse correctAnswer "0:4,1:5,2:6,3:7"
-        Map<String, String> correctMap = parsePairMap(item.getCorrectAnswer());
+        // Phase 2: evaluate — rule-based: ~0ms; LLM (TRANSLATION): 300–1200ms; không giữ TX
+        AnswerEvaluatorAgent.EvaluationResult result =
+                answerEvaluatorAgent.evaluate(itemSnapshot, request.getUserAnswer());
 
-        String leftKey  = String.valueOf(request.getLeftId());
-        String rightVal = String.valueOf(request.getRightId());
-        boolean pairCorrect = rightVal.equals(correctMap.get(leftKey));
-
-        // Kiểm tra allPairsMatched: tất cả cặp đã confirm đúng chưa
-        boolean allMatched = false;
-        if (pairCorrect) {
-            Map<String, String> matchedMap = parsePairMap(matchedSoFar);
-            matchedMap.put(leftKey, rightVal); // thêm cặp vừa đúng
-            allMatched = matchedMap.equals(correctMap);
-        }
-
-        return VerifyPairResponse.builder()
-                .correct(pairCorrect)
-                .allPairsMatched(allMatched)
-                .build();
+        // Phase 3: write TX — validate session ownership + status, persist, tính score
+        return persistAnswerResult(sessionId, itemId, userId, request.getUserAnswer(), result);
     }
 
-    /**
-     * Validate quyền truy cập và trạng thái, đồng thời đọc session context cần thiết
-     * để sinh câu hỏi tiếp theo bên ngoài transaction.
-     */
-    @Transactional(readOnly = true)
-    public SessionItemContext validateAndLoadItem(UUID sessionId, UUID itemId, UUID userId) {
+    @Transactional
+    public AnswerFeedbackResponse persistAnswerResult(UUID sessionId, UUID itemId, UUID userId,
+                                                       String userAnswer,
+                                                       AnswerEvaluatorAgent.EvaluationResult result) {
+        // Re-read within write TX — optimistic lock (@Version) bắt concurrent submits
         PracticeSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new BusinessException("SESSION_NOT_FOUND",
                         "Không tìm thấy phiên luyện tập."));
 
+        // Session ownership + status — validate tại đây thay vì read TX riêng
         if (!session.getUserId().equals(userId)) {
             throw new BusinessException("SESSION_ACCESS_DENIED",
                     "Bạn không có quyền truy cập phiên luyện tập này.");
         }
-
         if (session.getStatus() != PracticeStatus.IN_PROGRESS) {
             throw new BusinessException("SESSION_NOT_ACTIVE",
                     "Phiên luyện tập đã kết thúc.");
@@ -252,38 +195,7 @@ public class PracticeSessionService {
                 .orElseThrow(() -> new BusinessException("ITEM_NOT_FOUND",
                         "Không tìm thấy câu hỏi."));
 
-        if (!item.getSessionId().equals(sessionId)) {
-            throw new BusinessException("ITEM_SESSION_MISMATCH",
-                    "Câu hỏi không thuộc phiên luyện tập này.");
-        }
-
-        if (item.getUserAnswer() != null) {
-            throw new BusinessException("ITEM_ALREADY_ANSWERED",
-                    "Câu hỏi này đã được trả lời.");
-        }
-
-        return new SessionItemContext(
-                item,
-                session.getCompletedItems(),
-                session.getTotalItems(),
-                session.getSessionType()
-        );
-    }
-
-    @Transactional
-    public AnswerFeedbackResponse persistAnswerResult(UUID sessionId, UUID itemId,
-                                                       String userAnswer,
-                                                       AnswerEvaluatorAgent.EvaluationResult result,
-                                                       SessionItemContext ctx) {
-        // Re-read entities within this transaction (optimistic locking)
-        PracticeSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new BusinessException("SESSION_NOT_FOUND",
-                        "Không tìm thấy phiên luyện tập."));
-        PracticeItem item = itemRepository.findById(itemId)
-                .orElseThrow(() -> new BusinessException("ITEM_NOT_FOUND",
-                        "Không tìm thấy câu hỏi."));
-
-        // Double-check race condition
+        // Double-check race condition dưới write lock
         if (item.getUserAnswer() != null) {
             throw new BusinessException("ITEM_ALREADY_ANSWERED",
                     "Câu hỏi này đã được trả lời.");
@@ -297,8 +209,9 @@ public class PracticeSessionService {
         item.setAnsweredAt(LocalDateTime.now());
         itemRepository.save(item);
 
-        // Cập nhật session counter
+        // Cập nhật session counters
         session.setCompletedItems(session.getCompletedItems() + 1);
+        session.setRunningScoreSum(session.getRunningScoreSum() + result.score());
         if (result.isCorrect()) {
             session.setCorrectItems(session.getCorrectItems() + 1);
         }
@@ -342,14 +255,6 @@ public class PracticeSessionService {
                 .build();
     }
 
-    /** Context từ session cần thiết để persist kết quả câu trả lời. */
-    public record SessionItemContext(
-            PracticeItem item,
-            int completedItemsSnapshot,
-            int totalItems,
-            PracticeSessionType sessionType
-    ) {}
-
     // ── Complete Session ──────────────────────────────────────────────────
 
     /**
@@ -362,17 +267,11 @@ public class PracticeSessionService {
             return;
         }
 
-        // Weighted average of per-item scores (0–100 each).
-        // More fair than binary correct/total: partial MATCHING credit and LLM partial
-        // scores for TRANSLATION/FILL_BLANK are properly reflected in the session score.
-        double scoreValue = 0.0;
-        if (session.getTotalItems() > 0) {
-            List<PracticeItem> items = itemRepository.findBySessionIdOrderByItemIndex(session.getId());
-            double sumScores = items.stream()
-                    .mapToInt(PracticeItem::getScore)
-                    .sum();
-            scoreValue = sumScores / session.getTotalItems();
-        }
+        // Weighted average dựa trên runningScoreSum — không cần re-read toàn bộ items.
+        // runningScoreSum được cộng dồn sau mỗi persistAnswerResult().
+        double scoreValue = session.getTotalItems() > 0
+                ? (double) session.getRunningScoreSum() / session.getTotalItems()
+                : 0.0;
 
         BigDecimal score = BigDecimal.valueOf(scoreValue).setScale(2, RoundingMode.HALF_UP);
         session.setScore(score);
@@ -591,8 +490,16 @@ public class PracticeSessionService {
         if (resolvedType == PracticeItemType.MATCHING) {
             return buildMatchingItem(session, gen, index);
         }
+        if (resolvedType == PracticeItemType.SENTENCE_ORDER) {
+            return buildSentenceOrderItem(session, gen, index);
+        }
+        // FILL_BLANK và TRANSLATION đều là chọn 1 trong N options → cùng build logic
+        if (resolvedType == PracticeItemType.FILL_BLANK
+                || resolvedType == PracticeItemType.TRANSLATION) {
+            return buildSelectionItem(session, gen, index, resolvedType);
+        }
 
-        // Shuffle options so the correct answer is never predictably at position 0
+        // MULTIPLE_CHOICE, TRUE_FALSE: shuffle options (trừ TRUE_FALSE giữ Đúng/Sai cố định)
         List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.options();
         if (options != null && options.size() > 1
                 && resolvedType != PracticeItemType.TRUE_FALSE) {
@@ -609,6 +516,121 @@ public class PracticeSessionService {
                 .hint(gen.hint())
                 .options(buildOptionsJson(options))
                 .correctAnswer(gen.correctAnswer() != null ? gen.correctAnswer() : "")
+                .explanation(gen.explanation())
+                .refContentId(parseUuid(gen.refContentId()))
+                .refContentType(gen.refContentType())
+                .build();
+    }
+
+    /**
+     * Build item dạng "chọn 1 trong N options": FILL_BLANK và TRANSLATION.
+     *
+     * Options được shuffle để đáp án không luôn ở vị trí cố định.
+     * correctAnswer = index (id) của option có isCorrect=true sau khi shuffle.
+     * Frontend submit id option được chọn → server so sánh integer — không LLM.
+     */
+    private PracticeItem buildSelectionItem(PracticeSession session,
+                                             ExerciseGeneratorAgent.GeneratedItem gen,
+                                             int index,
+                                             PracticeItemType itemType) {
+        List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.options();
+        if (options == null || options.isEmpty()) {
+            log.warn("buildSelectionItem: LLM không trả về options cho {} item {}", itemType, index);
+            return PracticeItem.builder()
+                    .sessionId(session.getId())
+                    .itemIndex(index)
+                    .itemType(itemType)
+                    .question(gen.question() != null ? gen.question() : "")
+                    .options("[]")
+                    .correctAnswer(gen.correctAnswer() != null ? gen.correctAnswer() : "")
+                    .explanation(gen.explanation())
+                    .build();
+        }
+
+        List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> shuffled = new ArrayList<>(options);
+        Collections.shuffle(shuffled);
+
+        // correctAnswer = index của option có isCorrect=true trong mảng sau shuffle
+        int correctId = -1;
+        for (int i = 0; i < shuffled.size(); i++) {
+            if (shuffled.get(i).isCorrect()) {
+                correctId = i;
+                break;
+            }
+        }
+        if (correctId == -1) {
+            // Fallback: LLM không đánh dấu isCorrect → dùng correctAnswer text của LLM
+            log.warn("buildSelectionItem: không tìm thấy isCorrect=true cho {} item {}, fallback text", itemType, index);
+            return PracticeItem.builder()
+                    .sessionId(session.getId())
+                    .itemIndex(index)
+                    .itemType(itemType)
+                    .question(gen.question() != null ? gen.question() : "")
+                    .hint(gen.hint())
+                    .options(buildOptionsJson(shuffled))
+                    .correctAnswer(gen.correctAnswer() != null ? gen.correctAnswer() : "")
+                    .explanation(gen.explanation())
+                    .refContentId(parseUuid(gen.refContentId()))
+                    .refContentType(gen.refContentType())
+                    .build();
+        }
+
+        return PracticeItem.builder()
+                .sessionId(session.getId())
+                .itemIndex(index)
+                .itemType(itemType)
+                .question(gen.question() != null ? gen.question() : "")
+                .questionJapanese(gen.questionJapanese())
+                .hint(gen.hint())
+                .options(buildOptionsJson(shuffled))
+                .correctAnswer(String.valueOf(correctId))
+                .explanation(gen.explanation())
+                .refContentId(parseUuid(gen.refContentId()))
+                .refContentType(gen.refContentType())
+                .build();
+    }
+
+    /**
+     * Build SENTENCE_ORDER item.
+     *
+     * Tokens được lưu ĐÚNG THỨ TỰ như LLM sinh ra (thứ tự đúng của câu).
+     * Frontend tự shuffle để hiển thị — server không cần biết display order.
+     * correctAnswer = "0,1,2,...,N-1" (thứ tự ID đúng).
+     * Frontend submit ordered IDs theo thứ tự user chọn → server so sánh int array.
+     */
+    private PracticeItem buildSentenceOrderItem(PracticeSession session,
+                                                 ExerciseGeneratorAgent.GeneratedItem gen,
+                                                 int index) {
+        List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.options();
+        if (options == null || options.isEmpty()) {
+            log.warn("buildSentenceOrderItem: LLM không trả về options cho SENTENCE_ORDER item {}", index);
+            return PracticeItem.builder()
+                    .sessionId(session.getId())
+                    .itemIndex(index)
+                    .itemType(PracticeItemType.SENTENCE_ORDER)
+                    .question(gen.question() != null ? gen.question() : "")
+                    .options("[]")
+                    .correctAnswer("")
+                    .explanation(gen.explanation())
+                    .build();
+        }
+
+        // correctAnswer = "0,1,2,...,N-1" — thứ tự đúng chính là thứ tự LLM trả về
+        StringBuilder correctAnswer = new StringBuilder();
+        for (int i = 0; i < options.size(); i++) {
+            if (i > 0) correctAnswer.append(",");
+            correctAnswer.append(i);
+        }
+
+        return PracticeItem.builder()
+                .sessionId(session.getId())
+                .itemIndex(index)
+                .itemType(PracticeItemType.SENTENCE_ORDER)
+                .question(gen.question() != null ? gen.question() : "")
+                .questionJapanese(gen.questionJapanese())
+                .hint(gen.hint())
+                .options(buildOptionsJson(options))   // giữ thứ tự đúng, frontend tự shuffle
+                .correctAnswer(correctAnswer.toString())
                 .explanation(gen.explanation())
                 .refContentId(parseUuid(gen.refContentId()))
                 .refContentType(gen.refContentType())
@@ -872,6 +894,21 @@ public class PracticeSessionService {
 
     private PracticeItemResponse toItemResponse(PracticeItem item) {
         List<OptionDto> options = parseOptionsForDisplay(item.getOptions(), false);
+
+        // MATCHING: gửi correctMapping upfront để frontend validate client-side,
+        // tránh phải gọi verify-pair API cho mỗi lần kéo.
+        Map<Integer, Integer> correctMapping = null;
+        if (item.getItemType() == PracticeItemType.MATCHING
+                && item.getCorrectAnswer() != null
+                && !item.getCorrectAnswer().isBlank()) {
+            correctMapping = new LinkedHashMap<>();
+            for (Map.Entry<String, String> e : parsePairMap(item.getCorrectAnswer()).entrySet()) {
+                try {
+                    correctMapping.put(Integer.parseInt(e.getKey()), Integer.parseInt(e.getValue()));
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+
         return PracticeItemResponse.builder()
                 .id(item.getId())
                 .itemIndex(item.getItemIndex())
@@ -880,8 +917,8 @@ public class PracticeSessionService {
                 .questionJapanese(item.getQuestionJapanese())
                 .hint(item.getHint())
                 .options(options)
+                .correctMapping(correctMapping)
                 .build();
-        // correctAnswer KHÔNG được thêm vào đây
     }
 
     private List<OptionDto> parseOptionsForDisplay(String optionsJson, boolean revealCorrect) {
