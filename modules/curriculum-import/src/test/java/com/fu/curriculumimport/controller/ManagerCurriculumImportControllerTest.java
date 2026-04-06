@@ -496,6 +496,8 @@ class ManagerCurriculumImportControllerTest {
                     .totalImports(42)
                     .completedImports(35)
                     .failedImports(3)
+                    .rollbackImports(2)
+                    .pendingApprovalImports(1)
                     .totalLessonsCreated(200)
                     .totalVocabularyCreated(1500)
                     .totalGrammarPointsCreated(300)
@@ -510,7 +512,9 @@ class ManagerCurriculumImportControllerTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.totalImports").value(42))
-                    .andExpect(jsonPath("$.data.completedImports").value(35));
+                    .andExpect(jsonPath("$.data.completedImports").value(35))
+                    .andExpect(jsonPath("$.data.rollbackImports").value(2))
+                    .andExpect(jsonPath("$.data.pendingApprovalImports").value(1));
         }
     }
 

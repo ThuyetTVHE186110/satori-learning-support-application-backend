@@ -898,6 +898,8 @@ class CurriculumImportServiceImplTest {
             given(importRepository.countByStatus(ImportStatus.COMPLETED)).willReturn(6L);
             given(importRepository.countByStatus(ImportStatus.FAILED)).willReturn(2L);
             given(importRepository.countByStatus(ImportStatus.QUEUED)).willReturn(1L);
+            given(importRepository.countByStatus(ImportStatus.ROLLED_BACK)).willReturn(1L);
+            given(importRepository.countByStatus(ImportStatus.PENDING_APPROVAL)).willReturn(2L);
             given(importRepository.countByStatus(ImportStatus.CANCELLED)).willReturn(0L);
             given(importRepository.sumLessonsCreated()).willReturn(50L);
             given(importRepository.sumVocabularyCreated()).willReturn(300L);
@@ -916,6 +918,8 @@ class CurriculumImportServiceImplTest {
             assertThat(result.getCompletedImports()).isEqualTo(6L);
             assertThat(result.getFailedImports()).isEqualTo(2L);
             assertThat(result.getQueuedImports()).isEqualTo(1L);
+            assertThat(result.getRollbackImports()).isEqualTo(1L);
+            assertThat(result.getPendingApprovalImports()).isEqualTo(2L);
             // in-progress = 10 - 6 - 2 - 1 - 0 = 1
             assertThat(result.getInProgressImports()).isEqualTo(1L);
             assertThat(result.getTotalLessonsCreated()).isEqualTo(50L);
@@ -956,6 +960,8 @@ class CurriculumImportServiceImplTest {
             given(importRepository.countByStatus(ImportStatus.COMPLETED)).willReturn(5L);
             given(importRepository.countByStatus(ImportStatus.FAILED)).willReturn(2L); // sum > total
             given(importRepository.countByStatus(ImportStatus.QUEUED)).willReturn(0L);
+            given(importRepository.countByStatus(ImportStatus.ROLLED_BACK)).willReturn(0L);
+            given(importRepository.countByStatus(ImportStatus.PENDING_APPROVAL)).willReturn(0L);
             given(importRepository.countByStatus(ImportStatus.CANCELLED)).willReturn(0L);
             given(importRepository.sumLessonsCreated()).willReturn(0L);
             given(importRepository.sumVocabularyCreated()).willReturn(0L);
@@ -970,6 +976,8 @@ class CurriculumImportServiceImplTest {
 
             ImportStatisticsResponse result = service.getStatistics();
 
+            assertThat(result.getRollbackImports()).isZero();
+            assertThat(result.getPendingApprovalImports()).isZero();
             assertThat(result.getInProgressImports()).isGreaterThanOrEqualTo(0L);
         }
     }

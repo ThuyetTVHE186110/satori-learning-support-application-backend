@@ -312,6 +312,8 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
         long completedImports = importRepository.countByStatus(ImportStatus.COMPLETED);
         long failedImports = importRepository.countByStatus(ImportStatus.FAILED);
         long queuedImports = importRepository.countByStatus(ImportStatus.QUEUED);
+        long rollbackImports = importRepository.countByStatus(ImportStatus.ROLLED_BACK);
+        long pendingApprovalImports = importRepository.countByStatus(ImportStatus.PENDING_APPROVAL);
 
         // Count in-progress (any status between QUEUED and COMPLETED/FAILED/CANCELLED)
         long inProgressImports = totalImports - completedImports - failedImports - queuedImports
@@ -328,6 +330,8 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
                 .completedImports(completedImports)
                 .failedImports(failedImports)
                 .queuedImports(queuedImports)
+                .rollbackImports(rollbackImports)
+                .pendingApprovalImports(pendingApprovalImports)
                 .inProgressImports(Math.max(0, inProgressImports))
                 .totalLessonsCreated(totalLessons)
                 .totalVocabularyCreated(totalVocab)
@@ -492,7 +496,9 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
 
     // --- Helper methods ---
 
-    /** 100 MB — PPTX with embedded images can be larger than plain PDFs. */
+    /**
+     * 100 MB — PPTX with embedded images can be larger than plain PDFs.
+     */
     private static final long MAX_FILE_SIZE_BYTES = 100L * 1024 * 1024;
 
     private static final Set<String> ACCEPTED_MIME_TYPES = Set.of(
@@ -510,9 +516,9 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
         }
 
         String contentType = file.getContentType() == null ? "" : file.getContentType().toLowerCase();
-        String filename    = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
-        boolean mimeOk     = ACCEPTED_MIME_TYPES.contains(contentType);
-        boolean extOk      = ACCEPTED_EXTENSIONS.stream().anyMatch(filename::endsWith);
+        String filename = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
+        boolean mimeOk = ACCEPTED_MIME_TYPES.contains(contentType);
+        boolean extOk = ACCEPTED_EXTENSIONS.stream().anyMatch(filename::endsWith);
 
         if (!mimeOk && !extOk) {
             throw new InvalidImportFileException(
