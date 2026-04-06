@@ -8,6 +8,7 @@ import com.fu.achievement.dto.response.UserAchievementResponse;
 import com.fu.achievement.dto.response.LevelUpNotificationResponse;
 import com.fu.achievement.enums.BadgeType;
 import com.fu.achievement.service.StreakService;
+import com.fu.common.event.PracticeFeedbackReadyEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.course.entity.Course;
 import com.fu.course.entity.Lesson;
@@ -64,6 +65,7 @@ public class PracticeSessionService {
     private final AchievementService achievementService;
     private final LearningLevelService learningLevelService;
     private final StreakService streakService;
+    private final ApplicationEventPublisher eventPublisher;
 
     // ── Start Session ─────────────────────────────────────────────────────
 
