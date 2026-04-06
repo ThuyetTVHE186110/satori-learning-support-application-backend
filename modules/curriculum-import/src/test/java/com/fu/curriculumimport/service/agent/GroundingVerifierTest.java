@@ -279,10 +279,11 @@ class GroundingVerifierTest {
         @Test
         @DisplayName("Kanji decomp: 100% kanji found in source → textGrounded via decomp")
         void vocab_kanjiDecomp_allKanjiPresent_grounded() {
-            // 食べる: kanji = 食 (1 kanji). Source must contain 食 but NOT 食べる as whole word
-            String source = "今日は食 が美味しいです";
-            // "食べる" is NOT in source (source has "食 が"), but kanji 食 IS present
-            ExtractionResult result = resultWith(List.of(vocab("食べる", null, null)), List.of());
+            // Use multi-kanji word: 勉強 has 2 kanji (勉, 強)
+            // Source contains both kanji separately but NOT the compound word "勉強"
+            String source = "今日は勉めて強い人です"; // Has 勉 and 強 but not 勉強
+            // "勉強" is NOT in source as whole word, but both kanji ARE present
+            ExtractionResult result = resultWith(List.of(vocab("勉強", null, null)), List.of());
 
             GroundingVerifier.GroundingResult gr = verifier.verify(chunk(source), result);
 

@@ -56,12 +56,14 @@ class ConversationGenerationServiceTest {
                 "titleJapanese": "日常のショッピング",
                 "description": "Practice shopping vocabulary",
                 "descriptionVi": "Luyện từ vựng mua sắm",
+                "scenario": "At the supermarket",
                 "category": "shopping",
                 "jlptLevel": "N5",
+                "difficultyScore": 2,
                 "vocabularyHints": ["買い物", "値段"],
                 "grammarPoints": ["〜てください"],
                 "usefulExpressions": ["いくらですか"],
-                "scenarioSuggestions": ["At the supermarket"]
+                "missions": []
               }
             ]
             """;
