@@ -547,7 +547,10 @@ public class ExerciseGeneratorAgent {
                     "Các từ nhiễu phải là từ vựng khác trong bài hoặc từ gần nghĩa — KHÔNG dùng từ vô nghĩa. " +
                     "correctAnswer = text của đáp án đúng (từ cần điền vào ___). hint = gợi ý về nghĩa hoặc cách dùng của từ cần điền.";
             case TRANSLATION ->
-                    "TRANSLATION: question = câu tiếng Nhật cần dịch sang tiếng Việt (hoặc ngược lại). options = []. correctAnswer = bản dịch đúng.";
+                    "TRANSLATION: question = câu tiếng Nhật cần dịch sang tiếng Việt (hoặc ngược lại). " +
+                    "options = array {text, isCorrect}: đúng 1 (isCorrect=true) là bản dịch đúng, còn lại (isCorrect=false) là 3 bản dịch SAI — " +
+                    "phải sai về nghĩa hoặc ngữ pháp nhưng trông hợp lý (không dùng câu vô nghĩa). " +
+                    "correctAnswer = text của bản dịch đúng. hint = null.";
             case SENTENCE_ORDER ->
                     "SENTENCE_ORDER: question = câu tiếng VIỆT tham chiếu để học viên biết nghĩa (ví dụ: \"Tôi là học sinh.\"). " +
                     "options = từng TOKEN tiếng Nhật riêng lẻ của câu đúng, TẤT CẢ isCorrect=false. " +

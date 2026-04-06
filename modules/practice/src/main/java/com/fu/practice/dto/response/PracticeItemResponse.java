@@ -8,6 +8,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -29,8 +30,15 @@ public class PracticeItemResponse {
 
     /**
      * Danh sách lựa chọn — isCorrect = null (chỉ set sau khi submit).
+     * MATCHING: options chứa tất cả LEFT (id 0..N-1) + RIGHT shuffled (id N..2N-1), mỗi item có "side".
      */
     private List<OptionDto> options;
 
-    // correctAnswer KHÔNG có ở đây — chỉ expose qua AnswerFeedbackResponse
+    /**
+     * Chỉ non-null cho MATCHING items.
+     * Map leftId → rightId (đáp án đúng), cho phép frontend validate client-side
+     * mà không cần gọi verify-pair API cho mỗi lần kéo.
+     * Key = id của option bên LEFT, Value = id của option bên RIGHT tương ứng.
+     */
+    private Map<Integer, Integer> correctMapping;
 }
