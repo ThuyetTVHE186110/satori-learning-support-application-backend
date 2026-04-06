@@ -27,8 +27,7 @@ CREATE TYPE practice_session_type AS ENUM (
     'VOCAB_DRILL',      -- Luyện từ vựng
     'GRAMMAR_DRILL',    -- Luyện ngữ pháp
     'MIXED_LESSON',     -- Tổng hợp bài học (vocab + grammar)
-    'KANJI_READING',    -- Luyện đọc kanji
-    'SENTENCE_BUILD'    -- Sắp xếp câu
+    'KANJI_READING'     -- Luyện đọc kanji
 );
 
 CREATE TYPE practice_item_type AS ENUM (
