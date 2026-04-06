@@ -3,6 +3,7 @@ package com.fu.user.repository;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
+import com.fu.user.entity.AuthProvider;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -68,7 +69,7 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
             "AND (:#{#status == null} = true OR u.status = :status)")
     Page<User> searchUsers(
             @Param("keyword") String keyword,
-            @Param("role") UserRole role,
+            @Param("role" ) UserRole role,
             @Param("status") UserStatus status,
             Pageable pageable
     );
@@ -196,4 +197,59 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
     long countTotalLearners();
     @Query("SELECT u FROM User  u where u.role = 'TEACHER' and u.status = 'ACTIVE' and u.deletedAt IS NULL")
     List<User> findAllTeacher();
+
+    /**
+     * Count users by authentication provider (for admin dashboard)
+     */
+    @Query("SELECT COUNT(u) FROM User u WHERE u.authProvider = :provider AND u.deletedAt IS NULL")
+    long countByAuthProvider(@Param("provider") AuthProvider provider);
+
+    /**
+     * Get gender distribution of users (for admin dashboard)
+     */
+    @Query("SELECT u.gender, COUNT(u) FROM User u WHERE u.gender IS NOT NULL AND u.deletedAt IS NULL GROUP BY u.gender")
+    List<Object[]> findGenderDistribution();
+
+    /**
+     * Count new users registered in date range
+     */
+    @Query("SELECT COUNT(u) FROM User u WHERE u.createdAt >= :startDate AND u.createdAt < :endDate AND u.deletedAt IS NULL")
+    long countNewUsersByDateRange(@Param("startDate") java.time.LocalDateTime startDate, @Param("endDate") java.time.LocalDateTime endDate);
+
+    /**
+     * Find daily new user registration trend for admin dashboard
+     */
+    @Query("SELECT FUNCTION('DATE', u.createdAt) as date, COUNT(u) FROM User u WHERE FUNCTION('DATE', u.createdAt) >= :startDate AND FUNCTION('DATE', u.createdAt) <= :endDate AND u.deletedAt IS NULL GROUP BY FUNCTION('DATE', u.createdAt) ORDER BY FUNCTION('DATE', u.createdAt) DESC")
+    List<Object[]> findNewUserTrendByDateRange(@Param("startDate") java.time.LocalDate startDate, @Param("endDate") java.time.LocalDate endDate);
+
+    /**
+     * Count failed login attempts in period
+     */
+    @Query("SELECT COUNT(u) FROM User u WHERE u.failedLoginAttempts > 0 AND u.updatedAt >= :since AND u.deletedAt IS NULL")
+    long countFailedLoginsInPeriod(@Param("since") java.time.LocalDateTime since);
+
+    /**
+     * Count currently locked accounts
+     */
+    @Query("SELECT COUNT(u) FROM User u WHERE u.failedLoginAttempts > 0 AND u.lockedUntil > CURRENT_TIMESTAMP AND u.deletedAt IS NULL")
+    long countLockedAccounts();
+
+
+    /**
+     * Daily failed login trend
+     */
+    @Query("SELECT FUNCTION('DATE', u.updatedAt) as date, COUNT(u) FROM User u WHERE u.failedLoginAttempts > 0 AND FUNCTION('DATE', u.updatedAt) >= :startDate AND FUNCTION('DATE', u.updatedAt) <= :endDate AND u.deletedAt IS NULL GROUP BY FUNCTION('DATE', u.updatedAt) ORDER BY FUNCTION('DATE', u.updatedAt) DESC")
+    List<Object[]> findFailedLoginTrendByDateRange(@Param("startDate") java.time.LocalDate startDate, @Param("endDate") java.time.LocalDate endDate);
+
+    /**
+     * Count users active (last login) in a date range
+     */
+    @Query("SELECT COUNT(u) FROM User u WHERE u.lastLoginAt >= :startDate AND u.lastLoginAt < :endDate AND u.deletedAt IS NULL")
+    long countActiveUsersByDateRange(@Param("startDate") java.time.LocalDateTime startDate, @Param("endDate") java.time.LocalDateTime endDate);
+
+    /**
+     * Daily active user trend
+     */
+    @Query("SELECT FUNCTION('DATE', u.lastLoginAt) as date, COUNT(u) FROM User u WHERE FUNCTION('DATE', u.lastLoginAt) >= :startDate AND FUNCTION('DATE', u.lastLoginAt) <= :endDate AND u.deletedAt IS NULL GROUP BY FUNCTION('DATE', u.lastLoginAt) ORDER BY FUNCTION('DATE', u.lastLoginAt) DESC")
+    List<Object[]> findActiveUsersTrendByDateRange(@Param("startDate") java.time.LocalDate startDate, @Param("endDate") java.time.LocalDate endDate);
 }

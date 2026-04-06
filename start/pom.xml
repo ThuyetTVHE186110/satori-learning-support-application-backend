@@ -56,6 +56,10 @@
         </dependency>
         <dependency>
             <groupId>com.fu</groupId>
+            <artifactId>monitoring</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fu</groupId>
             <artifactId>practice</artifactId>
         </dependency>
         <dependency>
