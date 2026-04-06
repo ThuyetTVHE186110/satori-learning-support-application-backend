@@ -1,6 +1,13 @@
 package com.fu.practice.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.achievement.config.ActivityExpConfig;
+import com.fu.achievement.service.AchievementService;
+import com.fu.achievement.service.LearningLevelService;
+import com.fu.achievement.dto.response.UserAchievementResponse;
+import com.fu.achievement.dto.response.LevelUpNotificationResponse;
+import com.fu.achievement.enums.BadgeType;
+import com.fu.achievement.service.StreakService;
 import com.fu.common.exception.BusinessException;
 import com.fu.course.entity.Course;
 import com.fu.course.entity.Lesson;
@@ -53,12 +60,15 @@ public class PracticeSessionService {
     private final SessionFeedbackAgent sessionFeedbackAgent;
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbcTemplate;
+    private final AchievementService achievementService;
+    private final LearningLevelService learningLevelService;
+    private final StreakService streakService;
 
     // ── Start Session ─────────────────────────────────────────────────────
 
     /**
      * Bắt đầu phiên luyện tập mới.
-     *
+     * <p>
      * Sinh toàn bộ câu hỏi ngay khi start để submitAnswer không phải chờ LLM nữa.
      * LLM call runs OUTSIDE the transaction to avoid holding a DB connection for 5-30 seconds.
      */
@@ -99,8 +109,8 @@ public class PracticeSessionService {
 
     @Transactional
     public StartPracticeResponse persistNewSession(UUID userId, StartPracticeRequest request,
-                                                    LessonContext lessonCtx,
-                                                    List<ExerciseGeneratorAgent.GeneratedItem> firstItemList) {
+                                                   LessonContext lessonCtx,
+                                                   List<ExerciseGeneratorAgent.GeneratedItem> firstItemList) {
         // Lưu jlptLevel + itemTypes vào context JSON để dùng lại khi sinh câu tiếp theo
         String itemTypesJson = buildItemTypesJson(request.getItemTypes());
         String contextJson = String.format("{\"jlptLevel\":\"%s\",\"itemTypes\":%s}",
@@ -135,24 +145,62 @@ public class PracticeSessionService {
                 .build();
     }
 
-    private record LessonContext(UUID courseId, String jlptLevel) {}
+    private record LessonContext(UUID courseId, String jlptLevel) {
+    }
 
     // ── Submit Answer ─────────────────────────────────────────────────────
 
     /**
      * Nộp câu trả lời cho một câu hỏi.
-     *
-     * DB roundtrips: 3 (item read → evaluate → write TX: session + item re-read).
-     * Trước đây: 4 (read TX: session + item + write TX: session + item).
-     *
-     * Session ownership/status validation chuyển vào write TX để đảm bảo
-     * consistency dưới optimistic lock. Item read ngoài TX chỉ để cung cấp
-     * dữ liệu cho evaluation mà không giữ connection pool.
+     * <p>
+     * 1. Validate (short read TX)
+     * 2. Evaluate via LLM (no TX)
+     * 3. Persist answer + fetch pre-generated next item from DB (short write TX)
      */
     public AnswerFeedbackResponse submitAnswer(UUID sessionId, UUID itemId,
                                                UUID userId, SubmitAnswerRequest request) {
-        // Phase 1: load item cho evaluation — 1 read, không giữ TX
-        PracticeItem itemSnapshot = itemRepository.findById(itemId)
+        // Phase 1: validate — short read TX
+        SessionItemContext ctx = validateAndLoadItem(sessionId, itemId, userId);
+
+        // Phase 2: LLM evaluation — NO transaction held
+        AnswerEvaluatorAgent.EvaluationResult result =
+                answerEvaluatorAgent.evaluate(ctx.item(), request.getUserAnswer());
+
+        // Phase 3: Persist answer + fetch pre-generated next item — short write TX
+        return persistAnswerResult(sessionId, itemId, request.getUserAnswer(), result, ctx);
+    }
+
+    /**
+     * Kiểm tra ngay lập tức một cặp MATCHING — không thay đổi trạng thái DB.
+     * <p>
+     * UI gọi endpoint này mỗi khi learner kéo nối một cặp để hiển thị phản hồi tức thì.
+     * Khi {@code allPairsMatched = true}, UI tự động gọi {@code submitAnswer}
+     * với toàn bộ mapping để hoàn thành item.
+     *
+     * @param sessionId    session đang chơi
+     * @param itemId       MATCHING item cần check
+     * @param userId       học viên
+     * @param request      leftId + rightId của cặp vừa kéo
+     * @param matchedSoFar tất cả cặp learner đã kéo đúng tính đến lúc này (leftId:rightId,...)
+     *                     — UI tự track và gửi lên để server tính allPairsMatched
+     */
+    @Transactional(readOnly = true)
+    public VerifyPairResponse verifyMatchingPair(UUID sessionId, UUID itemId,
+                                                 UUID userId, VerifyPairRequest request,
+                                                 String matchedSoFar) {
+        PracticeSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new BusinessException("SESSION_NOT_FOUND",
+                        "Không tìm thấy phiên luyện tập."));
+
+        if (!session.getUserId().equals(userId)) {
+            throw new BusinessException("SESSION_ACCESS_DENIED",
+                    "Bạn không có quyền truy cập phiên luyện tập này.");
+        }
+        if (session.getStatus() != PracticeStatus.IN_PROGRESS) {
+            throw new BusinessException("SESSION_NOT_ACTIVE", "Phiên luyện tập đã kết thúc.");
+        }
+
+        PracticeItem item = itemRepository.findById(itemId)
                 .orElseThrow(() -> new BusinessException("ITEM_NOT_FOUND",
                         "Không tìm thấy câu hỏi."));
         if (!itemSnapshot.getSessionId().equals(sessionId)) {
@@ -164,9 +212,20 @@ public class PracticeSessionService {
                     "Câu hỏi này đã được trả lời.");
         }
 
-        // Phase 2: evaluate — rule-based: ~0ms; LLM (TRANSLATION): 300–1200ms; không giữ TX
-        AnswerEvaluatorAgent.EvaluationResult result =
-                answerEvaluatorAgent.evaluate(itemSnapshot, request.getUserAnswer());
+        // Parse correctAnswer "0:4,1:5,2:6,3:7"
+        Map<String, String> correctMap = parsePairMap(item.getCorrectAnswer());
+
+        String leftKey = String.valueOf(request.getLeftId());
+        String rightVal = String.valueOf(request.getRightId());
+        boolean pairCorrect = rightVal.equals(correctMap.get(leftKey));
+
+        // Kiểm tra allPairsMatched: tất cả cặp đã confirm đúng chưa
+        boolean allMatched = false;
+        if (pairCorrect) {
+            Map<String, String> matchedMap = parsePairMap(matchedSoFar);
+            matchedMap.put(leftKey, rightVal); // thêm cặp vừa đúng
+            allMatched = matchedMap.equals(correctMap);
+        }
 
         // Phase 3: write TX — validate session ownership + status, persist, tính score
         return persistAnswerResult(sessionId, itemId, userId, request.getUserAnswer(), result);
@@ -195,7 +254,38 @@ public class PracticeSessionService {
                 .orElseThrow(() -> new BusinessException("ITEM_NOT_FOUND",
                         "Không tìm thấy câu hỏi."));
 
-        // Double-check race condition dưới write lock
+        if (!item.getSessionId().equals(sessionId)) {
+            throw new BusinessException("ITEM_SESSION_MISMATCH",
+                    "Câu hỏi không thuộc phiên luyện tập này.");
+        }
+
+        if (item.getUserAnswer() != null) {
+            throw new BusinessException("ITEM_ALREADY_ANSWERED",
+                    "Câu hỏi này đã được trả lời.");
+        }
+
+        return new SessionItemContext(
+                item,
+                session.getCompletedItems(),
+                session.getTotalItems(),
+                session.getSessionType()
+        );
+    }
+
+    @Transactional
+    public AnswerFeedbackResponse persistAnswerResult(UUID sessionId, UUID itemId,
+                                                      String userAnswer,
+                                                      AnswerEvaluatorAgent.EvaluationResult result,
+                                                      SessionItemContext ctx) {
+        // Re-read entities within this transaction (optimistic locking)
+        PracticeSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new BusinessException("SESSION_NOT_FOUND",
+                        "Không tìm thấy phiên luyện tập."));
+        PracticeItem item = itemRepository.findById(itemId)
+                .orElseThrow(() -> new BusinessException("ITEM_NOT_FOUND",
+                        "Không tìm thấy câu hỏi."));
+
+        // Double-check race condition
         if (item.getUserAnswer() != null) {
             throw new BusinessException("ITEM_ALREADY_ANSWERED",
                     "Câu hỏi này đã được trả lời.");
@@ -255,6 +345,17 @@ public class PracticeSessionService {
                 .build();
     }
 
+    /**
+     * Context từ session cần thiết để persist kết quả câu trả lời.
+     */
+    public record SessionItemContext(
+            PracticeItem item,
+            int completedItemsSnapshot,
+            int totalItems,
+            PracticeSessionType sessionType
+    ) {
+    }
+
     // ── Complete Session ──────────────────────────────────────────────────
 
     /**
@@ -281,6 +382,35 @@ public class PracticeSessionService {
 
         if (session.getLessonId() != null) {
             upsertLessonProgress(session);
+        }
+        // Record daily activity for streak tracking
+        try {
+            streakService.recordDailyActivity(session.getUserId(), "PRACTICE");
+        } catch (Exception e) {
+            log.error("Error recording daily activity for learner: {}", session.getUserId(), e);
+        }
+        // Award direct EXP for practice completion (with level tier + score bonus)
+        try {
+            int currentLevel = learningLevelService.getCurrentLevel(session.getUserId());
+            Integer scoreForExp = session.getScore() != null ? session.getScore().intValue() : null;
+            int expToAward = ActivityExpConfig.ActivityType.PRACTICE_AI.getExpReward(currentLevel, scoreForExp);
+            learningLevelService.awardExpAndCheckLevelUp(session.getUserId(), expToAward);
+            log.info("Awarded {} EXP for practice session to user {} (level {}, score {}%)",
+                    expToAward, session.getUserId(), currentLevel, scoreForExp);
+        } catch (Exception e) {
+            log.error("Error awarding EXP for practice session to user {}", session.getUserId(), e);
+            // Continue even if EXP fails - don't break practice session
+        }
+
+        // Check and award achievements for practice completion
+        try {
+            // Count total completed practice sessions for this user to check badge requirements
+            long practiceCount = sessionRepository.countByUserIdAndStatus(session.getUserId(), PracticeStatus.COMPLETED);
+            achievementService.checkAndAwardBadges(session.getUserId(), BadgeType.AI_PRACTICE_COUNT, (int) practiceCount);
+            log.debug("Achievement check completed for user: {} with practice count: {}", session.getUserId(), practiceCount);
+        } catch (Exception e) {
+            log.error("Error checking achievements for practice session", e);
+            // Don't fail the practice session if achievement check fails
         }
     }
 
@@ -341,6 +471,70 @@ public class PracticeSessionService {
 
         String feedbackText = extractFeedbackSummary(session.getAiFeedback());
 
+        // Retrieve earned badges from session completion (if any)
+        // Badges earned within a small time window after session completion
+        List<UserAchievementResponse> earnedBadges = Collections.emptyList();
+        LevelUpNotificationResponse levelUpInfo = null;
+        
+        // Calculate EXP earned and get old total
+        int expEarned = 0;
+        Integer oldTotalExp = null;
+
+        if (session.getCompletedAt() != null) {
+            try {
+                // Get current total EXP
+                int currentTotalExp = learningLevelService.getTotalExp(userId);
+                int currentLevel = learningLevelService.getCurrentLevel(userId);
+                Integer sessionScore = session.getScore() != null ? session.getScore().intValue() : null;
+                
+                // Calculate EXP that was awarded
+                expEarned = ActivityExpConfig.ActivityType.PRACTICE_AI.getExpReward(currentLevel, sessionScore);
+                
+                // Calculate what it was before
+                oldTotalExp = currentTotalExp - expEarned;
+                
+            } catch (Exception e) {
+                log.debug("Error calculating EXP details for session summary", e);
+            }
+            
+            try {
+                earnedBadges = achievementService.getUserEarnedBadges(userId).stream()
+                        .filter(badge -> badge.getEarnedAt() != null &&
+                                badge.getEarnedAt().isAfter(session.getCreatedAt()) &&
+                                badge.getEarnedAt().isBefore(session.getCompletedAt().plusSeconds(10)))
+                        .collect(Collectors.toList());
+            } catch (Exception e) {
+                log.error("Error retrieving earned badges for session summary", e);
+            }
+
+            // Retrieve level-up information
+            try {
+                LearningLevelService.LevelProgressInfo progressInfo = learningLevelService.getProgressToNextLevel(userId);
+
+                // Calculate previous level from oldTotalExp
+                int previousLevel = 0;
+                if (oldTotalExp != null && oldTotalExp >= 0) {
+                    previousLevel = learningLevelService.calculateLevelFromExp(oldTotalExp);
+                }
+                
+                int currentLevel = progressInfo.currentLevel();
+                boolean actuallyLeveledUp = previousLevel < currentLevel;
+
+                levelUpInfo = LevelUpNotificationResponse.builder()
+                        .previousLevel(previousLevel)
+                        .newLevel(currentLevel)
+                        .expEarned(expEarned)
+                        .oldTotalExp(oldTotalExp)
+                        .totalExp(progressInfo.totalExp())
+                        .expToNextLevel(progressInfo.expToNextLevel())
+                        .progressPercentage(progressInfo.percentToNextLevel())
+                        .isLevelUp(actuallyLeveledUp)
+                        .build();
+            } catch (Exception e) {
+                log.error("Error retrieving level-up info for session summary", e);
+            }
+        }
+
         return SessionSummaryResponse.builder()
                 .sessionId(sessionId)
                 .score(session.getScore())
@@ -348,6 +542,8 @@ public class PracticeSessionService {
                 .totalItems(session.getTotalItems())
                 .aiFeedback(feedbackText)
                 .items(results)
+                .earnedBadges(earnedBadges)
+                .levelUpInfo(levelUpInfo)
                 .build();
     }
 
@@ -456,15 +652,15 @@ public class PracticeSessionService {
     private void validateEnrollment(UUID userId, UUID courseId) {
         Integer count = jdbcTemplate.queryForObject(
                 """
-                SELECT COUNT(*)
-                FROM user_management.class_members cm
-                JOIN user_management.classes c ON c.id = cm.class_id
-                WHERE cm.user_id = ?
-                  AND c.course_id = ?
-                  AND cm.removed_at IS NULL
-                  AND c.deleted_at IS NULL
-                  AND c.status = 'ACTIVE'
-                """,
+                        SELECT COUNT(*)
+                        FROM user_management.class_members cm
+                        JOIN user_management.classes c ON c.id = cm.class_id
+                        WHERE cm.user_id = ?
+                          AND c.course_id = ?
+                          AND cm.removed_at IS NULL
+                          AND c.deleted_at IS NULL
+                          AND c.status = 'ACTIVE'
+                        """,
                 Integer.class, userId, courseId
         );
         if (count == null || count == 0) {
@@ -483,8 +679,8 @@ public class PracticeSessionService {
     }
 
     private PracticeItem buildItem(PracticeSession session,
-                                    ExerciseGeneratorAgent.GeneratedItem gen,
-                                    int index) {
+                                   ExerciseGeneratorAgent.GeneratedItem gen,
+                                   int index) {
         PracticeItemType resolvedType = resolveItemType(session.getSessionType(), gen);
 
         if (resolvedType == PracticeItemType.MATCHING) {
@@ -639,16 +835,16 @@ public class PracticeSessionService {
 
     /**
      * Build một MATCHING PracticeItem từ danh sách pairs do LLM sinh ra.
-     *
+     * <p>
      * Cấu trúc options lưu DB:
-     *   id 0..N-1      → LEFT  (tiếng Nhật, giữ nguyên thứ tự)
-     *   id N..2N-1     → RIGHT (tiếng Việt, đã shuffle)
-     *
+     * id 0..N-1      → LEFT  (tiếng Nhật, giữ nguyên thứ tự)
+     * id N..2N-1     → RIGHT (tiếng Việt, đã shuffle)
+     * <p>
      * correctAnswer = "0:X,1:Y,..." — ánh xạ left id → right id.
      */
     private PracticeItem buildMatchingItem(PracticeSession session,
-                                            ExerciseGeneratorAgent.GeneratedItem gen,
-                                            int index) {
+                                           ExerciseGeneratorAgent.GeneratedItem gen,
+                                           int index) {
         List<ExerciseGeneratorAgent.GeneratedItem.MatchingPair> pairs = gen.pairs();
         if (pairs == null || pairs.isEmpty()) {
             // Fallback: LLM không trả về pairs — lưu item trống
@@ -723,7 +919,9 @@ public class PracticeSessionService {
                 .build();
     }
 
-    /** Parse "0:4,1:5,2:6" → Map{"0"→"4","1"→"5","2"→"6"}. */
+    /**
+     * Parse "0:4,1:5,2:6" → Map{"0"→"4","1"→"5","2"→"6"}.
+     */
     private Map<String, String> parsePairMap(String pairStr) {
         Map<String, String> map = new LinkedHashMap<>();
         if (pairStr == null || pairStr.isBlank()) return map;
@@ -753,7 +951,7 @@ public class PracticeSessionService {
      * 3. Fallback cuối: dựa theo sessionType
      */
     private PracticeItemType resolveItemType(PracticeSessionType sessionType,
-                                              ExerciseGeneratorAgent.GeneratedItem gen) {
+                                             ExerciseGeneratorAgent.GeneratedItem gen) {
         if (gen.itemType() != null && !gen.itemType().isBlank()) {
             try {
                 return PracticeItemType.valueOf(gen.itemType().trim().toUpperCase());
@@ -771,10 +969,10 @@ public class PracticeSessionService {
             return PracticeItemType.MULTIPLE_CHOICE;
         }
         return switch (sessionType) {
-            case KANJI_READING  -> PracticeItemType.FILL_BLANK;
-            case VOCAB_DRILL    -> PracticeItemType.FILL_BLANK;
-            case GRAMMAR_DRILL  -> PracticeItemType.FILL_BLANK;
-            default             -> PracticeItemType.TRANSLATION;
+            case KANJI_READING -> PracticeItemType.FILL_BLANK;
+            case VOCAB_DRILL -> PracticeItemType.FILL_BLANK;
+            case GRAMMAR_DRILL -> PracticeItemType.FILL_BLANK;
+            default -> PracticeItemType.TRANSLATION;
         };
     }
 
