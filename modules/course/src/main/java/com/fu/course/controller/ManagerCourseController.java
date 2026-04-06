@@ -47,10 +47,8 @@ public class ManagerCourseController {
     /**
      * Create a new course
      * POST /api/v1/manager/courses
-     * Content-Type: multipart/form-data
-     * - "request" part: JSON course data
      */
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping
     public ResponseEntity<ApiResponse<CourseResponse>> createCourse(
             @Valid @RequestBody CreateCourseRequest request,
             @AuthenticationPrincipal UUID managerId) {
@@ -64,7 +62,6 @@ public class ManagerCourseController {
     /**
      * Update an existing course
      * PUT /api/v1/manager/courses/{courseId}
-     * Content-Type: multipart/form-data
      */
     @PutMapping(value = "/{courseId}")
     public ResponseEntity<ApiResponse<CourseResponse>> updateCourse(
@@ -116,35 +113,6 @@ public class ManagerCourseController {
         );
         return ResponseEntity.ok(ApiResponse.success(pageResponse));
     }
-
-    /**
-     * Activate a course (INACTIVE -> ACTIVE).
-     * PATCH /api/v1/manager/courses/{courseId}/activate
-     */
-    @PatchMapping("/{courseId}/activate")
-    public ResponseEntity<ApiResponse<CourseResponse>> activateCourse(
-            @PathVariable UUID courseId,
-            @AuthenticationPrincipal(expression = "id") UUID managerId) {
-
-        log.info("Manager {} activating course: {}", managerId, courseId);
-        CourseResponse response = courseService.activateCourse(courseId, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Kích hoạt khóa học thành công", response));
-    }
-
-    /**
-     * Deactivate a course (ACTIVE -> INACTIVE).
-     * PATCH /api/v1/manager/courses/{courseId}/deactivate
-     */
-    @PatchMapping("/{courseId}/deactivate")
-    public ResponseEntity<ApiResponse<CourseResponse>> deactivateCourse(
-            @PathVariable UUID courseId,
-            @AuthenticationPrincipal(expression = "id") UUID managerId) {
-
-        log.info("Manager {} deactivating course: {}", managerId, courseId);
-        CourseResponse response = courseService.deactivateCourse(courseId, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Ngưng kích hoạt khóa học thành công", response));
-    }
-
 
     /**
      * Soft-delete a course.

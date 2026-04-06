@@ -68,4 +68,9 @@ public interface ClassRepository extends JpaRepository<Clazz, UUID>, JpaSpecific
             "ORDER BY c.status ASC, c.startDate DESC")
     List<Clazz> findLearnerClasses(@Param("learnerId") UUID learnerId, 
                                     @Param("statuses") List<ClassStatus> statuses);
+
+        /**
+         * Check if course has active classes (non-deleted)
+         */
+        boolean existsByCourseIdAndStatusInAndDeletedAtIsNull(UUID courseId, java.util.Collection<ClassStatus> statuses);
 }

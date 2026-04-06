@@ -14,6 +14,7 @@ import com.fu.course.mapper.CourseMapper;
 import com.fu.course.repository.CourseRepository;
 import com.fu.course.repository.LessonRepository;
 import com.fu.course.service.CourseService.CourseStatistics;
+import com.fu.course.service.CourseUsageChecker;
 import com.fu.course.service.impl.CourseServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -58,6 +59,9 @@ class CourseServiceImplTest {
 
     @Mock
     private LessonRepository lessonRepository;
+
+    @Mock
+    private CourseUsageChecker courseUsageChecker;
 
     @InjectMocks
     private CourseServiceImpl courseService;
@@ -118,6 +122,9 @@ class CourseServiceImplTest {
                 .name("Updated N5 Course")
                 .description("Updated description")
                 .build();
+
+        // Inject the list of CourseUsageCheckers manually since @InjectMocks cannot inject List<Interface>
+        ReflectionTestUtils.setField(courseService, "courseUsageCheckers", List.of(courseUsageChecker));
     }
 
     // =====================================================
@@ -270,7 +277,7 @@ class CourseServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should update course status to INACTIVE inline")
+        @DisplayName("Should update course status to INACTIVE when no active classes")
         void shouldUpdateStatusToInactive() {
             // Given
             testCourse.setStatus(CourseStatus.ACTIVE); // start active
@@ -279,6 +286,7 @@ class CourseServiceImplTest {
                     .build();
 
             given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(courseUsageChecker.checkActiveUsage(courseId)).willReturn(false); // no active classes
             given(courseRepository.save(any(Course.class))).willReturn(testCourse);
 
             CourseResponse inactiveResponse = CourseResponse.builder()
@@ -294,6 +302,26 @@ class CourseServiceImplTest {
             assertThat(result.getStatus()).isEqualTo(CourseStatus.INACTIVE);
             verify(courseMapper).updateEntity(testCourse, statusRequest);
             verify(courseRepository).save(any(Course.class));
+        }
+
+        @Test
+        @DisplayName("Should throw COURSE_IN_USE when updating status to INACTIVE with active classes")
+        void shouldThrowWhenUpdatingToInactiveWithActiveClasses() {
+            // Given
+            testCourse.setStatus(CourseStatus.ACTIVE);
+            UpdateCourseRequest statusRequest = UpdateCourseRequest.builder()
+                    .status(CourseStatus.INACTIVE)
+                    .build();
+
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(courseUsageChecker.checkActiveUsage(courseId)).willReturn(true); // has active classes
+
+            // When/Then
+            assertThatThrownBy(() -> courseService.updateCourse(courseId, statusRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("đang có lớp đang hoạt động");
+
+            verify(courseRepository, never()).save(any());
         }
 
         @Test
@@ -696,10 +724,11 @@ class CourseServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should deactivate course successfully")
+        @DisplayName("Should deactivate course successfully when no active classes")
         void shouldDeactivateCourseSuccessfully() {
             // Given
             given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(courseUsageChecker.checkActiveUsage(courseId)).willReturn(false); // no active classes
             given(courseRepository.save(any(Course.class))).willReturn(testCourse);
 
             CourseResponse deactivatedResponse = CourseResponse.builder()
@@ -718,10 +747,26 @@ class CourseServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should soft-delete course successfully")
+        @DisplayName("Should throw COURSE_IN_USE when deactivating course with active classes")
+        void shouldThrowWhenDeactivatingCourseWithActiveClasses() {
+            // Given
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(courseUsageChecker.checkActiveUsage(courseId)).willReturn(true); // has active classes
+
+            // When/Then
+            assertThatThrownBy(() -> courseService.deactivateCourse(courseId, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("đang có lớp đang hoạt động");
+
+            verify(courseRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Should soft-delete course successfully when no active classes")
         void shouldSoftDeleteCourseSuccessfully() {
             // Given
             given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(courseUsageChecker.checkActiveUsage(courseId)).willReturn(false); // no active classes
 
             // When
             courseService.deleteCourse(courseId, managerId);
@@ -732,6 +777,21 @@ class CourseServiceImplTest {
             assertThat(deleted.isDeleted()).isTrue();
             assertThat(deleted.getDeletedAt()).isNotNull();
             assertThat(deleted.getDeletedBy()).isEqualTo(managerId);
+        }
+
+        @Test
+        @DisplayName("Should throw COURSE_IN_USE when deleting course with active classes")
+        void shouldThrowWhenDeletingCourseWithActiveClasses() {
+            // Given
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(courseUsageChecker.checkActiveUsage(courseId)).willReturn(true); // has active classes
+
+            // When/Then
+            assertThatThrownBy(() -> courseService.deleteCourse(courseId, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("đang có lớp đang hoạt động");
+
+            verify(courseRepository, never()).save(any());
         }
 
         @Test
