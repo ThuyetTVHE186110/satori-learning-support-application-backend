@@ -112,15 +112,6 @@ public class DeviceTokenServiceImpl implements DeviceTokenService {
 
     @Override
     @Transactional
-    public void markTokenActive(String fcmToken) {
-        deviceTokenRepository.findByFcmToken(fcmToken).ifPresent(token -> {
-            token.markActive();
-            deviceTokenRepository.save(token);
-        });
-    }
-
-    @Override
-    @Transactional
     public void handleInvalidTokens(List<String> invalidTokens) {
         if (invalidTokens == null || invalidTokens.isEmpty()) {
             return;

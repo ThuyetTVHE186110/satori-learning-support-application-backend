@@ -25,6 +25,7 @@ import com.fu.practice.repository.PracticeItemRepository;
 import com.fu.practice.repository.PracticeSessionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -152,55 +153,18 @@ public class PracticeSessionService {
 
     /**
      * Nộp câu trả lời cho một câu hỏi.
-     * <p>
-     * 1. Validate (short read TX)
-     * 2. Evaluate via LLM (no TX)
-     * 3. Persist answer + fetch pre-generated next item from DB (short write TX)
+     *
+     * DB roundtrips: 3 (item read → evaluate → write TX: session + item re-read).
+     * Trước đây: 4 (read TX: session + item + write TX: session + item).
+     *
+     * Session ownership/status validation chuyển vào write TX để đảm bảo
+     * consistency dưới optimistic lock. Item read ngoài TX chỉ để cung cấp
+     * dữ liệu cho evaluation mà không giữ connection pool.
      */
     public AnswerFeedbackResponse submitAnswer(UUID sessionId, UUID itemId,
                                                UUID userId, SubmitAnswerRequest request) {
-        // Phase 1: validate — short read TX
-        SessionItemContext ctx = validateAndLoadItem(sessionId, itemId, userId);
-
-        // Phase 2: LLM evaluation — NO transaction held
-        AnswerEvaluatorAgent.EvaluationResult result =
-                answerEvaluatorAgent.evaluate(ctx.item(), request.getUserAnswer());
-
-        // Phase 3: Persist answer + fetch pre-generated next item — short write TX
-        return persistAnswerResult(sessionId, itemId, request.getUserAnswer(), result, ctx);
-    }
-
-    /**
-     * Kiểm tra ngay lập tức một cặp MATCHING — không thay đổi trạng thái DB.
-     * <p>
-     * UI gọi endpoint này mỗi khi learner kéo nối một cặp để hiển thị phản hồi tức thì.
-     * Khi {@code allPairsMatched = true}, UI tự động gọi {@code submitAnswer}
-     * với toàn bộ mapping để hoàn thành item.
-     *
-     * @param sessionId    session đang chơi
-     * @param itemId       MATCHING item cần check
-     * @param userId       học viên
-     * @param request      leftId + rightId của cặp vừa kéo
-     * @param matchedSoFar tất cả cặp learner đã kéo đúng tính đến lúc này (leftId:rightId,...)
-     *                     — UI tự track và gửi lên để server tính allPairsMatched
-     */
-    @Transactional(readOnly = true)
-    public VerifyPairResponse verifyMatchingPair(UUID sessionId, UUID itemId,
-                                                 UUID userId, VerifyPairRequest request,
-                                                 String matchedSoFar) {
-        PracticeSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new BusinessException("SESSION_NOT_FOUND",
-                        "Không tìm thấy phiên luyện tập."));
-
-        if (!session.getUserId().equals(userId)) {
-            throw new BusinessException("SESSION_ACCESS_DENIED",
-                    "Bạn không có quyền truy cập phiên luyện tập này.");
-        }
-        if (session.getStatus() != PracticeStatus.IN_PROGRESS) {
-            throw new BusinessException("SESSION_NOT_ACTIVE", "Phiên luyện tập đã kết thúc.");
-        }
-
-        PracticeItem item = itemRepository.findById(itemId)
+        // Phase 1: load item cho evaluation — 1 read, không giữ TX
+        PracticeItem itemSnapshot = itemRepository.findById(itemId)
                 .orElseThrow(() -> new BusinessException("ITEM_NOT_FOUND",
                         "Không tìm thấy câu hỏi."));
         if (!itemSnapshot.getSessionId().equals(sessionId)) {
@@ -212,20 +176,9 @@ public class PracticeSessionService {
                     "Câu hỏi này đã được trả lời.");
         }
 
-        // Parse correctAnswer "0:4,1:5,2:6,3:7"
-        Map<String, String> correctMap = parsePairMap(item.getCorrectAnswer());
-
-        String leftKey = String.valueOf(request.getLeftId());
-        String rightVal = String.valueOf(request.getRightId());
-        boolean pairCorrect = rightVal.equals(correctMap.get(leftKey));
-
-        // Kiểm tra allPairsMatched: tất cả cặp đã confirm đúng chưa
-        boolean allMatched = false;
-        if (pairCorrect) {
-            Map<String, String> matchedMap = parsePairMap(matchedSoFar);
-            matchedMap.put(leftKey, rightVal); // thêm cặp vừa đúng
-            allMatched = matchedMap.equals(correctMap);
-        }
+        // Phase 2: evaluate — rule-based: ~0ms; LLM (TRANSLATION): 300–1200ms; không giữ TX
+        AnswerEvaluatorAgent.EvaluationResult result =
+                answerEvaluatorAgent.evaluate(itemSnapshot, request.getUserAnswer());
 
         // Phase 3: write TX — validate session ownership + status, persist, tính score
         return persistAnswerResult(sessionId, itemId, userId, request.getUserAnswer(), result);
@@ -254,38 +207,7 @@ public class PracticeSessionService {
                 .orElseThrow(() -> new BusinessException("ITEM_NOT_FOUND",
                         "Không tìm thấy câu hỏi."));
 
-        if (!item.getSessionId().equals(sessionId)) {
-            throw new BusinessException("ITEM_SESSION_MISMATCH",
-                    "Câu hỏi không thuộc phiên luyện tập này.");
-        }
-
-        if (item.getUserAnswer() != null) {
-            throw new BusinessException("ITEM_ALREADY_ANSWERED",
-                    "Câu hỏi này đã được trả lời.");
-        }
-
-        return new SessionItemContext(
-                item,
-                session.getCompletedItems(),
-                session.getTotalItems(),
-                session.getSessionType()
-        );
-    }
-
-    @Transactional
-    public AnswerFeedbackResponse persistAnswerResult(UUID sessionId, UUID itemId,
-                                                      String userAnswer,
-                                                      AnswerEvaluatorAgent.EvaluationResult result,
-                                                      SessionItemContext ctx) {
-        // Re-read entities within this transaction (optimistic locking)
-        PracticeSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new BusinessException("SESSION_NOT_FOUND",
-                        "Không tìm thấy phiên luyện tập."));
-        PracticeItem item = itemRepository.findById(itemId)
-                .orElseThrow(() -> new BusinessException("ITEM_NOT_FOUND",
-                        "Không tìm thấy câu hỏi."));
-
-        // Double-check race condition
+        // Double-check race condition dưới write lock
         if (item.getUserAnswer() != null) {
             throw new BusinessException("ITEM_ALREADY_ANSWERED",
                     "Câu hỏi này đã được trả lời.");
@@ -442,6 +364,8 @@ public class PracticeSessionService {
             String feedback = sessionFeedbackAgent.generateFeedback(sessionId, scoreValue, allItems, sessionType);
             session.setAiFeedback(feedback);
             sessionRepository.save(session);
+            eventPublisher.publishEvent(new PracticeFeedbackReadyEvent(
+                    this, sessionId, session.getUserId(), session.getLessonId(), scoreValue));
         } catch (Exception e) {
             log.warn("generateAndSaveFeedback: Không sinh được AI feedback cho session {}: {}",
                     sessionId, e.getMessage());
@@ -475,7 +399,7 @@ public class PracticeSessionService {
         // Badges earned within a small time window after session completion
         List<UserAchievementResponse> earnedBadges = Collections.emptyList();
         LevelUpNotificationResponse levelUpInfo = null;
-        
+
         // Calculate EXP earned and get old total
         int expEarned = 0;
         Integer oldTotalExp = null;
@@ -486,17 +410,17 @@ public class PracticeSessionService {
                 int currentTotalExp = learningLevelService.getTotalExp(userId);
                 int currentLevel = learningLevelService.getCurrentLevel(userId);
                 Integer sessionScore = session.getScore() != null ? session.getScore().intValue() : null;
-                
+
                 // Calculate EXP that was awarded
                 expEarned = ActivityExpConfig.ActivityType.PRACTICE_AI.getExpReward(currentLevel, sessionScore);
-                
+
                 // Calculate what it was before
                 oldTotalExp = currentTotalExp - expEarned;
-                
+
             } catch (Exception e) {
                 log.debug("Error calculating EXP details for session summary", e);
             }
-            
+
             try {
                 earnedBadges = achievementService.getUserEarnedBadges(userId).stream()
                         .filter(badge -> badge.getEarnedAt() != null &&
@@ -516,7 +440,7 @@ public class PracticeSessionService {
                 if (oldTotalExp != null && oldTotalExp >= 0) {
                     previousLevel = learningLevelService.calculateLevelFromExp(oldTotalExp);
                 }
-                
+
                 int currentLevel = progressInfo.currentLevel();
                 boolean actuallyLeveledUp = previousLevel < currentLevel;
 

@@ -4,6 +4,7 @@ import com.fu.common.event.*;
 import com.fu.notification.dto.SendNotificationRequest;
 import com.fu.notification.entity.NotificationPriority;
 import com.fu.notification.entity.NotificationType;
+import com.fu.notification.service.DeviceTokenService;
 import com.fu.notification.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,7 @@ import java.util.UUID;
 public class ApplicationEventNotificationListener {
 
     private final NotificationService notificationService;
+    private final DeviceTokenService deviceTokenService;
 
     /**
      * Handles AssignmentCreatedEvent - notifies class members about new assignment.
@@ -35,29 +37,29 @@ public class ApplicationEventNotificationListener {
     public void handleAssignmentCreated(AssignmentCreatedEvent event) {
         log.debug("Processing AssignmentCreatedEvent: assignmentId={}", event.getAssignmentId());
 
+        List<UUID> memberIds = event.getMemberIds();
+        if (memberIds == null || memberIds.isEmpty()) {
+            log.debug("AssignmentCreatedEvent has no member IDs, skipping notification");
+            return;
+        }
+
         Map<String, Object> data = new HashMap<>();
         data.put("assignmentId", event.getAssignmentId().toString());
         data.put("classId", event.getClassId().toString());
 
-        // Note: Class member IDs should be fetched by the caller or passed in the event
-        // For now, we'll need to integrate with ClassMemberRepository
-        // This is a placeholder - actual implementation needs class member lookup
-        
         SendNotificationRequest request = SendNotificationRequest.builder()
+                .userIds(memberIds)
                 .type(NotificationType.ASSIGNMENT_CREATED)
                 .priority(NotificationPriority.HIGH)
-                .title("📝 Bài tập mới: " + event.getAssignmentTitle())
+                .title("Bài tập mới: " + event.getAssignmentTitle())
                 .body("Lớp " + event.getClassName() + " có bài tập mới. Hãy hoàn thành trước hạn!")
                 .data(data)
                 .actionUrl("/assignments/" + event.getAssignmentId())
+                .saveToHistory(true)
                 .build();
 
-        // TODO: Fetch class members and send to them
-        // List<UUID> memberIds = classMemberRepository.findMemberIdsByClassId(event.getClassId());
-        // request.setUserIds(memberIds);
-        // notificationService.send(request);
-        
-        log.info("Assignment created notification queued: {}", event.getAssignmentTitle());
+        int sent = notificationService.send(request);
+        log.info("Assignment created notification sent to {} members: {}", sent, event.getAssignmentTitle());
     }
 
     /**
@@ -171,6 +173,78 @@ public class ApplicationEventNotificationListener {
     }
 
     /**
+     * Handles CurriculumImportStatusEvent - notifies manager about import ready for approval or failure.
+     */
+    @Async
+    @EventListener
+    public void handleCurriculumImportStatus(CurriculumImportStatusEvent event) {
+        log.debug("Processing CurriculumImportStatusEvent: importId={}, status={}", event.getImportId(), event.getStatus());
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("importId", event.getImportId().toString());
+
+        SendNotificationRequest request;
+        if (event.getStatus() == CurriculumImportStatusEvent.Status.PENDING_APPROVAL) {
+            request = SendNotificationRequest.builder()
+                    .userId(event.getManagerId())
+                    .type(NotificationType.CURRICULUM_IMPORT_PENDING_APPROVAL)
+                    .priority(NotificationPriority.HIGH)
+                    .title("Tài liệu chờ duyệt: " + event.getImportName())
+                    .body("Import tài liệu đã hoàn tất và đang chờ bạn phê duyệt.")
+                    .data(data)
+                    .actionUrl("/manager/imports/" + event.getImportId())
+                    .saveToHistory(true)
+                    .bypassPreferences(true)
+                    .build();
+        } else {
+            request = SendNotificationRequest.builder()
+                    .userId(event.getManagerId())
+                    .type(NotificationType.CURRICULUM_IMPORT_FAILED)
+                    .priority(NotificationPriority.HIGH)
+                    .title("Import thất bại: " + event.getImportName())
+                    .body("Import tài liệu gặp lỗi: " + event.getErrorMessage())
+                    .data(data)
+                    .actionUrl("/manager/imports/" + event.getImportId())
+                    .saveToHistory(true)
+                    .bypassPreferences(true)
+                    .build();
+        }
+
+        notificationService.send(request);
+        log.info("Curriculum import {} notification sent to manager: {}", event.getStatus(), event.getManagerId());
+    }
+
+    /**
+     * Handles PracticeFeedbackReadyEvent - notifies learner that AI feedback is available.
+     */
+    @Async
+    @EventListener
+    public void handlePracticeFeedbackReady(PracticeFeedbackReadyEvent event) {
+        log.debug("Processing PracticeFeedbackReadyEvent: sessionId={}, userId={}", event.getSessionId(), event.getUserId());
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("sessionId", event.getSessionId().toString());
+        if (event.getLessonId() != null) {
+            data.put("lessonId", event.getLessonId().toString());
+        }
+
+        String scoreText = String.format("%.0f%%", event.getScore());
+        SendNotificationRequest request = SendNotificationRequest.builder()
+                .userId(event.getUserId())
+                .type(NotificationType.PRACTICE_FEEDBACK_READY)
+                .priority(NotificationPriority.NORMAL)
+                .title("Kết quả luyện tập: " + scoreText)
+                .body("AI đã phân tích bài luyện tập của bạn. Xem nhận xét chi tiết!")
+                .data(data)
+                .actionUrl("/practice/sessions/" + event.getSessionId() + "/summary")
+                .saveToHistory(true)
+                .build();
+
+        notificationService.send(request);
+        log.info("Practice feedback notification sent to user: {}", event.getUserId());
+    }
+
+    /**
      * Handles PasswordChangedEvent - security notification.
      */
     @Async
@@ -194,6 +268,10 @@ public class ApplicationEventNotificationListener {
                 .build();
 
         notificationService.send(request);
-        log.info("Password changed notification sent: {}", event.getUserId());
+
+        // Deactivate all FCM tokens for security (force re-login on all devices)
+        deviceTokenService.deactivateAllTokens(event.getUserId());
+
+        log.info("Password changed notification sent and tokens deactivated: {}", event.getUserId());
     }
 }

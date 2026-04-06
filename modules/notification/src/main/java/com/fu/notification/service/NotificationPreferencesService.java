@@ -5,6 +5,8 @@ import com.fu.notification.dto.UpdateNotificationPreferencesRequest;
 import com.fu.notification.entity.NotificationType;
 import com.fu.notification.entity.UserNotificationPreferences;
 
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -54,4 +56,13 @@ public interface NotificationPreferencesService {
      * @return the preferences entity
      */
     UserNotificationPreferences getOrCreatePreferences(UUID userId);
+
+    /**
+     * Batch-fetch preferences for multiple users.
+     * Users without saved preferences are assumed to have all notifications enabled.
+     *
+     * @param userIds list of user IDs
+     * @return map of userId → preferences entity
+     */
+    Map<UUID, UserNotificationPreferences> getPreferencesByUserIds(List<UUID> userIds);
 }
