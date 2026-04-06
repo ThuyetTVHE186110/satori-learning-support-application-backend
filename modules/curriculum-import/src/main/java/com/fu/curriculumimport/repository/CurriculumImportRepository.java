@@ -87,4 +87,6 @@ public interface CurriculumImportRepository extends JpaRepository<CurriculumImpo
 
     @Query("SELECT COALESCE(SUM(ci.hallucinatedItems), 0) FROM CurriculumImport ci WHERE ci.status = 'COMPLETED'")
     long sumHallucinatedItems();
+
+    //
 }

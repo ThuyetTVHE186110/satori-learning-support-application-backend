@@ -36,18 +36,4 @@ public interface AdminUserService {
      */
     AdminUserDetailResponse getUserDetail(UUID userId);
 
-    /**
-     * Suspend a user account (disables login)
-     */
-    void suspendUser(UUID userId);
-
-    /**
-     * Activate a suspended user account
-     */
-    void activateUser(UUID userId);
-
-    /**
-     * Reset user password (sends reset email)
-     */
-    void resetUserPassword(UUID userId);
 }

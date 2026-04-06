@@ -216,51 +216,6 @@ public class AdminUserServiceImpl implements AdminUserService {
                 .build();
     }
 
-    @Override
-    public Page<AdminUserDetailResponse> searchUsers(UserSearchRequest request) {
-        log.debug("Searching users with query: {}, role: {}, status: {}", request.getQuery(), request.getRole(), request.getStatus());
-
-        Page<User> users = userRepository.searchUsers(
-                request.getQuery(),
-                request.getRole(),
-                request.getStatus(),
-                PageRequest.of(request.getPage(), request.getSize())
-        );
-
-        return users.map(this::convertToDetailResponse);
-    }
-
-    @Override
-    public AdminUserDetailResponse getUserDetail(UUID userId) {
-        log.debug("Fetching detailed information for user: {}", userId);
-
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "User not found: " + userId));
-
-        return convertToDetailResponse(user);
-    }
-
-    private AdminUserDetailResponse convertToDetailResponse(User user) {
-        return AdminUserDetailResponse.builder()
-                .id(user.getId())
-                .fullName(user.getFirstName() + " " + user.getLastName())
-                .email(user.getEmail())
-                .phoneNumber(user.getPhoneNumber())
-                .dateOfBirth(user.getDateOfBirth())
-                .role(user.getRole())
-                .status(user.getStatus())
-                .authProvider(user.getAuthProvider() != null ? user.getAuthProvider().name() : "UNKNOWN")
-                .emailVerified(user.getEmailVerifiedAt() != null)
-                .createdAt(user.getCreatedAt())
-                .lastLoginAt(user.getLastLoginAt())
-                .updatedAt(user.getUpdatedAt())
-                .activeSessions(buildSessionSummary(user.getId()))
-                .statistics(AdminUserDetailResponse.UserStatistics.builder()
-                        .totalAssignments(0L)
-                        .totalPracticeSessions(0L)
-                        .build())
-                .build();
-    }
 
     private AdminUserDetailResponse.SessionSummary buildSessionSummary(UUID userId) {
         List<com.fu.user.entity.UserSession> sessions = userSessionRepository.findActiveSessionsByUserId(userId, LocalDateTime.now());
@@ -291,45 +246,13 @@ public class AdminUserServiceImpl implements AdminUserService {
     }
 
     @Override
-    @Transactional
-    public void suspendUser(UUID userId) {
-        log.info("Suspending user: {}", userId);
-
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "User not found: " + userId));
-
-        user.setStatus(UserStatus.SUSPENDED);
-        user.setUpdatedAt(LocalDateTime.now());
-        userRepository.save(user);
-
-        log.info("User {} suspended successfully", userId);
+    public Page<AdminUserDetailResponse> searchUsers(UserSearchRequest request) {
+        // Placeholder implementation to keep API stable while search behavior is finalized.
+        return Page.empty(PageRequest.of(request.getPage(), request.getSize()));
     }
 
     @Override
-    @Transactional
-    public void activateUser(UUID userId) {
-        log.info("Activating user: {}", userId);
-
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "User not found: " + userId));
-
-        user.setStatus(UserStatus.ACTIVE);
-        user.setUpdatedAt(LocalDateTime.now());
-        userRepository.save(user);
-
-        log.info("User {} activated successfully", userId);
-    }
-
-    @Override
-    @Transactional
-    public void resetUserPassword(UUID userId) {
-        log.info("Initiating password reset for user: {}", userId);
-
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "User not found: " + userId));
-
-        // In a real implementation, generate a reset token and send email
-        // For now, just log the action
-        log.info("Password reset initiated for user: {} ({})", userId, user.getEmail());
+    public AdminUserDetailResponse getUserDetail(UUID userId) {
+        throw new BusinessException("NOT_IMPLEMENTED", "User detail endpoint is not implemented yet.");
     }
 }

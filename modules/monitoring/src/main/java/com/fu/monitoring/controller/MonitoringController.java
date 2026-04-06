@@ -1,23 +1,18 @@
 package com.fu.monitoring.controller;
 
 import com.fu.common.response.ApiResponse;
-import com.fu.monitoring.dto.AdminUserDetailResponse;
 import com.fu.monitoring.dto.AdminUserStatsDTO;
 import com.fu.monitoring.dto.DashboardStatsResponse;
 import com.fu.monitoring.dto.OpenAiUsageResponse;
-import com.fu.monitoring.dto.UserSearchRequest;
 import com.fu.monitoring.service.AdminUserService;
 import com.fu.monitoring.service.OpenAiUsageService;
 import com.fu.monitoring.service.SystemMonitoringService;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/monitoring")
@@ -43,7 +38,7 @@ public class MonitoringController {
         return ApiResponse.success(openAiUsageService.getUsage());
     }
 
-    @GetMapping("/admin/users/stats")
+    @GetMapping("/users/stats")
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Get admin user statistics", description = "Returns comprehensive user statistics including role breakdown, new registrations, sessions, security metrics, and activity metrics.")
     public ApiResponse<AdminUserStatsDTO> getUserStatistics() {
