@@ -8,6 +8,7 @@ import com.fu.notification.entity.UserDeviceToken;
 import com.fu.notification.entity.UserNotificationPreferences;
 import com.fu.notification.repository.NotificationRepository;
 import com.fu.notification.repository.UserDeviceTokenRepository;
+import com.fu.notification.service.DeviceTokenService;
 import com.fu.notification.service.FcmService;
 import com.fu.notification.service.NotificationPreferencesService;
 import com.fu.notification.service.NotificationService;
@@ -37,6 +38,7 @@ public class NotificationServiceImpl implements NotificationService {
 
     private final NotificationRepository notificationRepository;
     private final UserDeviceTokenRepository deviceTokenRepository;
+    private final DeviceTokenService deviceTokenService;
     private final NotificationPreferencesService preferencesService;
     private final FcmService fcmService;
 
@@ -55,6 +57,8 @@ public class NotificationServiceImpl implements NotificationService {
         return 0;
     }
 
+    private static final int DEDUP_WINDOW_MINUTES = 5;
+
     @Override
     @Transactional
     public boolean sendToUser(UUID userId, SendNotificationRequest request) {
@@ -64,11 +68,21 @@ public class NotificationServiceImpl implements NotificationService {
                 log.debug("Notification type {} disabled for user {}", request.getType(), userId);
                 return false;
             }
-            
+
             // Skip non-critical notifications during quiet hours
             if (request.getPriority() != NotificationPriority.CRITICAL &&
                 preferencesService.isInQuietHours(userId)) {
                 log.debug("User {} is in quiet hours, skipping notification", userId);
+                return false;
+            }
+
+            // Deduplication: skip if identical type was already sent recently
+            LocalDateTime deduplicationSince = LocalDateTime.now().minusMinutes(DEDUP_WINDOW_MINUTES);
+            List<Notification> recent = notificationRepository.findRecentByUserAndType(
+                    userId, request.getType(), deduplicationSince);
+            if (!recent.isEmpty()) {
+                log.debug("Dedup: skipping {} for user {} (sent {} min ago)",
+                        request.getType(), userId, DEDUP_WINDOW_MINUTES);
                 return false;
             }
         }
@@ -104,25 +118,24 @@ public class NotificationServiceImpl implements NotificationService {
     @Override
     @Transactional
     public int sendToUsers(List<UUID> userIds, SendNotificationRequest request) {
+        if (userIds == null || userIds.isEmpty()) {
+            return 0;
+        }
         int successCount = 0;
-        
-        // Get preferences for all users
-        Map<UUID, UserNotificationPreferences> prefsMap = preferencesService
-                .getOrCreatePreferences(userIds.get(0)) != null ? 
-                userIds.stream()
-                        .collect(Collectors.toMap(
-                                id -> id,
-                                id -> preferencesService.getOrCreatePreferences(id)
-                        )) : Collections.emptyMap();
+
+        // Batch-fetch preferences in one query (O(1) instead of O(N))
+        Map<UUID, UserNotificationPreferences> prefsMap = request.isBypassPreferences()
+                ? Collections.emptyMap()
+                : preferencesService.getPreferencesByUserIds(userIds);
 
         // Filter users based on preferences
         List<UUID> eligibleUsers = userIds.stream()
                 .filter(userId -> {
                     if (request.isBypassPreferences()) return true;
                     UserNotificationPreferences prefs = prefsMap.get(userId);
-                    if (prefs == null) return true;
+                    if (prefs == null) return true; // no prefs → default enabled
                     return prefs.isNotificationTypeEnabled(request.getType()) &&
-                           (request.getPriority() == NotificationPriority.CRITICAL || 
+                           (request.getPriority() == NotificationPriority.CRITICAL ||
                             !prefs.isQuietTime(LocalTime.now()));
                 })
                 .collect(Collectors.toList());
@@ -273,10 +286,7 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Async
     protected void handleInvalidTokensAsync(List<String> invalidTokens) {
-        for (String token : invalidTokens) {
-            deviceTokenRepository.deactivateByFcmToken(token);
-        }
-        log.info("Deactivated {} invalid FCM tokens", invalidTokens.size());
+        deviceTokenService.handleInvalidTokens(invalidTokens);
     }
 
     private Map<String, String> convertDataToStringMap(Map<String, Object> data) {

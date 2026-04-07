@@ -3,6 +3,7 @@ package com.fu.curriculumimport.service.orchestrator;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.course.repository.CourseRepository;
+import com.fu.common.event.CurriculumImportStatusEvent;
 import com.fu.curriculumimport.config.AgenticRagProperties;
 import com.fu.curriculumimport.entity.CurriculumImport;
 import com.fu.curriculumimport.entity.ImportChunk;
@@ -26,6 +27,7 @@ import com.fu.curriculumimport.service.ingestion.OcrTextPreprocessor;
 import com.fu.curriculumimport.service.persistence.ImportPersistenceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -84,6 +86,7 @@ public class ImportOrchestrator {
     private final AgenticRagProperties ragProperties;
     private final ObjectMapper objectMapper;
     private final Executor importTaskExecutor;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * Tracks active import futures for cancel support.
@@ -401,6 +404,9 @@ public class ImportOrchestrator {
             importEntity.markPendingApproval();
             persistenceService.updateImportProgress(importEntity);
 
+            eventPublisher.publishEvent(CurriculumImportStatusEvent.pendingApproval(
+                    this, importId, importEntity.getCreatedBy(), importEntity.getOriginalFilename()));
+
             log.info("[{}] ✅ Import ready for manager approval! Lessons: {}, Vocab: {}, Grammar: {}, " +
                             "Embeddings: {}, Validations: {}/{}, Re-extractions: {}, Hallucinated: {}",
                     importId,
@@ -420,6 +426,8 @@ public class ImportOrchestrator {
             log.error("[{}] Import failed: {}", importId, e.getMessage(), e);
             importEntity.markFailed(e.getMessage());
             persistenceService.updateImportProgress(importEntity);
+            eventPublisher.publishEvent(CurriculumImportStatusEvent.failed(
+                    this, importId, importEntity.getCreatedBy(), importEntity.getOriginalFilename(), e.getMessage()));
         } finally {
             cancelFlags.remove(importId);
         }
@@ -525,6 +533,8 @@ public class ImportOrchestrator {
             importEntity.setActualCostUsd(estimateCost(totalTokens.get()));
             importEntity.markPendingApproval();
             persistenceService.updateImportProgress(importEntity);
+            eventPublisher.publishEvent(CurriculumImportStatusEvent.pendingApproval(
+                    this, importId, importEntity.getCreatedBy(), importEntity.getOriginalFilename()));
 
             log.info("[{}] Retry import ready for manager approval!", importId);
 
@@ -532,6 +542,8 @@ public class ImportOrchestrator {
             log.error("[{}] Retry import failed: {}", importId, e.getMessage(), e);
             importEntity.markFailed(e.getMessage());
             persistenceService.updateImportProgress(importEntity);
+            eventPublisher.publishEvent(CurriculumImportStatusEvent.failed(
+                    this, importId, importEntity.getCreatedBy(), importEntity.getOriginalFilename(), e.getMessage()));
         } finally {
             cancelFlags.remove(importId);
         }

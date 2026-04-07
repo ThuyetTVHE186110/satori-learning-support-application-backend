@@ -5,6 +5,7 @@ import com.fu.curriculumimport.dto.response.*;
 import com.fu.curriculumimport.entity.CurriculumImport.ImportStatus;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -30,9 +31,17 @@ public interface CurriculumImportService {
 
     /**
      * List all imports with pagination and optional filters.
+     *
+     * @param courseId optional - filter by course
+     * @param status optional - filter by import status
+     * @param startDate optional - filter by creation date (inclusive)
+     * @param endDate optional - filter by creation date (inclusive)
+     * @param page page number (0-indexed)
+     * @param size page size
+     * @return paginated list of imports ordered by creation date (newest first)
      */
     PageResponse<CurriculumImportSummaryResponse> listImports(
-            UUID courseId, ImportStatus status, int page, int size);
+            UUID courseId, ImportStatus status, LocalDateTime startDate, LocalDateTime endDate, int page, int size);
 
     /**
      * Get chunks for a specific import.

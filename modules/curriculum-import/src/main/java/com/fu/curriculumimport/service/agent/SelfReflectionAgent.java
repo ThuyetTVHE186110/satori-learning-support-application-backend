@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -52,10 +53,17 @@ public class SelfReflectionAgent {
     private final AgenticRagProperties ragProperties;
     private final PromptTemplateLoader promptLoader;
 
+    @Autowired
     public SelfReflectionAgent(OpenAiChatModel chatModel, ObjectMapper objectMapper,
                                 AgenticRagProperties ragProperties,
                                 PromptTemplateLoader promptLoader) {
-        this.chatClient = ChatClient.builder(chatModel).build();
+        this(ChatClient.builder(chatModel).build(), objectMapper, ragProperties, promptLoader);
+    }
+
+    SelfReflectionAgent(ChatClient chatClient, ObjectMapper objectMapper,
+                        AgenticRagProperties ragProperties,
+                        PromptTemplateLoader promptLoader) {
+        this.chatClient = chatClient;
         this.objectMapper = objectMapper;
         this.ragProperties = ragProperties;
         this.promptLoader = promptLoader;

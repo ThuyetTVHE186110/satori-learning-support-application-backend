@@ -46,7 +46,9 @@ public class AnswerEvaluatorAgent {
         return switch (item.getItemType()) {
             case MULTIPLE_CHOICE, TRUE_FALSE -> evaluateByRule(item, userAnswer);
             case MATCHING                    -> evaluateMatching(item, userAnswer);
-            default                          -> evaluateByLlm(item, userAnswer);
+            // FILL_BLANK và TRANSLATION đều là chọn option → correctAnswer là ID integer
+            case FILL_BLANK, TRANSLATION     -> evaluateFillBlank(item, userAnswer);
+            case SENTENCE_ORDER              -> evaluateSentenceOrder(item, userAnswer);
         };
     }
 
@@ -112,6 +114,84 @@ public class AnswerEvaluatorAgent {
             }
         }
         return map;
+    }
+
+    // ── Rule-based: FILL_BLANK ────────────────────────────────────────────
+
+    /**
+     * Đánh giá FILL_BLANK bằng so sánh ID option.
+     *
+     * correctAnswer = index (id) của option đúng trong mảng sau shuffle (ví dụ: "2").
+     * userAnswer    = id option user chọn (ví dụ: "2").
+     * So sánh integer — không cần normalize string tiếng Nhật, không có encoding edge case.
+     *
+     * Fallback về LLM nếu correctAnswer không phải số (item cũ hoặc LLM không trả về isCorrect).
+     */
+    private EvaluationResult evaluateFillBlank(PracticeItem item, String userAnswer) {
+        String correct = item.getCorrectAnswer();
+        if (correct == null || correct.isBlank()) {
+            return evaluateByLlm(item, userAnswer);
+        }
+        try {
+            int correctId = Integer.parseInt(correct.trim());
+            int userId    = Integer.parseInt(userAnswer == null ? "-1" : userAnswer.trim());
+            boolean isCorrect = correctId == userId;
+            String feedback = isCorrect
+                    ? "Chính xác!"
+                    : "Đáp án chưa đúng.";
+            return new EvaluationResult(isCorrect, isCorrect ? 100 : 0, feedback,
+                    isCorrect ? null : correct);
+        } catch (NumberFormatException e) {
+            // correctAnswer là text (item legacy) → fallback LLM
+            log.debug("evaluateFillBlank: correctAnswer '{}' không phải ID, fallback LLM", correct);
+            return evaluateByLlm(item, userAnswer);
+        }
+    }
+
+    // ── Rule-based: SENTENCE_ORDER ────────────────────────────────────────
+
+    /**
+     * Đánh giá SENTENCE_ORDER bằng so sánh mảng token ID.
+     *
+     * correctAnswer = "0,1,2,3" — thứ tự đúng của token IDs (đúng thứ tự LLM sinh ra).
+     * userAnswer    = "0,2,1,3" — thứ tự user kéo.
+     * So sánh integer array — không cần xử lý chuỗi tiếng Nhật.
+     *
+     * Fallback về LLM nếu correctAnswer không phải dạng ID (item legacy).
+     */
+    private EvaluationResult evaluateSentenceOrder(PracticeItem item, String userAnswer) {
+        String correct = item.getCorrectAnswer();
+        if (correct == null || correct.isBlank()) {
+            return evaluateByLlm(item, userAnswer);
+        }
+        try {
+            int[] correctIds = parseIdArray(correct);
+            int[] userIds    = parseIdArray(userAnswer == null ? "" : userAnswer);
+
+            if (correctIds.length == 0) return evaluateByLlm(item, userAnswer);
+
+            boolean isCorrect = java.util.Arrays.equals(correctIds, userIds);
+            String feedback = isCorrect
+                    ? "Chính xác! Thứ tự câu đúng."
+                    : "Thứ tự chưa đúng.";
+            return new EvaluationResult(isCorrect, isCorrect ? 100 : 0, feedback,
+                    isCorrect ? null : correct);
+        } catch (NumberFormatException e) {
+            // correctAnswer là text (item legacy) → fallback LLM
+            log.debug("evaluateSentenceOrder: correctAnswer '{}' không phải ID array, fallback LLM", correct);
+            return evaluateByLlm(item, userAnswer);
+        }
+    }
+
+    /** Parse "0,1,2,3" → int[]{0,1,2,3}. Ném NumberFormatException nếu không hợp lệ. */
+    private static int[] parseIdArray(String input) {
+        if (input == null || input.isBlank()) return new int[0];
+        String[] parts = input.trim().split(",");
+        int[] ids = new int[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            ids[i] = Integer.parseInt(parts[i].trim());
+        }
+        return ids;
     }
 
     // ── LLM evaluation ────────────────────────────────────────────────────

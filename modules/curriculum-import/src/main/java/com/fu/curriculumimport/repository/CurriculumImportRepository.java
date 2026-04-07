@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -54,6 +55,32 @@ public interface CurriculumImportRepository extends JpaRepository<CurriculumImpo
      */
     long countByCourseId(UUID courseId);
 
+    // --- Date range queries (new) ---
+
+    /**
+     * Find imports by date range only
+     */
+    Page<CurriculumImport> findByCreatedAtBetweenOrderByCreatedAtDesc(
+            LocalDateTime startDate, LocalDateTime endDate, Pageable pageable);
+
+    /**
+     * Find imports by status and date range
+     */
+    Page<CurriculumImport> findByStatusAndCreatedAtBetweenOrderByCreatedAtDesc(
+            ImportStatus status, LocalDateTime startDate, LocalDateTime endDate, Pageable pageable);
+
+    /**
+     * Find imports by courseId and date range
+     */
+    Page<CurriculumImport> findByCourseIdAndCreatedAtBetweenOrderByCreatedAtDesc(
+            UUID courseId, LocalDateTime startDate, LocalDateTime endDate, Pageable pageable);
+
+    /**
+     * Find imports by courseId, status, and date range
+     */
+    Page<CurriculumImport> findByCourseIdAndStatusAndCreatedAtBetweenOrderByCreatedAtDesc(
+            UUID courseId, ImportStatus status, LocalDateTime startDate, LocalDateTime endDate, Pageable pageable);
+
     // --- Statistics queries ---
 
     @Query("SELECT COALESCE(SUM(ci.lessonsCreated), 0) FROM CurriculumImport ci WHERE ci.status = 'COMPLETED'")
@@ -87,4 +114,6 @@ public interface CurriculumImportRepository extends JpaRepository<CurriculumImpo
 
     @Query("SELECT COALESCE(SUM(ci.hallucinatedItems), 0) FROM CurriculumImport ci WHERE ci.status = 'COMPLETED'")
     long sumHallucinatedItems();
+
+    //
 }

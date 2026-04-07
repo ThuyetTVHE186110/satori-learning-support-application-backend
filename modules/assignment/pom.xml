@@ -42,6 +42,10 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
+            <groupId>com.fu</groupId>
+            <artifactId>achievement</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.mapstruct</groupId>
             <artifactId>mapstruct</artifactId>
         </dependency>

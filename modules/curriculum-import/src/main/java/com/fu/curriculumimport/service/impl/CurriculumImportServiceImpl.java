@@ -38,6 +38,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -134,20 +135,47 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
 
     @Override
     public PageResponse<CurriculumImportSummaryResponse> listImports(
-            UUID courseId, ImportStatus status, int page, int size) {
-        log.debug("Listing imports: courseId={}, status={}, page={}, size={}", courseId, status, page, size);
+            UUID courseId, ImportStatus status, LocalDateTime startDate, LocalDateTime endDate, int page, int size) {
+        log.debug("Listing imports: courseId={}, status={}, startDate={}, endDate={}, page={}, size={}",
+                courseId, status, startDate, endDate, page, size);
+
+        // Validate date range if provided
+        if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
+            throw new BusinessException("Ngày kết thúc phải sau ngày bắt đầu.");
+        }
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 100));
         Page<CurriculumImport> importPage;
 
-        if (courseId != null && status != null) {
-            importPage = importRepository.findByCourseIdAndStatusOrderByCreatedAtDesc(courseId, status, pageable);
-        } else if (courseId != null) {
-            importPage = importRepository.findByCourseIdOrderByCreatedAtDesc(courseId, pageable);
-        } else if (status != null) {
-            importPage = importRepository.findByStatusOrderByCreatedAtDesc(status, pageable);
+        // Route to appropriate repository method based on which filters are provided
+        boolean hasDateRange = startDate != null && endDate != null;
+
+        if (hasDateRange) {
+            // Date range is provided
+            if (courseId != null && status != null) {
+                importPage = importRepository.findByCourseIdAndStatusAndCreatedAtBetweenOrderByCreatedAtDesc(
+                        courseId, status, startDate, endDate, pageable);
+            } else if (courseId != null) {
+                importPage = importRepository.findByCourseIdAndCreatedAtBetweenOrderByCreatedAtDesc(
+                        courseId, startDate, endDate, pageable);
+            } else if (status != null) {
+                importPage = importRepository.findByStatusAndCreatedAtBetweenOrderByCreatedAtDesc(
+                        status, startDate, endDate, pageable);
+            } else {
+                importPage = importRepository.findByCreatedAtBetweenOrderByCreatedAtDesc(
+                        startDate, endDate, pageable);
+            }
         } else {
-            importPage = importRepository.findAllByOrderByCreatedAtDesc(pageable);
+            // No date range - use existing logic
+            if (courseId != null && status != null) {
+                importPage = importRepository.findByCourseIdAndStatusOrderByCreatedAtDesc(courseId, status, pageable);
+            } else if (courseId != null) {
+                importPage = importRepository.findByCourseIdOrderByCreatedAtDesc(courseId, pageable);
+            } else if (status != null) {
+                importPage = importRepository.findByStatusOrderByCreatedAtDesc(status, pageable);
+            } else {
+                importPage = importRepository.findAllByOrderByCreatedAtDesc(pageable);
+            }
         }
 
         List<CurriculumImportSummaryResponse> content = importPage.getContent().stream()
@@ -312,6 +340,8 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
         long completedImports = importRepository.countByStatus(ImportStatus.COMPLETED);
         long failedImports = importRepository.countByStatus(ImportStatus.FAILED);
         long queuedImports = importRepository.countByStatus(ImportStatus.QUEUED);
+        long rollbackImports = importRepository.countByStatus(ImportStatus.ROLLED_BACK);
+        long pendingApprovalImports = importRepository.countByStatus(ImportStatus.PENDING_APPROVAL);
 
         // Count in-progress (any status between QUEUED and COMPLETED/FAILED/CANCELLED)
         long inProgressImports = totalImports - completedImports - failedImports - queuedImports
@@ -328,6 +358,8 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
                 .completedImports(completedImports)
                 .failedImports(failedImports)
                 .queuedImports(queuedImports)
+                .rollbackImports(rollbackImports)
+                .pendingApprovalImports(pendingApprovalImports)
                 .inProgressImports(Math.max(0, inProgressImports))
                 .totalLessonsCreated(totalLessons)
                 .totalVocabularyCreated(totalVocab)
@@ -492,7 +524,9 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
 
     // --- Helper methods ---
 
-    /** 100 MB — PPTX with embedded images can be larger than plain PDFs. */
+    /**
+     * 100 MB — PPTX with embedded images can be larger than plain PDFs.
+     */
     private static final long MAX_FILE_SIZE_BYTES = 100L * 1024 * 1024;
 
     private static final Set<String> ACCEPTED_MIME_TYPES = Set.of(
@@ -510,9 +544,9 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
         }
 
         String contentType = file.getContentType() == null ? "" : file.getContentType().toLowerCase();
-        String filename    = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
-        boolean mimeOk     = ACCEPTED_MIME_TYPES.contains(contentType);
-        boolean extOk      = ACCEPTED_EXTENSIONS.stream().anyMatch(filename::endsWith);
+        String filename = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
+        boolean mimeOk = ACCEPTED_MIME_TYPES.contains(contentType);
+        boolean extOk = ACCEPTED_EXTENSIONS.stream().anyMatch(filename::endsWith);
 
         if (!mimeOk && !extOk) {
             throw new InvalidImportFileException(

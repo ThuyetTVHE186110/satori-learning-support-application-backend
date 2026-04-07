@@ -1,6 +1,5 @@
 package com.fu.notification.repository;
 
-import com.fu.notification.entity.DeviceType;
 import com.fu.notification.entity.UserDeviceToken;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -33,21 +32,6 @@ public interface UserDeviceTokenRepository extends JpaRepository<UserDeviceToken
     Optional<UserDeviceToken> findByFcmToken(String fcmToken);
 
     /**
-     * Check if a token exists.
-     */
-    boolean existsByFcmToken(String fcmToken);
-
-    /**
-     * Find tokens by user and device type.
-     */
-    List<UserDeviceToken> findByUserIdAndDeviceTypeAndIsActiveTrue(UUID userId, DeviceType deviceType);
-
-    /**
-     * Count active devices for a user.
-     */
-    long countByUserIdAndIsActiveTrue(UUID userId);
-
-    /**
      * Deactivate all tokens for a user (e.g., on password change).
      */
     @Modifying
@@ -68,10 +52,4 @@ public interface UserDeviceTokenRepository extends JpaRepository<UserDeviceToken
     @Modifying
     @Query("DELETE FROM UserDeviceToken t WHERE t.isActive = false AND t.updatedAt < :cutoffDate")
     int deleteInactiveTokensOlderThan(@Param("cutoffDate") LocalDateTime cutoffDate);
-
-    /**
-     * Find all active tokens (for broadcast messages).
-     */
-    @Query("SELECT t.fcmToken FROM UserDeviceToken t WHERE t.isActive = true")
-    List<String> findAllActiveTokens();
 }
