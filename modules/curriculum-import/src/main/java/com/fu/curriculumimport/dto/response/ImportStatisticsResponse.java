@@ -20,6 +20,8 @@ public class ImportStatisticsResponse {
     private long completedImports;
     private long failedImports;
     private long queuedImports;
+    private long rollbackImports;
+    private long pendingApprovalImports;
     private long inProgressImports;
 
     private long totalLessonsCreated;

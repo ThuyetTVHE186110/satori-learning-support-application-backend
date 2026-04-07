@@ -21,6 +21,7 @@
         <module>modules/roleplay</module>
         <module>modules/assignment</module>
         <module>modules/practice</module>
+        <module>modules/monitoring</module>
         <module>modules/achievement</module>
         <module>modules/notification</module>
         <module>start</module>
@@ -137,7 +138,11 @@
                 <artifactId>notification</artifactId>
                 <version>${project.version}</version>
             </dependency>
-
+            <dependency>
+                <groupId>com.fu</groupId>
+                <artifactId>monitoring</artifactId>
+                <version>${project.version}</version>
+            </dependency>
             <!-- MapStruct -->
             <dependency>
                 <groupId>org.mapstruct</groupId>
@@ -158,6 +163,7 @@
                 <artifactId>jsoup</artifactId>
                 <version>1.18.1</version>
             </dependency>
+
 
             <!-- Apache POI (Excel / DOCX / PPTX processing) -->
             <dependency>

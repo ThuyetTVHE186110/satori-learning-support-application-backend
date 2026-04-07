@@ -193,9 +193,13 @@ management:
                 include: health,info,metrics,prometheus
     endpoint:
         health:
-            show-details: when-authorized
+            show-details: always
             probes:
                 enabled: true
+        metrics:
+            enabled: true
+        info:
+            enabled: true
 
 # ==================== Curriculum Import - Agentic RAG Configuration ====================
 curriculum-import:
