@@ -11,11 +11,9 @@
 # ==================== Build Stage ====================
 FROM eclipse-temurin:21-jdk-alpine AS builder
 
-WORKDIR /app
+RUN apk add --no-cache maven
 
-# Copy Maven wrapper (must be executable)
-COPY mvnw ./
-COPY .mvn .mvn
+WORKDIR /app
 
 # Copy parent + all module pom.xml first to maximise layer caching.
 # Docker only re-downloads dependencies when a pom changes, not when source changes.
@@ -37,7 +35,7 @@ COPY modules/user/pom.xml modules/user/
 COPY start/pom.xml start/
 
 # Pre-fetch all dependencies (cached layer — only invalidated when a pom changes)
-RUN chmod +x mvnw && ./mvnw dependency:go-offline -B
+RUN mvn dependency:go-offline -B
 
 # Copy all source code
 COPY common/src common/src
@@ -57,7 +55,7 @@ COPY modules/user/src modules/user/src
 COPY start/src start/src
 
 # Build — skip tests (tests run in CI, not in image build)
-RUN ./mvnw clean package -DskipTests -B
+RUN mvn clean package -DskipTests -B
 
 # ==================== Runtime Stage ====================
 FROM eclipse-temurin:21-jre-alpine AS runtime

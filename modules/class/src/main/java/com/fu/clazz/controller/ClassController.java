@@ -52,10 +52,10 @@ public class ClassController {
     /**
      * Get all classes with pagination and optional filters.
      * - OPERATION_MANAGER: sees all non-deleted classes with full filter support
-     * - TEACHER: sees only their own active classes (filtered by teacher ID auto)
+     * - TEACHER: sees only their own non-deleted classes (any status: ACTIVE, CLOSED, NOT_STARTED, etc.)
      * <p>
      * GET
-     * /api/v1/classes?page=0&size=10&isActive=true&courseId=xxx&teacherId=xxx&keyword=xxx
+     * /api/v1/classes?page=0&size=10&status=ACTIVE&courseId=xxx&teacherId=xxx&keyword=xxx
      */
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<ClassSummaryResponse>>> getAllClasses(
@@ -67,15 +67,25 @@ public class ClassController {
             @RequestParam(required = false) UUID teacherId,
             @RequestParam(required = false) String keyword) {
 
-        Pageable pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("createdAt").descending());
+        Pageable pageable;
+        
+        // For teacher without status filter: sort by status priority (ACTIVE > NOT_STARTED > CLOSED), then by createdAt
+        // For others or with status filter: sort by createdAt only
+        if (!isManager() && status == null) {
+            // Teacher without status filter: use custom status priority sorting
+            // Note: JPA doesn't support CASE expressions in Order, so we'll apply this on service side
+            pageable = PageRequest.of(page, Math.min(size, 100));
+        } else {
+            pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("createdAt").descending());
+        }
         Page<ClassSummaryResponse> classPage;
 
         if (isManager()) {
             // OPERATION_MANAGER: full access with dynamic filters combined by AND
             classPage = clazzService.getClasses(keyword, teacherId, courseId, status, pageable);
         } else {
-            // TEACHER: only their own active classes (force filter)
-            classPage = clazzService.getClasses(keyword, userId, courseId, com.fu.clazz.entity.ClassStatus.ACTIVE, pageable);
+            // TEACHER: see all non-deleted classes, can optionally filter by status if provided
+            classPage = clazzService.getClasses(keyword, userId, courseId, status, pageable);
         }
 
         PageResponse<ClassSummaryResponse> pageResponse = PageResponse.of(

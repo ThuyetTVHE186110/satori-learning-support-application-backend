@@ -67,18 +67,24 @@ public class ClassServiceImpl implements ClassService {
     @Override
     @Transactional
     public ClassResponse closeClass(UUID classId, UUID managerId) {
+        log.debug("Starting closeClass for classId: {}, managerId: {}", classId, managerId);
+
         Clazz clazz = findClassOrThrow(classId);
         if (clazz.getStatus() == ClassStatus.CLOSED) {
             throw new BusinessException("CLASS_ALREADY_INACTIVE", "Lớp học đã ngưng hoạt động.");
         }
+
         clazz.setStatus(ClassStatus.CLOSED);
         clazz.setEndDate(LocalDate.now());
         clazz.setUpdatedBy(managerId);
+
         Clazz updatedClazz = classRepository.save(clazz);
-        log.info("Đóng lớp học thành công: {}", classId);
+
         // Deactivate all members when class is closed
         deactivateMembers(classId);
-        return toResponseWithMemberCount(updatedClazz);
+        log.info("Đóng lớp học thành công: {}", classId);
+        ClassResponse response = toResponseWithMemberCount(updatedClazz);
+        return response;
     }
 
     @Override
@@ -169,8 +175,8 @@ public class ClassServiceImpl implements ClassService {
                 throw new BusinessException("CAPACITY_VIOLATION", "Số lượng học viên tối đa không thể nhỏ hơn số lượng học viên hiện tại đang theo học.");
             }
         }
-        if (currentMembers > 0 && request.getStartDate() != null && request.getStartDate().isAfter(clazz.getStartDate())) {
-            throw new BusinessException("INVALID_START_DATE", "Không thể cập nhật ngày bắt đầu sau ngày bắt đầu cũ khi đã có học viên trong lớp.");
+        if (clazz.getStatus() == ClassStatus.ACTIVE && request.getStartDate() != null && !request.getStartDate().isEqual(clazz.getStartDate())) {
+            throw new BusinessException("INVALID_START_DATE", "Không thể cập nhật ngày bắt đầu sau khi lớp học đã hoạt động.");
         }
 
         // Auto-activate if startDate moved to today or earlier AND no members AND currently NOT_STARTED
@@ -227,7 +233,45 @@ public class ClassServiceImpl implements ClassService {
 
         org.springframework.data.jpa.domain.Specification<Clazz> spec = org.springframework.data.jpa.domain.Specification.where(ClassSpecification.isNotDeleted()).and(ClassSpecification.hasKeyword(keyword)).and(ClassSpecification.hasTeacherId(teacherId)).and(ClassSpecification.hasCourseId(courseId)).and(ClassSpecification.hasStatus(status));
 
-        return classRepository.findAll(spec, pageable).map(this::toSummaryWithMemberCount);
+        Page<Clazz> classPage = classRepository.findAll(spec, pageable);
+        
+        // If no status filter and pageable has no sort, apply custom status priority sorting
+        if (status == null && !pageable.getSort().isSorted()) {
+            List<Clazz> sortedClasses = classPage.getContent().stream()
+                    .sorted((c1, c2) -> {
+                        // Priority order: ACTIVE (0) > NOT_STARTED (1) > CLOSED (2)
+                        int priority1 = getStatusPriority(c1.getStatus());
+                        int priority2 = getStatusPriority(c2.getStatus());
+                        
+                        if (priority1 != priority2) {
+                            return Integer.compare(priority1, priority2);
+                        }
+                        // Same priority: sort by createdAt descending
+                        return c2.getCreatedAt().compareTo(c1.getCreatedAt());
+                    })
+                    .toList();
+            
+            return new org.springframework.data.domain.PageImpl<>(
+                    sortedClasses.stream().map(this::toSummaryWithMemberCount).toList(),
+                    pageable,
+                    classPage.getTotalElements()
+            );
+        }
+        
+        return classPage.map(this::toSummaryWithMemberCount);
+    }
+    
+    /**
+     * Get status priority for sorting (lower = higher priority)
+     * Order: ACTIVE (0) > NOT_STARTED (1) > CLOSED (2)
+     */
+    private int getStatusPriority(ClassStatus status) {
+        return switch (status) {
+            case ACTIVE -> 0;
+            case NOT_STARTED -> 1;
+            case CLOSED -> 2;
+            default -> 3;
+        };
     }
 
     // =====================================================
@@ -328,6 +372,7 @@ public class ClassServiceImpl implements ClassService {
                 response.setEmail(user.getEmail());
                 response.setAvatarUrl(user.getAvatarUrl());
                 response.setRole(user.getRole() != null ? user.getRole().name() : null);
+                response.setPhoneNumber(user.getPhoneNumber());
             }
             return response;
         });
@@ -369,10 +414,14 @@ public class ClassServiceImpl implements ClassService {
      * Business rule: A learner is set to INACTIVE if their class is deleted or deactivated.
      */
     private void deactivateMembers(UUID classId) {
-        List<UUID> memberIds = classMemberRepository.findActiveUserIdsByClassId(classId);
-        if (!memberIds.isEmpty()) {
-            log.info("Deactivating {} members from class {}", memberIds.size(), classId);
-            userRepository.updateStatusByUserIdIn(memberIds, UserStatus.INACTIVE);
+        try {
+            List<UUID> memberIds = classMemberRepository.findActiveUserIdsByClassId(classId);
+            if (!memberIds.isEmpty()) {
+                userRepository.updateStatusByUserIdIn(memberIds, UserStatus.INACTIVE);
+            }
+        } catch (Exception e) {
+            log.error("ERROR deactivating members for class: {}", classId, e);
+            throw new BusinessException("MEMBER_DEACTIVATION_FAILED", "Có lỗi xảy ra khi cập nhật trạng thái học viên sau khi đóng lớp học.");
         }
     }
 
@@ -436,6 +485,7 @@ public class ClassServiceImpl implements ClassService {
             response.setEmail(user.getEmail());
             response.setAvatarUrl(user.getAvatarUrl());
             response.setRole(user.getRole().name());
+            response.setPhoneNumber(user.getPhoneNumber());
         });
         User learner = userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy học viên."));
         // If learner was previously INACTIVE, set to ACTIVE upon joining a class
@@ -506,11 +556,11 @@ public class ClassServiceImpl implements ClassService {
     @Override
     public List<LearnerClassResponse> getLearnerClasses(UUID learnerId) {
         log.info("Lấy danh sách lớp học của học viên: {}", learnerId);
-        
+
         // Query for classes with status ACTIVE or CLOSED where learner is an active member
         List<ClassStatus> allowedStatuses = List.of(ClassStatus.ACTIVE, ClassStatus.CLOSED);
         List<Clazz> classes = classRepository.findLearnerClasses(learnerId, allowedStatuses);
-        
+
         // Map to lightweight response
         return classes.stream()
                 .map(classMapper::toLearnerClassResponse)
