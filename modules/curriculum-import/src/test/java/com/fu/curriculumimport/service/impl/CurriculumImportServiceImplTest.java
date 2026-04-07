@@ -39,6 +39,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -114,6 +115,13 @@ class CurriculumImportServiceImplTest {
 
         @Mock private MultipartFile validPdf;
 
+        // PDF magic bytes: %PDF- (0x25 0x50 0x44 0x46 0x2D) + padding
+        private static final byte[] PDF_HEADER =
+                {0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34}; // %PDF-1.4
+        // PPTX/ZIP magic bytes: PK\x03\x04 (Office Open XML is a ZIP archive)
+        private static final byte[] PPTX_HEADER =
+                {0x50, 0x4B, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00}; // PK..
+
         @BeforeEach
         void setupValidFile() throws java.io.IOException {
             given(validPdf.isEmpty()).willReturn(false);
@@ -121,6 +129,8 @@ class CurriculumImportServiceImplTest {
             given(validPdf.getSize()).willReturn(1024L);
             given(validPdf.getOriginalFilename()).willReturn("lesson.pdf");
             given(validPdf.getBytes()).willReturn(new byte[1024]); // needed for InMemoryMultipartFile.from()
+            // Return a fresh stream each call — magic bytes check reads from position 0
+            given(validPdf.getInputStream()).willAnswer(inv -> new ByteArrayInputStream(PDF_HEADER));
         }
 
         @Test
@@ -229,6 +239,7 @@ class CurriculumImportServiceImplTest {
             long oversizeBytes = 101L * 1024 * 1024;
             given(bigFile.isEmpty()).willReturn(false);
             given(bigFile.getContentType()).willReturn("application/pdf");
+            given(bigFile.getOriginalFilename()).willReturn("big.pdf"); // must pass extension check first
             given(bigFile.getSize()).willReturn(oversizeBytes);
 
             assertThatThrownBy(() -> service.initiateImport(bigFile, null, MANAGER_ID))
@@ -296,6 +307,7 @@ class CurriculumImportServiceImplTest {
                 given(pptxFile.getSize()).willReturn(1024L);
                 given(pptxFile.getOriginalFilename()).willReturn("slides.pptx");
                 given(pptxFile.getBytes()).willReturn(new byte[1024]);
+                given(pptxFile.getInputStream()).willAnswer(inv -> new ByteArrayInputStream(PPTX_HEADER));
 
                 Course course = new Course();
                 course.setName("Korean N5");
@@ -333,6 +345,7 @@ class CurriculumImportServiceImplTest {
                 given(pptxFile.getSize()).willReturn(2048L);
                 given(pptxFile.getOriginalFilename()).willReturn("curriculum.pptx");
                 given(pptxFile.getBytes()).willReturn(new byte[2048]);
+                given(pptxFile.getInputStream()).willAnswer(inv -> new ByteArrayInputStream(PPTX_HEADER));
 
                 Course course = new Course();
                 given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));

@@ -8,6 +8,13 @@ spring:
     profiles:
         active: ${SPRING_PROFILES_ACTIVE:local}
 
+    main:
+        # Force servlet (WebMVC) mode even when spring-webflux is on the classpath.
+        # The monitoring module uses WebClient (from webflux) as an HTTP client only —
+        # it does NOT start a reactive web server. Without this, Spring Boot may
+        # detect both starters and fail to resolve the application type.
+        web-application-type: servlet
+
     # ==================== PostgreSQL Configuration ====================
     datasource:
         url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:satori_learning}?stringtype=unspecified
@@ -107,6 +114,13 @@ app:
             access-token-expiration-ms: ${JWT_ACCESS_EXPIRATION:1800000}
             # Refresh token expiration: 7 days (604800000 ms)
             refresh-token-expiration-ms: ${JWT_REFRESH_EXPIRATION:604800000}
+        # CORS allowed origins (comma-separated). Override per environment.
+        # Production MUST set APP_ALLOWED_ORIGINS to the actual frontend URL.
+        cors:
+            allowed-origins: ${APP_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+        # Swagger UI public access — true for local/dev, false for prod (application-prod.yml overrides)
+        swagger:
+            public: ${SWAGGER_PUBLIC:true}
         # Max failed login attempts before account lock
         max-failed-attempts: ${MAX_FAILED_ATTEMPTS:5}
         # Account lock duration in minutes
