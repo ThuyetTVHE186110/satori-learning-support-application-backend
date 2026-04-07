@@ -8,6 +8,7 @@ import com.fu.achievement.service.StreakService;
 import com.fu.achievement.service.LearningLevelService;
 import com.fu.achievement.dto.response.LevelUpNotificationResponse;
 import com.fu.achievement.dto.response.UserAchievementResponse;
+import com.fu.achievement.dto.response.StreakNotificationResponse;
 import com.fu.assignment.ai.AiGradingService;
 import com.fu.assignment.ai.QuizAiGenerationService;
 import com.fu.assignment.ai.QuizExplanationService;
@@ -749,8 +750,9 @@ public class AssignmentServiceImpl implements AssignmentService {
             log.info("Learner {} submitted quiz {}, score={}", learnerId, submission.getAssignmentId(), BigDecimal.valueOf(scored.earnedPoints));
 
             // Record daily activity for streak tracking
+            StreakNotificationResponse streakNotification = null;
             try {
-                streakService.recordDailyActivity(learnerId, "ASSIGNMENT");
+                streakNotification = streakService.recordDailyActivity(learnerId, "ASSIGNMENT");
             } catch (Exception e) {
                 log.error("Error recording daily activity for learner: {}", learnerId, e);
             }
@@ -785,7 +787,7 @@ public class AssignmentServiceImpl implements AssignmentService {
                 // Continue even if badge retrieval fails
             }
 
-            return enrichSubmissionResponseForSubmit(submission, earnedBadges, expEarned, oldTotalExp);
+            return enrichSubmissionResponseForSubmit(submission, earnedBadges, expEarned, oldTotalExp, streakNotification);
         }
     }
 
@@ -840,8 +842,9 @@ public class AssignmentServiceImpl implements AssignmentService {
             log.info("Learner {} submitted writing for assignment {} (images: {})", learnerId, assignmentId, hasImages ? images.length : 0);
 
             // Record daily activity for streak tracking (writing/translation submission)
+            StreakNotificationResponse streakNotification = null;
             try {
-                streakService.recordDailyActivity(learnerId, "ASSIGNMENT");
+                streakNotification = streakService.recordDailyActivity(learnerId, "ASSIGNMENT");
             } catch (Exception e) {
                 log.error("Error recording daily activity for learner: {}", learnerId, e);
             }
@@ -875,7 +878,7 @@ public class AssignmentServiceImpl implements AssignmentService {
                 // Continue even if badge retrieval fails
             }
 
-            return enrichSubmissionResponseForSubmit(submission, earnedBadges, expEarned, oldTotalExp);
+            return enrichSubmissionResponseForSubmit(submission, earnedBadges, expEarned, oldTotalExp, streakNotification);
         }
     }
 
@@ -1124,7 +1127,7 @@ public class AssignmentServiceImpl implements AssignmentService {
      * Enrich submission response for SUBMIT operations (POST endpoints)
      * Includes levelUp and badges - user just completed an action
      */
-    private SubmissionResponse enrichSubmissionResponseForSubmit(AssignmentSubmission s, List<UserAchievementResponse> earnedBadges, int expEarned, Integer oldTotalExp) {
+    private SubmissionResponse enrichSubmissionResponseForSubmit(AssignmentSubmission s, List<UserAchievementResponse> earnedBadges, int expEarned, Integer oldTotalExp, StreakNotificationResponse streakNotification) {
         SubmissionResponse response = mapper.toResponse(s);
         Assignment assignment = assignmentRepository.findByIdAndNotDeleted(s.getAssignmentId()).orElse(null);
         if (assignment != null) {
@@ -1145,6 +1148,11 @@ public class AssignmentServiceImpl implements AssignmentService {
         // Add earned badges from this submission
         if (earnedBadges != null && !earnedBadges.isEmpty()) {
             response.setEarnedBadges(earnedBadges);
+        }
+
+        // Add streak notification (first activity of day indicator)
+        if (streakNotification != null) {
+            response.setStreakNotification(streakNotification);
         }
 
         // Add level-up information (only for submit operations)
