@@ -28,6 +28,7 @@ COPY modules/class/pom.xml modules/class/
 COPY modules/conversation/pom.xml modules/conversation/
 COPY modules/course/pom.xml modules/course/
 COPY modules/curriculum-import/pom.xml modules/curriculum-import/
+COPY modules/monitoring/pom.xml modules/monitoring/
 COPY modules/notification/pom.xml modules/notification/
 COPY modules/practice/pom.xml modules/practice/
 COPY modules/pronunciation/pom.xml modules/pronunciation/
@@ -47,6 +48,7 @@ COPY modules/class/src modules/class/src
 COPY modules/conversation/src modules/conversation/src
 COPY modules/course/src modules/course/src
 COPY modules/curriculum-import/src modules/curriculum-import/src
+COPY modules/monitoring/src modules/monitoring/src
 COPY modules/notification/src modules/notification/src
 COPY modules/practice/src modules/practice/src
 COPY modules/pronunciation/src modules/pronunciation/src

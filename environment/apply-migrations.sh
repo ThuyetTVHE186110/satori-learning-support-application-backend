@@ -19,7 +19,7 @@
 #   PGPORT     (default: 5432)
 #   PGDATABASE (default: satori_learning)
 #   PGUSER     (default: satori_user)
-#   PGPASSWORD (default: SatoriSecure2026!)
+#   PGPASSWORD (REQUIRED — no default to prevent accidental dev password use in prod)
 # =============================================================================
 set -euo pipefail
 
@@ -31,7 +31,14 @@ PGHOST="${PGHOST:-localhost}"
 PGPORT="${PGPORT:-5432}"
 PGDATABASE="${PGDATABASE:-satori_learning}"
 PGUSER="${PGUSER:-satori_user}"
-PGPASSWORD="${PGPASSWORD:-SatoriSecure2026!}"
+
+# PGPASSWORD must be set explicitly — no default to avoid using dev credentials in prod
+if [[ -z "${PGPASSWORD:-}" ]]; then
+    echo "ERROR: PGPASSWORD environment variable is not set." >&2
+    echo "  Local:  export PGPASSWORD=SatoriSecure2026!" >&2
+    echo "  Prod:   export PGPASSWORD=<your-production-password>" >&2
+    exit 1
+fi
 DRY_RUN=false
 FROM_NUM=0
 
