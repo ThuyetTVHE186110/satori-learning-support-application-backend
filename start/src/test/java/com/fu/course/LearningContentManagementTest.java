@@ -324,9 +324,11 @@ class LearningContentManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
+            Course course = saveCourse("Test Course");
+
             MockMultipartFile txt = new MockMultipartFile("file", "test.txt", "text/plain", "hello".getBytes());
 
-            mockMvc.perform(multipart("/api/v1/manager/curriculum-imports").file(txt).header("Authorization", "Bearer " + token))
+            mockMvc.perform(multipart("/api/v1/manager/curriculum-imports").file(txt).param("courseId", course.getId().toString()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("INVALID_FILE"))
@@ -338,12 +340,13 @@ class LearningContentManagementTest {
         void tc_lcm_im_003() throws Exception {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            Course course = saveCourse("Test Course");
 
             MockMultipartFile bigPdf = new MockMultipartFile("file", "big.pdf", "application/pdf", "%PDF".getBytes()){
                 @Override public long getSize() { return 101L * 1024 * 1024; }
             };
 
-            mockMvc.perform(multipart("/api/v1/manager/curriculum-imports").file(bigPdf).header("Authorization", "Bearer " + token))
+            mockMvc.perform(multipart("/api/v1/manager/curriculum-imports").file(bigPdf).param("courseId", course.getId().toString()).header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("INVALID_FILE"));

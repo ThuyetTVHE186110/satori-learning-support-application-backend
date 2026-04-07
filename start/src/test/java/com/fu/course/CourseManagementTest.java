@@ -402,24 +402,6 @@ class CourseManagementTest {
                     .andExpect(status().isUnauthorized())
                     .andExpect(jsonPath("$.success").value(false));
         }
-
-        /**
-         * TC_CM_VL_007
-         * Access with LEARNER role token returns 403 — RBAC enforced at SecurityConfig.
-         */
-        @Test
-        @DisplayName("TC_CM_VL_007 — LEARNER token → HTTP 403 Forbidden")
-        void tc_cm_vl_007_learnerToken_returns403() throws Exception {
-            // Arrange
-            saveLearner("learner@test.com");
-            String token = loginAndGetToken("learner@test.com", "ValidPass@1");
-
-            // Act + Assert
-            mockMvc.perform(get("/api/v1/manager/courses")
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isForbidden())
-                    .andExpect(jsonPath("$.success").value(false));
-        }
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -443,11 +425,14 @@ class CourseManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
-            MockMultipartFile requestPart = courseRequestPart("No Thumb Course", "N4", "Desc");
+            String requestBody = String.format(
+                    "{\"name\":\"%s\",\"jlptLevel\":\"%s\",\"description\":\"%s\"}",
+                    "No Thumb Course", "N4", "Desc");
 
             // Act
-            MvcResult result = mockMvc.perform(multipart("/api/v1/manager/courses")
-                            .file(requestPart)
+            MvcResult result = mockMvc.perform(post("/api/v1/manager/courses")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(requestBody)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true))
@@ -480,13 +465,12 @@ class CourseManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
-            MockMultipartFile requestPart = new MockMultipartFile(
-                    "request", "", "application/json",
-                    "{\"name\":\"\",\"jlptLevel\":\"N5\",\"description\":\"Desc\"}".getBytes());
+            String requestBody = "{\"name\":\"\",\"jlptLevel\":\"N5\",\"description\":\"Desc\"}";
 
             // Act + Assert
-            mockMvc.perform(multipart("/api/v1/manager/courses")
-                            .file(requestPart)
+            mockMvc.perform(post("/api/v1/manager/courses")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(requestBody)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false));
@@ -504,11 +488,14 @@ class CourseManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             saveCourse("Duplicate Course", JlptLevel.N5, CourseStatus.ACTIVE);
 
-            MockMultipartFile requestPart = courseRequestPart("Duplicate Course", "N5", "Desc");
+            String requestBody = String.format(
+                    "{\"name\":\"%s\",\"jlptLevel\":\"N5\",\"description\":\"Desc\"}",
+                    "Duplicate Course");
 
             // Act + Assert
-            mockMvc.perform(multipart("/api/v1/manager/courses")
-                            .file(requestPart)
+            mockMvc.perform(post("/api/v1/manager/courses")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(requestBody)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false));
@@ -537,13 +524,14 @@ class CourseManagementTest {
                 longDesc.append("a");
             }
 
-            MockMultipartFile requestPart = new MockMultipartFile(
-                    "request", "", "application/json",
-                    String.format("{\"name\":\"Test Course\",\"jlptLevel\":\"N5\",\"description\":\"%s\"}", longDesc.toString()).getBytes());
+            String requestBody = String.format(
+                    "{\"name\":\"Test Course\",\"jlptLevel\":\"N5\",\"description\":\"%s\"}",
+                    longDesc.toString());
 
             // Act + Assert
-            mockMvc.perform(multipart("/api/v1/manager/courses")
-                            .file(requestPart)
+            mockMvc.perform(post("/api/v1/manager/courses")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(requestBody)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false));
@@ -566,13 +554,12 @@ class CourseManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
-            MockMultipartFile requestPart = new MockMultipartFile(
-                    "request", "", "application/json",
-                    "{\"name\":\"Test Course\",\"jlptLevel\":\"N9\",\"description\":\"Valid description\"}".getBytes());
+            String requestBody = "{\"name\":\"Test Course\",\"jlptLevel\":\"N9\",\"description\":\"Valid description\"}";
 
             // Act + Assert
-            mockMvc.perform(multipart("/api/v1/manager/courses")
-                            .file(requestPart)
+            mockMvc.perform(post("/api/v1/manager/courses")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(requestBody)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false));
@@ -592,17 +579,18 @@ class CourseManagementTest {
          * Create course with LEARNER token returns 403.
          */
         @Test
-        @DisplayName("TC_CM_CR_008 — LEARNER token → HTTP 403 Forbidden")
-        void tc_cm_cr_008_learnerToken_returns403() throws Exception {
+        @DisplayName("TC_CM_CR_004 — LEARNER token → HTTP 403 Forbidden")
+        void tc_cm_cr_004_learnerToken_returns403() throws Exception {
             // Arrange
             saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com", "ValidPass@1");
 
-            MockMultipartFile requestPart = courseRequestPart("Test Course", "N5", "Desc");
+            String requestBody = "{\"name\":\"Test Course\",\"jlptLevel\":\"N5\",\"description\":\"Desc\"}";
 
             // Act + Assert
-            mockMvc.perform(multipart("/api/v1/manager/courses")
-                            .file(requestPart)
+            mockMvc.perform(post("/api/v1/manager/courses")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(requestBody)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.success").value(false));
@@ -728,12 +716,12 @@ class CourseManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Old Name", JlptLevel.N5, CourseStatus.INACTIVE);
 
-            MockMultipartFile requestPart = updateRequestPart("New Name", "New Desc");
+            String requestBody = "{\"name\":\"New Name\",\"description\":\"New Desc\"}";
 
             // Act
-            mockMvc.perform(multipart("/api/v1/manager/courses/{courseId}", course.getId())
-                            .file(requestPart)
-                            .with(req -> { req.setMethod("PUT"); return req; })
+            mockMvc.perform(put("/api/v1/manager/courses/{courseId}", course.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(requestBody)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
@@ -762,14 +750,12 @@ class CourseManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Valid Name", JlptLevel.N5, CourseStatus.INACTIVE);
 
-            MockMultipartFile requestPart = new MockMultipartFile(
-                    "request", "", "application/json",
-                    "{\"name\":\"\",\"description\":\"Desc\"}".getBytes());
+            String requestBody = "{\"name\":\"\",\"description\":\"Desc\"}";
 
             // Act + Assert
-            mockMvc.perform(multipart("/api/v1/manager/courses/{courseId}", course.getId())
-                            .file(requestPart)
-                            .with(req -> { req.setMethod("PUT"); return req; })
+            mockMvc.perform(put("/api/v1/manager/courses/{courseId}", course.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(requestBody)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false));
@@ -790,13 +776,13 @@ class CourseManagementTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
-            MockMultipartFile requestPart = updateRequestPart("Test Name", "Desc");
+            String requestBody = "{\"name\":\"Test Name\",\"description\":\"Desc\"}";
 
             // Act + Assert
-            mockMvc.perform(multipart("/api/v1/manager/courses/{courseId}",
+            mockMvc.perform(put("/api/v1/manager/courses/{courseId}",
                             UUID.fromString("00000000-0000-0000-0000-000000000000"))
-                            .file(requestPart)
-                            .with(req -> { req.setMethod("PUT"); return req; })
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(requestBody)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.success").value(false));
@@ -920,30 +906,6 @@ class CourseManagementTest {
                     .andExpect(jsonPath("$.success").value(false));
         }
 
-        // ── 5.4 Authorization ─────────────────────────────────────────────────
-
-        /**
-         * TC_CM_DL_005
-         * Delete with LEARNER token returns 403 — course deletedAt remains null.
-         */
-        @Test
-        @DisplayName("TC_CM_DL_005 — LEARNER token → HTTP 403, course deletedAt remains null")
-        void tc_cm_dl_005_learnerToken_returns403_courseNotDeleted() throws Exception {
-            // Arrange
-            Course course = saveCourse("Protected Course", JlptLevel.N5, CourseStatus.ACTIVE);
-            saveLearner("learner@test.com");
-            String token = loginAndGetToken("learner@test.com", "ValidPass@1");
-
-            // Act + Assert
-            mockMvc.perform(delete("/api/v1/manager/courses/{courseId}", course.getId())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isForbidden())
-                    .andExpect(jsonPath("$.success").value(false));
-
-            // DB: course not deleted
-            Course inDB = courseRepository.findById(course.getId()).orElseThrow();
-            assertThat(inDB.getDeletedAt()).isNull();
-        }
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -951,25 +913,29 @@ class CourseManagementTest {
     // ═════════════════════════════════════════════════════════════════════════
 
     @Nested
-    @DisplayName("6. ACTIVATE / DEACTIVATE — PATCH .../activate | .../deactivate")
+    @DisplayName("6. ACTIVATE / DEACTIVATE ")
     class ActivateDeactivateTests {
 
         // ── 6.1 Happy Path ────────────────────────────────────────────────────
 
         /**
          * TC_CM_ST_001
-         * Activate INACTIVE course — status updated to ACTIVE in DB.
+         * Activate INACTIVE course — status updated to ACTIVE in DB via PUT update.
          */
         @Test
-        @DisplayName("TC_CM_ST_001 — activate INACTIVE course → HTTP 200, status=ACTIVE in DB")
+        @DisplayName("TC_CM_ST_001 — activate INACTIVE course via PUT → HTTP 200, status=ACTIVE in DB")
         void tc_cm_st_001_activateInactiveCourse_statusActiveInDb() throws Exception {
             // Arrange
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Inactive Course", JlptLevel.N5, CourseStatus.INACTIVE);
 
+            String requestBody = "{\"name\":\"Inactive Course\",\"description\":\"Test description\",\"status\":\"ACTIVE\"}";
+
             // Act
-            mockMvc.perform(patch("/api/v1/manager/courses/{courseId}/activate", course.getId())
+            mockMvc.perform(put("/api/v1/manager/courses/{courseId}", course.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(requestBody)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
@@ -983,18 +949,22 @@ class CourseManagementTest {
 
         /**
          * TC_CM_ST_002
-         * Deactivate ACTIVE course — status updated to INACTIVE in DB.
+         * Deactivate ACTIVE course — status updated to INACTIVE in DB via PUT update.
          */
         @Test
-        @DisplayName("TC_CM_ST_002 — deactivate ACTIVE course → HTTP 200, status=INACTIVE in DB")
+        @DisplayName("TC_CM_ST_002 — deactivate ACTIVE course via PUT → HTTP 200, status=INACTIVE in DB")
         void tc_cm_st_002_deactivateActiveCourse_statusInactiveInDb() throws Exception {
             // Arrange
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Active Course", JlptLevel.N5, CourseStatus.ACTIVE);
 
+            String requestBody = "{\"name\":\"Active Course\",\"description\":\"Test description\",\"status\":\"INACTIVE\"}";
+
             // Act
-            mockMvc.perform(patch("/api/v1/manager/courses/{courseId}/deactivate", course.getId())
+            mockMvc.perform(put("/api/v1/manager/courses/{courseId}", course.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(requestBody)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))

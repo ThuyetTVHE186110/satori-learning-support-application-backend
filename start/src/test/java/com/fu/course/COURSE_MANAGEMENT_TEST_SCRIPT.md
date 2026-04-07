@@ -886,21 +886,22 @@ Database state: course.deletedAt = null
 
 
 ### Test Case ID: TC_CM_ST_001
-**Test Case Description:** Manager activate course success
+**Test Case Description:** Manager activate course success via PUT update
 
 **Pre-conditions:**
 - Manager accessToken is available (from prior login)
 - Course exists with status=INACTIVE
 
 **Test Case Procedure:**
-1. Client sends PATCH /api/v1/manager/courses/{courseId}/activate with Authorization: Bearer {token}.
+1. Client sends PUT /api/v1/manager/courses/{courseId} with Authorization: Bearer {token} and JSON body:
+   - {"name":"Inactive Course","description":"Test description","status":"ACTIVE"}
 2. AuthFilter validates token and resolves MANAGER user identity.
-3. CourseController calls CourseService.activateCourse().
+3. CourseController calls CourseService.updateCourse().
 4. CourseService retrieves course by ID via CourseRepository.findByIdAndNotDeleted().
 5. CourseRepository executes database query and returns the course object.
-6. CourseService updates course status to ACTIVE via CourseRepository.save().
+6. CourseService updates course fields including status to ACTIVE via CourseRepository.save().
 7. CourseRepository saves the updated course with new status.
-8. System returns the activate success response.
+8. System returns the update success response.
 
 **Expected Results:** HTTP 200 OK
 Response JSON:
@@ -911,21 +912,22 @@ Database state: course.status = ACTIVE, course.updatedAt is not null
 ---
 
 ### Test Case ID: TC_CM_ST_002
-**Test Case Description:** Manager deactivate ACTIVE course success
+**Test Case Description:** Manager deactivate ACTIVE course success via PUT update
 
 **Pre-conditions:**
 - Manager accessToken is available (from prior login)
 - Course exists with status=ACTIVE
 
 **Test Case Procedure:**
-1. Client sends PATCH /api/v1/manager/courses/{courseId}/deactivate with Authorization: Bearer {token}.
+1. Client sends PUT /api/v1/manager/courses/{courseId} with Authorization: Bearer {token} and JSON body:
+   - {"name":"Active Course","description":"Test description","status":"INACTIVE"}
 2. AuthFilter validates token and resolves MANAGER user identity.
-3. CourseController calls CourseService.deactivateCourse().
+3. CourseController calls CourseService.updateCourse().
 4. CourseService retrieves course by ID via CourseRepository.findByIdAndNotDeleted().
 5. CourseRepository executes database query and returns the course object.
-6. CourseService updates course status to INACTIVE via CourseRepository.save().
+6. CourseService updates course fields including status to INACTIVE via CourseRepository.save().
 7. CourseRepository saves the updated course with new status.
-8. System returns the deactivate success response.
+8. System returns the update success response.
 
 **Expected Results:** HTTP 200 OK
 Response JSON:
