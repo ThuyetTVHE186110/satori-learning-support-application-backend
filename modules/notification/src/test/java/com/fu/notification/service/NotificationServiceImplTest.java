@@ -90,7 +90,8 @@ class NotificationServiceImplTest {
             boolean result = notificationService.sendToUser(userId, baseRequest);
 
             assertThat(result).isTrue();
-            verify(notificationRepository).save(any(Notification.class));
+            // save() is called twice: once to persist the record, once to update pushSent flag
+            verify(notificationRepository, times(2)).save(any(Notification.class));
             verify(fcmService).sendToDevice(eq("fcm-token-abc"), any(), any(), any(), any());
         }
 
@@ -126,7 +127,8 @@ class NotificationServiceImplTest {
                     .priority(NotificationPriority.CRITICAL)
                     .build();
             when(preferencesService.isNotificationEnabled(userId, criticalRequest.getType())).thenReturn(true);
-            when(preferencesService.isInQuietHours(userId)).thenReturn(true);
+            // isInQuietHours is NOT stubbed — short-circuit AND skips the call for CRITICAL priority:
+            // "priority != CRITICAL" is false → isInQuietHours() is never invoked
             when(notificationRepository.findRecentByUserAndType(eq(userId), any(), any()))
                     .thenReturn(Collections.emptyList());
             Notification saved = Notification.builder().id(UUID.randomUUID()).userId(userId).build();

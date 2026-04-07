@@ -73,21 +73,21 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
         log.info("Initiating curriculum import by manager: {}, courseId: {}, file: {}",
                 managerId, courseId, file.getOriginalFilename());
 
-        // Validate file
-        validateImportFile(file);
+        // 1. Fast metadata checks (no file I/O): null, extension, size
+        String filename = validateFileMetadata(file);
 
-        // courseId is required — lessons cannot be created without a target course.
-        // Use PATCH /{importId}/link-course after import if the course is not yet known.
+        // 2. Business checks: courseId and course existence
+        // Do these before reading file bytes to avoid unnecessary I/O on invalid requests.
         if (courseId == null) {
             throw new BusinessException("VALIDATION_ERROR",
                     "courseId is required. Please select a course before uploading the curriculum.");
         }
-
-        // Validate course exists
-        String courseName = null;
         var course = courseRepository.findById(courseId)
                 .orElseThrow(() -> new CourseNotFoundException(courseId));
-        courseName = course.getName();
+        String courseName = course.getName();
+
+        // 3. Content I/O: magic bytes validation (actual file content, not client-reported type)
+        validateMagicBytes(file, filename);
 
         // Create import record
         CurriculumImport importEntity = CurriculumImport.builder()
@@ -540,7 +540,12 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
     private static final byte[] PDF_MAGIC  = {0x25, 0x50, 0x44, 0x46, 0x2D}; // %PDF-
     private static final byte[] PPTX_MAGIC = {0x50, 0x4B, 0x03, 0x04};        // PK..
 
-    private void validateImportFile(MultipartFile file) {
+    /**
+     * Validates file metadata (no content I/O): null/empty, extension, size.
+     *
+     * @return lowercase filename for reuse in magic-bytes check
+     */
+    private String validateFileMetadata(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new InvalidImportFileException("File is required and must not be empty");
         }
@@ -560,9 +565,7 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
                     MAX_FILE_SIZE_BYTES / (1024 * 1024)));
         }
 
-        // Magic-bytes check: validate actual file content, not just the name/MIME reported by client.
-        // This prevents malicious uploads disguised with a .pdf or .pptx extension.
-        validateMagicBytes(file, filename);
+        return filename;
     }
 
     private void validateMagicBytes(MultipartFile file, String lowercaseFilename) {

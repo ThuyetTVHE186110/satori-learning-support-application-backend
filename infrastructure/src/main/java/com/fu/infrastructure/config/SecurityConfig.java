@@ -44,6 +44,15 @@ public class SecurityConfig {
     private boolean swaggerPublic;
 
     /**
+     * When true, allow requests from ANY origin (uses allowedOriginPatterns("*")).
+     * Safe to enable only in local/dev — NEVER set true in prod.
+     * Note: allowedOrigins("*") + allowCredentials(true) is rejected by browsers,
+     *       so we use allowedOriginPatterns which is compatible.
+     */
+    @Value("${app.security.cors.allow-all:false}")
+    private boolean corsAllowAll;
+
+    /**
      * Endpoints that are always publicly accessible regardless of profile.
      * Actuator health probes must be public for load-balancer / k8s readiness checks.
      * Actuator metrics/prometheus are NOT listed here — they require ADMIN role.
@@ -141,13 +150,18 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
 
-        // Parse comma-separated origins from environment variable.
-        // Supports exact origins only (no wildcards) to work correctly with allowCredentials=true.
-        List<String> origins = Arrays.stream(allowedOriginsRaw.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .toList();
-        configuration.setAllowedOrigins(origins);
+        if (corsAllowAll) {
+            // Dev/local only: allow any origin.
+            // Must use allowedOriginPatterns (not allowedOrigins) to be compatible with allowCredentials=true.
+            configuration.setAllowedOriginPatterns(List.of("*"));
+        } else {
+            // Prod/staging: explicit whitelist only.
+            List<String> origins = Arrays.stream(allowedOriginsRaw.split(","))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .toList();
+            configuration.setAllowedOrigins(origins);
+        }
 
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-Requested-With", "Accept"));
