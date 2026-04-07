@@ -34,5 +34,6 @@ public class CurrentStreakResponse {
     
     @JsonProperty("days_until_break")
     @Schema(description = "Days user can miss before streak breaks (0=today, 1=tomorrow)", example = "1")
-    private Integer daysUntilBreak;
+    @Builder.Default
+    private Integer daysUntilBreak = 0;
 }

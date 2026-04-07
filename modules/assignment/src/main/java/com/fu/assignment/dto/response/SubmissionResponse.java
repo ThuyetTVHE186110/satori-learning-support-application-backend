@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fu.assignment.entity.SubmissionStatus;
 import com.fu.achievement.dto.response.UserAchievementResponse;
 import com.fu.achievement.dto.response.LevelUpNotificationResponse;
+import com.fu.achievement.dto.response.StreakNotificationResponse;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -59,6 +60,10 @@ public class SubmissionResponse {
     /** Level-up notification if user leveled up during submission. */
     @JsonProperty("levelUp")
     private LevelUpNotificationResponse levelUpInfo;
+
+    /** Streak notification indicating first activity of day. */
+    @JsonProperty("streakNotification")
+    private StreakNotificationResponse streakNotification;
 
     private LocalDateTime createdAt;
 }

@@ -195,19 +195,19 @@ public class AchievementServiceImpl implements AchievementService {
                         .currentLevel(1)
                         .totalExp(0)
                         .build());
-        
-        // Fallback: If currentStreak is 0, check streak_history (source of truth)
-        if (userStats.getCurrentStreak() == 0) {
-            StreakService streakService = streakServiceProvider.getIfAvailable();
-            if (streakService != null) {
-                int streakFromHistory = streakService.getCurrentStreakFromHistory(userId);
-                if (streakFromHistory > 0) {
-                    log.warn("User {} has currentStreak=0 in UserStats but streak_history shows: {}. Using history value.",
-                            userId, streakFromHistory);
-                    userStats.setCurrentStreak(streakFromHistory);
-                }
-            }
-        }
+
+//        // Fallback: If currentStreak is 0, check streak_history (source of truth)
+//        if (userStats.getCurrentStreak() == 0) {
+//            StreakService streakService = streakServiceProvider.getIfAvailable();
+//            if (streakService != null) {
+//                int streakFromHistory = streakService.getCurrentStreakFromHistory(userId);
+//                if (streakFromHistory > 0) {
+//                    log.warn("User {} has currentStreak=0 in UserStats but streak_history shows: {}. Using history value.",
+//                            userId, streakFromHistory);
+//                    userStats.setCurrentStreak(streakFromHistory);
+//                }
+//            }
+//        }
         
         // Get practice and speaking counts from registered providers
         int practiceCount = activityCountProviders.stream()
@@ -532,56 +532,19 @@ public class AchievementServiceImpl implements AchievementService {
                     .longestStreak(0)
                     .streakLastDate(null)
                     .freezeTokensAvailable(0)
-                    .daysUntilBreak(0)
                     .build();
         }
         
         var userStats = userStatsOpt.get();
         
-        // Fallback: If currentStreak is 0, check streak_history (source of truth)
+//        // Fallback: If currentStreak is 0, check streak_history (source of truth)
         Integer currentStreak = userStats.getCurrentStreak();
-        if (currentStreak == null || currentStreak == 0) {
-            StreakService streakService = streakServiceProvider.getIfAvailable();
-            if (streakService != null) {
-                int streakFromHistory = streakService.getCurrentStreakFromHistory(userId);
-                if (streakFromHistory > 0) {
-                    log.warn("User {} has currentStreak=0 in UserStats but streak_history shows: {}. Using history value.",
-                            userId, streakFromHistory);
-                    currentStreak = streakFromHistory;
-                }
-            }
-        }
-        
-        // Calculate days until streak breaks
-        // If last activity was today, user can miss 1 day (tomorrow)
-        // If last activity was yesterday or before, streak can break today
-        LocalDate today = LocalDate.now();
-        LocalDate lastDate = userStats.getStreakLastDate();
-        int daysUntilBreak;
-        
-        if (lastDate == null) {
-            daysUntilBreak = 0; // No streak yet
-        } else if (lastDate.equals(today)) {
-            daysUntilBreak = 1; // Activity today, can miss tomorrow
-        } else {
-            long daysSince = java.time.temporal.ChronoUnit.DAYS.between(lastDate, today);
-            if (daysSince < 0) {
-                // Future date - data integrity issue (likely clock skew or manipulation)
-                log.warn("User {} has future streakLastDate: {}. This indicates a potential data integrity issue.", userId, lastDate);
-                daysUntilBreak = 0;
-            } else if (daysSince == 1) {
-                daysUntilBreak = 1; // Activity yesterday, can miss today (but will break tomorrow if no activity)
-            } else {
-                daysUntilBreak = 0; // Streak already broken
-            }
-        }
         
         return CurrentStreakResponse.builder()
                 .currentStreak(currentStreak != null ? currentStreak : 0)
                 .longestStreak(userStats.getLongestStreak() != null ? userStats.getLongestStreak() : 0)
-                .streakLastDate(lastDate)
+                .streakLastDate(userStats.getStreakLastDate())
                 .freezeTokensAvailable(userStats.getStreakFreezeCount() != null ? userStats.getStreakFreezeCount() : 0)
-                .daysUntilBreak(daysUntilBreak)
                 .build();
     }
 

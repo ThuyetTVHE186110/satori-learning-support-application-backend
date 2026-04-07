@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fu.achievement.dto.response.LevelUpNotificationResponse;
 import com.fu.achievement.dto.response.UserAchievementResponse;
+import com.fu.achievement.dto.response.StreakNotificationResponse;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -48,6 +49,12 @@ public class SessionEvaluationResponse {
      */
     @JsonProperty("levelUp")
     private LevelUpNotificationResponse levelUpInfo;
+
+    /**
+     * Streak notification indicating first activity of day.
+     */
+    @JsonProperty("streakNotification")
+    private StreakNotificationResponse streakNotification;
 
     @Data
     @Builder

@@ -8,7 +8,9 @@ import com.fu.achievement.config.ActivityExpConfig;
 import com.fu.achievement.dto.response.LevelUpNotificationResponse;
 import com.fu.achievement.service.AchievementService;
 import com.fu.achievement.service.LearningLevelService;
+import com.fu.achievement.service.StreakService;
 import com.fu.achievement.dto.response.UserAchievementResponse;
+import com.fu.achievement.dto.response.StreakNotificationResponse;
 import com.fu.achievement.enums.BadgeType;
 import com.fu.achievement.service.impl.StreakServiceImpl;
 import com.fu.common.exception.BusinessException;
@@ -612,8 +614,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     languageEval.getVocabularyScore());
         }
         // Record daily activity for streak tracking
+        StreakNotificationResponse streakNotification = null;
         try {
-            streakService.recordDailyActivity(userId, "SPEAKING");
+            streakNotification = streakService.recordDailyActivity(userId, "ROLEPLAY");
         } catch (Exception e) {
             log.error("Error recording daily activity for learner: {}", userId, e);
         }
@@ -709,6 +712,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 .languageEvaluation(languageEval)
                 .earnedBadges(earnedBadges)
                 .levelUpInfo(levelUpInfo)
+                .streakNotification(streakNotification)
                 .build();
     }
 

@@ -6,6 +6,7 @@ import com.fu.achievement.service.AchievementService;
 import com.fu.achievement.service.LearningLevelService;
 import com.fu.achievement.dto.response.UserAchievementResponse;
 import com.fu.achievement.dto.response.LevelUpNotificationResponse;
+import com.fu.achievement.dto.response.StreakNotificationResponse;
 import com.fu.achievement.enums.BadgeType;
 import com.fu.achievement.service.StreakService;
 import com.fu.common.event.PracticeFeedbackReadyEvent;
@@ -307,12 +308,16 @@ public class PracticeSessionService {
         if (session.getLessonId() != null) {
             upsertLessonProgress(session);
         }
+        
         // Record daily activity for streak tracking
+        // Note: This may be called 2nd time after persistAnswerResult already called it,
+        // but recordDailyActivity checks hasActivityOnDate and will return isFirstActivityToday=false
         try {
             streakService.recordDailyActivity(session.getUserId(), "PRACTICE");
         } catch (Exception e) {
             log.error("Error recording daily activity for learner: {}", session.getUserId(), e);
         }
+        
         // Award direct EXP for practice completion (with level tier + score bonus)
         try {
             int currentLevel = learningLevelService.getCurrentLevel(session.getUserId());
@@ -461,6 +466,16 @@ public class PracticeSessionService {
             }
         }
 
+        // Fetch streak notification if session is completed
+        com.fu.achievement.dto.response.StreakNotificationResponse streakNotification = null;
+        if (session.getStatus() == PracticeStatus.COMPLETED) {
+            try {
+                streakNotification = streakService.recordDailyActivity(userId, "PRACTICE");
+            } catch (Exception e) {
+                log.debug("Error retrieving streak info for session summary", e);
+            }
+        }
+
         return SessionSummaryResponse.builder()
                 .sessionId(sessionId)
                 .score(session.getScore())
@@ -470,6 +485,7 @@ public class PracticeSessionService {
                 .items(results)
                 .earnedBadges(earnedBadges)
                 .levelUpInfo(levelUpInfo)
+                .streakNotification(streakNotification)
                 .build();
     }
 
