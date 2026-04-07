@@ -40,6 +40,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.LocalDate;
+import java.time.DayOfWeek;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -585,23 +587,63 @@ public class AchievementServiceImpl implements AchievementService {
 
     @Override
     @Transactional(readOnly = true)
-    public StreakHistoryResponse getStreakHistory(UUID userId, LocalDate startDate, LocalDate endDate) {
-        log.debug("Fetching streak history for user: {} from {} to {}", userId, startDate, endDate);
+    public StreakHistoryResponse getStreakHistory(UUID userId) {
+        log.debug("Fetching streak history for user: {} - cycle-based display", userId);
         
-        // Validate date range (startDate must be before or equal to endDate)
-        if (startDate.isAfter(endDate)) {
-            throw new IllegalArgumentException("startDate cannot be after endDate");
+        // Get user stats to determine current streak
+        var userStats = userStatsRepository.findByUserId(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User stats not found"));
+        
+        int currentStreak = userStats.getCurrentStreak() != null ? userStats.getCurrentStreak() : 0;
+        LocalDate today = LocalDate.now();
+        
+        // If no streak, return empty response
+        if (currentStreak == 0) {
+            log.debug("User {} has no streak, returning empty response", userId);
+            return StreakHistoryResponse.builder()
+                    .period(StreakPeriodInfo.builder()
+                            .startDate(null)
+                            .endDate(null)
+                            .daysRequested(0)
+                            .streakStartDate(null)
+                            .cycleNumber(0L)
+                            .build())
+                    .summary(StreakSummary.builder()
+                            .currentStreak(0)
+                            .build())
+                    .dailyRecords(new ArrayList<>())
+                    .build();
         }
         
-        // Validate date range (max 90 days)
-        long daysBetween = java.time.temporal.ChronoUnit.DAYS.between(startDate, endDate);
-        if (daysBetween > 90) {
-            log.warn("Requested date range exceeds 90 days limit, clamping to 90 days");
-            startDate = endDate.minusDays(90);
-        }
+        // Check if today has a streak record
+        StreakHistory todayRecord = streakHistoryRepository.findByUserIdAndDate(userId, today).orElse(null);
+        boolean hasStreakToday = todayRecord != null;
+        log.debug("User {} has streak today: {}", userId, hasStreakToday);
         
-        // Query streak history for date range
-        List<StreakHistory> records = streakHistoryRepository.findStreaksByDateRange(userId, startDate, endDate);
+        // Calculate streak start date based on whether today has a streak
+        // If today has streak: streakStartDate = today - (currentStreak - 1)
+        // If today doesn't have streak: streakStartDate = today - currentStreak
+        LocalDate streakStartDate = hasStreakToday 
+                ? today.minusDays(currentStreak - 1)
+                : today.minusDays(currentStreak);
+        log.debug("Calculated streakStartDate: {} (hasStreakToday: {})", streakStartDate, hasStreakToday);
+        
+        // Calculate days since start
+        long daysSinceStart = ChronoUnit.DAYS.between(streakStartDate, today);
+        
+        // Calculate cycle number (1-based): cycle = (daysSinceStart / 7) + 1
+        long cycle = (daysSinceStart / 7) + 1;
+        log.debug("Cycle number: {} (daysSinceStart: {})", cycle, daysSinceStart);
+        
+        // Calculate cycle start and end dates
+        long cycleStartIndex = ((cycle - 1) * 7) + 1;
+        LocalDate cycleStartDate = streakStartDate.plusDays(cycleStartIndex - 1);
+        LocalDate cycleEndDate = cycleStartDate.plusDays(6);
+        
+        log.debug("Cycle {} dates: {} to {}", cycle, cycleStartDate, cycleEndDate);
+        
+        // Query streak history for the cycle
+        List<StreakHistory> records = streakHistoryRepository.findStreaksByDateRange(userId, cycleStartDate, cycleEndDate);
         
         // Create map for quick lookup
         Map<LocalDate, StreakHistory> recordMap = new HashMap<>();
@@ -611,25 +653,38 @@ public class AchievementServiceImpl implements AchievementService {
         
         // Build daily records (fill gaps for days with no activity)
         List<StreakHistoryItem> dailyRecords = new ArrayList<>();
-        LocalDate current = endDate;
+        LocalDate cycleStartForCalcDate = null;
+        LocalDate current = cycleEndDate;
         
-        while (!current.isBefore(startDate)) {
+        while (!current.isBefore(cycleStartDate)) {
             StreakHistory record = recordMap.get(current);
+            
+            DayOfWeek dow = current.getDayOfWeek();
+            String dayOfWeekStr = dow.toString().substring(0, 3).toUpperCase();
+            Boolean isToday = current.equals(today);
             
             if (record != null) {
                 // Day has activity
                 dailyRecords.add(StreakHistoryItem.builder()
                         .date(current)
+                        .dayOfWeek(dayOfWeekStr)
+                        .isToday(isToday)
                         .streakCount(record.getStreakCount())
                         .hadActivity(true)
                         .activityType(record.getActivityType())
                         .expEarned(record.getExpEarned() != null ? record.getExpEarned() : 0)
                         .freezeUsed(record.getFreezeUsed() != null ? record.getFreezeUsed() : false)
                         .build());
+                
+                if (cycleStartForCalcDate == null && record.getStreakCount() > 0) {
+                    cycleStartForCalcDate = current.minusDays(record.getStreakCount() - 1);
+                }
             } else {
                 // Day has no activity - create placeholder
                 dailyRecords.add(StreakHistoryItem.builder()
                         .date(current)
+                        .dayOfWeek(dayOfWeekStr)
+                        .isToday(isToday)
                         .streakCount(0)
                         .hadActivity(false)
                         .activityType(null)
@@ -641,33 +696,17 @@ public class AchievementServiceImpl implements AchievementService {
             current = current.minusDays(1);
         }
         
-        // Calculate summary statistics
-        int activeCount = (int) dailyRecords.stream()
-                .filter(StreakHistoryItem::getHadActivity)
-                .count();
-        int totalDays = dailyRecords.size();
-        int percentage = totalDays > 0 ? Math.round((float) activeCount / totalDays * 100) : 0;
-        
-        // Current streak within period (consecutive days from most recent with activity going backward)
-        int currentStreakInPeriod = 0;
-        for (StreakHistoryItem item : dailyRecords) {
-            if (item.getHadActivity()) {
-                currentStreakInPeriod = item.getStreakCount();
-                break;
-            }
-        }
-        
+        // Build summary (only currentStreak from UserStats)
         StreakSummary summary = StreakSummary.builder()
-                .activeCount(activeCount)
-                .totalDays(totalDays)
-                .activityPercentage(percentage)
-                .currentStreak(currentStreakInPeriod)
+                .currentStreak(currentStreak)
                 .build();
         
         StreakPeriodInfo period = StreakPeriodInfo.builder()
-                .startDate(startDate)
-                .endDate(endDate)
-                .daysRequested(totalDays)
+                .startDate(cycleStartDate)
+                .endDate(cycleEndDate)
+                .daysRequested(7)
+                .streakStartDate(cycleStartForCalcDate != null ? cycleStartForCalcDate : streakStartDate)
+                .cycleNumber(cycle)
                 .build();
         
         return StreakHistoryResponse.builder()

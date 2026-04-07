@@ -27,4 +27,12 @@ public class StreakPeriodInfo {
     @JsonProperty("days_requested")
     @Schema(description = "Number of days requested", example = "7")
     private Integer daysRequested;
+    
+    @JsonProperty("streak_start_date")
+    @Schema(description = "Date when current streak started (YYYY-MM-DD)", example = "2026-03-30", nullable = true)
+    private LocalDate streakStartDate;
+    
+    @JsonProperty("cycle_number")
+    @Schema(description = "Current streak cycle number (1-based, each cycle = 7 days)", example = "2")
+    private Long cycleNumber;
 }

@@ -28,7 +28,6 @@ public class CreateCourseRequest {
     private String description;
 
     @NotNull(message = "Cấp độ JLPT là bắt buộc")
-    @Pattern(regexp = "N[1-5]", message = "Cấp độ JLPT phải có định dạng N1, N2, N3, N4 hoặc N5")
     private JlptLevel jlptLevel;
 
     private Integer orderIndex;

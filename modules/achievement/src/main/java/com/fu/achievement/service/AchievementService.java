@@ -82,9 +82,7 @@ public interface AchievementService {
      * Get streak history for a date range with daily breakdown
      *
      * @param userId The user ID
-     * @param startDate Start of range (inclusive)
-     * @param endDate End of range (inclusive)
      * @return Streak history with daily records, activity types, and summary statistics
      */
-    StreakHistoryResponse getStreakHistory(UUID userId, LocalDate startDate, LocalDate endDate);
+    StreakHistoryResponse getStreakHistory(UUID userId);
 }
