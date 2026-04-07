@@ -157,7 +157,6 @@ class LearningContentManagementTest {
                     .andExpect(jsonPath("$.data.content[0].id").exists())
                     .andExpect(jsonPath("$.data.content[0].id").value(savedLesson.getId().toString()))
                     .andExpect(jsonPath("$.data.content[0].title").value("Lesson 1"))
-                    .andExpect(jsonPath("$.data.content[0].lessonType").value("VOCABULARY"))
                     .andExpect(jsonPath("$.data.content[0].status").value("DRAFT"))
                     .andExpect(jsonPath("$.data.content[0].orderIndex").value(0))
                     .andExpect(jsonPath("$.data.totalElements").value(1))
@@ -269,8 +268,6 @@ class LearningContentManagementTest {
                     .andExpect(jsonPath("$.data.courseId").exists())
                     .andExpect(jsonPath("$.data.courseId").value(course.getId().toString()))
                     .andExpect(jsonPath("$.data.title").value("Detail Lesson"))
-                    .andExpect(jsonPath("$.data.lessonType").exists())
-                    .andExpect(jsonPath("$.data.lessonType").value("VOCABULARY"))
                     .andExpect(jsonPath("$.data.status").exists())
                     .andExpect(jsonPath("$.data.status").value("DRAFT"))
                     .andExpect(jsonPath("$.data.orderIndex").exists())
@@ -302,10 +299,14 @@ class LearningContentManagementTest {
         void tc_lcm_im_001() throws Exception {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            Course course = saveCourse("N5 Course");
 
             MockMultipartFile pdf = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
 
-            mockMvc.perform(multipart("/api/v1/manager/curriculum-imports").file(pdf).header("Authorization", "Bearer " + token))
+            mockMvc.perform(multipart("/api/v1/manager/curriculum-imports")
+                    .file(pdf)
+                    .param("courseId", course.getId().toString())
+                    .header("Authorization", "Bearer " + token))
                     .andExpect(status().isAccepted())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.message").value("Import accepted and queued for processing"))
@@ -557,7 +558,6 @@ class LearningContentManagementTest {
                     .andExpect(jsonPath("$.data.id").exists())
                     .andExpect(jsonPath("$.data.courseId").value(course.getId().toString()))
                     .andExpect(jsonPath("$.data.title").value("New Lesson"))
-                    .andExpect(jsonPath("$.data.lessonType").value("VOCABULARY"))
                     .andExpect(jsonPath("$.data.status").value("DRAFT"))
                     .andExpect(jsonPath("$.data.createdAt").exists())
                     .andExpect(jsonPath("$.data.updatedAt").exists());
@@ -765,7 +765,6 @@ class LearningContentManagementTest {
                     .andExpect(jsonPath("$.data[*].status").value("PUBLISHED"))
                     .andExpect(jsonPath("$.data[0].id").exists())
                     .andExpect(jsonPath("$.data[0].title").exists())
-                    .andExpect(jsonPath("$.data[0].lessonType").exists())
                     .andExpect(jsonPath("$.data[0].orderIndex").exists());
         }
 

@@ -181,7 +181,10 @@ ACTIVE LEARNER inserted via userRepository.save():
 Response JSON:
 - success = false
 - code = "ACCOUNT_LOCKED"
-Database state: user.status = LOCKED, user.failedLoginAttempts = 5
+Database state: 
+- user.failedLoginAttempts = 5
+- user.lockedUntil = approximately 30 minutes from request time
+  (Note: System uses time-based lock via `lockedUntil` field, not `status=LOCKED`)
 
 ---
 
@@ -189,14 +192,14 @@ Database state: user.status = LOCKED, user.failedLoginAttempts = 5
 **Test Case Description:** Login succeeds after lock expires; failedAttempts reset to 0
 
 **Pre-conditions:**
-LOCKED LEARNER inserted via userRepository.save():
+ACTIVE LEARNER inserted via userRepository.save() with expired lock:
 - email = learner@test.com
 - password = passwordEncoder.encode("ValidPass@1")
 - role = LEARNER
-- status = LOCKED
+- status = ACTIVE
 - isDeleted = false
 - failedLoginAttempts = 5
-- lockTime = LocalDateTime.now().minusHours(25) (lock expired)
+- lockedUntil = LocalDateTime.now().minusSeconds(1) (lock already expired)
 
 **Test Case Procedure:**
 1. Client sends POST /api/v1/auth/login with valid credentials (lock already expired).
@@ -211,7 +214,10 @@ LOCKED LEARNER inserted via userRepository.save():
 10. System returns the authentication response.
 
 **Expected Results:** HTTP 200 OK
-Database state: user.status = ACTIVE, user.failedLoginAttempts = 0
+Database state: 
+- user.status = ACTIVE (remains active, not changed)
+- user.failedLoginAttempts = 0 (reset)
+- user.lockedUntil = null (lock cleared)
 
 ---
 
@@ -1026,7 +1032,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AUTH_CP_005
-**Test Case Description:** New password same as current password → SAME_PASSWORD
+**Test Case Description:** New password same as current password → PASSWORD_REUSE
 
 **Pre-conditions:**
 ACTIVE LEARNER inserted via userRepository.save():
@@ -1051,7 +1057,7 @@ A login session exists with:
 **Expected Results:** HTTP 400 BAD REQUEST
 Response JSON:
 - success = false
-- code = "SAME_PASSWORD"
+- code = "PASSWORD_REUSE"
 
 ---
 

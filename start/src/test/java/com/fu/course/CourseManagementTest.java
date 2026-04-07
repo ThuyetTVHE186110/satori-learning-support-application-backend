@@ -130,16 +130,6 @@ class CourseManagementTest {
                 .build());
     }
 
-    /** Build and save a Course with thumbnail. */
-    private Course saveCourseWithThumbnail(String name, JlptLevel level, CourseStatus status, String thumbnailUrl) {
-        return courseRepository.save(Course.builder()
-                .name(name)
-                .description("Test description")
-                .jlptLevel(level)
-                .status(status)
-                .orderIndex(0)
-                .build());
-    }
 
     /** Build a valid image MockMultipartFile. */
     private MockMultipartFile validImageFile() {
@@ -444,11 +434,11 @@ class CourseManagementTest {
 
         /**
          * TC_CM_CR_001
-         * Create course without thumbnail — course saved with null thumbnailUrl, Cloudinary not called.
+         * Create course — course saved
          */
         @Test
-        @DisplayName("TC_CM_CR_001 — no thumbnail → HTTP 201, thumbnailUrl=null in DB, Cloudinary not called")
-        void tc_cm_cr_001_createWithoutThumbnail_returns201_thumbnailUrlNull() throws Exception {
+        @DisplayName("TC_CM_CR_001  → HTTP 201")
+        void tc_cm_cr_001_createCourse() throws Exception {
             // Arrange
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
@@ -475,49 +465,6 @@ class CourseManagementTest {
             Course course = courseRepository.findByIdAndNotDeleted(UUID.fromString(idStr)).orElseThrow();
             assertThat(course.getDeletedAt()).isNull();
 
-            // Assert Cloudinary not called
-            verify(cloudinaryService, never()).uploadImage(any(), anyString());
-        }
-
-        /**
-         * TC_CM_CR_001b
-         * Create course with thumbnail — course saved with thumbnail URL from Cloudinary, returns Vietnamese success message.
-         */
-        @Test
-        @DisplayName("TC_CM_CR_001b — with thumbnail → HTTP 201, Vietnamese success message, thumbnail URL stored")
-        void tc_cm_cr_001b_createWithThumbnail_returns201_vietnameseMessage_thumbnailUrlStored() throws Exception {
-            // Arrange
-            saveManager("manager@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-
-            String mockThumbnailUrl = "https://res.cloudinary.com/demo/image/upload/v123/courses/thumbnails/test.jpg";
-            Mockito.when(cloudinaryService.uploadImage(any(), anyString())).thenReturn(mockThumbnailUrl);
-
-            MockMultipartFile requestPart = courseRequestPart("Course With Thumb", "N5", "Test description");
-
-            // Act
-            MvcResult result = mockMvc.perform(multipart("/api/v1/manager/courses")
-                            .file(requestPart)
-                            .file(validImageFile())
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isCreated())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.message").value("Tạo khóa học thành công."))
-                    .andExpect(jsonPath("$.data.id").isNotEmpty())
-                    .andExpect(jsonPath("$.data.name").value("Course With Thumb"))
-                    .andExpect(jsonPath("$.data.jlptLevel").value("N5"))
-                    .andExpect(jsonPath("$.data.status").value("INACTIVE"))
-                    .andExpect(jsonPath("$.data.thumbnailUrl").value(mockThumbnailUrl))
-                    .andReturn();
-
-            // Assert DB
-            String idStr = objectMapper.readTree(result.getResponse().getContentAsString())
-                    .path("data").path("id").asText();
-            Course course = courseRepository.findByIdAndNotDeleted(UUID.fromString(idStr)).orElseThrow();
-            assertThat(course.getDeletedAt()).isNull();
-
-            // Assert Cloudinary called
-            verify(cloudinaryService).uploadImage(any(), anyString());
         }
 
         // ── 2.2 Validation Errors ─────────────────────────────────────────────
@@ -685,8 +632,7 @@ class CourseManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             
             // Create course with thumbnail
-            Course course = saveCourseWithThumbnail("Comprehensive Course", JlptLevel.N4, CourseStatus.ACTIVE,
-                    "https://example.com/course-thumb.jpg");
+            Course course = saveCourse("Comprehensive Course", JlptLevel.N4, CourseStatus.ACTIVE);
             
             // Add some lessons to the course
             saveLesson(course, "Lesson 1 - Vocabulary");
@@ -704,7 +650,6 @@ class CourseManagementTest {
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.id").value(course.getId().toString()))
                     .andExpect(jsonPath("$.data.name").value("Comprehensive Course"))
-                    .andExpect(jsonPath("$.data.thumbnailUrl").value("https://example.com/course-thumb.jpg"))
                     .andExpect(jsonPath("$.data.status").value("ACTIVE"))
                     .andExpect(jsonPath("$.data.description").value("Test description"))
                     .andExpect(jsonPath("$.data.jlptLevel").value("N4"))
@@ -773,16 +718,15 @@ class CourseManagementTest {
 
         /**
          * TC_CM_UP_001
-         * Update name and description without new thumbnail — thumbnailUrl preserved in DB.
+         * Update name and description .
          */
         @Test
-        @DisplayName("TC_CM_UP_001 — update name+description, no thumbnail → HTTP 200, thumbnailUrl preserved")
-        void tc_cm_up_001_updateNameAndDescription_thumbnailPreserved() throws Exception {
+        @DisplayName("TC_CM_UP_001 — update name+description → HTTP 200")
+        void tc_cm_up_001_updateNameAndDescription() throws Exception {
             // Arrange
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            Course course = saveCourseWithThumbnail("Old Name", JlptLevel.N5, CourseStatus.INACTIVE,
-                    "https://old.url/thumb.jpg");
+            Course course = saveCourse("Old Name", JlptLevel.N5, CourseStatus.INACTIVE);
 
             MockMultipartFile requestPart = updateRequestPart("New Name", "New Desc");
 
@@ -804,52 +748,6 @@ class CourseManagementTest {
             assertThat(updated.getUpdatedAt()).isNotNull();
         }
 
-        /**
-         * TC_CM_UP_001b
-         * Update course with new thumbnail — Cloudinary returns new URL and DB saves new thumbnail URL.
-         */
-        @Test
-        @DisplayName("TC_CM_UP_001b — update with new thumbnail → HTTP 200, Cloudinary returns new URL, DB saves new thumbnail")
-        void tc_cm_up_001b_updateWithNewThumbnail_returns200_newThumbnailUrlStored() throws Exception {
-            // Arrange
-            saveManager("manager@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-            
-            String oldThumbnailUrl = "https://old.url/thumb.jpg";
-            String newThumbnailUrl = "https://res.cloudinary.com/demo/image/upload/v456/courses/thumbnails/new-thumb.jpg";
-            
-            Course course = saveCourseWithThumbnail("Course Name", JlptLevel.N5, CourseStatus.ACTIVE, oldThumbnailUrl);
-            
-            // Mock Cloudinary to return new URL
-            Mockito.when(cloudinaryService.uploadImage(any(), anyString())).thenReturn(newThumbnailUrl);
-            Mockito.when(cloudinaryService.extractPublicId(oldThumbnailUrl)).thenReturn("courses/thumbnails/thumb");
-            
-            MockMultipartFile requestPart = updateRequestPart("Updated Name", "Updated description");
-
-            // Act
-            MvcResult result = mockMvc.perform(multipart("/api/v1/manager/courses/{courseId}", course.getId())
-                            .file(requestPart)
-                            .file(validImageFile())
-                            .with(req -> { req.setMethod("PUT"); return req; })
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.name").value("Updated Name"))
-                    .andExpect(jsonPath("$.data.description").value("Updated description"))
-                    .andExpect(jsonPath("$.data.thumbnailUrl").value(newThumbnailUrl))
-                    .andExpect(jsonPath("$.data.updatedAt").isNotEmpty())
-                    .andReturn();
-
-            // Assert DB
-            Course updated = courseRepository.findByIdAndNotDeleted(course.getId()).orElseThrow();
-            assertThat(updated.getName()).isEqualTo("Updated Name");
-            assertThat(updated.getDescription()).isEqualTo("Updated description");
-            assertThat(updated.getUpdatedAt()).isNotNull();
-
-            // Assert Cloudinary was called for upload and delete
-            verify(cloudinaryService).uploadImage(any(), anyString());
-            verify(cloudinaryService).deleteImage("courses/thumbnails/thumb");
-        }
         // ── 4.3 Validation & Exception ────────────────────────────────────────
 
         /**

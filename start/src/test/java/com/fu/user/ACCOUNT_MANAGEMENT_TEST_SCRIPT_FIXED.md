@@ -138,8 +138,8 @@ Response JSON:
 
 ## Section 2 — Create Account Tests (POST /api/v1/users)
 
-### Test Case ID: TC_AM_CREATE_001
-**Test Case Description:** Admin create an account success with email service call success, status of new account is Active
+### Test Case ID: TC_AM_CREATE_001a
+**Test Case Description:** Admin create LEARNER account → status = INACTIVE (awaiting email verification)
 
 **Pre-conditions:**
 - Admin accessToken is available (from prior login)
@@ -148,27 +148,70 @@ Response JSON:
 
 **Test Case Procedure:**
 1. Client sends POST /api/v1/users with Authorization: Bearer {token} and CreateUserRequest:
-   - email = newaccount@test.com
+   - email = newlearner@test.com
    - firstName = New
-   - lastName = Account
+   - lastName = Learner
    - role = LEARNER
 2. AuthFilter validates token and resolves ADMIN user identity.
 3. UserController calls UserService.createUser().
 4. UserService checks for existing email via UserRepository.findByEmail().
 5. UserRepository executes database query and returns empty (no existing account).
 6. UserService generates random password and encodes it via PasswordEncoder.encode().
-7. UserService creates new User entity and saves via UserRepository.save().
-8. UserRepository saves the new account with status=ACTIVE and generated password hash.
+7. UserService detects role = LEARNER and creates new User entity with status=INACTIVE.
+8. UserRepository saves the new account with status=INACTIVE and generated password hash.
 9. EmailService.sendWelcomeEmailWithCredentials() is called once.
 10. System returns the created account response.
 
 **Expected Results:** HTTP 201 CREATED
 Response JSON:
 - success = true
-- data.email = "newaccount@test.com"
+- data.email = "newlearner@test.com"
 - data.firstName = "New"
-- data.lastName = "Account"
+- data.lastName = "Learner"
 - data.role = "LEARNER"
+- data.status = "INACTIVE"
+- data.id = non-empty UUID
+- data.createdAt = non-null timestamp
+- data.updatedAt = non-null timestamp
+- data.passwordHash = NOT included in response (security)
+- data.deletedAt = null
+- data.deletedBy = null
+Database state: account.status = INACTIVE, account.deletedAt = null, account.passwordHash non-empty
+Email verification: sendWelcomeEmailWithCredentials called exactly once
+
+---
+
+### Test Case ID: TC_AM_CREATE_002
+**Test Case Description:** Admin create non-LEARNER account (TEACHER) → status = ACTIVE
+
+**Pre-conditions:**
+- Admin accessToken is available (from prior login)
+- Accounts inserted via userRepository.save():
+- admin@test.com (role=ADMIN, status=ACTIVE)
+
+**Test Case Procedure:**
+1. Client sends POST /api/v1/users with Authorization: Bearer {token} and CreateUserRequest:
+   - email = newteacher@test.com
+   - firstName = New
+   - lastName = Teacher
+   - role = TEACHER
+2. AuthFilter validates token and resolves ADMIN user identity.
+3. UserController calls UserService.createUser().
+4. UserService checks for existing email via UserRepository.findByEmail().
+5. UserRepository executes database query and returns empty (no existing account).
+6. UserService generates random password and encodes it via PasswordEncoder.encode().
+7. UserService detects role = TEACHER (non-LEARNER) and creates new User entity with status=ACTIVE.
+8. UserRepository saves the new account with status=ACTIVE and generated password hash.
+9. EmailService.sendWelcomeEmailWithCredentials() is called once.
+10. System returns the created account response.
+
+**Expected Results:** HTTP 201 CREATED  
+Response JSON:
+- success = true
+- data.email = "newteacher@test.com"
+- data.firstName = "New"
+- data.lastName = "Teacher"
+- data.role = "TEACHER"
 - data.status = "ACTIVE"
 - data.id = non-empty UUID
 - data.createdAt = non-null timestamp

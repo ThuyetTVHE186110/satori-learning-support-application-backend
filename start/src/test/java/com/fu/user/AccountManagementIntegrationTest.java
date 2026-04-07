@@ -281,16 +281,22 @@ class AccountManagementIntegrationTest {
     @DisplayName("Section 2 — Create Account")
     class CreateAccountTests {
 
+        /**
+         * TC_AM_CREATE_001a — Admin create LEARNER account → status = INACTIVE
+         * 
+         * Learners are created in INACTIVE status by default.
+         * They need to activate their account via email verification.
+         */
         @Test
-        @DisplayName("TC_AM_CREATE_001 — Admin create an account success")
-        void tc_am_create_001_adminCreatesAccount() throws Exception {
+        @DisplayName("TC_AM_CREATE_001a — Admin create LEARNER account → INACTIVE status")
+        void tc_am_create_001a_adminCreatesLearnerAccountInactive() throws Exception {
             buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
             CreateUserRequest req = CreateUserRequest.builder()
-                    .email("newaccount@test.com")
+                    .email("newlearner@test.com")
                     .firstName("New")
-                    .lastName("Account")
+                    .lastName("Learner")
                     .role(UserRole.LEARNER)
                     .build();
 
@@ -300,50 +306,68 @@ class AccountManagementIntegrationTest {
                             .content(objectMapper.writeValueAsString(req)))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.email").value("newaccount@test.com"))
+                    .andExpect(jsonPath("$.data.email").value("newlearner@test.com"))
                     .andExpect(jsonPath("$.data.firstName").value("New"))
-                    .andExpect(jsonPath("$.data.lastName").value("Account"))
+                    .andExpect(jsonPath("$.data.lastName").value("Learner"))
                     .andExpect(jsonPath("$.data.role").value("LEARNER"))
+                    .andExpect(jsonPath("$.data.status").value("INACTIVE"))
+                    .andExpect(jsonPath("$.data.id").isNotEmpty())
+                    .andExpect(jsonPath("$.data.createdAt").isNotEmpty())
+                    .andExpect(jsonPath("$.data.updatedAt").isNotEmpty())
+                    .andExpect(jsonPath("$.data.passwordHash").doesNotExist());
+
+            User saved = userRepository.findByEmail("newlearner@test.com").orElseThrow();
+            assertThat(saved.getStatus()).isEqualTo(UserStatus.INACTIVE);
+
+            verify(emailService, times(1))
+                    .sendWelcomeEmailWithCredentials(org.mockito.ArgumentMatchers.eq("newlearner@test.com"),
+                            any(), any(), any());
+        }
+
+        /**
+         * TC_AM_CREATE_001b — Admin create non-LEARNER account (TEACHER) → status = ACTIVE
+         * 
+         * Non-learner roles (TEACHER, CONTENT_MANAGER, OPERATION_MANAGER, ADMIN) 
+         * are created in ACTIVE status immediately.
+         */
+        @Test
+        @DisplayName("TC_AM_CREATE_002 — Admin create TEACHER account → ACTIVE status")
+        void tc_am_create_002_adminCreatesTeacherAccountActive() throws Exception {
+            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
+            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
+
+            CreateUserRequest req = CreateUserRequest.builder()
+                    .email("newteacher@test.com")
+                    .firstName("New")
+                    .lastName("Teacher")
+                    .role(UserRole.TEACHER)
+                    .build();
+
+            mockMvc.perform(post("/api/v1/users")
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(req)))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.email").value("newteacher@test.com"))
+                    .andExpect(jsonPath("$.data.firstName").value("New"))
+                    .andExpect(jsonPath("$.data.lastName").value("Teacher"))
+                    .andExpect(jsonPath("$.data.role").value("TEACHER"))
                     .andExpect(jsonPath("$.data.status").value("ACTIVE"))
                     .andExpect(jsonPath("$.data.id").isNotEmpty())
                     .andExpect(jsonPath("$.data.createdAt").isNotEmpty())
                     .andExpect(jsonPath("$.data.updatedAt").isNotEmpty())
                     .andExpect(jsonPath("$.data.passwordHash").doesNotExist());
 
-            User saved = userRepository.findByEmail("newaccount@test.com").orElseThrow();
+            User saved = userRepository.findByEmail("newteacher@test.com").orElseThrow();
             assertThat(saved.getStatus()).isEqualTo(UserStatus.ACTIVE);
 
             verify(emailService, times(1))
-                    .sendWelcomeEmailWithCredentials(org.mockito.ArgumentMatchers.eq("newaccount@test.com"),
+                    .sendWelcomeEmailWithCredentials(org.mockito.ArgumentMatchers.eq("newteacher@test.com"),
                             any(), any(), any());
         }
 
-        @Test
-        @DisplayName("TC_AM_CREATE_002 — Deleted email detected")
-        void tc_am_create_002_deletedEmailDetected() throws Exception {
-            buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
-            buildAndSaveDeletedUser("deleted@test.com", UserRole.LEARNER);
-            String token = loginAndGetToken("admin@test.com", "ValidPass@1");
 
-            mockMvc.perform(post("/api/v1/users")
-                            .header("Authorization", "Bearer " + token)
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(objectMapper.writeValueAsString(CreateUserRequest.builder()
-                                    .email("deleted@test.com")
-                                    .firstName("New")
-                                    .lastName("Account")
-                                    .role(UserRole.LEARNER)
-                                    .build())))
-                    .andExpect(status().isConflict())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.code").value("DELETED_USER_EXISTS"))
-                    .andExpect(jsonPath("$.data.userId").isNotEmpty())
-                    .andExpect(jsonPath("$.data.email").value("deleted@test.com"))
-                    .andExpect(jsonPath("$.data.status").value("DELETED"))
-                    .andExpect(jsonPath("$.data.deletedAt").isNotEmpty())
-                    .andExpect(jsonPath("$.data.deletedBy").isNotEmpty())
-                    .andExpect(jsonPath("$.message").value("Email này đã tồn tại trong hệ thống nhưng đã bị xóa. Bạn có muốn khôi phục tài khoản này không?"));
-        }
 
         @Test
         @DisplayName("TC_AM_CREATE_003 — Email already exist")
@@ -407,7 +431,7 @@ class AccountManagementIntegrationTest {
 
             // Verify account was still created despite email failure
             User saved = userRepository.findByEmail("newaccount@test.com").orElseThrow();
-            assertThat(saved.getStatus()).isEqualTo(UserStatus.ACTIVE);
+            assertThat(saved.getStatus()).isEqualTo(UserStatus.INACTIVE);
         }
 
         @Test

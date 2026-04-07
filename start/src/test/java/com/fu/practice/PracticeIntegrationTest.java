@@ -194,7 +194,7 @@ class PracticeIntegrationTest {
         EvaluationResult evalResult = new EvaluationResult(true, 100, "Correct", null);
         when(answerEvaluatorAgent.evaluate(any(), any())).thenReturn(evalResult);
 
-        when(sessionFeedbackAgent.generateFeedback(any(), anyDouble(), anyList())).thenReturn("{}");
+        when(sessionFeedbackAgent.generateFeedback(any(), anyDouble(), anyList(), anyString())).thenReturn("{}");
     }
 
     // ── SECURITY ─────────────────────────────────────────────────────────
@@ -668,7 +668,7 @@ class PracticeIntegrationTest {
 
             // Mock session feedback agent trả về feedback JSON
             String expectedFeedback = "{\"summary\":\"Bạn làm rất tốt\",\"strengths\":[\"Nhanh\"],\"weaknesses\":[],\"nextLessonSuggestion\":\"Học tiếp bài N5\"}";
-            when(sessionFeedbackAgent.generateFeedback(eq(session.getId()), anyDouble(), anyList()))
+            when(sessionFeedbackAgent.generateFeedback(eq(session.getId()), anyDouble(), anyList(), anyString()))
                     .thenReturn(expectedFeedback);
 
             SubmitAnswerRequest request = new SubmitAnswerRequest();

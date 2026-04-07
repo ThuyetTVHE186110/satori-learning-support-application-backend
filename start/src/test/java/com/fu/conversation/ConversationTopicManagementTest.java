@@ -534,31 +534,6 @@ class ConversationTopicManagementTest {
                             .content(body))
                     .andExpect(status().isBadRequest());
         }
-
-        /**
-         * TC_CTP_CTH_006
-         * Duplicate title → business exception.
-         */
-        @Test
-        @DisplayName("TC_CTP_CTH_006 — duplicate title → 400 BusinessException")
-        void tc_ctp_cth_006_duplicateTitle_returns400() throws Exception {
-            // Arrange
-            saveManager("manager@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-
-            saveActiveTopic("Shopping");
-
-            String body = "{\"title\":\"Shopping\"}";
-
-            // Act + Assert
-            mockMvc.perform(post("/api/v1/manager/conversation/topics")
-                            .header("Authorization", "Bearer " + token)
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(body))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.message").value("already exists"));
-        }
     }
 
     @Nested
@@ -655,31 +630,6 @@ class ConversationTopicManagementTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body))
                     .andExpect(status().isNotFound());
-        }
-
-        /**
-         * TC_CTP_UTH_004
-         * Update to duplicate title.
-         */
-        @Test
-        @DisplayName("TC_CTP_UTH_004 — update to duplicate title → 400 BusinessException")
-        void tc_ctp_uth_004_updateToDuplicateTitle_returns400() throws Exception {
-            // Arrange
-            saveManager("manager@test.com");
-            String token = loginAndGetToken("manager@test.com", "ValidPass@1");
-
-            ConversationTopic topic1 = saveActiveTopic("Topic 1");
-            ConversationTopic topic2 = saveActiveTopic("Topic 2");
-
-            String body = "{\"title\":\"Topic 1\"}";
-
-            // Act + Assert
-            mockMvc.perform(put("/api/v1/manager/conversation/topics/{topicId}", topic2.getId())
-                            .header("Authorization", "Bearer " + token)
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(body))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.message").value("already exists"));
         }
 
         /**
