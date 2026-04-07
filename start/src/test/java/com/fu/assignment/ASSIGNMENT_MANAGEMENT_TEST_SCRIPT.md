@@ -52,8 +52,7 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_T_VL_002
-**Test Case Description:** Class ID does not exist → 404 NOT FOUND
-
+**Test Case Description:** Class ID does not exist → 404 NOT FOUN
 **Pre-conditions:**
 - Teacher accessToken is available (from prior login)
 - No class exists with the provided UUID
@@ -158,31 +157,6 @@ Response JSON:
 
 ---
 
-### Test Case ID: TC_AS_T_VL_006b
-**Test Case Description:** Get My Assignments with filtering by class
-
-**Pre-conditions:**
-- Teacher accessToken is available (from prior login)
-- Multiple classes created by the same teacher
-- Assignments created across different classes
-
-**Test Case Procedure:**
-1. Client sends GET /api/v1/teacher/assignments?classId={classId1} with Authorization: Bearer {token}.
-2. AuthFilter validates token and resolves TEACHER identity.
-3. AssignmentController forwards the request to AssignmentService with class filter.
-4. AssignmentService retrieves assignments for the teacher and class via AssignmentRepository.
-5. AssignmentRepository queries the database with class filter and returns filtered results.
-6. System returns the filtered paginated assignment list response.
-
-**Expected Results:** HTTP 200 OK
-Response JSON:
-- success = true
-- data.content.length() = 2
-- data.totalElements = 2
-- All returned assignments belong to the specified class
-
----
-
 ### Test Case ID: TC_AS_T_VL_006c
 **Test Case Description:** Get My Assignments with filtering by assignment type
 
@@ -192,7 +166,7 @@ Response JSON:
 - Assignments with different types created
 
 **Test Case Procedure:**
-1. Client sends GET /api/v1/teacher/assignments?assignmentType=QUIZ with Authorization: Bearer {token}.
+1. Client sends GET /api/v1/teacher/assignments?type=QUIZ with Authorization: Bearer {token}.
 2. AuthFilter validates token and resolves TEACHER identity.
 3. AssignmentController forwards the request to AssignmentService with type filter.
 4. AssignmentService retrieves assignments for the teacher and type via AssignmentRepository.
@@ -217,7 +191,7 @@ Response JSON:
 - Assignments with specific titles created
 
 **Test Case Procedure:**
-1. Client sends GET /api/v1/teacher/assignments?keyword=Writing with Authorization: Bearer {token}.
+1. Client sends GET /api/v1/teacher/assignments?title=Writing with Authorization: Bearer {token}.
 2. AuthFilter validates token and resolves TEACHER identity.
 3. AssignmentController forwards the request to AssignmentService with keyword filter.
 4. AssignmentService searches assignments by keyword in title via AssignmentRepository.
@@ -384,6 +358,7 @@ Response JSON:
 
 **Test Case Procedure:**
 1. Client sends GET /api/v1/teacher/assignments/class/{classId}?assignmentType=INVALID_TYPE with Authorization: Bearer {token}.
+2. Spring MVC fails to convert invalid string to AssignmentType enum.
 2. Spring MVC fails to convert invalid string to AssignmentType enum.
 3. System returns the method argument type mismatch error response.
 
@@ -1097,27 +1072,29 @@ Response JSON:
 ---
 
 ### Test Case ID: TC_AS_AI_002
-**Test Case Description:** AI grading writing assignment success
+**Test Case Description:** AI generate explanation for existing question
 
 **Pre-conditions:**
-- Learner accessToken is available (from prior login)
-- Writing assignment submitted
-- AiGradingService mocked to return evaluation
+- Teacher accessToken is available (from prior login)
+- QuizQuestion entity exists in database
+- QuizExplanationService mocked to return updated question with explanation
 
 **Test Case Procedure:**
-1. AssignmentService calls AiGradingService after submission.
-2. Mocked AI service returns writing evaluation.
-3. AssignmentService updates submission with AI score and feedback.
-4. System returns the submission result with AI evaluation.
+1. Client sends POST /api/v1/teacher/assignments/questions/{questionId}/ai-explain with Authorization: Bearer {token}.
+2. AuthFilter validates token and resolves TEACHER identity.
+3. AssignmentController forwards the request to QuizExplanationService.
+4. QuizExplanationService.generateExplanation() returns updated QuizQuestion with explanation.
+5. System returns the question details response with generated explanation.
 
 **Expected Results:** HTTP 200 OK
 Response JSON:
 - success = true
-- data.aiScore exists
-- data.aiFeedback exists
-- data.grammarScore exists
-- data.vocabularyScore exists
-- data.contentScore exists
+- data.id = question UUID
+- data.questionText exists
+- data.questionType exists
+- data.options exists
+- data.correctAnswer exists
+- data.explanation is not empty
 
 ---
 

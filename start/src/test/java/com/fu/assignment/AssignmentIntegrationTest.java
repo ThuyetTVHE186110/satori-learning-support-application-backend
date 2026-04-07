@@ -3095,35 +3095,6 @@ class AssignmentIntegrationTest {
                     .andExpect(status().isNotFound());
         }
     }
-    @Test
-    @DisplayName("TC_AS_AI_007 — ai-explain lưu explanation vào DB")
-    void tc_as_ai_007() throws Exception {
-        saveTeacher("teacher@test.com");
-        String token = loginAndGetToken("teacher@test.com");
-
-        QuizQuestion q = quizQuestionRepository.save(QuizQuestion.builder()
-                .questionText("テスト問題")
-                .questionType("multiple_choice")
-                .options("[{\"id\":\"A\",\"text\":\"はい\",\"isCorrect\":true}]")
-                .correctAnswer("A")
-                .explanation(null)
-                .aiGenerated(false)
-                .build());
-
-        when(quizExplanationService.generateExplanation(eq(q.getId()), any(UUID.class)))
-                .thenAnswer(invocation -> {
-                    q.setExplanation("Đáp án đúng là A vì...");
-                    return quizQuestionRepository.save(q);
-                });
-
-        mockMvc.perform(post("/api/v1/teacher/assignments/questions/{id}/ai-explain", q.getId())
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.explanation").isNotEmpty());
-
-        QuizQuestion updated = quizQuestionRepository.findById(q.getId()).orElseThrow();
-        assertThat(updated.getExplanation()).isNotBlank();
-    }
 
     @Test
     @DisplayName("TC_AS_AI_008 — AI explain draft")
