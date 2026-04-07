@@ -1,6 +1,5 @@
 package com.fu.course.dto.request;
 
-import com.fu.course.entity.Lesson.LessonType;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -35,9 +34,6 @@ public class CreateLessonRequest {
 
     @Size(max = 5000, message = "Description must not exceed 5000 characters")
     private String description;
-
-    @NotNull(message = "Lesson type is required")
-    private LessonType lessonType;
 
     /** JSONB content (flexible structure). */
     private String content;

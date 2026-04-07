@@ -1,6 +1,7 @@
 package com.fu.curriculumimport.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.common.exception.BusinessException;
 import com.fu.common.response.ApiResponse;
 import com.fu.common.response.PageResponse;
 import com.fu.curriculumimport.dto.response.*;
@@ -24,8 +25,10 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -141,8 +144,8 @@ class ManagerCurriculumImportControllerTest {
     class UploadAndImportTests {
 
         @Test
-        @DisplayName("Valid multipart PDF → 202 ACCEPTED, success = true")
-        void uploadAndImport_validPdfFile_returns202() throws Exception {
+        @DisplayName("Missing courseId in multipart request → 400 BAD REQUEST")
+        void uploadAndImport_missingCourseId_returns400() throws Exception {
             // Arrange
             MockMultipartFile pdfFile = new MockMultipartFile(
                     "file",
@@ -150,9 +153,6 @@ class ManagerCurriculumImportControllerTest {
                     MediaType.APPLICATION_PDF_VALUE,
                     "PDF binary content".getBytes()
             );
-
-            given(importService.initiateImport(any(), isNull(), isNull()))
-                    .willReturn(sampleImportResponse);
 
             // Act
             ResultActions result = mockMvc.perform(
@@ -162,10 +162,10 @@ class ManagerCurriculumImportControllerTest {
 
             // Assert
             result.andDo(print())
-                    .andExpect(status().isAccepted())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.id").value(IMPORT_ID.toString()))
-                    .andExpect(jsonPath("$.data.originalFilename").value("minna_no_nihongo.pdf"));
+                    .andExpect(status().isBadRequest())
+                    .andExpect(resultMatcher ->
+                            org.assertj.core.api.Assertions.assertThat(resultMatcher.getResolvedException())
+                                    .isInstanceOf(MissingServletRequestParameterException.class));
         }
 
         @Test
@@ -236,7 +236,7 @@ class ManagerCurriculumImportControllerTest {
         @DisplayName("No filters → 200 OK, success = true, paginated results")
         void listImports_noFilters_returns200() throws Exception {
             // Arrange
-            given(importService.listImports(isNull(), isNull(), eq(0), eq(10)))
+            given(importService.listImports(isNull(), isNull(), isNull(), isNull(), eq(0), eq(10)))
                     .willReturn(sampleImportPage);
 
             // Act
@@ -254,12 +254,77 @@ class ManagerCurriculumImportControllerTest {
         @DisplayName("With status filter → 200 OK, success = true")
         void listImports_withStatusFilter_returns200() throws Exception {
             // Arrange
-            given(importService.listImports(isNull(), eq(ImportStatus.COMPLETED), eq(0), eq(10)))
+            given(importService.listImports(isNull(), eq(ImportStatus.COMPLETED), isNull(), isNull(), eq(0), eq(10)))
                     .willReturn(sampleImportPage);
 
             // Act
             ResultActions result = mockMvc.perform(get(BASE_URL)
                     .param("status", "COMPLETED")
+            );
+
+            // Assert
+            result.andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true));
+        }
+
+        @Test
+        @DisplayName("With date range filters → 200 OK, success = true")
+        void listImports_withDateRangeFilters_returns200() throws Exception {
+            // Arrange
+            LocalDateTime startDate = LocalDateTime.of(2024, 1, 1, 0, 0, 0);
+            LocalDateTime endDate = LocalDateTime.of(2024, 1, 31, 23, 59, 59);
+
+            given(importService.listImports(isNull(), isNull(), eq(startDate), eq(endDate), eq(0), eq(10)))
+                    .willReturn(sampleImportPage);
+
+            // Act
+            ResultActions result = mockMvc.perform(get(BASE_URL)
+                    .param("startDate", "2024-01-01T00:00:00")
+                    .param("endDate", "2024-01-31T23:59:59")
+            );
+
+            // Assert
+            result.andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true));
+        }
+
+        @Test
+        @DisplayName("With date range and status filters → 200 OK, success = true")
+        void listImports_withDateRangeAndStatusFilters_returns200() throws Exception {
+            // Arrange
+            LocalDateTime startDate = LocalDateTime.of(2024, 1, 1, 0, 0, 0);
+            LocalDateTime endDate = LocalDateTime.of(2024, 1, 31, 23, 59, 59);
+
+            given(importService.listImports(isNull(), eq(ImportStatus.COMPLETED), eq(startDate), eq(endDate), eq(0), eq(10)))
+                    .willReturn(sampleImportPage);
+
+            // Act
+            ResultActions result = mockMvc.perform(get(BASE_URL)
+                    .param("status", "COMPLETED")
+                    .param("startDate", "2024-01-01T00:00:00")
+                    .param("endDate", "2024-01-31T23:59:59")
+            );
+
+            // Assert
+            result.andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true));
+        }
+
+        @Test
+        @DisplayName("With date range and courseId filters → 200 OK, success = true")
+        void listImports_withDateRangeAndCourseIdFilters_returns200() throws Exception {
+            // Arrange
+            LocalDateTime startDate = LocalDateTime.of(2024, 1, 1, 0, 0, 0);
+            LocalDateTime endDate = LocalDateTime.of(2024, 1, 31, 23, 59, 59);
+
+            given(importService.listImports(eq(COURSE_ID), isNull(), eq(startDate), eq(endDate), eq(0), eq(10)))
+                    .willReturn(sampleImportPage);
+
+            // Act
+            ResultActions result = mockMvc.perform(get(BASE_URL)
+                    .param("courseId", COURSE_ID.toString())
+                    .param("startDate", "2024-01-01T00:00:00")
+                    .param("endDate", "2024-01-31T23:59:59")
             );
 
             // Assert
@@ -407,7 +472,6 @@ class ManagerCurriculumImportControllerTest {
                     UUID.randomUUID(),
                     "Lesson 1: Basic Greetings",
                     "第一課：挨拶",
-                    "VOCABULARY",
                     1, 1, 10,
                     "PUBLISHED"
             );
@@ -497,6 +561,8 @@ class ManagerCurriculumImportControllerTest {
                     .totalImports(42)
                     .completedImports(35)
                     .failedImports(3)
+                    .rollbackImports(2)
+                    .pendingApprovalImports(1)
                     .totalLessonsCreated(200)
                     .totalVocabularyCreated(1500)
                     .totalGrammarPointsCreated(300)
@@ -511,7 +577,9 @@ class ManagerCurriculumImportControllerTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.totalImports").value(42))
-                    .andExpect(jsonPath("$.data.completedImports").value(35));
+                    .andExpect(jsonPath("$.data.completedImports").value(35))
+                    .andExpect(jsonPath("$.data.rollbackImports").value(2))
+                    .andExpect(jsonPath("$.data.pendingApprovalImports").value(1));
         }
     }
 

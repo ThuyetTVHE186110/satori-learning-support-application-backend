@@ -5,7 +5,6 @@ import com.fu.course.dto.request.UpdateLessonRequest;
 import com.fu.course.dto.response.LessonResponse;
 import com.fu.course.dto.response.LessonSummaryResponse;
 import com.fu.course.entity.Lesson.ContentStatus;
-import com.fu.course.entity.Lesson.LessonType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -49,7 +48,7 @@ public interface LessonService {
     /**
      * Get all lessons for a course with pagination.
      */
-    Page<LessonSummaryResponse> getLessonsByCourseId(UUID courseId, Pageable pageable);
+    Page<LessonSummaryResponse> getLessonsByCourseId(UUID courseId, ContentStatus status, Pageable pageable);
 
     /**
      * Get published lessons for a course (student view).
@@ -64,7 +63,7 @@ public interface LessonService {
     /**
      * Search lessons within a specific course.
      */
-    Page<LessonSummaryResponse> searchLessonsInCourse(UUID courseId, String keyword, Pageable pageable);
+    Page<LessonSummaryResponse> searchLessonsInCourse(UUID courseId, String keyword, ContentStatus status, Pageable pageable);
 
     // ===== Status Management =====
 

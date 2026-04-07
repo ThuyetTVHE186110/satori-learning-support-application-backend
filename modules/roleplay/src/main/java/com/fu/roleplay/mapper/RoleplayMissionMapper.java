@@ -5,7 +5,7 @@ import com.fu.roleplay.dto.request.UpdateMissionRequest;
 import com.fu.roleplay.dto.response.MissionResponse;
 import com.fu.roleplay.dto.response.SessionMissionResponse;
 import com.fu.conversation.entity.ConversationMission;
-import com.fu.roleplay.dto.entity.SessionMission;
+import com.fu.roleplay.entity.SessionMission;
 import org.mapstruct.*;
 
 @Mapper(
@@ -26,7 +26,7 @@ public interface RoleplayMissionMapper {
 
     @BeanMapping(nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
     @Mapping(target = "id", ignore = true)
-    @Mapping(target = "topicId", ignore = true)
+    @Mapping(target = "conversationId", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     @Mapping(target = "createdBy", ignore = true)

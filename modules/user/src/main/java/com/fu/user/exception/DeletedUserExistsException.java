@@ -14,8 +14,7 @@ public class DeletedUserExistsException extends RuntimeException {
     private final DeletedUserInfo deletedUserInfo;
     
     public DeletedUserExistsException(DeletedUserInfo deletedUserInfo) {
-        super("User with email " + deletedUserInfo.getEmail() + " already exists but is deleted. " +
-              "You can restore this account.");
+        super("Email này đã tồn tại trong hệ thống nhưng đã bị xóa. Bạn có muốn khôi phục tài khoản này không?");
         this.deletedUserInfo = deletedUserInfo;
     }
 }

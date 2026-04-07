@@ -24,12 +24,7 @@ public class QuizQuestionResponse {
     private JsonNode correctAnswers;
     private String explanation;
 
-    private UUID vocabularyId;
-    private UUID grammarId;
-    private UUID lessonId;
     private Course.JlptLevel jlptLevel;
-    private String[] tags;
-    private String imageUrl;
     private UUID createdBy;
     private LocalDateTime createdAt;
 }

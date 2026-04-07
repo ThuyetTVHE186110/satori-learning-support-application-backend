@@ -1,0 +1,42 @@
+services:
+    # ==================== PostgreSQL (System Test) ====================
+    # Isolated DB for system testing — ephemeral (no persistent volume)
+    postgres-systest:
+        image: pgvector/pgvector:pg16
+        container_name: satori-postgres-systest
+        environment:
+            POSTGRES_DB: satori_systest
+            POSTGRES_USER: satori_user
+            POSTGRES_PASSWORD: SatoriSystest2026!
+        ports:
+            - "5433:5432"
+        volumes:
+            - ./docker/init-scripts/postgres:/docker-entrypoint-initdb.d
+            - ./docker/init-scripts/systest/01-systest-seed.sql:/docker-entrypoint-initdb.d/99-systest-seed.sql
+        networks:
+            - satori-systest-network
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U satori_user -d satori_systest"]
+            interval: 10s
+            timeout: 5s
+            retries: 10
+
+    # ==================== Redis (System Test) ====================
+    # No password, no persistence — fast and disposable
+    redis-systest:
+        image: redis:7.2-alpine
+        container_name: satori-redis-systest
+        command: redis-server --appendonly no --save ""
+        ports:
+            - "6380:6379"
+        networks:
+            - satori-systest-network
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+networks:
+    satori-systest-network:
+        driver: bridge

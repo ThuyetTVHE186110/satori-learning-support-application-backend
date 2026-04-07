@@ -3,18 +3,13 @@ package com.fu.conversation.service;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.conversation.ai.ConversationGenerationService;
-import com.fu.conversation.dto.request.CreateThemeRequest;
-import com.fu.conversation.dto.request.GenerateThemeRequest;
-import com.fu.conversation.dto.request.UpdateThemeRequest;
-import com.fu.conversation.dto.response.ConversationThemeResponse;
-import com.fu.conversation.dto.response.ConversationThemeSummaryResponse;
-import com.fu.conversation.dto.response.GeneratedThemeSuggestionResponse;
-import com.fu.conversation.entity.ConversationTheme;
-import com.fu.conversation.entity.ConversationTopic;
-import com.fu.conversation.mapper.ConversationThemeMapper;
-import com.fu.conversation.repository.ConversationThemeRepository;
-import com.fu.conversation.repository.ConversationTopicRepository;
-import com.fu.conversation.service.impl.ConversationThemeServiceImpl;
+import com.fu.conversation.dto.request.CreateUserConversationRequest;
+import com.fu.conversation.dto.request.UpdateUserConversationRequest;
+import com.fu.conversation.dto.response.UserConversationResponse;
+import com.fu.conversation.entity.UserConversation;
+import com.fu.conversation.mapper.UserConversationMapper;
+import com.fu.conversation.repository.UserConversationRepository;
+import com.fu.conversation.service.impl.UserConversationServiceImpl;
 import com.fu.course.entity.Course;
 import com.fu.course.repository.CourseRepository;
 import org.junit.jupiter.api.*;
@@ -24,7 +19,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.*;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.time.LocalDateTime;
 import java.util.*;
 
 import static org.assertj.core.api.Assertions.*;
@@ -32,647 +26,375 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-@DisplayName("ConversationThemeServiceImpl Tests")
-class ConversationThemeServiceImplTest {
+@DisplayName("UserConversationServiceImpl Tests")
+class UserConversationServiceImplTest {
 
-    @Mock private ConversationThemeRepository themeRepository;
-    @Mock private ConversationTopicRepository topicRepository;
-    @Mock private ConversationThemeMapper themeMapper;
+    @Mock private UserConversationRepository userConversationRepository;
+    @Mock private UserConversationMapper userConversationMapper;
     @Mock private ConversationGenerationService generationService;
     @Mock private CourseRepository courseRepository;
 
     @InjectMocks
-    private ConversationThemeServiceImpl themeService;
+    private UserConversationServiceImpl userConversationService;
 
-    private UUID managerId;
-    private UUID themeId;
+    private UUID userId;
+    private UUID conversationId;
     private UUID courseId;
-    private ConversationTheme activeTheme;
-    private ConversationTheme deletedTheme;
+    private UserConversation ownedConversation;
+    private UserConversationResponse conversationResponse;
     private Course course;
-    private ConversationThemeResponse themeResponse;
-    private ConversationThemeSummaryResponse summaryResponse;
 
     @BeforeEach
     void setUp() {
-        managerId = UUID.randomUUID();
-        themeId   = UUID.randomUUID();
-        courseId  = UUID.randomUUID();
+        userId         = UUID.randomUUID();
+        conversationId = UUID.randomUUID();
+        courseId       = UUID.randomUUID();
 
-        activeTheme = ConversationTheme.builder()
-                .title("Daily Life Conversations")
-                .category("daily_life")
-                .jlptLevel(Course.JlptLevel.N5)
+        ownedConversation = UserConversation.builder()
+                .userId(userId)
+                .title("My Shopping Conversation")
+                .scenario("Practice buying clothes in Harajuku")
+                .jlptLevel(Course.JlptLevel.N4)
                 .courseId(courseId)
-                .status(Course.ContentStatus.DRAFT)
-                .orderIndex(0)
-                .build();
-        ReflectionTestUtils.setField(activeTheme, "id", themeId);
-
-        deletedTheme = ConversationTheme.builder()
-                .title("Deleted Theme")
+                .aiGeneratedContext("{}")
                 .status(Course.ContentStatus.DRAFT)
                 .build();
-        UUID deletedId = UUID.randomUUID();
-        ReflectionTestUtils.setField(deletedTheme, "id", deletedId);
-        deletedTheme.setDeletedAt(LocalDateTime.now().minusDays(1));
+        ReflectionTestUtils.setField(ownedConversation, "id", conversationId);
 
-        course = Course.builder().name("N5 Beginner Course").build();
+        course = Course.builder().name("N4 Course").build();
 
-        themeResponse = ConversationThemeResponse.builder()
-                .id(themeId)
-                .title("Daily Life Conversations")
+        conversationResponse = UserConversationResponse.builder()
+                .id(conversationId)
+                .userId(userId)
+                .title("My Shopping Conversation")
                 .status(Course.ContentStatus.DRAFT)
                 .build();
-
-        summaryResponse = ConversationThemeSummaryResponse.builder()
-                .id(themeId)
-                .title("Daily Life Conversations")
-                .build();
-    }
-
-    // ── helper ──────────────────────────────────────────────────────────────
-    private void mockTopicCount(UUID id, long count) {
-        when(topicRepository.countByThemeIdAndDeletedAtIsNull(eq(id)))
-                .thenReturn(count);
     }
 
     // ════════════════════════════════════════════════════════════════════════
     @Nested
-    @DisplayName("generateThemeSuggestions")
-    class GenerateThemeSuggestionsTests {
+    @DisplayName("createConversation")
+    class CreateConversationTests {
 
         @Test
-        @DisplayName("Should delegate to ConversationGenerationService and return results")
-        void shouldReturnSuggestionsFromGenerationService() {
-            // Given
-            GenerateThemeRequest request = GenerateThemeRequest.builder()
-                    .jlptLevel(Course.JlptLevel.N5).count(3).build();
-            List<GeneratedThemeSuggestionResponse> expected = List.of(
-                    GeneratedThemeSuggestionResponse.builder().title("Theme A").build(),
-                    GeneratedThemeSuggestionResponse.builder().title("Theme B").build()
-            );
-            when(generationService.generateThemes(Course.JlptLevel.N5, null, null, 3))
-                    .thenReturn(expected);
-
-            // When
-            List<GeneratedThemeSuggestionResponse> result =
-                    themeService.generateThemeSuggestions(request);
-
-            // Then
-            assertThat(result).hasSize(2).isEqualTo(expected);
-            verify(generationService).generateThemes(Course.JlptLevel.N5, null, null, 3);
-        }
-
-        @Test
-        @DisplayName("Should return empty list when generation service finds nothing")
-        void shouldReturnEmptyListWhenNoSuggestions() {
-            GenerateThemeRequest request = GenerateThemeRequest.builder().count(3).build();
-            when(generationService.generateThemes(any(), any(), any(), anyInt()))
-                    .thenReturn(Collections.emptyList());
-
-            List<GeneratedThemeSuggestionResponse> result =
-                    themeService.generateThemeSuggestions(request);
-
-            assertThat(result).isEmpty();
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    @Nested
-    @DisplayName("createTheme")
-    class CreateThemeTests {
-
-        @Test
-        @DisplayName("Should save theme and set createdBy / updatedBy")
-        void shouldCreateThemeAndSetAuditFields() {
-            // Given
-            CreateThemeRequest request = CreateThemeRequest.builder()
-                    .title("Daily Life Conversations")
+        @DisplayName("Should save conversation with userId set correctly")
+        void shouldCreateConversationWithUserIdSet() {
+            CreateUserConversationRequest request = CreateUserConversationRequest.builder()
+                    .title("My Shopping Conversation")
+                    .scenario("Practice buying clothes")
                     .courseId(courseId)
                     .build();
-            when(themeMapper.toEntity(request)).thenReturn(activeTheme);
-            when(themeRepository.save(activeTheme)).thenReturn(activeTheme);
-            when(themeMapper.toResponse(activeTheme)).thenReturn(themeResponse);
+            when(userConversationMapper.toEntity(request)).thenReturn(ownedConversation);
+            when(userConversationRepository.save(ownedConversation)).thenReturn(ownedConversation);
+            when(userConversationMapper.toResponse(ownedConversation)).thenReturn(conversationResponse);
             when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            mockTopicCount(themeId, 0L);
 
-            // When
-            ConversationThemeResponse result = themeService.createTheme(request, managerId);
+            UserConversationResponse result = userConversationService.createConversation(request, userId);
 
-            // Then
             assertThat(result).isNotNull();
-            assertThat(activeTheme.getCreatedBy()).isEqualTo(managerId);
-            assertThat(activeTheme.getUpdatedBy()).isEqualTo(managerId);
-            verify(themeRepository).save(activeTheme);
+            assertThat(ownedConversation.getUserId()).isEqualTo(userId);
+            verify(userConversationRepository).save(ownedConversation);
         }
 
         @Test
         @DisplayName("Should populate courseName when courseId is present")
         void shouldPopulateCourseNameWhenCourseExists() {
-            CreateThemeRequest request = CreateThemeRequest.builder()
+            CreateUserConversationRequest request = CreateUserConversationRequest.builder()
                     .title("Test").courseId(courseId).build();
-            when(themeMapper.toEntity(request)).thenReturn(activeTheme);
-            when(themeRepository.save(any())).thenReturn(activeTheme);
-            when(themeMapper.toResponse(activeTheme)).thenReturn(themeResponse);
+            when(userConversationMapper.toEntity(request)).thenReturn(ownedConversation);
+            when(userConversationRepository.save(any())).thenReturn(ownedConversation);
+            UserConversationResponse responseWithCourse = UserConversationResponse.builder()
+                    .id(conversationId).userId(userId).title("Test").courseName("N4 Course").build();
+            when(userConversationMapper.toResponse(ownedConversation)).thenReturn(responseWithCourse);
             when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            mockTopicCount(themeId, 5L);
 
-            ConversationThemeResponse result = themeService.createTheme(request, managerId);
+            UserConversationResponse result = userConversationService.createConversation(request, userId);
 
-            assertThat(result.getCourseName()).isEqualTo("N5 Beginner Course");
-            assertThat(result.getTopicCount()).isEqualTo(5L);
+            assertThat(result.getCourseName()).isEqualTo("N4 Course");
         }
 
         @Test
         @DisplayName("Should not query courseRepository when courseId is null")
         void shouldSkipCourseQueryWhenCourseIdNull() {
-            ConversationTheme themeNoCourse = ConversationTheme.builder()
+            UserConversation noCourseConversation = UserConversation.builder()
+                    .userId(userId).title("No Course").build();
+            ReflectionTestUtils.setField(noCourseConversation, "id", conversationId);
+
+            CreateUserConversationRequest request = CreateUserConversationRequest.builder()
                     .title("No Course").build();
-            ReflectionTestUtils.setField(themeNoCourse, "id", themeId);
+            when(userConversationMapper.toEntity(request)).thenReturn(noCourseConversation);
+            when(userConversationRepository.save(any())).thenReturn(noCourseConversation);
+            when(userConversationMapper.toResponse(noCourseConversation)).thenReturn(conversationResponse);
 
-            CreateThemeRequest request = CreateThemeRequest.builder().title("No Course").build();
-            when(themeMapper.toEntity(request)).thenReturn(themeNoCourse);
-            when(themeRepository.save(any())).thenReturn(themeNoCourse);
-            when(themeMapper.toResponse(themeNoCourse)).thenReturn(themeResponse);
-            mockTopicCount(themeId, 0L);
-
-            themeService.createTheme(request, managerId);
+            userConversationService.createConversation(request, userId);
 
             verify(courseRepository, never()).findById(any());
         }
-
-        @Test
-        @DisplayName("Should gracefully handle missing course (courseId present but course not found)")
-        void shouldHandleMissingCourseGracefully() {
-            CreateThemeRequest request = CreateThemeRequest.builder()
-                    .title("Test").courseId(courseId).build();
-            when(themeMapper.toEntity(request)).thenReturn(activeTheme);
-            when(themeRepository.save(any())).thenReturn(activeTheme);
-            when(themeMapper.toResponse(activeTheme)).thenReturn(themeResponse);
-            when(courseRepository.findById(courseId)).thenReturn(Optional.empty());
-            mockTopicCount(themeId, 0L);
-
-            ConversationThemeResponse result = themeService.createTheme(request, managerId);
-
-            assertThat(result.getCourseName()).isNull();
-        }
     }
 
     // ════════════════════════════════════════════════════════════════════════
     @Nested
-    @DisplayName("updateTheme")
-    class UpdateThemeTests {
+    @DisplayName("updateConversation")
+    class UpdateConversationTests {
 
         @Test
-        @DisplayName("Should update theme fields and set updatedBy")
-        void shouldUpdateThemeSuccessfully() {
-            // Given
-            UpdateThemeRequest request = UpdateThemeRequest.builder()
-                    .title("Updated Title").build();
-            when(themeRepository.findById(themeId)).thenReturn(Optional.of(activeTheme));
-            when(themeRepository.save(activeTheme)).thenReturn(activeTheme);
-            when(themeMapper.toResponse(activeTheme)).thenReturn(themeResponse);
+        @DisplayName("Should update conversation and save")
+        void shouldUpdateConversationSuccessfully() {
+            UpdateUserConversationRequest request = UpdateUserConversationRequest.builder()
+                    .title("Updated Title").scenario("New scenario").build();
+            when(userConversationRepository.findByIdAndUserId(conversationId, userId))
+                    .thenReturn(Optional.of(ownedConversation));
+            when(userConversationRepository.save(ownedConversation)).thenReturn(ownedConversation);
+            when(userConversationMapper.toResponse(ownedConversation)).thenReturn(conversationResponse);
             when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            mockTopicCount(themeId, 0L);
 
-            // When
-            ConversationThemeResponse result =
-                    themeService.updateTheme(themeId, request, managerId);
+            UserConversationResponse result =
+                    userConversationService.updateConversation(conversationId, request, userId);
 
-            // Then
             assertThat(result).isNotNull();
-            assertThat(activeTheme.getUpdatedBy()).isEqualTo(managerId);
-            verify(themeMapper).updateEntity(activeTheme, request);
-            verify(themeRepository).save(activeTheme);
+            verify(userConversationMapper).updateEntity(ownedConversation, request);
+            verify(userConversationRepository).save(ownedConversation);
         }
 
         @Test
-        @DisplayName("Should throw ResourceNotFoundException when theme does not exist")
-        void shouldThrowWhenThemeNotFound() {
-            when(themeRepository.findById(themeId)).thenReturn(Optional.empty());
+        @DisplayName("Should throw ResourceNotFoundException when conversation not owned by user")
+        void shouldThrowWhenConversationNotOwned() {
+            when(userConversationRepository.findByIdAndUserId(conversationId, userId))
+                    .thenReturn(Optional.empty());
 
             assertThatThrownBy(() ->
-                    themeService.updateTheme(themeId, new UpdateThemeRequest(), managerId))
+                    userConversationService.updateConversation(
+                            conversationId, new UpdateUserConversationRequest(), userId))
                     .isInstanceOf(ResourceNotFoundException.class)
-                    .hasMessageContaining("ConversationTheme");
+                    .hasMessageContaining("UserConversation");
         }
 
         @Test
-        @DisplayName("Should throw ResourceNotFoundException when theme is soft-deleted")
-        void shouldThrowWhenThemeIsSoftDeleted() {
-            when(themeRepository.findById(deletedTheme.getId()))
-                    .thenReturn(Optional.of(deletedTheme));
+        @DisplayName("Should throw when conversation belongs to a different user")
+        void shouldThrowWhenConversationBelongsToDifferentUser() {
+            UUID anotherUser = UUID.randomUUID();
+            when(userConversationRepository.findByIdAndUserId(conversationId, anotherUser))
+                    .thenReturn(Optional.empty());
 
             assertThatThrownBy(() ->
-                    themeService.updateTheme(deletedTheme.getId(), new UpdateThemeRequest(), managerId))
-                    .isInstanceOf(ResourceNotFoundException.class);
-        }
-        @Test
-        @DisplayName("Should throw BusinessException when title is blank (non-null)")
-        void shouldThrowWhenTitleIsBlank() {
-            UpdateThemeRequest request = UpdateThemeRequest.builder()
-                    .title("   ").build(); // blank, not null
-
-            assertThatThrownBy(() ->
-                    themeService.updateTheme(themeId, request, managerId))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("Title must not be blank");
-        }
-
-        @Test
-        @DisplayName("Should allow null title (partial update, no change)")
-        void shouldAllowNullTitle() {
-            UpdateThemeRequest request = UpdateThemeRequest.builder()
-                    .category("travel").build(); // title is null
-            when(themeRepository.findById(themeId)).thenReturn(Optional.of(activeTheme));
-            when(themeRepository.save(activeTheme)).thenReturn(activeTheme);
-            when(themeMapper.toResponse(activeTheme)).thenReturn(themeResponse);
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            mockTopicCount(themeId, 0L);
-
-            ConversationThemeResponse result =
-                    themeService.updateTheme(themeId, request, managerId);
-
-            assertThat(result).isNotNull();
-            verify(themeMapper).updateEntity(activeTheme, request);
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    @Nested
-    @DisplayName("deleteTheme")
-    class DeleteThemeTests {
-
-        @Test
-        @DisplayName("Should soft-delete by setting deletedAt and deletedBy")
-        void shouldSoftDeleteTheme() {
-            // Given
-            when(themeRepository.findById(themeId)).thenReturn(Optional.of(activeTheme));
-
-            // When
-            themeService.deleteTheme(themeId, managerId);
-
-            // Then
-            assertThat(activeTheme.getDeletedAt()).isNotNull();
-            assertThat(activeTheme.getDeletedBy()).isEqualTo(managerId);
-            verify(themeRepository).save(activeTheme);
-        }
-
-        @Test
-        @DisplayName("Should throw ResourceNotFoundException when theme not found")
-        void shouldThrowWhenThemeNotFound() {
-            when(themeRepository.findById(themeId)).thenReturn(Optional.empty());
-
-            assertThatThrownBy(() -> themeService.deleteTheme(themeId, managerId))
-                    .isInstanceOf(ResourceNotFoundException.class);
-        }
-
-        @Test
-        @DisplayName("Should throw when theme is already soft-deleted")
-        void shouldThrowWhenThemeAlreadyDeleted() {
-            when(themeRepository.findById(deletedTheme.getId()))
-                    .thenReturn(Optional.of(deletedTheme));
-
-            assertThatThrownBy(() ->
-                    themeService.deleteTheme(deletedTheme.getId(), managerId))
-                    .isInstanceOf(ResourceNotFoundException.class);
-        }
-
-        @Test
-        @DisplayName("Should cascade soft-delete active child topics when theme is deleted")
-        void shouldCascadeSoftDeleteChildTopics() {
-            // Given
-            ConversationTopic child1 = ConversationTopic.builder()
-                    .title("Topic A").build();
-            ConversationTopic child2 = ConversationTopic.builder()
-                    .title("Topic B").build();
-            ReflectionTestUtils.setField(child1, "id", UUID.randomUUID());
-            ReflectionTestUtils.setField(child2, "id", UUID.randomUUID());
-
-            when(themeRepository.findById(themeId)).thenReturn(Optional.of(activeTheme));
-            when(topicRepository.findByThemeIdAndDeletedAtIsNull(themeId))
-                    .thenReturn(List.of(child1, child2));
-
-            // When
-            themeService.deleteTheme(themeId, managerId);
-
-            // Then: both child topics should be soft-deleted
-            assertThat(child1.getDeletedAt()).isNotNull();
-            assertThat(child1.getDeletedBy()).isEqualTo(managerId);
-            assertThat(child2.getDeletedAt()).isNotNull();
-            assertThat(child2.getDeletedBy()).isEqualTo(managerId);
-            verify(topicRepository).saveAll(List.of(child1, child2));
-        }
-
-        @Test
-        @DisplayName("Should soft-delete theme successfully when it has no topics")
-        void shouldSoftDeleteThemeWithNoTopics() {
-            when(themeRepository.findById(themeId)).thenReturn(Optional.of(activeTheme));
-            when(topicRepository.findByThemeIdAndDeletedAtIsNull(themeId))
-                    .thenReturn(Collections.emptyList());
-
-            themeService.deleteTheme(themeId, managerId);
-
-            assertThat(activeTheme.getDeletedAt()).isNotNull();
-            verify(topicRepository, never()).saveAll(any());
-        }
-
-        @Test
-        @DisplayName("Should stamp theme and topics with the same deletedAt timestamp")
-        void shouldStampSameTimestampOnThemeAndTopics() {
-            ConversationTopic child = ConversationTopic.builder().title("Child").build();
-            ReflectionTestUtils.setField(child, "id", UUID.randomUUID());
-
-            when(themeRepository.findById(themeId)).thenReturn(Optional.of(activeTheme));
-            when(topicRepository.findByThemeIdAndDeletedAtIsNull(themeId))
-                    .thenReturn(List.of(child));
-
-            themeService.deleteTheme(themeId, managerId);
-
-            // Both deletedAt values should be non-null and equal (same reference: LocalDateTime.now())
-            assertThat(activeTheme.getDeletedAt()).isNotNull();
-            assertThat(child.getDeletedAt()).isNotNull();
-            assertThat(child.getDeletedAt()).isEqualTo(activeTheme.getDeletedAt());
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    @Nested
-    @DisplayName("updateStatus")
-    class UpdateStatusTests {
-
-        @Test
-        @DisplayName("Should change status to PUBLISHED and update updatedBy")
-        void shouldPublishTheme() {
-            when(themeRepository.findById(themeId)).thenReturn(Optional.of(activeTheme));
-            when(themeRepository.save(activeTheme)).thenReturn(activeTheme);
-            when(themeMapper.toResponse(activeTheme)).thenReturn(themeResponse);
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            mockTopicCount(themeId, 0L);
-
-            themeService.updateStatus(themeId, Course.ContentStatus.PUBLISHED, managerId);
-
-            assertThat(activeTheme.getStatus()).isEqualTo(Course.ContentStatus.PUBLISHED);
-            assertThat(activeTheme.getUpdatedBy()).isEqualTo(managerId);
-            verify(themeRepository).save(activeTheme);
-        }
-
-        @Test
-        @DisplayName("Should change status to ARCHIVED")
-        void shouldArchiveTheme() {
-            when(themeRepository.findById(themeId)).thenReturn(Optional.of(activeTheme));
-            when(themeRepository.save(activeTheme)).thenReturn(activeTheme);
-            when(themeMapper.toResponse(activeTheme)).thenReturn(themeResponse);
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            mockTopicCount(themeId, 0L);
-
-            themeService.updateStatus(themeId, Course.ContentStatus.ARCHIVED, managerId);
-
-            assertThat(activeTheme.getStatus()).isEqualTo(Course.ContentStatus.ARCHIVED);
-        }
-
-        @Test
-        @DisplayName("Should throw ResourceNotFoundException when theme not found")
-        void shouldThrowWhenThemeNotFound() {
-            when(themeRepository.findById(themeId)).thenReturn(Optional.empty());
-
-            assertThatThrownBy(() ->
-                    themeService.updateStatus(themeId, Course.ContentStatus.PUBLISHED, managerId))
-                    .isInstanceOf(ResourceNotFoundException.class);
-        }
-
-        @Test
-        @DisplayName("Should throw when theme is soft-deleted")
-        void shouldThrowWhenThemeSoftDeleted() {
-            when(themeRepository.findById(deletedTheme.getId()))
-                    .thenReturn(Optional.of(deletedTheme));
-
-            assertThatThrownBy(() ->
-                    themeService.updateStatus(deletedTheme.getId(),
-                            Course.ContentStatus.PUBLISHED, managerId))
+                    userConversationService.updateConversation(
+                            conversationId, new UpdateUserConversationRequest(), anotherUser))
                     .isInstanceOf(ResourceNotFoundException.class);
         }
     }
 
     // ════════════════════════════════════════════════════════════════════════
     @Nested
-    @DisplayName("getTheme")
-    class GetThemeTests {
+    @DisplayName("deleteConversation")
+    class DeleteConversationTests {
 
         @Test
-        @DisplayName("Should return full theme response with courseName and topicCount")
-        void shouldReturnThemeWithDetails() {
-            when(themeRepository.findById(themeId)).thenReturn(Optional.of(activeTheme));
-            when(themeMapper.toResponse(activeTheme)).thenReturn(themeResponse);
-            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            mockTopicCount(themeId, 3L);
+        @DisplayName("Should hard-delete conversation (not soft delete)")
+        void shouldHardDeleteConversation() {
+            when(userConversationRepository.findByIdAndUserId(conversationId, userId))
+                    .thenReturn(Optional.of(ownedConversation));
 
-            ConversationThemeResponse result = themeService.getTheme(themeId);
+            userConversationService.deleteConversation(conversationId, userId);
 
-            assertThat(result).isNotNull();
-            assertThat(result.getCourseName()).isEqualTo("N5 Beginner Course");
-            assertThat(result.getTopicCount()).isEqualTo(3L);
+            verify(userConversationRepository).delete(ownedConversation);
+            verify(userConversationRepository, never()).save(any());
         }
 
         @Test
-        @DisplayName("Should throw ResourceNotFoundException when theme not found")
-        void shouldThrowForNonExistentTheme() {
-            when(themeRepository.findById(themeId)).thenReturn(Optional.empty());
+        @DisplayName("Should throw ResourceNotFoundException when conversation not owned by user")
+        void shouldThrowWhenConversationNotOwned() {
+            when(userConversationRepository.findByIdAndUserId(conversationId, userId))
+                    .thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> themeService.getTheme(themeId))
-                    .isInstanceOf(ResourceNotFoundException.class)
-                    .hasMessageContaining("ConversationTheme");
-        }
-
-        @Test
-        @DisplayName("Should throw ResourceNotFoundException when theme is soft-deleted")
-        void shouldThrowForDeletedTheme() {
-            when(themeRepository.findById(deletedTheme.getId()))
-                    .thenReturn(Optional.of(deletedTheme));
-
-            assertThatThrownBy(() -> themeService.getTheme(deletedTheme.getId()))
+            assertThatThrownBy(() ->
+                    userConversationService.deleteConversation(conversationId, userId))
                     .isInstanceOf(ResourceNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("Should not delete a conversation owned by another user")
+        void shouldNotDeleteAnotherUsersConversation() {
+            UUID otherId = UUID.randomUUID();
+            when(userConversationRepository.findByIdAndUserId(conversationId, otherId))
+                    .thenReturn(Optional.empty());
+
+            assertThatThrownBy(() ->
+                    userConversationService.deleteConversation(conversationId, otherId))
+                    .isInstanceOf(ResourceNotFoundException.class);
+            verify(userConversationRepository, never()).delete(any());
         }
     }
 
     // ════════════════════════════════════════════════════════════════════════
     @Nested
-    @DisplayName("getAllThemes")
-    class GetAllThemesTests {
+    @DisplayName("generateContext")
+    class GenerateContextTests {
 
         @Test
-        @DisplayName("Should return paginated themes as summary responses with topicCount")
-        void shouldReturnPaginatedThemes() {
+        @DisplayName("Should generate context and persist aiGeneratedContext")
+        void shouldGenerateAndSaveContext() {
+            String generatedJson = "{\"vocabularyHints\":[\"ショッピング\"]}";
+            when(userConversationRepository.findByIdAndUserId(conversationId, userId))
+                    .thenReturn(Optional.of(ownedConversation));
+            when(generationService.generateUserConversationContext(
+                    ownedConversation.getScenario(), courseId))
+                    .thenReturn(generatedJson);
+            when(userConversationRepository.save(ownedConversation)).thenReturn(ownedConversation);
+            when(userConversationMapper.toResponse(ownedConversation)).thenReturn(conversationResponse);
+            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+
+            userConversationService.generateContext(conversationId, userId);
+
+            assertThat(ownedConversation.getAiGeneratedContext()).isEqualTo(generatedJson);
+            verify(generationService).generateUserConversationContext(
+                    ownedConversation.getScenario(), courseId);
+            verify(userConversationRepository).save(ownedConversation);
+        }
+
+        @Test
+        @DisplayName("Should throw BusinessException when scenario is null")
+        void shouldThrowWhenScenarioIsNull() {
+            UserConversation noScenario = UserConversation.builder()
+                    .userId(userId).title("No Scenario").scenario(null).build();
+            ReflectionTestUtils.setField(noScenario, "id", conversationId);
+            when(userConversationRepository.findByIdAndUserId(conversationId, userId))
+                    .thenReturn(Optional.of(noScenario));
+
+            assertThatThrownBy(() ->
+                    userConversationService.generateContext(conversationId, userId))
+                    .isInstanceOf(BusinessException.class);
+            verify(generationService, never()).generateUserConversationContext(any(), any());
+        }
+
+        @Test
+        @DisplayName("Should throw BusinessException when scenario is blank")
+        void shouldThrowWhenScenarioIsBlank() {
+            UserConversation blankScenario = UserConversation.builder()
+                    .userId(userId).title("Blank").scenario("   ").build();
+            ReflectionTestUtils.setField(blankScenario, "id", conversationId);
+            when(userConversationRepository.findByIdAndUserId(conversationId, userId))
+                    .thenReturn(Optional.of(blankScenario));
+
+            assertThatThrownBy(() ->
+                    userConversationService.generateContext(conversationId, userId))
+                    .isInstanceOf(BusinessException.class);
+            verify(generationService, never()).generateUserConversationContext(any(), any());
+        }
+
+        @Test
+        @DisplayName("Should throw ResourceNotFoundException when conversation not found")
+        void shouldThrowWhenConversationNotFound() {
+            when(userConversationRepository.findByIdAndUserId(conversationId, userId))
+                    .thenReturn(Optional.empty());
+
+            assertThatThrownBy(() ->
+                    userConversationService.generateContext(conversationId, userId))
+                    .isInstanceOf(ResourceNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("Should pass null courseId to generation service when conversation has no course")
+        void shouldPassNullCourseIdWhenNoCourse() {
+            UserConversation noCourse = UserConversation.builder()
+                    .userId(userId).title("No Course")
+                    .scenario("Just a scenario").courseId(null).aiGeneratedContext("{}").build();
+            ReflectionTestUtils.setField(noCourse, "id", conversationId);
+
+            String generatedJson = "{\"vocabularyHints\":[]}";
+            when(userConversationRepository.findByIdAndUserId(conversationId, userId))
+                    .thenReturn(Optional.of(noCourse));
+            when(generationService.generateUserConversationContext("Just a scenario", null))
+                    .thenReturn(generatedJson);
+            when(userConversationRepository.save(noCourse)).thenReturn(noCourse);
+            when(userConversationMapper.toResponse(noCourse)).thenReturn(conversationResponse);
+
+            userConversationService.generateContext(conversationId, userId);
+
+            verify(generationService).generateUserConversationContext("Just a scenario", null);
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    @Nested
+    @DisplayName("getMyConversations")
+    class GetMyConversationsTests {
+
+        @Test
+        @DisplayName("Should return paginated personal conversations for user")
+        void shouldReturnPaginatedConversationsForUser() {
             Pageable pageable = PageRequest.of(0, 10);
-            Page<ConversationTheme> page = new PageImpl<>(List.of(activeTheme));
-            when(themeRepository.findByDeletedAtIsNull(pageable)).thenReturn(page);
-            when(themeMapper.toSummaryResponse(activeTheme)).thenReturn(summaryResponse);
-            mockTopicCount(themeId, 2L);
+            when(userConversationRepository.findByUserId(userId, pageable))
+                    .thenReturn(new PageImpl<>(List.of(ownedConversation)));
+            when(userConversationMapper.toResponse(ownedConversation)).thenReturn(conversationResponse);
+            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
 
-            Page<ConversationThemeSummaryResponse> result = themeService.getAllThemes(pageable);
+            Page<UserConversationResponse> result =
+                    userConversationService.getMyConversations(userId, pageable);
 
             assertThat(result.getContent()).hasSize(1);
-            assertThat(result.getContent().get(0).getTopicCount()).isEqualTo(2L);
-            verify(themeRepository).findByDeletedAtIsNull(pageable);
+            verify(userConversationRepository).findByUserId(userId, pageable);
         }
 
         @Test
-        @DisplayName("Should return empty page when no themes exist")
-        void shouldReturnEmptyPage() {
+        @DisplayName("Should return empty page when user has no personal conversations")
+        void shouldReturnEmptyPageWhenNoConversations() {
             Pageable pageable = PageRequest.of(0, 10);
-            when(themeRepository.findByDeletedAtIsNull(pageable)).thenReturn(Page.empty());
-
-            Page<ConversationThemeSummaryResponse> result = themeService.getAllThemes(pageable);
-
-            assertThat(result.getContent()).isEmpty();
-        }
-
-        @Test
-        @DisplayName("Should map multiple themes correctly")
-        void shouldMapMultipleThemes() {
-            UUID otherId = UUID.randomUUID();
-            ConversationTheme other = ConversationTheme.builder().title("Other").build();
-            ReflectionTestUtils.setField(other, "id", otherId);
-
-            ConversationThemeSummaryResponse otherSummary =
-                    ConversationThemeSummaryResponse.builder().id(otherId).title("Other").build();
-
-            Pageable pageable = PageRequest.of(0, 10);
-            when(themeRepository.findByDeletedAtIsNull(pageable))
-                    .thenReturn(new PageImpl<>(List.of(activeTheme, other)));
-            when(themeMapper.toSummaryResponse(activeTheme)).thenReturn(summaryResponse);
-            when(themeMapper.toSummaryResponse(other)).thenReturn(otherSummary);
-            mockTopicCount(themeId, 1L);
-            mockTopicCount(otherId, 0L);
-
-            Page<ConversationThemeSummaryResponse> result = themeService.getAllThemes(pageable);
-
-            assertThat(result.getContent()).hasSize(2);
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    @Nested
-    @DisplayName("getPublishedThemes")
-    class GetPublishedThemesTests {
-
-        @Test
-        @DisplayName("Should filter by JLPT level when provided")
-        void shouldFilterByJlptLevel() {
-            Pageable pageable = PageRequest.of(0, 10);
-            when(themeRepository.findByJlptLevelAndStatusAndDeletedAtIsNull(
-                    eq(Course.JlptLevel.N5.name()), eq(Course.ContentStatus.PUBLISHED.name()), any(Pageable.class)))
-                    .thenReturn(new PageImpl<>(List.of(activeTheme)));
-            when(themeMapper.toSummaryResponse(activeTheme)).thenReturn(summaryResponse);
-            mockTopicCount(themeId, 0L);
-
-            themeService.getPublishedThemes(Course.JlptLevel.N5, pageable);
-
-            verify(themeRepository).findByJlptLevelAndStatusAndDeletedAtIsNull(
-                    eq(Course.JlptLevel.N5.name()), eq(Course.ContentStatus.PUBLISHED.name()), any(Pageable.class));
-            verify(themeRepository, never())
-                    .findByStatusAndDeletedAtIsNull(any(), any());
-        }
-
-        @Test
-        @DisplayName("Should return all published when jlptLevel is null")
-        void shouldReturnAllPublishedWhenNoLevelFilter() {
-            Pageable pageable = PageRequest.of(0, 10);
-            when(themeRepository.findByStatusAndDeletedAtIsNull(
-                    eq(Course.ContentStatus.PUBLISHED.name()), any(Pageable.class)))
-                    .thenReturn(new PageImpl<>(List.of(activeTheme)));
-            when(themeMapper.toSummaryResponse(activeTheme)).thenReturn(summaryResponse);
-            mockTopicCount(themeId, 0L);
-
-            themeService.getPublishedThemes(null, pageable);
-
-            verify(themeRepository).findByStatusAndDeletedAtIsNull(
-                    eq(Course.ContentStatus.PUBLISHED.name()), any(Pageable.class));
-            verify(themeRepository, never())
-                    .findByJlptLevelAndStatusAndDeletedAtIsNull(any(), any(), any());
-        }
-
-        @Test
-        @DisplayName("Should return empty page when no published themes")
-        void shouldReturnEmptyWhenNoPublishedThemes() {
-            Pageable pageable = PageRequest.of(0, 10);
-            when(themeRepository.findByStatusAndDeletedAtIsNull(
-                    eq(Course.ContentStatus.PUBLISHED.name()), any(Pageable.class)))
+            when(userConversationRepository.findByUserId(userId, pageable))
                     .thenReturn(Page.empty());
 
-            Page<ConversationThemeSummaryResponse> result =
-                    themeService.getPublishedThemes(null, pageable);
+            Page<UserConversationResponse> result =
+                    userConversationService.getMyConversations(userId, pageable);
 
             assertThat(result.getContent()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Should only return conversations belonging to the requesting user")
+        void shouldOnlyReturnConversationsForCorrectUser() {
+            UUID otherUser = UUID.randomUUID();
+            Pageable pageable = PageRequest.of(0, 10);
+            when(userConversationRepository.findByUserId(otherUser, pageable))
+                    .thenReturn(Page.empty());
+
+            Page<UserConversationResponse> result =
+                    userConversationService.getMyConversations(otherUser, pageable);
+
+            assertThat(result.getContent()).isEmpty();
+            verify(userConversationRepository).findByUserId(otherUser, pageable);
+            verify(userConversationRepository, never()).findByUserId(eq(userId), any());
         }
     }
 
     // ════════════════════════════════════════════════════════════════════════
     @Nested
-    @DisplayName("searchThemes")
-    class SearchThemesTests {
+    @DisplayName("getMyConversation")
+    class GetMyConversationTests {
 
         @Test
-        @DisplayName("Should return paginated results matching keyword")
-        void shouldReturnSearchResults() {
-            Pageable pageable = PageRequest.of(0, 10);
-            Page<ConversationTheme> page = new PageImpl<>(List.of(activeTheme));
-            when(themeRepository.searchByKeyword("Daily", pageable)).thenReturn(page);
-            when(themeMapper.toSummaryResponse(activeTheme)).thenReturn(summaryResponse);
-            mockTopicCount(themeId, 1L);
+        @DisplayName("Should return conversation response when user owns it")
+        void shouldReturnConversationWhenOwned() {
+            when(userConversationRepository.findByIdAndUserId(conversationId, userId))
+                    .thenReturn(Optional.of(ownedConversation));
+            when(userConversationMapper.toResponse(ownedConversation)).thenReturn(conversationResponse);
+            when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
 
-            Page<ConversationThemeSummaryResponse> result =
-                    themeService.searchThemes("Daily", pageable);
+            UserConversationResponse result =
+                    userConversationService.getMyConversation(conversationId, userId);
 
-            assertThat(result.getContent()).hasSize(1);
-            verify(themeRepository).searchByKeyword("Daily", pageable);
+            assertThat(result).isNotNull();
+            assertThat(result.getId()).isEqualTo(conversationId);
         }
 
         @Test
-        @DisplayName("Should return empty page when no matches")
-        void shouldReturnEmptyWhenNoMatches() {
-            Pageable pageable = PageRequest.of(0, 10);
-            when(themeRepository.searchByKeyword("xyz", pageable)).thenReturn(Page.empty());
+        @DisplayName("Should throw ResourceNotFoundException when conversation not found or not owned")
+        void shouldThrowWhenConversationNotOwnedByUser() {
+            when(userConversationRepository.findByIdAndUserId(conversationId, userId))
+                    .thenReturn(Optional.empty());
 
-            Page<ConversationThemeSummaryResponse> result =
-                    themeService.searchThemes("xyz", pageable);
-
-            assertThat(result.getContent()).isEmpty();
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    @Nested
-    @DisplayName("searchPublishedThemes")
-    class SearchPublishedThemesTests {
-
-        @Test
-        @DisplayName("Should return published themes matching keyword")
-        void shouldReturnPublishedSearchResults() {
-            Pageable pageable = PageRequest.of(0, 10);
-            Page<ConversationTheme> page = new PageImpl<>(List.of(activeTheme));
-            when(themeRepository.searchPublishedByKeyword("Shopping", pageable)).thenReturn(page);
-            when(themeMapper.toSummaryResponse(activeTheme)).thenReturn(summaryResponse);
-            mockTopicCount(themeId, 0L);
-
-            Page<ConversationThemeSummaryResponse> result =
-                    themeService.searchPublishedThemes("Shopping", pageable);
-
-            assertThat(result.getContent()).hasSize(1);
-            verify(themeRepository).searchPublishedByKeyword("Shopping", pageable);
-        }
-
-        @Test
-        @DisplayName("Should return empty page when no published matches")
-        void shouldReturnEmptyWhenNoPublishedMatches() {
-            Pageable pageable = PageRequest.of(0, 10);
-            when(themeRepository.searchPublishedByKeyword("xyz", pageable)).thenReturn(Page.empty());
-
-            Page<ConversationThemeSummaryResponse> result =
-                    themeService.searchPublishedThemes("xyz", pageable);
-
-            assertThat(result.getContent()).isEmpty();
+            assertThatThrownBy(() ->
+                    userConversationService.getMyConversation(conversationId, userId))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("UserConversation");
         }
     }
 }

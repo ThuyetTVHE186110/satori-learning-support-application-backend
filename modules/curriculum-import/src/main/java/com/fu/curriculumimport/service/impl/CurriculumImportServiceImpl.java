@@ -1,5 +1,8 @@
 package com.fu.curriculumimport.service.impl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.common.exception.BusinessException;
 import com.fu.common.response.PageResponse;
 import com.fu.course.entity.GrammarPoint;
 import com.fu.course.entity.Lesson;
@@ -17,6 +20,7 @@ import com.fu.curriculumimport.mapper.CurriculumImportMapper;
 import com.fu.curriculumimport.repository.CurriculumImportRepository;
 import com.fu.curriculumimport.repository.ImportChunkRepository;
 import com.fu.curriculumimport.service.CurriculumImportService;
+import com.fu.curriculumimport.service.agent.ExtractionResult;
 import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import com.fu.curriculumimport.service.ingestion.InMemoryMultipartFile;
 import com.fu.curriculumimport.service.orchestrator.ImportOrchestrator;
@@ -33,7 +37,11 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -57,6 +65,7 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
     private final ImportOrchestrator orchestrator;
     private final ImportPersistenceService persistenceService;
     private final EmbeddingService embeddingService;
+    private final ObjectMapper objectMapper;
 
     @Override
     @Transactional
@@ -64,16 +73,21 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
         log.info("Initiating curriculum import by manager: {}, courseId: {}, file: {}",
                 managerId, courseId, file.getOriginalFilename());
 
-        // Validate file
-        validateImportFile(file);
+        // 1. Fast metadata checks (no file I/O): null, extension, size
+        String filename = validateFileMetadata(file);
 
-        // Validate course exists if provided
-        String courseName = null;
-        if (courseId != null) {
-            var course = courseRepository.findById(courseId)
-                    .orElseThrow(() -> new CourseNotFoundException(courseId));
-            courseName = course.getName();
+        // 2. Business checks: courseId and course existence
+        // Do these before reading file bytes to avoid unnecessary I/O on invalid requests.
+        if (courseId == null) {
+            throw new BusinessException("VALIDATION_ERROR",
+                    "courseId is required. Please select a course before uploading the curriculum.");
         }
+        var course = courseRepository.findById(courseId)
+                .orElseThrow(() -> new CourseNotFoundException(courseId));
+        String courseName = course.getName();
+
+        // 3. Content I/O: magic bytes validation (actual file content, not client-reported type)
+        validateMagicBytes(file, filename);
 
         // Create import record
         CurriculumImport importEntity = CurriculumImport.builder()
@@ -123,20 +137,47 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
 
     @Override
     public PageResponse<CurriculumImportSummaryResponse> listImports(
-            UUID courseId, ImportStatus status, int page, int size) {
-        log.debug("Listing imports: courseId={}, status={}, page={}, size={}", courseId, status, page, size);
+            UUID courseId, ImportStatus status, LocalDateTime startDate, LocalDateTime endDate, int page, int size) {
+        log.debug("Listing imports: courseId={}, status={}, startDate={}, endDate={}, page={}, size={}",
+                courseId, status, startDate, endDate, page, size);
+
+        // Validate date range if provided
+        if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
+            throw new BusinessException("Ngày kết thúc phải sau ngày bắt đầu.");
+        }
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 100));
         Page<CurriculumImport> importPage;
 
-        if (courseId != null && status != null) {
-            importPage = importRepository.findByCourseIdAndStatusOrderByCreatedAtDesc(courseId, status, pageable);
-        } else if (courseId != null) {
-            importPage = importRepository.findByCourseIdOrderByCreatedAtDesc(courseId, pageable);
-        } else if (status != null) {
-            importPage = importRepository.findByStatusOrderByCreatedAtDesc(status, pageable);
+        // Route to appropriate repository method based on which filters are provided
+        boolean hasDateRange = startDate != null && endDate != null;
+
+        if (hasDateRange) {
+            // Date range is provided
+            if (courseId != null && status != null) {
+                importPage = importRepository.findByCourseIdAndStatusAndCreatedAtBetweenOrderByCreatedAtDesc(
+                        courseId, status, startDate, endDate, pageable);
+            } else if (courseId != null) {
+                importPage = importRepository.findByCourseIdAndCreatedAtBetweenOrderByCreatedAtDesc(
+                        courseId, startDate, endDate, pageable);
+            } else if (status != null) {
+                importPage = importRepository.findByStatusAndCreatedAtBetweenOrderByCreatedAtDesc(
+                        status, startDate, endDate, pageable);
+            } else {
+                importPage = importRepository.findByCreatedAtBetweenOrderByCreatedAtDesc(
+                        startDate, endDate, pageable);
+            }
         } else {
-            importPage = importRepository.findAllByOrderByCreatedAtDesc(pageable);
+            // No date range - use existing logic
+            if (courseId != null && status != null) {
+                importPage = importRepository.findByCourseIdAndStatusOrderByCreatedAtDesc(courseId, status, pageable);
+            } else if (courseId != null) {
+                importPage = importRepository.findByCourseIdOrderByCreatedAtDesc(courseId, pageable);
+            } else if (status != null) {
+                importPage = importRepository.findByStatusOrderByCreatedAtDesc(status, pageable);
+            } else {
+                importPage = importRepository.findAllByOrderByCreatedAtDesc(pageable);
+            }
         }
 
         List<CurriculumImportSummaryResponse> content = importPage.getContent().stream()
@@ -206,6 +247,9 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
     @Transactional
     public CurriculumImportResponse cancelImport(UUID importId) {
         log.info("Cancelling import: {}", importId);
+
+        // Reload fresh from DB inside the transaction to avoid stale-state race with
+        // the async pipeline thread that may have changed status since last read.
         CurriculumImport importEntity = findImportOrThrow(importId);
 
         if (importEntity.getStatus() == ImportStatus.COMPLETED ||
@@ -219,7 +263,7 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
                     "Import is awaiting approval. Use the reject endpoint to cancel it.");
         }
 
-        // Request async cancellation of the running import
+        // Signal the async pipeline to stop at its next checkpoint.
         orchestrator.requestCancel(importId);
 
         importEntity.markCancelled();
@@ -242,7 +286,6 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
                         l.getId(),
                         l.getTitle(),
                         l.getTitleJapanese(),
-                        l.getLessonType().name(),
                         l.getOrderIndex(),
                         l.getPageStart(),
                         l.getPageEnd(),
@@ -299,6 +342,8 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
         long completedImports = importRepository.countByStatus(ImportStatus.COMPLETED);
         long failedImports = importRepository.countByStatus(ImportStatus.FAILED);
         long queuedImports = importRepository.countByStatus(ImportStatus.QUEUED);
+        long rollbackImports = importRepository.countByStatus(ImportStatus.ROLLED_BACK);
+        long pendingApprovalImports = importRepository.countByStatus(ImportStatus.PENDING_APPROVAL);
 
         // Count in-progress (any status between QUEUED and COMPLETED/FAILED/CANCELLED)
         long inProgressImports = totalImports - completedImports - failedImports - queuedImports
@@ -315,6 +360,8 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
                 .completedImports(completedImports)
                 .failedImports(failedImports)
                 .queuedImports(queuedImports)
+                .rollbackImports(rollbackImports)
+                .pendingApprovalImports(pendingApprovalImports)
                 .inProgressImports(Math.max(0, inProgressImports))
                 .totalLessonsCreated(totalLessons)
                 .totalVocabularyCreated(totalVocab)
@@ -343,18 +390,66 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
         importEntity.setCourseId(courseId);
         importRepository.save(importEntity);
 
-        // Reassign all lessons that belong to this import to the target course
+        // Reassign existing lessons to the target course
         List<Lesson> lessons = lessonRepository.findByImportIdAndNotDeleted(importId);
         for (Lesson lesson : lessons) {
             lesson.setCourse(course);
             lessonRepository.save(lesson);
         }
 
-        log.info("Linked {} lessons from import {} to course {}", lessons.size(), importId, courseId);
+        if (!lessons.isEmpty()) {
+            log.info("Linked {} existing lessons from import {} to course {}", lessons.size(), importId, courseId);
+        } else {
+            // No lessons were created during the original import (courseId was null at upload time).
+            // Re-run lesson persistence from stored extractedData — no LLM calls, zero cost.
+            log.info("Import {} has 0 lessons — re-running lesson persistence from stored chunk data", importId);
+            List<ExtractionResult> storedResults = deserializeChunkResults(importId);
+            if (!storedResults.isEmpty()) {
+                persistenceService.persistExtractedContent(importEntity, storedResults);
+                log.info("Re-created {} lessons for import {} linked to course {}",
+                        importEntity.getLessonsCreated(), importId, courseId);
+            } else {
+                log.warn("Import {} has no completed chunks with extractedData — cannot re-create lessons", importId);
+            }
+        }
 
         CurriculumImportResponse response = importMapper.toResponse(importEntity);
         response.setCourseName(course.getName());
         return response;
+    }
+
+    /**
+     * Deserialize stored {@code extractedData} JSONB from completed chunks back into
+     * {@link ExtractionResult} objects for lesson re-persistence.
+     *
+     * <p>Called by {@link #linkToCourse} when an import completed with {@code lessonsCreated=0}
+     * because {@code courseId} was null at upload time. The extraction results were already
+     * serialized and stored in {@code import_chunks.extracted_data} during the original run,
+     * so no LLM calls are needed.
+     */
+    private List<ExtractionResult> deserializeChunkResults(UUID importId) {
+        List<ImportChunk> chunks = chunkRepository
+                .findByCurriculumImportIdOrderByChunkIndexAsc(importId);
+
+        List<ExtractionResult> results = new ArrayList<>();
+        for (ImportChunk chunk : chunks) {
+            if (chunk.getStatus() != ImportChunk.ChunkStatus.COMPLETED
+                    || chunk.getExtractedData() == null
+                    || chunk.getExtractedData().isBlank()) {
+                continue;
+            }
+            try {
+                ExtractionResult result = objectMapper.readValue(
+                        chunk.getExtractedData(), ExtractionResult.class);
+                results.add(result);
+            } catch (JsonProcessingException e) {
+                log.warn("Failed to deserialize extractedData for chunk {} of import {}: {}",
+                        chunk.getChunkIndex(), importId, e.getMessage());
+            }
+        }
+        log.info("Deserialized {} extraction results from {} chunks for import {}",
+                results.size(), chunks.size(), importId);
+        return results;
     }
 
     @Override
@@ -431,32 +526,36 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
 
     // --- Helper methods ---
 
-    /** 100 MB — PPTX with embedded images can be larger than plain PDFs. */
+    /**
+     * 100 MB — PPTX with embedded images can be larger than plain PDFs.
+     */
     private static final long MAX_FILE_SIZE_BYTES = 100L * 1024 * 1024;
-
-    private static final Set<String> ACCEPTED_MIME_TYPES = Set.of(
-            "application/pdf",
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
-            "application/zip"   // some browsers report PPTX as generic zip
-    );
 
     private static final Set<String> ACCEPTED_EXTENSIONS = Set.of(".pdf", ".pptx");
 
-    private void validateImportFile(MultipartFile file) {
+    /**
+     * PDF magic bytes: "%PDF-" (0x25 0x50 0x44 0x46 0x2D)
+     * PPTX/XLSX/ZIP magic bytes: "PK\x03\x04" (Office Open XML is a ZIP archive)
+     */
+    private static final byte[] PDF_MAGIC  = {0x25, 0x50, 0x44, 0x46, 0x2D}; // %PDF-
+    private static final byte[] PPTX_MAGIC = {0x50, 0x4B, 0x03, 0x04};        // PK..
+
+    /**
+     * Validates file metadata (no content I/O): null/empty, extension, size.
+     *
+     * @return lowercase filename for reuse in magic-bytes check
+     */
+    private String validateFileMetadata(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new InvalidImportFileException("File is required and must not be empty");
         }
 
-        String contentType = file.getContentType() == null ? "" : file.getContentType().toLowerCase();
-        String filename    = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
-        boolean mimeOk     = ACCEPTED_MIME_TYPES.contains(contentType);
-        boolean extOk      = ACCEPTED_EXTENSIONS.stream().anyMatch(filename::endsWith);
+        String filename = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
+        boolean extOk = ACCEPTED_EXTENSIONS.stream().anyMatch(filename::endsWith);
 
-        if (!mimeOk && !extOk) {
+        if (!extOk) {
             throw new InvalidImportFileException(
-                    "Only PDF and PPTX files are accepted. Received MIME type: " + contentType
-                            + ", filename: " + file.getOriginalFilename());
+                    "Chỉ chấp nhận các tệp PDF và PPTX. Tên tệp nhận được: " + file.getOriginalFilename());
         }
 
         if (file.getSize() > MAX_FILE_SIZE_BYTES) {
@@ -465,6 +564,39 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
                     file.getSize() / (1024.0 * 1024.0),
                     MAX_FILE_SIZE_BYTES / (1024 * 1024)));
         }
+
+        return filename;
+    }
+
+    private void validateMagicBytes(MultipartFile file, String lowercaseFilename) {
+        int headerLength = PDF_MAGIC.length; // 5 bytes — longest magic sequence
+        byte[] header = new byte[headerLength];
+
+        try (InputStream is = file.getInputStream()) {
+            int bytesRead = is.read(header, 0, headerLength);
+            if (bytesRead < 4) {
+                throw new InvalidImportFileException("File quá nhỏ hoặc rỗng");
+            }
+        } catch (IOException e) {
+            throw new InvalidImportFileException("Không thể đọc file để xác thực: " + e.getMessage());
+        }
+
+        if (lowercaseFilename.endsWith(".pdf")) {
+            if (!startsWith(header, PDF_MAGIC)) {
+                throw new InvalidImportFileException(
+                        "File không phải PDF hợp lệ. Nội dung không khớp với định dạng PDF (%PDF-).");
+            }
+        } else if (lowercaseFilename.endsWith(".pptx")) {
+            if (!startsWith(header, PPTX_MAGIC)) {
+                throw new InvalidImportFileException(
+                        "File không phải PPTX hợp lệ. Nội dung không khớp với định dạng Office Open XML (PK).");
+            }
+        }
+    }
+
+    private static boolean startsWith(byte[] data, byte[] prefix) {
+        if (data.length < prefix.length) return false;
+        return Arrays.equals(Arrays.copyOf(data, prefix.length), prefix);
     }
 
     private CurriculumImport findImportOrThrow(UUID importId) {

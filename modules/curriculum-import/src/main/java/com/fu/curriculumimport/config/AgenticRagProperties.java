@@ -53,11 +53,6 @@ public class AgenticRagProperties {
     private boolean embeddingEnabled = true;
 
     /**
-     * Embedding model dimension (text-embedding-3-small = 1536).
-     */
-    private int embeddingDimension = 1536;
-
-    /**
      * Enable content validation step.
      */
     private boolean validationEnabled = true;
@@ -143,6 +138,31 @@ public class AgenticRagProperties {
      * Combined score threshold below which re-extraction is triggered.
      */
     private double combinedReExtractionThreshold = 0.5;
+
+    /**
+     * Maximum concurrent LLM calls across all imports.
+     * Acts as a global semaphore to prevent OpenAI rate limit exhaustion
+     * when multiple imports run in parallel.
+     * Default 6 — allows 2 concurrent imports with batch size 3 each.
+     */
+    private int maxConcurrentLlmCalls = 6;
+
+    /**
+     * Per-batch timeout in minutes for parallel chunk processing.
+     * Per-section grammar extraction can take 6 × ~30 s = 3 min per chunk;
+     * with batch size 3 and OpenAI retry, worst case is ~10 min.
+     * Default 15 — provides ample headroom without masking true hangs.
+     */
+    private int batchTimeoutMinutes = 15;
+
+    /**
+     * Minutes an import can stay in a processing state before being considered
+     * stuck and eligible for retry. Must exceed the longest expected processing
+     * time for the largest supported document.
+     * A 200-page textbook: OCR ~21 min + AI ~60 min = ~80 min total.
+     * Default 120 — prevents false-positive retry triggers for large imports.
+     */
+    private int stuckImportThresholdMinutes = 120;
 
     @PostConstruct
     public void validate() {

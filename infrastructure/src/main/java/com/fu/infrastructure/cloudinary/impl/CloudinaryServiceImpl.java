@@ -40,7 +40,7 @@ public class CloudinaryServiceImpl implements CloudinaryService {
         validateImageFile(file);
 
         try {
-            log.info("Uploading image to Cloudinary folder: {}", folder);
+            log.info("Đang tải ảnh lên thư mục Cloudinary: {}", folder);
 
             Map<?, ?> uploadResult = cloudinary.uploader().upload(file.getBytes(), ObjectUtils.asMap(
                     "folder", folder,
@@ -49,12 +49,12 @@ public class CloudinaryServiceImpl implements CloudinaryService {
             ));
 
             String secureUrl = (String) uploadResult.get("secure_url");
-            log.info("Image uploaded successfully: {}", secureUrl);
+            log.info("Tải ảnh lên thành công: {}", secureUrl);
 
             return secureUrl;
         } catch (IOException e) {
-            log.error("Failed to upload image to Cloudinary", e);
-            throw new BusinessException("UPLOAD_FAILED", "Failed to upload image: " + e.getMessage());
+            log.error("Tải ảnh lên Cloudinary thất bại", e);
+            throw new BusinessException("UPLOAD_FAILED", "Tải ảnh lên thất bại: " + e.getMessage());
         }
     }
 
@@ -64,20 +64,19 @@ public class CloudinaryServiceImpl implements CloudinaryService {
             log.info("[CLOUDINARY DISABLED] Would delete image with public ID: {}", publicId);
             return;
         }
-
         try {
-            log.info("Deleting image from Cloudinary: {}", publicId);
+            log.info("Đang xóa ảnh khỏi Cloudinary: {}", publicId);
 
             Map<?, ?> result = cloudinary.uploader().destroy(publicId, ObjectUtils.emptyMap());
 
             String deleteResult = (String) result.get("result");
             if ("ok".equals(deleteResult)) {
-                log.info("Image deleted successfully: {}", publicId);
+                log.info("Xóa ảnh thành công: {}", publicId);
             } else {
-                log.warn("Image deletion returned unexpected result: {} for publicId: {}", deleteResult, publicId);
+                log.warn("Việc xóa ảnh trả về kết quả không mong đợi: {} cho publicId: {}", deleteResult, publicId);
             }
         } catch (IOException e) {
-            log.error("Failed to delete image from Cloudinary: {}", publicId, e);
+            log.error("Xóa ảnh khỏi Cloudinary thất bại: {}", publicId, e);
             // Don't throw exception for deletion failures - log and continue
         }
     }
@@ -88,21 +87,20 @@ public class CloudinaryServiceImpl implements CloudinaryService {
             log.info("[CLOUDINARY DISABLED] Would delete audio with public ID: {}", publicId);
             return;
         }
-
         try {
-            log.info("Deleting audio from Cloudinary: {}", publicId);
+            log.info("Đang xóa âm thanh khỏi Cloudinary: {}", publicId);
 
             Map<?, ?> result = cloudinary.uploader().destroy(publicId,
                     ObjectUtils.asMap("resource_type", "video"));
 
             String deleteResult = (String) result.get("result");
             if ("ok".equals(deleteResult)) {
-                log.info("Audio deleted successfully: {}", publicId);
+                log.info("Xóa âm thanh thành công: {}", publicId);
             } else {
-                log.warn("Audio deletion returned unexpected result: {} for publicId: {}", deleteResult, publicId);
+                log.warn("Việc xóa âm thanh trả về kết quả không mong đợi: {} cho publicId: {}", deleteResult, publicId);
             }
         } catch (IOException e) {
-            log.error("Failed to delete audio from Cloudinary: {}", publicId, e);
+            log.error("Xóa âm thanh khỏi Cloudinary thất bại: {}", publicId, e);
             // Don't throw — deletion failure should not block the main flow
         }
     }
@@ -131,7 +129,7 @@ public class CloudinaryServiceImpl implements CloudinaryService {
             }
             return afterUpload;
         } catch (Exception e) {
-            log.warn("Failed to extract public ID from URL: {}", url, e);
+            log.warn("Trích xuất public ID từ URL thất bại: {}", url, e);
             return null;
         }
     }
@@ -141,30 +139,30 @@ public class CloudinaryServiceImpl implements CloudinaryService {
      */
     private void validateImageFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
-            throw new BusinessException("INVALID_FILE", "File is required and must not be empty");
+            throw new BusinessException("INVALID_FILE", "Tệp là bắt buộc và không được để trống");
         }
 
         if (file.getSize() > MAX_FILE_SIZE) {
-            throw new BusinessException("FILE_TOO_LARGE", "File size must not exceed 5MB");
+            throw new BusinessException("FILE_TOO_LARGE", "Kích thước tệp không được vượt quá 5MB");
         }
 
         String contentType = file.getContentType();
         if (contentType == null || !contentType.startsWith("image/")) {
-            throw new BusinessException("INVALID_FILE_TYPE", "Only image files are allowed (JPEG, PNG, GIF, WebP)");
+            throw new BusinessException("INVALID_FILE_TYPE", "Chỉ cho phép các định dạng ảnh JPEG, PNG, GIF, WebP");
         }
     }
 
     @Override
     public String uploadAudio(MultipartFile file, String folder) {
         if (!cloudinaryEnabled) {
-            log.info("[CLOUDINARY DISABLED] Would upload audio: {} to folder: {}", file.getOriginalFilename(), folder);
-            return "https://placeholder.co/audio?text=Cloudinary+Disabled";
+            log.info("[CLOUDINARY ĐANG TẮT] Sẽ tải âm thanh: {} lên thư mục: {}", file.getOriginalFilename(), folder);
+            return "https://placeholder.co/audio?text=Cloudinary+Dang+Tat";
         }
 
         validateAudioFile(file);
 
         try {
-            log.info("Uploading audio to Cloudinary folder: {}", folder);
+            log.info("Đang tải âm thanh lên thư mục Cloudinary: {}", folder);
 
             Map<?, ?> uploadResult = cloudinary.uploader().upload(file.getBytes(), ObjectUtils.asMap(
                     "folder", folder,
@@ -173,27 +171,27 @@ public class CloudinaryServiceImpl implements CloudinaryService {
             ));
 
             String secureUrl = (String) uploadResult.get("secure_url");
-            log.info("Audio uploaded successfully: {}", secureUrl);
+            log.info("Tải âm thanh lên thành công: {}", secureUrl);
 
             return secureUrl;
         } catch (IOException e) {
-            log.error("Failed to upload audio to Cloudinary", e);
-            throw new BusinessException("UPLOAD_FAILED", "Failed to upload audio: " + e.getMessage());
+            log.error("Tải âm thanh lên Cloudinary thất bại", e);
+            throw new BusinessException("UPLOAD_FAILED", "Tải âm thanh lên thất bại: " + e.getMessage());
         }
     }
 
     private void validateAudioFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
-            throw new BusinessException("INVALID_FILE", "Audio file is required and must not be empty");
+            throw new BusinessException("INVALID_FILE", "Tệp âm thanh là bắt buộc và không được để trống");
         }
 
         if (file.getSize() > MAX_AUDIO_FILE_SIZE) {
-            throw new BusinessException("FILE_TOO_LARGE", "Audio file size must not exceed 10MB");
+            throw new BusinessException("FILE_TOO_LARGE", "Kích thước tệp âm thanh không được vượt quá 10MB");
         }
 
         String contentType = file.getContentType();
         if (contentType == null || !contentType.startsWith("audio/")) {
-            throw new BusinessException("INVALID_FILE_TYPE", "Only audio files are allowed (WAV, MP3, OGG, WebM, M4A)");
+            throw new BusinessException("INVALID_FILE_TYPE", "Chỉ cho phép các tệp âm thanh (WAV, MP3, OGG, WebM, M4A)");
         }
     }
 }

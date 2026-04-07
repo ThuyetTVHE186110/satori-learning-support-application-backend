@@ -4,14 +4,16 @@ import com.fu.user.dto.*;
 import com.fu.user.entity.UserRole;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
  * Service interface for User Management operations.
  * Implements UC-01 to UC-05 from business requirements.
- * 
- * <h2>Use Cases (Manager Operations on Web Portal)</h2>
+ *
+ * <h2>Use Cases (Admin Operations on Web Portal)</h2>
  * <ul>
  *   <li>UC-01: View User List - search, filter, pagination</li>
  *   <li>UC-02: Create User - manual creation with welcome email</li>
@@ -19,7 +21,7 @@ import java.util.UUID;
  *   <li>UC-04: Update User Information - modify user data</li>
  *   <li>UC-05: Delete User - soft delete (set status to INACTIVE)</li>
  * </ul>
- * 
+ *
  * <h2>User Self-Service Operations</h2>
  * <ul>
  *   <li>View own profile</li>
@@ -28,12 +30,11 @@ import java.util.UUID;
  */
 public interface UserService {
 
-    // ==================== Manager Operations (UC-01 to UC-05) ====================
+    // ==================== Admin Operations (UC-01 to UC-05) ====================
 
     /**
      * UC-02: Create User
-     * Manager creates a new user account (Learner/Teacher).
-     * Admin creates any account (Learner/Teacher/Manager).
+     * Admin creates any account (Learner/Teacher/Manager/Admin).
      * <ul>
      *   <li>Validates email uniqueness (BR-01)</li>
      *   <li>If email exists with DELETED status: throw DeletedUserExistsException</li>
@@ -41,10 +42,10 @@ public interface UserService {
      *   <li>Sets status to ACTIVE (created by manager/admin)</li>
      *   <li>Sends welcome email with login credentials and password setup guide</li>
      * </ul>
-     * 
-     * @param request CreateUserRequest with user details
-     * @param createdByUserId UUID of the manager/admin creating the user
-     * @param creatorRole Role of the user creating this account
+     *
+     * @param request         CreateUserRequest with user details
+     * @param createdByUserId UUID of the admin creating the user
+     * @param creatorRole     Role of the user creating this account
      * @return Created user response
      * @throws DeletedUserExistsException if email belongs to a deleted account
      */
@@ -52,7 +53,7 @@ public interface UserService {
 
     /**
      * UC-01/UC-03: Get user by ID.
-     * 
+     *
      * @param id User UUID
      * @return User response
      */
@@ -62,15 +63,15 @@ public interface UserService {
      * UC-03: Get detailed user information with enrollment history.
      * For LEARNER: includes course and class enrollments
      * For TEACHER: includes taught classes history
-     * 
+     *
      * @param id User UUID
      * @return Detailed user response with enrollment history
      */
-    UserDetailResponse getUserDetailById(UserRole userRole,UUID id);
+    UserDetailResponse getUserDetailById(UserRole userRole, UUID id);
 
     /**
      * Get user by email.
-     * 
+     *
      * @param email User email
      * @return User response
      */
@@ -81,9 +82,8 @@ public interface UserService {
      * Get paginated list of users.
      * Default sort: createdAt DESC
      * - Admin sees all users (including deleted)
-     * - Manager sees only active users
-     * 
-     * @param pageable Pagination parameters
+     *
+     * @param pageable        Pagination parameters
      * @param currentUserRole Role of the requesting user
      * @return Page of user responses
      */
@@ -96,11 +96,11 @@ public interface UserService {
      *   <li>Search by keyword (name, email)</li>
      *   <li>Filter by role (LEARNER/TEACHER/MANAGER/ADMIN)</li>
      *   <li>Filter by status (ACTIVE/INACTIVE/etc.)</li>
-     *   <li>Role-based visibility: Manager only sees LEARNER/TEACHER</li>
+     *   <li>Role-based visibility: Admin can see all users</li>
      * </ul>
-     * 
-     * @param filter Filter criteria
-     * @param pageable Pagination parameters
+     *
+     * @param filter          Filter criteria
+     * @param pageable        Pagination parameters
      * @param currentUserRole Role of the user making the request
      * @return Page of user responses
      */
@@ -108,14 +108,13 @@ public interface UserService {
 
     /**
      * UC-04: Update User Information
-     * Manager updates user details (name, phone, status for LEARNER/TEACHER).
-     * Admin can update all users including MANAGER.
+     * Admin can update all users.
      * Deleted users cannot be updated.
-     * 
-     * @param id User UUID
-     * @param request Update request with changed fields
-     * @param updatedByUserId UUID of the manager/admin performing update
-     * @param updaterRole Role of the user performing the update
+     *
+     * @param id              User UUID
+     * @param request         Update request with changed fields
+     * @param updatedByUserId UUID of the admin performing update
+     * @param updaterRole     Role of the user performing the update
      * @return Updated user response
      */
     UserResponse updateUser(UUID id, UpdateUserRequest request, UUID updatedByUserId, UserRole updaterRole);
@@ -123,24 +122,23 @@ public interface UserService {
     /**
      * UC-05: Delete User (Soft Delete)
      * Sets status to INACTIVE and marks as deleted.
-     * Manager can delete LEARNER/TEACHER only.
-     * Admin can delete all including MANAGER.
+     * Admin can delete all users.
      * Historical data (learning progress, scores) is preserved for reporting.
-     * 
-     * @param id User UUID to delete
-     * @param deletedByUserId UUID of the manager/admin performing deletion
-     * @param deleterRole Role of the user performing the deletion
+     *
+     * @param id              User UUID to delete
+     * @param deletedByUserId UUID of the admin performing deletion
+     * @param deleterRole     Role of the user performing the deletion
      */
     void deleteUser(UUID id, UUID deletedByUserId, UserRole deleterRole);
 
-    // ==================== Admin/Manager Operations ====================
+    // ==================== Admin Operations ====================
 
     /**
-     * Admin/Manager: Restore a soft-deleted user account
-     * 
-     * @param request Restore request with user ID and new information
-     * @param restoredByUserId UUID of the admin/manager restoring the user
-     * @param restorerRole Role of the user performing the restoration
+     * Admin: Restore a soft-deleted user account
+     *
+     * @param request          Restore request with user ID and new information
+     * @param restoredByUserId UUID of the admin restoring the user
+     * @param restorerRole     Role of the user performing the restoration
      * @return Restored user response
      */
     UserResponse restoreUser(RestoreUserRequest request, UUID restoredByUserId, UserRole restorerRole);
@@ -157,7 +155,7 @@ public interface UserService {
 
     /**
      * Get current user's own profile.
-     * 
+     *
      * @param userId User UUID
      * @return User profile response
      */
@@ -166,10 +164,16 @@ public interface UserService {
     /**
      * Update current user's own profile.
      * Users can update personal info (name, phone, avatar, etc.) except email.
-     * 
-     * @param userId User UUID
+     *
+     * @param userId  User UUID
      * @param request Update profile request
      * @return Updated user response
      */
     UserResponse updateMyProfile(UUID userId, UpdateProfileRequest request);
+
+    ImportUsersResult importUsersFromExcel(MultipartFile file, UUID adminID);
+
+    ImportUserResponse approveImport(ApproveImportRequest request, UUID currentUserId);
+
+    List<UserResponse> getAllTeachers();
 }

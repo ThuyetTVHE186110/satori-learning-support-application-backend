@@ -81,4 +81,34 @@ public interface UserSessionRepository extends JpaRepository<UserSession, UUID> 
      * Find session by ID and user ID.
      */
     Optional<UserSession> findByIdAndUserId(UUID id, UUID userId);
+
+    /**
+     * Count all active sessions (for admin dashboard)
+     */
+    @Query("SELECT COUNT(s) FROM UserSession s WHERE s.revokedAt IS NULL AND s.expiresAt > CURRENT_TIMESTAMP")
+    long countActiveSessions();
+
+    /**
+     * Group active sessions by device type (for admin dashboard)
+     */
+    @Query(value = "SELECT device_info->>'device_type' as deviceType, COUNT(*) FROM user_management.user_sessions WHERE revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP GROUP BY device_info->>'device_type'", nativeQuery = true)
+    List<Object[]> findActiveSessionsGroupByDeviceType();
+
+    /**
+     * Group active sessions by operating system (for admin dashboard)
+     */
+    @Query(value = "SELECT device_info->>'os' as os, COUNT(*) FROM user_management.user_sessions WHERE revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP GROUP BY device_info->>'os'", nativeQuery = true)
+    List<Object[]> findActiveSessionsGroupByOs();
+
+    /**
+     * Group active sessions by browser (for admin dashboard)
+     */
+    @Query(value = "SELECT device_info->>'browser' as browser, COUNT(*) FROM user_management.user_sessions WHERE revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP GROUP BY device_info->>'browser'", nativeQuery = true)
+    List<Object[]> findActiveSessionsGroupByBrowser();
+
+    /**
+     * Calculate average session duration for active sessions (in seconds)
+     */
+    @Query(value = "SELECT AVG(EXTRACT(EPOCH FROM (COALESCE(revoked_at, CURRENT_TIMESTAMP) - created_at)))::BIGINT FROM user_management.user_sessions WHERE revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP", nativeQuery = true)
+    Long findAverageSessionDurationSeconds();
 }

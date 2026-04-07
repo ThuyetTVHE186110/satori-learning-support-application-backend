@@ -60,8 +60,8 @@ public class MissionServiceImpl implements MissionService {
     }
 
     @Override
-    public List<MissionResponse> getMissionsByTopic(UUID topicId) {
-        return missionRepository.findByTopicIdAndDeletedAtIsNullOrderByOrderIndexAsc(topicId)
+    public List<MissionResponse> getMissionsByConversation(UUID conversationId) {
+        return missionRepository.findByConversationIdAndDeletedAtIsNullOrderByOrderIndexAsc(conversationId)
                 .stream()
                 .map(missionMapper::toResponse)
                 .collect(Collectors.toList());

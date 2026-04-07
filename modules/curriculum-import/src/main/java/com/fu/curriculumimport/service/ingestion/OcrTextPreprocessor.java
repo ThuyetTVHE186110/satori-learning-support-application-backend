@@ -18,6 +18,13 @@ import java.util.regex.Pattern;
  *       {@code ...} that OCR occasionally detects from decorative borders.</li>
  *   <li><b>Excessive blank lines</b> — scanned pages often produce runs of
  *       empty lines between OCR blocks; collapse to a single blank line.</li>
+ *   <li><b>Letter-spaced OCR artefact</b> — Google Vision sometimes emits
+ *       each character as a separate space-separated token when the source
+ *       page uses wide letter-spacing (e.g. {@code "T r ợ t ừ"}).
+ *       This doubles the character count and causes explanation / example
+ *       sentences to be cut off by the token budget.  Lines where ≥75 % of
+ *       tokens are single Unicode code-points are collapsed: tokens are joined
+ *       without separators so the LLM receives compact, readable text.</li>
  * </ol>
  *
  * <h3>Token-budget enforcement</h3>
@@ -147,7 +154,7 @@ public final class OcrTextPreprocessor {
 
             if (isNoiseLine(stripped)) continue;
 
-            sb.append(line).append('\n');
+            sb.append(removeLetterSpacing(line)).append('\n');
         }
 
         return sb.toString().strip();
@@ -166,6 +173,8 @@ public final class OcrTextPreprocessor {
      */
     public static String truncateToTokenBudget(String text, int maxTokens) {
         if (text == null) return null;
+        // Sanitize control characters that would break JSON serialization to OpenAI
+        text = sanitizeForJson(text);
         int maxChars = maxTokens * CHARS_PER_TOKEN;
         if (text.length() <= maxChars) return text;
 
@@ -176,6 +185,22 @@ public final class OcrTextPreprocessor {
 
         return text.substring(0, cutoff).stripTrailing()
                 + "\n[...nội dung bị cắt do giới hạn token...]";
+    }
+
+    /**
+     * Strip control characters (NUL, BEL, etc.) that would break JSON serialization
+     * when sending prompts to the OpenAI API. Preserves tab, newline, and carriage return.
+     */
+    public static String sanitizeForJson(String text) {
+        if (text == null) return null;
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c >= 0x20 || c == '\n' || c == '\r' || c == '\t') {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /**
@@ -199,6 +224,56 @@ public final class OcrTextPreprocessor {
     }
 
     // ── Internal helpers ─────────────────────────────────────────────────────
+
+    /**
+     * Detect and collapse the "letter-spaced" OCR artefact.
+     *
+     * <p>Google Cloud Vision sometimes outputs each character as a separate
+     * space-separated token when the source page uses wide letter-spacing
+     * (common in Japanese/Vietnamese textbook scans):
+     * <pre>
+     *   "T r ợ t ừ [ l à ]  b i ể u  t h ị"
+     * </pre>
+     * is collapsed to:
+     * <pre>
+     *   "Trợtừ[là]biểuthị"
+     * </pre>
+     *
+     * <p><b>Heuristic</b>: if ≥75 % of non-empty, space-separated tokens on
+     * the line are ≤ 1 Unicode code-point and the line has at least 8 tokens,
+     * the line is classified as letter-spaced and all tokens are joined
+     * without separators.
+     *
+     * <p>The resulting compact text uses roughly half the tokens, preventing
+     * the explanation and example-sentence sections from being cut off by
+     * {@link #truncateToTokenBudget}.
+     *
+     * @param line a single line from OCR output (leading whitespace preserved)
+     * @return de-spaced line, or the original line unchanged when not letter-spaced
+     */
+    static String removeLetterSpacing(String line) {
+        if (line == null || line.isBlank()) return line;
+        String[] tokens = line.split(" ", -1);
+        if (tokens.length < 8) return line;
+
+        int nonEmpty = 0;
+        int singleCodePoint = 0;
+        for (String token : tokens) {
+            if (token.isEmpty()) continue;
+            nonEmpty++;
+            if (token.codePointCount(0, token.length()) <= 1) {
+                singleCodePoint++;
+            }
+        }
+        if (nonEmpty == 0 || (double) singleCodePoint / nonEmpty < 0.75) return line;
+
+        // Letter-spaced: join all tokens (no separator — LLM handles word boundaries)
+        StringBuilder sb = new StringBuilder(line.length());
+        for (String token : tokens) {
+            sb.append(token);
+        }
+        return sb.toString();
+    }
 
     /**
      * Return {@code true} if this stripped line is pure noise and should be

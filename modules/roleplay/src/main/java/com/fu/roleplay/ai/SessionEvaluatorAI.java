@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.common.ai.PromptFragment;
 import com.fu.common.ai.PromptUtils;
 import com.fu.roleplay.dto.response.SessionEvaluationResponse;
-import com.fu.roleplay.dto.entity.ConversationMessage;
+import com.fu.roleplay.entity.ConversationMessage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;

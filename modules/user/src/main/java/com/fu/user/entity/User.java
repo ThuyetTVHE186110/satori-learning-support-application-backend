@@ -68,7 +68,8 @@ public class User extends SoftDeletableEntity {
     private UserStatus status = UserStatus.PENDING_ACTIVATION;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "auth_provider", nullable = false)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "auth_provider", columnDefinition = "auth_provider", nullable = false)
     @ColumnTransformer(write = "CAST(? AS auth_provider)")
     @Builder.Default
     private AuthProvider authProvider = AuthProvider.LOCAL;
@@ -131,12 +132,6 @@ public class User extends SoftDeletableEntity {
             && (lockedUntil == null || lockedUntil.isBefore(LocalDateTime.now()));
     }
 
-    /**
-     * Check if user has manager/admin privileges
-     */
-    public boolean isManager() {
-        return role == UserRole.MANAGER || role == UserRole.ADMIN;
-    }
 
     /**
      * Check if user is a teacher

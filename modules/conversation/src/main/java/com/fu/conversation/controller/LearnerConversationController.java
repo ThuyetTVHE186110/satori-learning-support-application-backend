@@ -2,15 +2,15 @@ package com.fu.conversation.controller;
 
 import com.fu.common.response.ApiResponse;
 import com.fu.common.response.PageResponse;
-import com.fu.conversation.dto.request.CreateUserTopicRequest;
-import com.fu.conversation.dto.request.UpdateUserTopicRequest;
-import com.fu.conversation.dto.response.ConversationThemeSummaryResponse;
-import com.fu.conversation.dto.response.ConversationTopicResponse;
+import com.fu.conversation.dto.request.CreateUserConversationRequest;
+import com.fu.conversation.dto.request.UpdateUserConversationRequest;
+import com.fu.conversation.dto.response.ConversationResponse;
+import com.fu.conversation.dto.response.ConversationSummaryResponse;
 import com.fu.conversation.dto.response.ConversationTopicSummaryResponse;
-import com.fu.conversation.dto.response.UserConversationTopicResponse;
-import com.fu.conversation.service.ConversationThemeService;
+import com.fu.conversation.dto.response.UserConversationResponse;
+import com.fu.conversation.service.ConversationService;
 import com.fu.conversation.service.ConversationTopicService;
-import com.fu.conversation.service.UserConversationTopicService;
+import com.fu.conversation.service.UserConversationService;
 import com.fu.course.entity.Course;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -29,7 +29,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * REST Controller for Learner: View published topics and manage personal topics.
+ * REST Controller for Learner: View published topics/conversations and manage personal conversations.
  * Base path: /api/v1/learner/conversation
  */
 @Slf4j
@@ -39,18 +39,18 @@ import java.util.UUID;
 @PreAuthorize("hasRole('LEARNER')")
 public class LearnerConversationController {
 
-    private final ConversationThemeService themeService;
     private final ConversationTopicService topicService;
-    private final UserConversationTopicService userTopicService;
+    private final ConversationService conversationService;
+    private final UserConversationService userConversationService;
 
-    // ==================== Browse Published Themes/Topics ====================
+    // ==================== Browse Published Topics ====================
 
     /**
-     * Get all published themes (optionally filtered by JLPT level). Supports keyword search.
-     * GET /api/v1/learner/conversation/themes?level=N5&keyword=xxx
+     * Get all published topics (optionally filtered by JLPT level). Supports keyword search.
+     * GET /api/v1/learner/conversation/topics?level=N5&keyword=xxx
      */
-    @GetMapping("/themes")
-    public ResponseEntity<ApiResponse<PageResponse<ConversationThemeSummaryResponse>>> getPublishedThemes(
+    @GetMapping("/topics")
+    public ResponseEntity<ApiResponse<PageResponse<ConversationTopicSummaryResponse>>> getPublishedTopics(
             @RequestParam(required = false) Course.JlptLevel level,
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
@@ -59,11 +59,11 @@ public class LearnerConversationController {
         Pageable pageable = PageRequest.of(page, Math.min(size, 50),
                 Sort.by("orderIndex").ascending());
 
-        Page<ConversationThemeSummaryResponse> result;
+        Page<ConversationTopicSummaryResponse> result;
         if (keyword != null && !keyword.isBlank()) {
-            result = themeService.searchPublishedThemes(keyword.trim(), pageable);
+            result = topicService.searchPublishedTopics(keyword.trim(), pageable);
         } else {
-            result = themeService.getPublishedThemes(level, pageable);
+            result = topicService.getPublishedTopics(level, pageable);
         }
 
         return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
@@ -71,118 +71,120 @@ public class LearnerConversationController {
                 result.getTotalElements(), result.getTotalPages())));
     }
 
+    // ==================== Browse Published Conversations ====================
+
     /**
-     * Get published topics for a theme.
-     * GET /api/v1/learner/conversation/themes/{themeId}/topics
+     * Get published conversations for a topic (enriched with learner's practice history).
+     * GET /api/v1/learner/conversation/topics/{topicId}/conversations
      */
-    @GetMapping("/themes/{themeId}/topics")
-    public ResponseEntity<ApiResponse<List<ConversationTopicSummaryResponse>>> getTopicsByTheme(
-            @PathVariable UUID themeId,
+    @GetMapping("/topics/{topicId}/conversations")
+    public ResponseEntity<ApiResponse<List<ConversationSummaryResponse>>> getConversationsByTopic(
+            @PathVariable UUID topicId,
             @AuthenticationPrincipal(expression = "id") UUID userId) {
 
-        List<ConversationTopicSummaryResponse> topics =
-                topicService.getPublishedTopicsByTheme(themeId, userId);
-        return ResponseEntity.ok(ApiResponse.success(topics));
+        List<ConversationSummaryResponse> conversations =
+                conversationService.getPublishedConversationsByTopic(topicId, userId);
+        return ResponseEntity.ok(ApiResponse.success(conversations));
     }
 
     /**
-     * Get detail of a single published topic.
-     * GET /api/v1/learner/conversation/topics/{topicId}
+     * Get detail of a single published conversation.
+     * GET /api/v1/learner/conversation/conversations/{conversationId}
      */
-    @GetMapping("/topics/{topicId}")
-    public ResponseEntity<ApiResponse<ConversationTopicResponse>> getPublishedTopic(
-            @PathVariable UUID topicId) {
+    @GetMapping("/conversations/{conversationId}")
+    public ResponseEntity<ApiResponse<ConversationResponse>> getPublishedConversation(
+            @PathVariable UUID conversationId) {
 
         return ResponseEntity.ok(ApiResponse.success(
-                topicService.getPublishedTopic(topicId)));
+                conversationService.getPublishedConversation(conversationId)));
     }
 
-    // ==================== My Personal Topics (Chủ đề tự tạo) ====================
+    // ==================== My Personal Conversations (Hội thoại tự tạo) ====================
 
     /**
-     * Create a personal conversation topic.
-     * POST /api/v1/learner/conversation/my-topics
+     * Create a personal conversation.
+     * POST /api/v1/learner/conversation/my-conversations
      */
-    @PostMapping("/my-topics")
-    public ResponseEntity<ApiResponse<UserConversationTopicResponse>> createMyTopic(
-            @Valid @RequestBody CreateUserTopicRequest request,
+    @PostMapping("/my-conversations")
+    public ResponseEntity<ApiResponse<UserConversationResponse>> createMyConversation(
+            @Valid @RequestBody CreateUserConversationRequest request,
             @AuthenticationPrincipal(expression = "id") UUID userId) {
 
-        log.info("Learner {} creating personal topic: {}", userId, request.getTitle());
-        UserConversationTopicResponse response = userTopicService.createTopic(request, userId);
+        log.info("Learner {} creating personal conversation: {}", userId, request.getTitle());
+        UserConversationResponse response = userConversationService.createConversation(request, userId);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success("Personal topic created successfully", response));
+                .body(ApiResponse.success("Personal conversation created successfully", response));
     }
 
     /**
-     * Get all personal topics (paginated).
-     * GET /api/v1/learner/conversation/my-topics
+     * Get all personal conversations (paginated).
+     * GET /api/v1/learner/conversation/my-conversations
      */
-    @GetMapping("/my-topics")
-    public ResponseEntity<ApiResponse<PageResponse<UserConversationTopicResponse>>> getMyTopics(
+    @GetMapping("/my-conversations")
+    public ResponseEntity<ApiResponse<PageResponse<UserConversationResponse>>> getMyConversations(
             @AuthenticationPrincipal(expression = "id") UUID userId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 50),
                 Sort.by("createdAt").descending());
-        Page<UserConversationTopicResponse> result = userTopicService.getMyTopics(userId, pageable);
+        Page<UserConversationResponse> result = userConversationService.getMyConversations(userId, pageable);
         return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
                 result.getContent(), result.getNumber(), result.getSize(),
                 result.getTotalElements(), result.getTotalPages())));
     }
 
     /**
-     * Get a specific personal topic by ID.
-     * GET /api/v1/learner/conversation/my-topics/{topicId}
+     * Get a specific personal conversation by ID.
+     * GET /api/v1/learner/conversation/my-conversations/{conversationId}
      */
-    @GetMapping("/my-topics/{topicId}")
-    public ResponseEntity<ApiResponse<UserConversationTopicResponse>> getMyTopic(
-            @PathVariable UUID topicId,
+    @GetMapping("/my-conversations/{conversationId}")
+    public ResponseEntity<ApiResponse<UserConversationResponse>> getMyConversation(
+            @PathVariable UUID conversationId,
             @AuthenticationPrincipal(expression = "id") UUID userId) {
 
         return ResponseEntity.ok(ApiResponse.success(
-                userTopicService.getMyTopic(topicId, userId)));
+                userConversationService.getMyConversation(conversationId, userId)));
     }
 
     /**
-     * Update a personal topic.
-     * PUT /api/v1/learner/conversation/my-topics/{topicId}
+     * Update a personal conversation.
+     * PUT /api/v1/learner/conversation/my-conversations/{conversationId}
      */
-    @PutMapping("/my-topics/{topicId}")
-    public ResponseEntity<ApiResponse<UserConversationTopicResponse>> updateMyTopic(
-            @PathVariable UUID topicId,
-            @Valid @RequestBody UpdateUserTopicRequest request,
+    @PutMapping("/my-conversations/{conversationId}")
+    public ResponseEntity<ApiResponse<UserConversationResponse>> updateMyConversation(
+            @PathVariable UUID conversationId,
+            @Valid @RequestBody UpdateUserConversationRequest request,
             @AuthenticationPrincipal(expression = "id") UUID userId) {
 
-        UserConversationTopicResponse response = userTopicService.updateTopic(topicId, request, userId);
-        return ResponseEntity.ok(ApiResponse.success("Topic updated successfully", response));
+        UserConversationResponse response = userConversationService.updateConversation(conversationId, request, userId);
+        return ResponseEntity.ok(ApiResponse.success("Conversation updated successfully", response));
     }
 
     /**
-     * Delete a personal topic (hard delete - it's private data).
-     * DELETE /api/v1/learner/conversation/my-topics/{topicId}
+     * Delete a personal conversation (hard delete - it's private data).
+     * DELETE /api/v1/learner/conversation/my-conversations/{conversationId}
      */
-    @DeleteMapping("/my-topics/{topicId}")
-    public ResponseEntity<ApiResponse<Void>> deleteMyTopic(
-            @PathVariable UUID topicId,
+    @DeleteMapping("/my-conversations/{conversationId}")
+    public ResponseEntity<ApiResponse<Void>> deleteMyConversation(
+            @PathVariable UUID conversationId,
             @AuthenticationPrincipal(expression = "id") UUID userId) {
 
-        userTopicService.deleteTopic(topicId, userId);
-        return ResponseEntity.ok(ApiResponse.success("Topic deleted successfully", null));
+        userConversationService.deleteConversation(conversationId, userId);
+        return ResponseEntity.ok(ApiResponse.success("Conversation deleted successfully", null));
     }
 
     /**
-     * Generate AI context for a personal topic (vocabulary hints, grammar, expressions).
-     * POST /api/v1/learner/conversation/my-topics/{topicId}/generate-context
+     * Generate AI context for a personal conversation (vocabulary hints, grammar, expressions).
+     * POST /api/v1/learner/conversation/my-conversations/{conversationId}/generate-context
      */
-    @PostMapping("/my-topics/{topicId}/generate-context")
-    public ResponseEntity<ApiResponse<UserConversationTopicResponse>> generateContext(
-            @PathVariable UUID topicId,
+    @PostMapping("/my-conversations/{conversationId}/generate-context")
+    public ResponseEntity<ApiResponse<UserConversationResponse>> generateContext(
+            @PathVariable UUID conversationId,
             @AuthenticationPrincipal(expression = "id") UUID userId) {
 
-        log.info("Learner {} generating context for topic: {}", userId, topicId);
-        UserConversationTopicResponse response = userTopicService.generateContext(topicId, userId);
+        log.info("Learner {} generating context for conversation: {}", userId, conversationId);
+        UserConversationResponse response = userConversationService.generateContext(conversationId, userId);
         return ResponseEntity.ok(ApiResponse.success("Context generated successfully", response));
     }
 }

@@ -2,6 +2,13 @@ package com.fu.assignment.service.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.achievement.config.ActivityExpConfig;
+import com.fu.achievement.service.AchievementService;
+import com.fu.achievement.service.StreakService;
+import com.fu.achievement.service.LearningLevelService;
+import com.fu.achievement.dto.response.LevelUpNotificationResponse;
+import com.fu.achievement.dto.response.UserAchievementResponse;
+import com.fu.assignment.ai.AiGradingService;
 import com.fu.assignment.ai.QuizAiGenerationService;
 import com.fu.assignment.ai.QuizExplanationService;
 import com.fu.assignment.dto.request.*;
@@ -10,11 +17,15 @@ import com.fu.assignment.entity.*;
 import com.fu.assignment.exception.AssignmentNotFoundException;
 import com.fu.assignment.mapper.AssignmentMapper;
 import com.fu.assignment.repository.*;
+import com.fu.assignment.service.AssignmentScheduleManager;
 import com.fu.assignment.service.AssignmentService;
+import com.fu.assignment.service.SubmissionService;
 import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.repository.ClassMemberRepository;
 import com.fu.clazz.repository.ClassRepository;
 import com.fu.assignment.util.MarkdownUtils;
+import com.fu.clazz.entity.ClassStatus;
+import com.fu.clazz.repository.ClassTeacherHistoryRepository;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.infrastructure.cloudinary.CloudinaryService;
@@ -25,6 +36,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import org.springframework.web.multipart.MultipartFile;
@@ -33,6 +45,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -54,9 +67,18 @@ public class AssignmentServiceImpl implements AssignmentService {
     private final QuizExplanationService quizExplanationService;
     private final ObjectMapper objectMapper;
     private final CloudinaryService cloudinaryService;
-
+    private final SubmissionService submissionService;
+    private final AiGradingService aiGradingService;
+    private final AssignmentScheduleManager scheduleManager;
+    private final ClassTeacherHistoryRepository classTeacherHistoryRepository;
+    private final StreakService streakService;
+    private final LearningLevelService learningLevelService;
+    private final AchievementService achievementService;
     private static final String SUBMISSION_IMAGE_FOLDER = "satori/assignment-submissions";
-    private static final int MAX_SUBMISSION_IMAGES = 10;
+    private static final String SUBMISSION_FAILED_MSG = "Không thể lưu hoặc chấm điểm bài nộp.";
+    private static final int MAX_SUBMISSION_IMAGES = 3;
+    private static final long MAX_IMAGE_SIZE_MB = 5;
+    private static final long MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // AI QUESTION GENERATION
@@ -119,6 +141,11 @@ public class AssignmentServiceImpl implements AssignmentService {
             log.warn("Assignment {} update blocked: Audio content changed but assignment has submissions.", assignmentId);
             throw new BusinessException("HAS_SUBMISSIONS", "Bài tập đã có học viên nộp bài. Không thể cập nhật nội dung bài tập đã giao." + "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
         }
+        // If submissions exist, throw ONLY if questions ACTUALLY changed
+        if (hasSubmissions && hasQuizQuestionsChanged(request.getQuestions(), assignmentId)) {
+            log.warn("Assignment {} update blocked: Quiz questions changed but assignment has submissions.", assignmentId);
+            throw new BusinessException("HAS_SUBMISSIONS", "Bài tập đã có học viên nộp bài. Không thể cập nhật nội dung đề bài (câu hỏi). " + "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
+        }
         if (!hasSubmissions) {
             if (audioFile != null && !audioFile.isEmpty()) {
                 // Delete old audio from Cloudinary before uploading the new one
@@ -153,15 +180,12 @@ public class AssignmentServiceImpl implements AssignmentService {
             assignment.setQuestionCount(qCount);
         }
 
-        // If submissions exist, throw ONLY if questions ACTUALLY changed
-        if (hasSubmissions && hasQuizQuestionsChanged(request.getQuestions(), assignmentId)) {
-            log.warn("Assignment {} update blocked: Quiz questions changed but assignment has submissions.", assignmentId);
-            throw new BusinessException("HAS_SUBMISSIONS", "Bài tập đã có học viên nộp bài. Không thể cập nhật nội dung đề bài (câu hỏi). " + "Chỉ được cập nhật thông tin cơ bản (tiêu đề, mô tả, hạn nộp...).");
-        }
 
         // Save assignment
         Assignment savedAssignment = assignmentRepository.save(assignment);
         UUID finalAssignmentId = savedAssignment.getId();
+
+        scheduleManager.scheduleClosing(savedAssignment);
 
         // If new assignment, bind it to the class target
         if (isNewAssignment && classId != null) {
@@ -186,7 +210,6 @@ public class AssignmentServiceImpl implements AssignmentService {
                     q.setCorrectAnswer(MarkdownUtils.sanitizeAndValidate(qDto.getCorrectAnswer()));
                     q.setCorrectAnswers(qDto.getCorrectAnswers());
                     q.setExplanation(MarkdownUtils.sanitizePlainExplanation(qDto.getExplanation()));
-                    q.setImageUrl(qDto.getImageUrl());
                     q.setJlptLevel(qDto.getJlptLevel());
 
                     if (q.getId() == null) {
@@ -208,6 +231,7 @@ public class AssignmentServiceImpl implements AssignmentService {
             // Remove orphan links (questions removed from the form)
             for (AssignmentQuestion oldLink : existingLinks) {
                 if (!incomingQuestionIds.contains(oldLink.getQuestionId())) {
+
                     assignmentQuestionRepository.delete(oldLink);
                 }
             }
@@ -275,6 +299,8 @@ public class AssignmentServiceImpl implements AssignmentService {
         Assignment savedAssignment = assignmentRepository.save(assignment);
         UUID savedId = savedAssignment.getId();
 
+        scheduleManager.scheduleClosing(savedAssignment);
+
         // If new assignment, bind it to the class target
         if (isNewAssignment && classId != null) {
             AssignmentTarget target = AssignmentTarget.builder().assignmentId(savedId).classId(classId).build();
@@ -284,9 +310,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         // Save or update writing content — only when no submissions
         if (!hasSubmissions) {
             WritingAssignment content = writingAssignmentRepository.findByAssignmentId(savedId).orElse(WritingAssignment.builder().assignmentId(savedId).createdAt(LocalDateTime.now()).build());
-
             content.setPrompt(request.getPrompt());
-            content.setSourceText(request.getSourceText());
             writingAssignmentRepository.save(content);
         }
 
@@ -303,6 +327,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         requireDraftOrNoSubmission(assignment);
         assignment.softDelete(teacherId);
         assignmentRepository.save(assignment);
+        scheduleManager.cancelScheduledClosing(assignmentId);
         log.info("Assignment {} soft-deleted by teacher {}", assignmentId, teacherId);
     }
 
@@ -319,11 +344,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         // Teacher must be in class to see its assignments
         verifyTeacherAccess(clazz, teacherId);
 
-        Specification<Assignment> spec = Specification.where(AssignmentSpecification.withClassId(classId))
-                .and(AssignmentSpecification.isNotDeleted())
-                .and(AssignmentSpecification.withTitle(title))
-                .and(AssignmentSpecification.withStatus(status))
-                .and(AssignmentSpecification.withType(type));
+        Specification<Assignment> spec = Specification.where(AssignmentSpecification.withClassId(classId)).and(AssignmentSpecification.isNotDeleted()).and(AssignmentSpecification.withTitle(title)).and(AssignmentSpecification.withStatus(status)).and(AssignmentSpecification.withType(type));
 
         Page<Assignment> assignments = assignmentRepository.findAll(spec, pageable);
         return populateTeacherSummaryResponses(assignments);
@@ -377,11 +398,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     @Override
     public Page<AssignmentSummaryResponse> getMyAssignments(UUID teacherId, String title, com.fu.assignment.entity.AssignmentStatus status, AssignmentType type, Pageable pageable) {
         log.warn("title={}, status={}, type={}", title, status, type);
-        Specification<Assignment> spec = Specification.where(AssignmentSpecification.withCreatedBy(teacherId))
-                .and(AssignmentSpecification.isNotDeleted())
-                .and(AssignmentSpecification.withTitle(title))
-                .and(AssignmentSpecification.withStatus(status))
-                .and(AssignmentSpecification.withType(type));
+        Specification<Assignment> spec = Specification.where(AssignmentSpecification.withCreatedBy(teacherId)).and(AssignmentSpecification.isNotDeleted()).and(AssignmentSpecification.withTitle(title)).and(AssignmentSpecification.withStatus(status)).and(AssignmentSpecification.withType(type));
 
         Page<Assignment> assignments = assignmentRepository.findAll(spec, pageable);
         return populateTeacherSummaryResponses(assignments);
@@ -389,8 +406,17 @@ public class AssignmentServiceImpl implements AssignmentService {
 
     private Page<AssignmentSummaryResponse> populateTeacherSummaryResponses(Page<Assignment> assignments) {
         List<UUID> ids = assignments.getContent().stream().map(Assignment::getId).toList();
-        Map<UUID, Long> ungradedCounts = new HashMap<>();
+        List<UUID> classIds = assignments.getContent().stream()
+                .map(Assignment::getClassId)
+                .filter(Objects::nonNull)
+                .distinct().toList();
 
+        Map<UUID, String> classNames = new HashMap<>();
+        if (!classIds.isEmpty()) {
+            classRepository.findAllById(classIds).forEach(c -> classNames.put(c.getId(), c.getName()));
+        }
+
+        Map<UUID, Long> ungradedCounts = new HashMap<>();
         if (!ids.isEmpty()) {
             List<Object[]> counts = submissionRepository.countUngradedByAssignmentIds(ids);
             for (Object[] row : counts) {
@@ -401,6 +427,8 @@ public class AssignmentServiceImpl implements AssignmentService {
         return assignments.map(a -> {
             AssignmentSummaryResponse r = buildSummaryResponse(a);
             r.setUngradedCount(ungradedCounts.getOrDefault(a.getId(), 0L));
+            r.setClassId(a.getClassId());
+            r.setClassName(classNames.get(a.getClassId()));
             return r;
         });
     }
@@ -423,8 +451,7 @@ public class AssignmentServiceImpl implements AssignmentService {
             SubmissionStatus status = learnerStatuses.getOrDefault(a.getId(), SubmissionStatus.NOT_STARTED);
 
             // If not finished and past dueDate -> mark as OVERDUE for the learner view
-            if ((status == SubmissionStatus.NOT_STARTED || status == SubmissionStatus.IN_PROGRESS)
-                    && a.getDueDate() != null && a.getDueDate().isBefore(LocalDateTime.now())) {
+            if ((status == SubmissionStatus.NOT_STARTED || status == SubmissionStatus.IN_PROGRESS) && a.getDueDate() != null && a.getDueDate().isBefore(LocalDateTime.now())) {
                 status = SubmissionStatus.OVERDUE;
             }
 
@@ -449,26 +476,11 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         // 2. Verify target class exists and teacher has access
         UUID targetClassId = request.getTargetClassId();
-        Clazz targetClazz = classRepository.findByIdAndNotDeleted(targetClassId)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy lớp học đích"));
+        Clazz targetClazz = classRepository.findByIdAndNotDeleted(targetClassId).orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy lớp học đích"));
         verifyTeacherAccess(targetClazz, teacherId);
 
         // 3. Build cloned assignment (new entity, DRAFT, no submissions)
-        Assignment cloned = Assignment.builder()
-                .title(request.getNewTitle() != null ? request.getNewTitle() : source.getTitle())
-                .description(source.getDescription())
-                .instructions(source.getInstructions())
-                .assignmentType(source.getAssignmentType())
-                .classId(targetClassId)
-                .dueDate(request.getNewDueDate())
-                .startDate(null)
-                .questionCount(source.getQuestionCount())
-                .status(AssignmentStatus.DRAFT)
-                .hasSubmissions(false)
-                .createdBy(teacherId)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .build();
+        Assignment cloned = Assignment.builder().title(request.getNewTitle() != null ? request.getNewTitle() : source.getTitle()).description(source.getDescription()).instructions(source.getInstructions()).assignmentType(source.getAssignmentType()).classId(targetClassId).dueDate(request.getNewDueDate()).startDate(null).questionCount(source.getQuestionCount()).status(AssignmentStatus.DRAFT).hasSubmissions(false).createdBy(teacherId).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
 
         Assignment savedClone = assignmentRepository.save(cloned);
         UUID clonedId = savedClone.getId();
@@ -496,7 +508,7 @@ public class AssignmentServiceImpl implements AssignmentService {
             if (original == null || original.isDeleted()) continue;
 
             // Deep-copy the question
-            QuizQuestion copy = QuizQuestion.builder().questionText(original.getQuestionText()).questionType(original.getQuestionType()).questionSubtype(original.getQuestionSubtype()).options(original.getOptions()).correctAnswer(original.getCorrectAnswer()).correctAnswers(original.getCorrectAnswers()).explanation(original.getExplanation()).vocabularyId(original.getVocabularyId()).grammarId(original.getGrammarId()).lessonId(original.getLessonId()).aiGenerated(original.getAiGenerated()).jlptLevel(original.getJlptLevel()).tags(original.getTags()).imageUrl(original.getImageUrl()).createdBy(teacherId).createdAt(LocalDateTime.now()).build();
+            QuizQuestion copy = QuizQuestion.builder().questionText(original.getQuestionText()).questionType(original.getQuestionType()).questionSubtype(original.getQuestionSubtype()).options(original.getOptions()).correctAnswer(original.getCorrectAnswer()).correctAnswers(original.getCorrectAnswers()).explanation(original.getExplanation()).aiGenerated(original.getAiGenerated()).jlptLevel(original.getJlptLevel()).createdBy(teacherId).createdAt(LocalDateTime.now()).build();
 
             QuizQuestion savedCopy = questionRepository.save(copy);
 
@@ -511,7 +523,7 @@ public class AssignmentServiceImpl implements AssignmentService {
      */
     private void cloneWritingContent(UUID sourceAssignmentId, UUID clonedAssignmentId) {
         writingAssignmentRepository.findByAssignmentId(sourceAssignmentId).ifPresent(source -> {
-            WritingAssignment copy = WritingAssignment.builder().assignmentId(clonedAssignmentId).prompt(source.getPrompt()).sourceText(source.getSourceText()).createdAt(LocalDateTime.now()).build();
+            WritingAssignment copy = WritingAssignment.builder().assignmentId(clonedAssignmentId).prompt(source.getPrompt()).createdAt(LocalDateTime.now()).build();
             writingAssignmentRepository.save(copy);
         });
     }
@@ -532,7 +544,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         AssignmentSubmission submission = findSubmissionOrThrow(submissionId);
         Assignment assignment = findAssignmentOrThrow(submission.getAssignmentId());
         verifyAssignmentAccess(assignment, teacherId);
-        return enrichSubmissionResponse(submission);
+        return enrichSubmissionResponseForDetail(submission);
     }
 
     @Override
@@ -550,7 +562,6 @@ public class AssignmentServiceImpl implements AssignmentService {
             throw new BusinessException("INVALID_STATUS", "Chỉ có thể chấm điểm bài nộp ở trạng thái SUBMITTED.");
         }
 
-        submission.setTeacherScore(request.getTeacherScore());
         submission.setFeedback(request.getFeedback());
         submission.setScore(request.getTeacherScore());
         submission.setStatus(SubmissionStatus.GRADED);
@@ -561,7 +572,13 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         submissionRepository.save(submission);
         log.info("Writing submission {} graded by teacher {} with score {}", submissionId, teacherId, request.getTeacherScore());
-        return enrichSubmissionResponse(submission);
+
+        // NOTE: Streak is NOT recorded here because:
+        // 1. Streak already counted when learner submitted (submitWriting)
+        // 2. Teacher grading is not a learner activity
+        // 3. Teacher may grade days later, not reflecting learner's actual activity date
+
+        return enrichSubmissionResponseForDetail(submission);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -569,17 +586,85 @@ public class AssignmentServiceImpl implements AssignmentService {
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Override
-    public Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, String title, AssignmentType type, Pageable pageable) {
-        List<UUID> classIds = classMemberRepository.findActiveClassIdsByUserId(learnerId);
+    public Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(
+            UUID learnerId, UUID classId, String title, AssignmentType type,
+            SubmissionStatus status, Pageable pageable) {
 
-        Specification<Assignment> spec = Specification.where(AssignmentSpecification.isAvailableForLearner(learnerId, classIds))
-                .and(AssignmentSpecification.isNotDeleted())
-                .and(AssignmentSpecification.isPublishedOrClosed())
-                .and(AssignmentSpecification.withTitle(title))
-                .and(AssignmentSpecification.withType(type));
+        List<UUID> classIds;
 
-        Page<Assignment> assignments = assignmentRepository.findAll(spec, pageable);
+        if (classId == null) {
+            // No classId provided: get THE single active enrolled class
+            Optional<UUID> activeClassId = getActiveEnrolledClassId(learnerId);
+            if (activeClassId.isEmpty()) {
+                // Learner has no active class - return empty page
+                log.info("Learner {} has no active enrolled class", learnerId);
+                return Page.empty(pageable);
+            }
+            classIds = List.of(activeClassId.get());
+        } else {
+            // Specific classId provided: validate learner has access
+            if (!isLearnerInClass(learnerId, classId)) {
+                log.warn("Learner {} attempted to access assignments from class {} but is not a member",
+                        learnerId, classId);
+                return Page.empty(pageable);
+            }
+            classIds = List.of(classId);
+        }
+
+        String titleStr = (title != null) ? title : "";
+        String typeStr = (type != null) ? type.name() : "";
+        String statusStr = (status != null) ? status.name() : "";
+
+        Page<Assignment> assignments = assignmentRepository
+                .findLearnerAssignmentsSorted(learnerId, classIds, titleStr, typeStr, statusStr, pageable);
+
         return populateLearnerSummaryResponses(assignments, learnerId);
+    }
+
+    /**
+     * Get the single active enrolled class for a learner.
+     * Business rule: Learners can only be enrolled in ONE active class at a time.
+     *
+     * @param learnerId Learner's UUID
+     * @return Optional containing the active class ID, or empty if no active class
+     */
+    private Optional<UUID> getActiveEnrolledClassId(UUID learnerId) {
+        // Get all active class memberships
+        List<UUID> activeClassIds = classMemberRepository.findActiveClassIdsByUserId(learnerId);
+
+        if (activeClassIds.isEmpty()) {
+            return Optional.empty();
+        }
+
+        // Filter for classes with ACTIVE status
+        List<Clazz> activeClasses = classRepository.findAllById(activeClassIds).stream()
+                .filter(clazz -> clazz.getStatus() == ClassStatus.ACTIVE)
+                .filter(clazz -> clazz.getDeletedAt() == null)
+                .toList();
+
+        if (activeClasses.isEmpty()) {
+            return Optional.empty();
+        }
+
+        // Should only be one active class per learner (business rule)
+        if (activeClasses.size() > 1) {
+            log.warn("Learner {} has multiple active classes: {}. Using first one.",
+                    learnerId, activeClasses.stream().map(Clazz::getId).toList());
+        }
+
+        return Optional.of(activeClasses.get(0).getId());
+    }
+
+    /**
+     * Check if learner is an active member of a class.
+     *
+     * @param learnerId Learner's UUID
+     * @param classId   Class UUID
+     * @return true if learner is an active member (removedAt IS NULL)
+     */
+    private boolean isLearnerInClass(UUID learnerId, UUID classId) {
+        List<UUID> activeClassIds = classMemberRepository.findActiveClassIdsByUserId(learnerId);
+        return activeClassIds.contains(classId);
     }
 
 
@@ -588,7 +673,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     public LearnerAssignmentResponse startAssignment(UUID assignmentId, UUID learnerId) {
         Assignment assignment = findAssignmentOrThrow(assignmentId);
 
-        if (assignment.getStatus() != AssignmentStatus.PUBLISHED) {
+        if (assignment.getStatus() == AssignmentStatus.DRAFT || assignment.getStatus() == AssignmentStatus.CLOSED) {
             throw new BusinessException("ASSIGNMENT_NOT_PUBLISHED", "Bài tập này hiện không khả dụng.");
         }
 
@@ -619,20 +704,7 @@ public class AssignmentServiceImpl implements AssignmentService {
             totalQ = 1;
         }
 
-        AssignmentSubmission submission = AssignmentSubmission.builder()
-                .assignmentId(assignmentId)
-                .userId(learnerId)
-                .status(SubmissionStatus.IN_PROGRESS)
-                .attemptNumber((int) attemptCount + 1)
-                .startedAt(LocalDateTime.now())
-                .totalQuestions(totalQ)
-                .answers("[]")
-                .correctCount(0)
-                .timeSpentSeconds(0)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .build();
-
+        AssignmentSubmission submission = AssignmentSubmission.builder().assignmentId(assignmentId).userId(learnerId).status(SubmissionStatus.IN_PROGRESS).attemptNumber((int) attemptCount + 1).startedAt(LocalDateTime.now()).totalQuestions(totalQ).answers("[]").correctCount(0).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
         submissionRepository.save(submission);
 
         // Mark assignment as having submissions
@@ -647,56 +719,94 @@ public class AssignmentServiceImpl implements AssignmentService {
     }
 
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public SubmissionResponse submitQuiz(UUID assignmentId, SubmitAssignmentRequest request, UUID learnerId) {
         // Resolve active submission by assignmentId and learnerId
-        AssignmentSubmission submission = submissionRepository.findActiveByAssignmentIdAndUserId(assignmentId, learnerId)
-                .orElseThrow(() -> new BusinessException("NO_ACTIVE_SUBMISSION", "Không tìm thấy bài nộp đang làm. Vui lòng bắt đầu bài tập trước."));
-
-        if (!submission.getUserId().equals(learnerId)) {
-            throw new BusinessException("ACCESS_DENIED", "Không thể nộp bài thay cho học viên khác.");
-        }
+        AssignmentSubmission submission = submissionRepository.findActiveByAssignmentIdAndUserId(assignmentId, learnerId).orElseThrow(() -> new BusinessException("NO_ACTIVE_SUBMISSION", "Không tìm thấy bài nộp đang làm. Vui lòng bắt đầu bài tập trước."));
 
         Assignment assignment = findAssignmentOrThrow(assignmentId);
         if (!assignment.isQuiz()) {
             throw new BusinessException("INVALID_TYPE", "Vui lòng sử dụng submitWriting cho bài tập không phải dạng QUIZ.");
         }
-
-        // Auto-score: compare submitted answers with correct answers
-        String answersJson = request.getAnswers();
-        AutoScoreResult scored = autoScore(answersJson, assignment);
-
-        submission.setAnswers(answersJson);
-        submission.setCorrectCount(scored.correctCount);
-        submission.setScore(BigDecimal.valueOf(scored.earnedPoints));
-        submission.setTimeSpentSeconds(request.getTimeSpentSeconds());
-        submission.setSubmittedAt(LocalDateTime.now());
-        submission.setUpdatedAt(LocalDateTime.now());
-
-        // Past due date and late not allowed → OVERDUE
         if (assignment.getDueDate().isBefore(LocalDateTime.now())) {
-            submission.setStatus(SubmissionStatus.OVERDUE);
+            submission.setAnswers(request.getAnswers());
+            submission.setSubmittedAt(LocalDateTime.now());
+            submissionService.markSubmissionAsOverdueAndSave(submission.getId());
+            throw new BusinessException("PAST_DUE", "Bài tập này đã hết hạn nộp.");
         } else {
-            submission.setStatus(SubmissionStatus.GRADED); // Quiz: auto-graded immediately
-        }
 
-        submissionRepository.save(submission);
-        log.info("Learner {} submitted quiz {}, score={}", learnerId, submission.getAssignmentId(), BigDecimal.valueOf(scored.earnedPoints));
-        return enrichSubmissionResponse(submission);
+            // Auto-score: compare submitted answers with correct answers
+            String answersJson = request.getAnswers();
+            AutoScoreResult scored = autoScore(answersJson, assignment);
+
+            submission.setAnswers(answersJson);
+            submission.setCorrectCount(scored.correctCount);
+            submission.setScore(BigDecimal.valueOf(scored.earnedPoints));
+            submission.setSubmittedAt(LocalDateTime.now());
+            submission.setUpdatedAt(LocalDateTime.now());
+            submission.setStatus(SubmissionStatus.GRADED); // Quiz: auto-graded immediately
+            submissionRepository.save(submission);
+            log.info("Learner {} submitted quiz {}, score={}", learnerId, submission.getAssignmentId(), BigDecimal.valueOf(scored.earnedPoints));
+
+            // Record daily activity for streak tracking
+            try {
+                streakService.recordDailyActivity(learnerId, "ASSIGNMENT");
+            } catch (Exception e) {
+                log.error("Error recording daily activity for learner: {}", learnerId, e);
+            }
+
+            // Award direct EXP for quiz completion (with level tier + score bonus)
+            int expEarned = 0;
+            Integer oldTotalExp = null;
+            try {
+                oldTotalExp = learningLevelService.getTotalExp(learnerId);
+                int currentLevel = learningLevelService.getCurrentLevel(learnerId);
+                Integer score = submission.getScore() != null ? submission.getScore().intValue() : null;
+                expEarned = ActivityExpConfig.ActivityType.QUIZ_ASSIGNMENT.getExpReward(currentLevel, score);
+                learningLevelService.awardExpAndCheckLevelUp(learnerId, expEarned);
+                log.info("Awarded {} EXP for quiz completion to user {} (level {}, score {}%)",
+                        expEarned, learnerId, currentLevel, score);
+            } catch (Exception e) {
+                log.error("Error awarding EXP for quiz completion to user {}", learnerId, e);
+                // Continue even if EXP fails - don't break submission flow
+            }
+
+            // Retrieve badges earned during this quiz submission
+            List<UserAchievementResponse> earnedBadges = Collections.emptyList();
+            try {
+                earnedBadges = achievementService.getUserEarnedBadges(learnerId).stream()
+                        .filter(badge -> badge.getEarnedAt() != null
+                                && badge.getEarnedAt().isAfter(submission.getStartedAt())
+                                && badge.getEarnedAt().isBefore(submission.getSubmittedAt().plusSeconds(5)))
+                        .collect(Collectors.toList());
+                log.info("Retrieved {} earned badges for quiz submission by user {}", earnedBadges.size(), learnerId);
+            } catch (Exception e) {
+                log.error("Error retrieving earned badges for quiz submission", e);
+                // Continue even if badge retrieval fails
+            }
+
+            return enrichSubmissionResponseForSubmit(submission, earnedBadges, expEarned, oldTotalExp);
+        }
     }
 
     @Override
-    @Transactional
-    public SubmissionResponse submitWriting(UUID assignmentId, SubmitWritingRequest request, MultipartFile[] images, UUID learnerId) {
-        boolean hasText = request.getWrittenAnswer() != null && !request.getWrittenAnswer().isBlank();
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public SubmissionResponse submitWriting(UUID assignmentId, MultipartFile[] images, UUID learnerId) {
         boolean hasImages = images != null && images.length > 0 && java.util.Arrays.stream(images).anyMatch(f -> f != null && !f.isEmpty());
 
-        if (!hasText && !hasImages) {
-            throw new BusinessException("INVALID_INPUT", "Phải cung cấp bài viết hoặc ít nhất một hình ảnh.");
+        if (!hasImages) {
+            throw new BusinessException("INVALID_INPUT", "Phải cung cấp ít nhất một hình ảnh.");
         }
 
         if (hasImages && images.length > MAX_SUBMISSION_IMAGES) {
             throw new BusinessException("TOO_MANY_IMAGES", "Tối đa " + MAX_SUBMISSION_IMAGES + " hình ảnh cho mỗi bài nộp.");
+        }
+
+        // Validate each image size
+        for (MultipartFile image : images) {
+            if (image != null && !image.isEmpty() && image.getSize() > MAX_IMAGE_SIZE_BYTES) {
+                throw new BusinessException("IMAGE_TOO_LARGE", "Mỗi hình ảnh không được vượt quá " + MAX_IMAGE_SIZE_MB + "MB. File: " + image.getOriginalFilename() + " có kích thước " + (image.getSize() / (1024 * 1024)) + "MB.");
+            }
         }
 
         // Find the active IN_PROGRESS submission for this assignment+learner
@@ -704,15 +814,10 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         AssignmentSubmission submission = active.stream().filter(s -> s.getStatus() == SubmissionStatus.IN_PROGRESS).findFirst().orElseThrow(() -> new BusinessException("NO_ACTIVE_SUBMISSION", "Không tìm thấy bài nộp đang làm. Vui lòng bắt đầu bài tập trước."));
 
-        if (!submission.getUserId().equals(learnerId)) {
-            throw new BusinessException("ACCESS_DENIED", "Không thể nộp bài thay cho học viên khác.");
-        }
-
         Assignment assignment = findAssignmentOrThrow(assignmentId);
         if (assignment.isQuiz()) {
             throw new BusinessException("INVALID_TYPE", "Vui lòng sử dụng submitQuiz cho bài tập dạng QUIZ.");
         }
-
         // Upload images to Cloudinary
         if (hasImages) {
             List<String> imageUrls = uploadSubmissionImages(images, learnerId, assignmentId);
@@ -724,20 +829,109 @@ public class AssignmentServiceImpl implements AssignmentService {
             }
         }
 
-        submission.setWrittenAnswer(request.getWrittenAnswer());
-        submission.setTimeSpentSeconds(request.getTimeSpentSeconds());
         submission.setSubmittedAt(LocalDateTime.now());
-        submission.setUpdatedAt(LocalDateTime.now());
-
         if (assignment.getDueDate().isBefore(LocalDateTime.now())) {
-            submission.setStatus(SubmissionStatus.OVERDUE);
+            submissionService.markSubmissionAsOverdueAndSave(submission.getId());
+            throw new BusinessException("PAST_DUE", "Bài tập này đã hết hạn nộp.");
         } else {
+            submission.setUpdatedAt(LocalDateTime.now());
             submission.setStatus(SubmissionStatus.SUBMITTED); // waiting for teacher grading
+            submissionRepository.save(submission);
+            log.info("Learner {} submitted writing for assignment {} (images: {})", learnerId, assignmentId, hasImages ? images.length : 0);
+
+            // Record daily activity for streak tracking (writing/translation submission)
+            try {
+                streakService.recordDailyActivity(learnerId, "ASSIGNMENT");
+            } catch (Exception e) {
+                log.error("Error recording daily activity for learner: {}", learnerId, e);
+            }
+
+            // Award direct EXP for writing submission (no score yet - graded by teacher later)
+            int expEarned = 0;
+            Integer oldTotalExp = null;
+            try {
+                oldTotalExp = learningLevelService.getTotalExp(learnerId);
+                int currentLevel = learningLevelService.getCurrentLevel(learnerId);
+                expEarned = ActivityExpConfig.ActivityType.WRITING_ASSIGNMENT.getExpReward(currentLevel, null);
+                learningLevelService.awardExpAndCheckLevelUp(learnerId, expEarned);
+                log.info("Awarded {} EXP for writing submission to user {} (level {}, score not yet graded)",
+                        expEarned, learnerId, currentLevel);
+            } catch (Exception e) {
+                log.error("Error awarding EXP for writing submission to user {}", learnerId, e);
+                // Continue even if EXP fails - don't break submission flow
+            }
+
+            // Retrieve badges earned during this writing submission
+            List<UserAchievementResponse> earnedBadges = Collections.emptyList();
+            try {
+                earnedBadges = achievementService.getUserEarnedBadges(learnerId).stream()
+                        .filter(badge -> badge.getEarnedAt() != null
+                                && badge.getEarnedAt().isAfter(submission.getStartedAt())
+                                && badge.getEarnedAt().isBefore(submission.getSubmittedAt().plusSeconds(5)))
+                        .collect(Collectors.toList());
+                log.info("Retrieved {} earned badges for writing submission by user {}", earnedBadges.size(), learnerId);
+            } catch (Exception e) {
+                log.error("Error retrieving earned badges for writing submission", e);
+                // Continue even if badge retrieval fails
+            }
+
+            return enrichSubmissionResponseForSubmit(submission, earnedBadges, expEarned, oldTotalExp);
+        }
+    }
+
+    @Override
+    @Transactional
+    public SubmissionResponse cancelSubmission(UUID assignmentId, UUID learnerId) {
+        Assignment assignment = findAssignmentOrThrow(assignmentId);
+
+        if (assignment.isQuiz()) {
+            throw new BusinessException("INVALID_TYPE", "Không thể hủy nộp bài dạng trắc nghiệm (QUIZ).");
         }
 
+        if (assignment.getDueDate().isBefore(LocalDateTime.now())) {
+            throw new BusinessException("PAST_DUE", "Đã quá hạn nộp, không thể hủy nộp bài.");
+        }
+
+        List<AssignmentSubmission> active = submissionRepository.findByAssignmentIdAndUserIdOrderByAttemptDesc(assignmentId, learnerId);
+        if (active.isEmpty()) {
+            throw new BusinessException("NO_SUBMISSION", "Không tìm thấy bài nộp nào để hủy.");
+        }
+
+        AssignmentSubmission submission = active.get(0);
+
+        if (submission.getStatus() == SubmissionStatus.GRADED) {
+            throw new BusinessException("ALREADY_GRADED", "Bài nộp đã được chấm điểm, không thể hủy.");
+        }
+
+        if (submission.getStatus() == SubmissionStatus.IN_PROGRESS) {
+            throw new BusinessException("ALREADY_IN_PROGRESS", "Bài nộp đang ở trạng thái nháp.");
+        }
+
+        if (submission.getStatus() != SubmissionStatus.SUBMITTED) {
+            throw new BusinessException("INVALID_STATUS", "Chỉ có thể hủy bài nộp ở trạng thái SUBMITTED.");
+        }
+
+        submission.setStatus(SubmissionStatus.IN_PROGRESS);
+        submission.setSubmittedAt(null);
+        submission.setUpdatedAt(LocalDateTime.now());
+
+        log.info("Learner {} canceled submission for assignment {}", learnerId, assignmentId);
+        deleteSubmittedImages(submission);
         submissionRepository.save(submission);
-        log.info("Learner {} submitted writing for assignment {} (images: {})", learnerId, assignmentId, hasImages ? images.length : 0);
-        return enrichSubmissionResponse(submission);
+        return enrichSubmissionResponseForDetail(submission);
+    }
+
+    private void deleteSubmittedImages(AssignmentSubmission submission) {
+        List<String> imageUrls = parseImageUrls(submission.getImageUrls());
+        if (imageUrls != null && !imageUrls.isEmpty()) {
+            for (String s : imageUrls) {
+                String publicId = cloudinaryService.extractPublicId(s);
+                if (publicId != null) {
+                    cloudinaryService.deleteImage(publicId);
+                }
+            }
+        }
+        submission.setImageUrls("[]");
     }
 
     @Override
@@ -751,7 +945,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         if (!submission.getUserId().equals(learnerId)) {
             throw new BusinessException("ACCESS_DENIED", "Bạn chỉ có thể xem bài nộp của chính mình.");
         }
-        return enrichSubmissionResponse(submission);
+        return enrichSubmissionResponseForDetail(submission);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -766,6 +960,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     private AssignmentSubmission findSubmissionOrThrow(UUID id) {
         return submissionRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy bài nộp."));
     }
+
     private void requireDraftOrNoSubmission(Assignment assignment) {
         if (assignment.getStatus() != AssignmentStatus.DRAFT && assignment.getHasSubmissions() == Boolean.TRUE) {
             throw new BusinessException("INVALID_STATUS", "Thao tác này chỉ được phép với bài tập ở trạng thái nháp hoặc chưa có bài được nộp.");
@@ -779,7 +974,10 @@ public class AssignmentServiceImpl implements AssignmentService {
     }
 
     private void verifyTeacherAccess(Clazz clazz, UUID teacherId) {
-        if (clazz != null && !clazz.getTeacherId().equals(teacherId)) {
+        if (clazz == null) return;
+        UUID currentTeacherId = classTeacherHistoryRepository.findCurrentTeacherIdByClassId(clazz.getId())
+                .orElse(null);
+        if (!teacherId.equals(currentTeacherId)) {
             throw new BusinessException("ACCESS_DENIED", "Bạn không phải là giáo viên của lớp này.");
         }
     }
@@ -864,6 +1062,13 @@ public class AssignmentServiceImpl implements AssignmentService {
             writingAssignmentRepository.findByAssignmentId(assignment.getId()).ifPresent(wc -> response.setWritingContent(mapper.toResponse(wc)));
         }
 
+        if (assignment.getClassId() != null) {
+            classRepository.findByIdAndNotDeleted(assignment.getClassId()).ifPresent(c -> {
+                response.setClassName(c.getName());
+                response.setClassId(c.getId());
+            });
+        }
+
         return response;
     }
 
@@ -889,12 +1094,15 @@ public class AssignmentServiceImpl implements AssignmentService {
         return response;
     }
 
-    private SubmissionResponse enrichSubmissionResponse(AssignmentSubmission s) {
+    /**
+     * Enrich submission response for DETAIL/VIEW operations (GET endpoints, teacher view)
+     * Does NOT include levelUp or badges - these are user's old data, not a new event
+     */
+    private SubmissionResponse enrichSubmissionResponseForDetail(AssignmentSubmission s) {
         SubmissionResponse response = mapper.toResponse(s);
         Assignment assignment = assignmentRepository.findByIdAndNotDeleted(s.getAssignmentId()).orElse(null);
         if (assignment != null) {
             response.setAssignmentTitle(assignment.getTitle());
-
             // Enrich quiz details if completed
             if (assignment.isQuiz() && (s.getStatus() == SubmissionStatus.GRADED || s.getStatus() == SubmissionStatus.OVERDUE)) {
                 response.setQuizDetails(enrichQuizDetails(s.getAnswers()));
@@ -907,9 +1115,67 @@ public class AssignmentServiceImpl implements AssignmentService {
         });
         // Parse imageUrls JSON string → List<String>
         response.setImageUrls(parseImageUrls(s.getImageUrls()));
+
+        // NO levelUp or badges - this is detail view, not a new submission event
         return response;
     }
 
+    /**
+     * Enrich submission response for SUBMIT operations (POST endpoints)
+     * Includes levelUp and badges - user just completed an action
+     */
+    private SubmissionResponse enrichSubmissionResponseForSubmit(AssignmentSubmission s, List<UserAchievementResponse> earnedBadges, int expEarned, Integer oldTotalExp) {
+        SubmissionResponse response = mapper.toResponse(s);
+        Assignment assignment = assignmentRepository.findByIdAndNotDeleted(s.getAssignmentId()).orElse(null);
+        if (assignment != null) {
+            response.setAssignmentTitle(assignment.getTitle());
+            // Enrich quiz details if completed
+            if (assignment.isQuiz() && (s.getStatus() == SubmissionStatus.GRADED || s.getStatus() == SubmissionStatus.OVERDUE)) {
+                response.setQuizDetails(enrichQuizDetails(s.getAnswers()));
+            }
+        }
+
+        userRepository.findById(s.getUserId()).ifPresent(u -> {
+            response.setUserFullName(u.getFullName());
+            response.setUserEmail(u.getEmail());
+        });
+        // Parse imageUrls JSON string → List<String>
+        response.setImageUrls(parseImageUrls(s.getImageUrls()));
+
+        // Add earned badges from this submission
+        if (earnedBadges != null && !earnedBadges.isEmpty()) {
+            response.setEarnedBadges(earnedBadges);
+        }
+
+        // Add level-up information (only for submit operations)
+        try {
+            LearningLevelService.LevelProgressInfo progressInfo = learningLevelService.getProgressToNextLevel(s.getUserId());
+            
+            // Calculate previous level from oldTotalExp
+            int previousLevel = 0;
+            if (oldTotalExp != null && oldTotalExp >= 0) {
+                previousLevel = learningLevelService.calculateLevelFromExp(oldTotalExp);
+            }
+            
+            int currentLevel = progressInfo.currentLevel();
+            boolean actuallyLeveledUp = previousLevel < currentLevel;
+            
+            LevelUpNotificationResponse levelUpInfo = LevelUpNotificationResponse.builder()
+                    .previousLevel(previousLevel)
+                    .newLevel(currentLevel)
+                    .expEarned(expEarned)
+                    .oldTotalExp(oldTotalExp)
+                    .totalExp(progressInfo.totalExp())
+                    .expToNextLevel(progressInfo.expToNextLevel())
+                    .progressPercentage(progressInfo.percentToNextLevel())
+                    .isLevelUp(actuallyLeveledUp)
+                    .build();
+            response.setLevelUpInfo(levelUpInfo);
+        } catch (Exception e) {
+            log.debug("Error retrieving level-up info for submission", e);
+        }
+        return response;
+    }
     private List<QuizSubmissionDetailResponse> enrichQuizDetails(String answersJson) {
         List<QuizSubmissionDetailResponse> details = new ArrayList<>();
         if (answersJson == null || answersJson.isBlank()) return details;
@@ -922,16 +1188,7 @@ public class AssignmentServiceImpl implements AssignmentService {
 
                 questionRepository.findById(questionId).ifPresent(q -> {
                     boolean isCorrect = checkAnswer(q, selectedAnswer);
-                    details.add(QuizSubmissionDetailResponse.builder()
-                            .questionId(questionId)
-                            .questionText(q.getQuestionText())
-                            .questionType(q.getQuestionType())
-                            .selectedAnswer(selectedAnswer)
-                            .correctAnswer(formatCorrectAnswer(q))
-                            .explanation(q.getExplanation())
-                            .isCorrect(isCorrect)
-                            .options(toJsonNode(q.getOptions()))
-                            .build());
+                    details.add(QuizSubmissionDetailResponse.builder().questionId(questionId).questionText(q.getQuestionText()).questionType(q.getQuestionType()).selectedAnswer(selectedAnswer).correctAnswer(formatCorrectAnswer(q)).explanation(q.getExplanation()).isCorrect(isCorrect).options(toJsonNode(q.getOptions())).build());
                 });
             }
         } catch (Exception e) {
@@ -1120,7 +1377,7 @@ public class AssignmentServiceImpl implements AssignmentService {
      * (prompt, sampleAnswer, sourceText, etc.) that would modify the assignment's core content.
      */
     private boolean hasWritingContent(SaveFullWritingRequest request) {
-        return request.getPrompt() != null || request.getSourceText() != null;
+        return request.getPrompt() != null;
     }
 
     /**
@@ -1137,10 +1394,6 @@ public class AssignmentServiceImpl implements AssignmentService {
             return true;
         }
 
-        if (!Objects.equals(current.getSourceText(), request.getSourceText())) {
-            log.warn("Writing content changed: sourceText. Incoming={}, Existing={}", request.getSourceText(), current.getSourceText());
-            return true;
-        }
         return false;
     }
 
@@ -1220,18 +1473,16 @@ public class AssignmentServiceImpl implements AssignmentService {
                 return true;
             }
 
-            if (!Objects.equals(incoming.getImageUrl(), existing.getImageUrl())) {
-                log.warn("Quiz question {} changed: imageUrl. Incoming={}, Existing={}", incoming.getId(), incoming.getImageUrl(), existing.getImageUrl());
-                return true;
-            }
             if (!Objects.equals(incoming.getJlptLevel(), existing.getJlptLevel())) {
-                log.warn("Quiz question {} changed: jlptLevel. Incoming={}, Existing={}", incoming.getId(), incoming.getJlptLevel(), existing.getJlptLevel());
-                return true;
+                if (!Objects.equals(incoming.getJlptLevel(), existing.getJlptLevel())) {
+                    log.warn("Quiz question {} changed: jlptLevel. Incoming={}, Existing={}", incoming.getId(), incoming.getJlptLevel(), existing.getJlptLevel());
+                    return true;
+                }
             }
         }
-
         return false;
     }
+
 
     private String sanitizeOptionsJson(String optionsJson) {
         if (optionsJson == null || optionsJson.isBlank()) return optionsJson;
@@ -1294,6 +1545,11 @@ public class AssignmentServiceImpl implements AssignmentService {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    @Override
+    public WritingEvaluationResponse evaluateWriting(WritingEvaluationRequest request, MultipartFile[] images) {
+        return aiGradingService.evaluateWriting(request, images);
     }
 }
 

@@ -3,10 +3,10 @@ package com.fu.conversation.ai;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.common.ai.PromptUtils;
-import com.fu.conversation.dto.response.GeneratedThemeSuggestionResponse;
+import com.fu.conversation.dto.response.GeneratedConversationSuggestionResponse;
 import com.fu.conversation.dto.response.GeneratedTopicSuggestionResponse;
-import com.fu.conversation.entity.ConversationTheme;
-import com.fu.conversation.repository.ConversationThemeRepository;
+import com.fu.conversation.entity.ConversationTopic;
+import com.fu.conversation.repository.ConversationTopicRepository;
 import com.fu.course.entity.Course;
 import com.fu.course.entity.GrammarPoint;
 import com.fu.course.entity.Vocabulary;
@@ -22,24 +22,23 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 /**
- * AI service for generating conversation themes and topic context.
- * Uses OpenAI GPT to analyze course vocabulary/grammar and suggest conversation topics.
+ * AI service for generating conversation topics and conversation context.
+ * Uses OpenAI GPT to analyze course vocabulary/grammar and suggest conversations.
  */
 @Service
 @Slf4j
 public class ConversationGenerationService {
 
-    private static final String GENERATE_TOPICS_SYSTEM_PROMPT = """
-            You are a Korean language teacher assistant helping design conversation practice topics.
-            Given a conversation theme (with its associated vocabulary and grammar), generate specific sub-topics for learners to practice.
+    private static final String GENERATE_CONVERSATIONS_SYSTEM_PROMPT = """
+            You are a Japanese language teacher assistant helping design conversation practice scenarios.
+            Given a conversation topic (with its associated vocabulary and grammar), generate specific conversations for learners to practice.
 
             Always respond with a valid JSON array. Do not include markdown code fences.
-            Each topic object must have:
-            - title (String): Topic title in English/Vietnamese
-            - titleJapanese (String): Topic title in Korean
+            Each conversation object must have:
+            - title (String): Conversation title in English/Vietnamese
+            - titleJapanese (String): Conversation title in Japanese
             - description (String): 2-3 sentence description
             - descriptionVi (String): Vietnamese description
             - scenario (String): Detailed roleplay scenario in English (who learner plays, who AI plays, context)
@@ -62,33 +61,33 @@ public class ConversationGenerationService {
               - orderIndex (Integer): starting from 1
             """;
 
-    private static final String GENERATE_THEMES_SYSTEM_PROMPT = """
-            You are a Korean language teacher assistant helping design conversation practice themes.
-            Themes are course-agnostic: they represent broad real-world situations suitable
-            for any Korean learner at the given JLPT level.
+    private static final String GENERATE_TOPICS_SYSTEM_PROMPT = """
+            You are a Japanese language teacher assistant helping design conversation practice topics.
+            Topics are course-agnostic: they represent broad real-world situations suitable
+            for any Japanese learner at the given JLPT level.
 
             Always respond with a valid JSON array. Do not include markdown code fences.
-            Each theme object must have these fields:
-            - title (String): Theme title in Vietnamese/English
-            - titleJapanese (String): Theme title in Korean
-            - description (String): Brief description of the theme (2-3 sentences)
+            Each topic object must have these fields:
+            - title (String): Topic title in Vietnamese/English
+            - titleJapanese (String): Topic title in Japanese
+            - description (String): Brief description of the topic (2-3 sentences)
             - descriptionVi (String): Vietnamese description
             - category (String): One of: daily_life, travel, business, school, shopping, restaurant, health, culture
             - jlptLevel (String): N5/N4/N3/N2/N1
-            - vocabularyHints (Array<String>): 5-8 representative vocabulary words for this theme
-            - grammarPoints (Array<String>): 3-5 grammar patterns commonly used in this theme
-            - usefulExpressions (Array<String>): 4-6 useful expressions for this theme
-            - scenarioSuggestions (Array<String>): 3-4 specific sub-topic scenario ideas for topics under this theme
+            - vocabularyHints (Array<String>): 5-8 representative vocabulary words for this topic
+            - grammarPoints (Array<String>): 3-5 grammar patterns commonly used in this topic
+            - usefulExpressions (Array<String>): 4-6 useful expressions for this topic
+            - scenarioSuggestions (Array<String>): 3-4 specific sub-conversation scenario ideas under this topic
             """;
 
     private static final String GENERATE_USER_CONTEXT_SYSTEM_PROMPT = """
-            You are a Korean language learning assistant.
-            Given a conversation topic scenario described by a learner, generate helpful context
+            You are a Japanese language learning assistant.
+            Given a conversation scenario described by a learner, generate helpful context
             including vocabulary hints, grammar points, and useful expressions for practicing that scenario.
 
             Respond with a valid JSON object. Do not include markdown code fences.
             The object must have:
-            - vocabularyHints (Array<String>): 8-10 relevant Korean vocabulary words with meanings
+            - vocabularyHints (Array<String>): 8-10 relevant Japanese vocabulary words with meanings
             - grammarPoints (Array<String>): 3-5 relevant grammar patterns
             - usefulExpressions (Array<String>): 5-8 useful expressions for this scenario
             - practiceQuestions (Array<String>): 3-4 example questions to practice in this scenario
@@ -98,36 +97,36 @@ public class ConversationGenerationService {
     private final VocabularyRepository vocabularyRepository;
     private final GrammarPointRepository grammarPointRepository;
     private final CourseRepository courseRepository;
-    private final ConversationThemeRepository themeRepository;
+    private final ConversationTopicRepository topicRepository;
     private final ObjectMapper objectMapper;
 
     public ConversationGenerationService(OpenAiChatModel chatModel,
                                           VocabularyRepository vocabularyRepository,
                                           GrammarPointRepository grammarPointRepository,
                                           CourseRepository courseRepository,
-                                          ConversationThemeRepository themeRepository,
+                                          ConversationTopicRepository topicRepository,
                                           ObjectMapper objectMapper) {
         this.chatClient = ChatClient.builder(chatModel).build();
         this.vocabularyRepository = vocabularyRepository;
         this.grammarPointRepository = grammarPointRepository;
         this.courseRepository = courseRepository;
-        this.themeRepository = themeRepository;
+        this.topicRepository = topicRepository;
         this.objectMapper = objectMapper;
     }
 
     /**
-     * Generate conversation theme suggestions (course-agnostic).
-     * Themes represent broad real-world situations for any Korean learner.
+     * Generate conversation topic suggestions (course-agnostic).
+     * Topics represent broad real-world situations for any Japanese learner.
      *
      * @param jlptLevel optional JLPT level to target
      * @param category  optional category hint (e.g. "restaurant", "travel")
      * @param hint      optional free-text hint for the AI
-     * @param count     number of themes to suggest (1-5)
-     * @return list of theme suggestions (not persisted yet)
+     * @param count     number of topics to suggest (1-5)
+     * @return list of topic suggestions (not persisted yet)
      */
-    public List<GeneratedThemeSuggestionResponse> generateThemes(
+    public List<GeneratedTopicSuggestionResponse> generateTopics(
             Course.JlptLevel jlptLevel, String category, String hint, int count) {
-        log.info("Generating {} conversation themes (jlpt={}, category={})", count, jlptLevel, category);
+        log.info("Generating {} conversation topics (jlpt={}, category={})", count, jlptLevel, category);
 
         StringBuilder sb = new StringBuilder();
         if (jlptLevel != null) {
@@ -137,64 +136,65 @@ public class ConversationGenerationService {
             sb.append("Preferred category: ").append(category).append("\n");
         }
         if (hint != null && !hint.isBlank()) {
-            sb.append("Additional guidance: ").append(hint).append("\n");
+            String safeHint = hint.strip();
+            if (safeHint.length() > 500) safeHint = safeHint.substring(0, 500);
+            sb.append("Additional guidance: [").append(safeHint).append("]\n");
         }
-        sb.append("\nGenerate ").append(count).append(" conversation theme(s) in JSON array format.");
+        sb.append("\nGenerate ").append(count).append(" conversation topic(s) in JSON array format.");
 
         try {
             String rawResponse = chatClient.prompt()
-                    .system(GENERATE_THEMES_SYSTEM_PROMPT)
+                    .system(GENERATE_TOPICS_SYSTEM_PROMPT)
                     .user(sb.toString())
                     .call()
                     .content();
 
             String cleanJson = cleanJson(rawResponse);
             return objectMapper.readValue(cleanJson,
-                    new TypeReference<List<GeneratedThemeSuggestionResponse>>() {});
+                    new TypeReference<List<GeneratedTopicSuggestionResponse>>() {});
 
         } catch (Exception e) {
-            log.error("Failed to generate themes: {}", e.getMessage());
+            log.error("Failed to generate topics: {}", e.getMessage());
             return new ArrayList<>();
         }
     }
 
     /**
-     * Generate conversation topic suggestions for a manager.
-     * Topics are course-specific: the given course's vocabulary and grammar provide context.
+     * Generate conversation suggestions for a topic.
+     * Conversations are course-specific: the given course's vocabulary and grammar provide context.
      *
-     * @param themeId    UUID of the theme (course-agnostic parent)
+     * @param topicId    UUID of the topic (course-agnostic parent)
      * @param courseId   UUID of the course whose vocab/grammar is used as context
-     * @param jlptLevel  optional JLPT level override (falls back to theme level if omitted)
-     * @param count      number of topics to suggest (1-5)
-     * @return list of topic suggestions (not persisted yet)
+     * @param jlptLevel  optional JLPT level override (falls back to topic level if omitted)
+     * @param count      number of conversations to suggest (1-5)
+     * @return list of conversation suggestions (not persisted yet)
      */
-    public List<GeneratedTopicSuggestionResponse> generateTopicsForTheme(
-            UUID themeId, UUID courseId, Course.JlptLevel jlptLevel, int count) {
-        log.info("Generating {} conversation topics for theme: {}, course: {}", count, themeId, courseId);
+    public List<GeneratedConversationSuggestionResponse> generateConversationsForTopic(
+            UUID topicId, UUID courseId, Course.JlptLevel jlptLevel, int count) {
+        log.info("Generating {} conversations for topic: {}, course: {}", count, topicId, courseId);
 
-        ConversationTheme theme = themeRepository.findById(themeId).orElse(null);
-        if (theme == null) {
-            log.warn("Theme not found: {}", themeId);
+        ConversationTopic topic = topicRepository.findById(topicId).orElse(null);
+        if (topic == null) {
+            log.warn("Topic not found: {}", topicId);
             return new ArrayList<>();
         }
 
         StringBuilder contextBuilder = new StringBuilder();
-        contextBuilder.append("Theme: ").append(theme.getTitle()).append("\n");
-        if (theme.getTitleJapanese() != null) {
-            contextBuilder.append("Theme (Korean): ").append(theme.getTitleJapanese()).append("\n");
+        contextBuilder.append("Topic: ").append(topic.getTitle()).append("\n");
+        if (topic.getTitleJapanese() != null) {
+            contextBuilder.append("Topic (Japanese): ").append(topic.getTitleJapanese()).append("\n");
         }
-        if (theme.getDescription() != null) {
-            contextBuilder.append("Description: ").append(theme.getDescription()).append("\n");
+        if (topic.getDescription() != null) {
+            contextBuilder.append("Description: ").append(topic.getDescription()).append("\n");
         }
-        if (theme.getCategory() != null) {
-            contextBuilder.append("Category: ").append(theme.getCategory()).append("\n");
+        if (topic.getCategory() != null) {
+            contextBuilder.append("Category: ").append(topic.getCategory()).append("\n");
         }
-        Course.JlptLevel effectiveLevel = jlptLevel != null ? jlptLevel : theme.getJlptLevel();
+        Course.JlptLevel effectiveLevel = jlptLevel != null ? jlptLevel : topic.getJlptLevel();
         if (effectiveLevel != null) {
             contextBuilder.append("Target JLPT Level: ").append(effectiveLevel.name()).append("\n");
         }
 
-        // Load vocab/grammar from the specified course (topics are course-specific)
         String courseName = courseRepository.findById(courseId)
                 .map(Course::getName).orElse(null);
         if (courseName != null) {
@@ -224,35 +224,35 @@ public class ConversationGenerationService {
                     .append("\n"));
         }
 
-        contextBuilder.append("\nGenerate ").append(count).append(" sub-topic(s) in JSON array format.");
+        contextBuilder.append("\nGenerate ").append(count).append(" conversation(s) in JSON array format.");
 
         try {
             String rawResponse = chatClient.prompt()
-                    .system(GENERATE_TOPICS_SYSTEM_PROMPT)
+                    .system(GENERATE_CONVERSATIONS_SYSTEM_PROMPT)
                     .user(contextBuilder.toString())
                     .call()
                     .content();
 
             String cleanJson = cleanJson(rawResponse);
             return objectMapper.readValue(cleanJson,
-                    new TypeReference<List<GeneratedTopicSuggestionResponse>>() {});
+                    new TypeReference<List<GeneratedConversationSuggestionResponse>>() {});
 
         } catch (Exception e) {
-            log.error("Failed to generate topics for theme {}: {}", themeId, e.getMessage());
+            log.error("Failed to generate conversations for topic {}: {}", topicId, e.getMessage());
             return new ArrayList<>();
         }
     }
 
     /**
-     * Generate AI context for a learner's personal conversation topic.
+     * Generate AI context for a learner's personal conversation.
      * Uses the scenario text and optionally enriches with vocabulary/grammar from a linked course.
      *
      * @param scenario  free-form scenario description from the learner
      * @param courseId  optional course UUID for additional vocabulary/grammar context
      * @return JSON string suitable for storing in aiGeneratedContext column
      */
-    public String generateUserTopicContext(String scenario, UUID courseId) {
-        log.info("Generating context for user topic scenario: {}", scenario);
+    public String generateUserConversationContext(String scenario, UUID courseId) {
+        log.info("Generating context for user conversation scenario: {}", scenario);
 
         StringBuilder contextInfo = new StringBuilder();
         contextInfo.append("Scenario: ").append(scenario).append("\n\n");
@@ -291,7 +291,7 @@ public class ConversationGenerationService {
             return cleanJson;
 
         } catch (Exception e) {
-            log.error("Failed to generate user topic context: {}", e.getMessage());
+            log.error("Failed to generate user conversation context: {}", e.getMessage());
             return "{}";
         }
     }

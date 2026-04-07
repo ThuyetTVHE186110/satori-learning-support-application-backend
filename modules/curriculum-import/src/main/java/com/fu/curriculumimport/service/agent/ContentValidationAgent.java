@@ -6,6 +6,7 @@ import com.fu.curriculumimport.service.agent.ValidationResult.ValidationIssue;
 import com.fu.curriculumimport.service.agent.ValidationResult.ValidationIssue.IssueSeverity;
 import com.fu.curriculumimport.service.agent.ValidationResult.ValidationStatus;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
+import com.fu.curriculumimport.util.JapaneseTextPatterns;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -50,15 +51,14 @@ public class ContentValidationAgent {
     private final GroundingVerifier groundingVerifier;
     private final AgenticRagProperties ragProperties;
 
-    // Japanese text patterns
-    private static final Pattern HIRAGANA = Pattern.compile("[\\u3040-\\u309F]");
-    private static final Pattern KATAKANA = Pattern.compile("[\\u30A0-\\u30FF]");
-    private static final Pattern KANJI = Pattern.compile("[\\u4E00-\\u9FAF]");
-    private static final Pattern KANA_OR_KANJI = Pattern.compile("[\\u3040-\\u309F\\u30A0-\\u30FF\\u4E00-\\u9FAF]");
-    private static final Pattern ROMAJI = Pattern.compile("^[a-zA-Z\\s\\-']+$");
-    private static final Pattern VALID_JLPT = Pattern.compile("^N[1-5]$");
+    // Japanese text patterns — shared via JapaneseTextPatterns utility
+    private static final Pattern HIRAGANA = JapaneseTextPatterns.HIRAGANA;
+    private static final Pattern KATAKANA = JapaneseTextPatterns.KATAKANA;
+    private static final Pattern KANA_OR_KANJI = JapaneseTextPatterns.KANA_OR_KANJI;
+    private static final Pattern ROMAJI = JapaneseTextPatterns.ROMAJI;
+    private static final Pattern VALID_JLPT = JapaneseTextPatterns.VALID_JLPT;
 
-    private final double DEFAULT_CONFIDENCE_THRESHOLD = 0.6;
+    private static final double DEFAULT_CONFIDENCE_THRESHOLD = 0.6;
 
     /**
      * Full 3-layer validation: Rule-Based + Self-Reflection + Grounding.
@@ -73,6 +73,19 @@ public class ContentValidationAgent {
                                           DocumentChunk sourceChunk, String jlptLevel) {
         log.debug("Starting 3-layer validation for chunk {} ({} vocab, {} grammar)",
                 result.getChunkIndex(), result.getVocabulary().size(), result.getGrammarPoints().size());
+
+        // === LAYER 0: Structural anti-split check (markdown headings vs extracted count) ===
+        if (sourceChunk != null && !result.getGrammarPoints().isEmpty()) {
+            int sectionCount = countNumberedSections(sourceChunk.getContent());
+            int extractedCount = result.getGrammarPoints().size();
+            if (sectionCount > 0 && extractedCount > sectionCount * 2) {
+                log.warn("Chunk {}: anti-split triggered — {} numbered sections in markdown but {} grammar points extracted (>2x). "
+                        + "Likely split sub-components. Will flag for re-extraction.",
+                        result.getChunkIndex(), sectionCount, extractedCount);
+                // Force low confidence to trigger re-extraction with anti-split feedback
+                result.setConfidence(Math.min(result.getConfidence(), 0.3));
+            }
+        }
 
         // === LAYER 1: Rule-Based Validation ===
         ValidationResult ruleBasedResult = validateRuleBased(result, confidenceThreshold);
@@ -181,28 +194,15 @@ public class ContentValidationAgent {
                 .build();
     }
 
-    /**
-     * Simple validation (rule-based only) — backward compatible.
-     */
-    public ValidationResult validate(ExtractionResult result, double confidenceThreshold) {
-        return validateRuleBased(result, confidenceThreshold);
-    }
-
-    /**
-     * Validate with default confidence threshold.
-     */
-    public ValidationResult validate(ExtractionResult result) {
-        return validateRuleBased(result, DEFAULT_CONFIDENCE_THRESHOLD);
-    }
-
     // ==========================================================================
     // LAYER 1: Rule-Based Validation
     // ==========================================================================
 
     /**
      * Rule-based validation — structural, linguistic, and completeness checks.
+     * Also usable standalone for unit testing without LLM dependencies.
      */
-    private ValidationResult validateRuleBased(ExtractionResult result, double confidenceThreshold) {
+    public ValidationResult validateRuleBased(ExtractionResult result, double confidenceThreshold) {
         List<ValidationIssue> issues = new ArrayList<>();
         int validVocab = 0;
         int validGrammar = 0;
@@ -403,6 +403,20 @@ public class ContentValidationAgent {
                     "Ensure the text is in Japanese"));
         }
 
+        // japaneseText should use kanji when available, not furigana
+        if (!isBlank(vocab.getJapaneseText()) && !isBlank(vocab.getKanjiWriting())) {
+            String jp = vocab.getJapaneseText().trim();
+            String kw = vocab.getKanjiWriting().trim();
+            boolean jpIsPureKana = HIRAGANA.matcher(jp).find()
+                    && !jp.chars().anyMatch(c -> c >= 0x4E00 && c <= 0x9FFF);
+            boolean kwHasKanji = kw.chars().anyMatch(c -> c >= 0x4E00 && c <= 0x9FFF);
+            if (jpIsPureKana && kwHasKanji && !jp.equals(kw)) {
+                issues.add(issue(id, "japaneseText", IssueSeverity.WARNING,
+                        "japaneseText '" + jp + "' is furigana but kanjiWriting '" + kw + "' has kanji — use kanji as japaneseText",
+                        "Set japaneseText to the kanji form: " + kw));
+            }
+        }
+
         // Reading should be in hiragana
         if (isBlank(vocab.getReading())) {
             issues.add(issue(id, "reading", IssueSeverity.WARNING,
@@ -440,6 +454,24 @@ public class ContentValidationAgent {
 
     // --- Grammar Validation ---
 
+    /**
+     * Regex to detect numbered grammar section headings in markdown content.
+     * Matches patterns like: "## 1. ...", "## 2. ...", "### 1) ...", "1. ...", "1) ..."
+     */
+    private static final java.util.regex.Pattern NUMBERED_HEADING_PATTERN =
+            java.util.regex.Pattern.compile("^(?:#{1,4}\\s+)?\\d+[.\\))]\\s+", java.util.regex.Pattern.MULTILINE);
+
+    /**
+     * Count numbered grammar sections in chunk content (markdown headings or plain numbered items).
+     */
+    static int countNumberedSections(String content) {
+        if (content == null || content.isBlank()) return 0;
+        java.util.regex.Matcher m = NUMBERED_HEADING_PATTERN.matcher(content);
+        int count = 0;
+        while (m.find()) count++;
+        return count;
+    }
+
     private List<ValidationIssue> validateGrammar(ExtractionResult.ExtractedGrammar grammar) {
         List<ValidationIssue> issues = new ArrayList<>();
         String id = grammar.getPattern() != null ? grammar.getPattern() : "unknown";
@@ -448,6 +480,18 @@ public class ContentValidationAgent {
         if (isBlank(grammar.getPattern())) {
             issues.add(issue(id, "pattern", IssueSeverity.ERROR,
                     "Grammar pattern is empty", "Provide the grammar pattern"));
+        }
+
+        // Anti-paraphrase check: detailedExplanationVi too short suggests LLM summarized
+        // instead of copying verbatim from the textbook. Raised from 50 to 150 chars because
+        // even the shortest MnN grammar explanations are typically 100+ chars in Vietnamese.
+        if (!isBlank(grammar.getDetailedExplanationVi())
+                && grammar.getDetailedExplanationVi().length() < 150) {
+            issues.add(issue(id, "detailedExplanationVi", IssueSeverity.WARNING,
+                    "Detailed explanation is suspiciously short (" + grammar.getDetailedExplanationVi().length()
+                    + " chars). It should be a VERBATIM copy from the textbook, not a summary.",
+                    "Copy the FULL explanation text from the source, including all sub-explanations "
+                    + "and example sentences within the numbered section."));
         }
 
         // Meanings
@@ -461,7 +505,7 @@ public class ContentValidationAgent {
         }
 
         // Explanation
-        if (isBlank(grammar.getShortExplanation()) && isBlank(grammar.getDetailedExplanation())) {
+        if (isBlank(grammar.getShortExplanationVi()) && isBlank(grammar.getDetailedExplanationVi())) {
             issues.add(issue(id, "explanation", IssueSeverity.WARNING,
                     "No explanation provided for grammar point",
                     "Add at least a short explanation"));

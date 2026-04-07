@@ -7,7 +7,7 @@ import com.fu.conversation.dto.response.ConversationMissionResponse;
 import com.fu.conversation.entity.ConversationMission;
 import com.fu.conversation.mapper.ConversationMissionMapper;
 import com.fu.conversation.repository.ConversationMissionRepository;
-import com.fu.conversation.repository.ConversationTopicRepository;
+import com.fu.conversation.repository.ConversationRepository;
 import com.fu.conversation.service.ConversationMissionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,21 +25,21 @@ public class ConversationMissionServiceImpl implements ConversationMissionServic
 
     private final ConversationMissionRepository missionRepository;
     private final ConversationMissionMapper missionMapper;
-    private final ConversationTopicRepository topicRepository;
+    private final ConversationRepository conversationRepository;
 
     @Override
     @Transactional
     public ConversationMissionResponse createMission(CreateMissionRequest request, UUID managerId) {
-        topicRepository.findById(request.getTopicId())
-                .filter(t -> t.getDeletedAt() == null)
+        conversationRepository.findById(request.getConversationId())
+                .filter(c -> c.getDeletedAt() == null)
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        "ConversationTopic", "id", request.getTopicId().toString()));
+                        "Conversation", "id", request.getConversationId().toString()));
 
         ConversationMission mission = missionMapper.toEntity(request);
         mission.setCreatedBy(managerId);
         mission.setUpdatedBy(managerId);
         ConversationMission saved = missionRepository.save(mission);
-        log.info("Manager {} created mission: {} for topic: {}", managerId, saved.getId(), request.getTopicId());
+        log.info("Manager {} created mission: {} for conversation: {}", managerId, saved.getId(), request.getConversationId());
         return missionMapper.toResponse(saved);
     }
 
@@ -69,9 +69,9 @@ public class ConversationMissionServiceImpl implements ConversationMissionServic
     }
 
     @Override
-    public List<ConversationMissionResponse> getMissionsByTopic(UUID topicId) {
+    public List<ConversationMissionResponse> getMissionsByConversation(UUID conversationId) {
         return missionRepository
-                .findByTopicIdAndDeletedAtIsNullOrderByOrderIndexAsc(topicId)
+                .findByConversationIdAndDeletedAtIsNullOrderByOrderIndexAsc(conversationId)
                 .stream()
                 .map(missionMapper::toResponse)
                 .collect(Collectors.toList());

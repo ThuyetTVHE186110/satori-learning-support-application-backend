@@ -8,6 +8,13 @@ spring:
     profiles:
         active: ${SPRING_PROFILES_ACTIVE:local}
 
+    main:
+        # Force servlet (WebMVC) mode even when spring-webflux is on the classpath.
+        # The monitoring module uses WebClient (from webflux) as an HTTP client only —
+        # it does NOT start a reactive web server. Without this, Spring Boot may
+        # detect both starters and fail to resolve the application type.
+        web-application-type: servlet
+
     # ==================== PostgreSQL Configuration ====================
     datasource:
         url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:satori_learning}?stringtype=unspecified
@@ -24,10 +31,11 @@ spring:
     jpa:
         hibernate:
             ddl-auto: validate
-        show-sql: ${SHOW_SQL:false}
+        show-sql: false
         properties:
             hibernate:
-                format_sql: true
+                show_sql: false
+                format_sql: false
                 dialect: org.hibernate.dialect.PostgreSQLDialect
                 default_schema: user_management
         open-in-view: false
@@ -60,12 +68,13 @@ spring:
             api-key: ${OPENAI_API_KEY:}
             chat:
                 options:
-                    model: gpt-4o-mini
+                    model: gpt-4o
                     temperature: 0.7
-                    max-tokens: 2000
+                    max-tokens: 4096
             embedding:
                 options:
-                    model: text-embedding-3-small
+                    model: text-embedding-3-large
+                    dimensions: 1536
 
     # ==================== File Upload Configuration ====================
     servlet:
@@ -105,6 +114,13 @@ app:
             access-token-expiration-ms: ${JWT_ACCESS_EXPIRATION:1800000}
             # Refresh token expiration: 7 days (604800000 ms)
             refresh-token-expiration-ms: ${JWT_REFRESH_EXPIRATION:604800000}
+        # CORS allowed origins (comma-separated). Override per environment.
+        # Production MUST set APP_ALLOWED_ORIGINS to the actual frontend URL.
+        cors:
+            allowed-origins: ${APP_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+        # Swagger UI public access — true for local/dev, false for prod (application-prod.yml overrides)
+        swagger:
+            public: ${SWAGGER_PUBLIC:true}
         # Max failed login attempts before account lock
         max-failed-attempts: ${MAX_FAILED_ATTEMPTS:5}
         # Account lock duration in minutes
@@ -120,6 +136,20 @@ app:
             enabled: ${FIREBASE_ENABLED:false}
             credentials-file: ${FIREBASE_CREDENTIALS_FILE:}
             project-id: ${FIREBASE_PROJECT_ID:}
+
+    # Push Notification Configuration (FCM)
+    notification:
+        firebase:
+            enabled: ${FCM_ENABLED:false}
+            credentials-file: ${FIREBASE_CREDENTIALS_FILE:}
+            project-id: ${FIREBASE_PROJECT_ID:}
+        cleanup:
+            read-notification-retention-days: ${NOTIFICATION_READ_RETENTION_DAYS:30}
+            all-notification-retention-days: ${NOTIFICATION_ALL_RETENTION_DAYS:90}
+            inactive-token-retention-days: ${NOTIFICATION_TOKEN_RETENTION_DAYS:30}
+        batch:
+            max-batch-size: ${NOTIFICATION_BATCH_SIZE:500}
+            batch-delay-ms: ${NOTIFICATION_BATCH_DELAY_MS:100}
 
     # Email Configuration
     email:
@@ -140,7 +170,7 @@ spring.mail:
     host: ${MAIL_HOST:smtp.gmail.com}
     port: ${MAIL_PORT:587}
     username: ${MAIL_USERNAME:nihongosatori@gmail.com}
-    password: ${MAIL_PASSWORD:wzsn ucsx jnsh mptd}
+    password: ${MAIL_PASSWORD:}
     properties:
         mail:
             smtp:
@@ -170,9 +200,13 @@ management:
                 include: health,info,metrics,prometheus
     endpoint:
         health:
-            show-details: when-authorized
+            show-details: always
             probes:
                 enabled: true
+        metrics:
+            enabled: true
+        info:
+            enabled: true
 
 # ==================== Curriculum Import - Agentic RAG Configuration ====================
 curriculum-import:
@@ -196,6 +230,28 @@ curriculum-import:
         # Example: environment/secrets/satori-489709-ce922a405186.json
         credentials-file: ${GOOGLE_APPLICATION_CREDENTIALS:environment/secrets/satori-489709-ce922a405186.json}
 
+        # ===== Document AI Layout Parser (OCR Tier 0) =====
+        # Enable for highest-fidelity table extraction from Minna no Nihongo vocabulary pages.
+        # Requires a Layout Parser processor created in Google Cloud Console → Document AI.
+        # Cost: ~$10/1000 pages (vs $1.50 for Vision). Disable to use Vision OCR only.
+        document-ai-enabled: ${DOCUMENT_AI_ENABLED:false}
+        # Google Cloud project ID (same project as Vision API is fine).
+        document-ai-project-id: ${DOCUMENT_AI_PROJECT_ID:703548005421}
+        # Processor region — must be "us" or "eu" (Document AI has no global endpoint).
+        document-ai-location: ${DOCUMENT_AI_LOCATION:us}
+        # Processor ID from Google Cloud Console (e.g. abc123def456).
+        document-ai-processor-id: ${DOCUMENT_AI_PROCESSOR_ID:}
+        # Timeout in minutes for a single processDocument call.
+        # OCR of a full scanned PDF (17 pages @ 300 DPI) can take 2-4 min.
+        # Increase for larger documents; decrease to fail faster on slow connections.
+        document-ai-timeout-minutes: ${DOCUMENT_AI_TIMEOUT_MINUTES:5}
+
+        # ===== Gemini 2.5 Flash Vision (OCR Tier 2 — replaces GPT-4o) =====
+        # Get an API key at https://aistudio.google.com/app/apikey (free tier available).
+        # When blank, Tier 2 falls back to GPT-4o (existing behaviour).
+        # Enabling Gemini reduces Tier 2 cost by ~95 % vs GPT-4o.
+        gemini-api-key: ${GEMINI_API_KEY:}
+
     agentic-rag:
         # Minimum confidence for extraction (Corrective RAG threshold)
         confidence-threshold: ${RAG_CONFIDENCE_THRESHOLD:0.6}
@@ -215,8 +271,6 @@ curriculum-import:
         thread-pool-queue-capacity: ${RAG_THREAD_POOL_QUEUE:50}
         # Enable embedding generation
         embedding-enabled: ${RAG_EMBEDDING_ENABLED:true}
-        # Embedding dimension (text-embedding-3-small = 1536)
-        embedding-dimension: 1536
         # Enable content validation step
         validation-enabled: ${RAG_VALIDATION_ENABLED:true}
         # Enable RAG context retrieval before extraction
@@ -242,6 +296,43 @@ curriculum-import:
         grounding-weight: ${RAG_GROUNDING_WEIGHT:0.35}
         # Combined score below this triggers re-extraction
         combined-re-extraction-threshold: ${RAG_COMBINED_RE_EXTRACTION_THRESHOLD:0.5}
+
+# ==================== Conversation Module Configuration ====================
+conversation:
+    chat:
+        # OpenAI model for the main CURRICULUM_QA response
+        model: ${CHAT_MODEL:gpt-4o-mini}
+        # Sampling temperature (0.0 = deterministic, 1.0 = creative)
+        temperature: ${CHAT_TEMPERATURE:0.3}
+        # Max tokens the model may generate per response
+        max-response-tokens: ${CHAT_MAX_RESPONSE_TOKENS:1024}
+        # Token budget for conversation history (leaves room for system prompt + RAG + question)
+        max-history-tokens: ${CHAT_MAX_HISTORY_TOKENS:2000}
+        # Per-user rate limit: max messages per window
+        rate-limit-max-requests: ${CHAT_RATE_LIMIT_MAX_REQUESTS:20}
+        # Duration of the rate-limit window in minutes
+        rate-limit-window-minutes: ${CHAT_RATE_LIMIT_WINDOW_MINUTES:1}
+        # ACTIVE sessions older than this are marked ABANDONED by the nightly cleanup scheduler
+        session-cleanup-retention-days: ${CHAT_SESSION_CLEANUP_RETENTION_DAYS:30}
+    rag:
+        # Enable Self-RAG relevance check advisor (order=200)
+        relevance-check-enabled: ${CHAT_RAG_RELEVANCE_CHECK:true}
+        # Min confidence threshold for relevance verdict to strip RAG context
+        relevance-threshold: ${CHAT_RAG_RELEVANCE_THRESHOLD:0.5}
+        # Enable CRAG grounding check advisor (order=300)
+        grounding-check-enabled: ${CHAT_RAG_GROUNDING_CHECK:true}
+        # Min confidence for grounding verdict to append disclaimer
+        grounding-threshold: ${CHAT_RAG_GROUNDING_THRESHOLD:0.6}
+        # Min cosine similarity for best retrieved item to be considered meaningful context
+        min-meaningful-similarity: ${CHAT_RAG_MIN_SIMILARITY:0.50}
+        # Model for lightweight advisor LLM calls (relevance + grounding checks)
+        check-model: ${CHAT_RAG_CHECK_MODEL:gpt-4o-mini}
+        # Max tokens for advisor check calls
+        check-max-tokens: ${CHAT_RAG_CHECK_MAX_TOKENS:512}
+        # Enable combined query analysis (intent + bilingual translation) before retrieval
+        query-analysis-enabled: ${CHAT_RAG_QUERY_ANALYSIS:true}
+        # Fallback bilingual query expansion when query-analysis-enabled=false
+        bilingual-query-enabled: ${CHAT_RAG_BILINGUAL:true}
 
 # ==================== Pronunciation Assessment ====================
 # Provider priority: Azure > SpeechSuper (auto-selected by CompositePronunciationProvider)

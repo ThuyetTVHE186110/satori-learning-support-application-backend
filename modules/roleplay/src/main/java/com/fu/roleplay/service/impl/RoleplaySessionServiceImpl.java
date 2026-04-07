@@ -3,12 +3,21 @@ package com.fu.roleplay.service.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fu.achievement.config.ActivityExpConfig;
+import com.fu.achievement.dto.response.LevelUpNotificationResponse;
+import com.fu.achievement.service.AchievementService;
+import com.fu.achievement.service.LearningLevelService;
+import com.fu.achievement.dto.response.UserAchievementResponse;
+import com.fu.achievement.enums.BadgeType;
+import com.fu.achievement.service.impl.StreakServiceImpl;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
+import com.fu.conversation.entity.Conversation;
 import com.fu.conversation.entity.ConversationMission;
-import com.fu.conversation.entity.ConversationTopic;
 import com.fu.conversation.repository.ConversationMissionRepository;
-import com.fu.conversation.repository.ConversationTopicRepository;
+import com.fu.conversation.repository.ConversationRepository;
+import com.fu.conversation.repository.UserConversationProgressRepository;
 import com.fu.course.entity.Course;
 import com.fu.pronunciation.dto.AssessmentRequest;
 import com.fu.pronunciation.dto.AssessmentResult;
@@ -21,7 +30,10 @@ import com.fu.roleplay.dto.request.SendMessageRequest;
 import com.fu.roleplay.dto.request.StartFreeTalkRequest;
 import com.fu.roleplay.dto.request.StartSessionRequest;
 import com.fu.roleplay.dto.response.*;
-import com.fu.roleplay.dto.entity.*;
+import com.fu.roleplay.entity.ConversationMessage;
+import com.fu.roleplay.entity.ConversationSession;
+import com.fu.roleplay.entity.MessagePronunciation;
+import com.fu.roleplay.entity.SessionMission;
 import com.fu.roleplay.mapper.RoleplayMessageMapper;
 import com.fu.roleplay.mapper.RoleplayMissionMapper;
 import com.fu.roleplay.mapper.RoleplaySessionMapper;
@@ -45,7 +57,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
@@ -58,7 +69,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     private final ConversationMissionRepository missionRepository;
     private final SessionMissionRepository sessionMissionRepository;
     private final MessagePronunciationRepository pronunciationRepository;
-    private final ConversationTopicRepository topicRepository;
+    private final ConversationRepository conversationRepository;
+    private final UserConversationProgressRepository progressRepository;
 
     private final RoleplayAIService roleplayAIService;
     private final MissionEvaluatorAI missionEvaluatorAI;
@@ -72,6 +84,10 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     private final RoleplayProperties properties;
     private final ObjectMapper objectMapper;
     private final Executor roleplayTaskExecutor;
+    private final AchievementService achievementService;
+    private final StreakServiceImpl streakService;
+
+    private final LearningLevelService learningLevelService;
 
     public RoleplaySessionServiceImpl(
             ConversationSessionRepository sessionRepository,
@@ -79,7 +95,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             ConversationMissionRepository missionRepository,
             SessionMissionRepository sessionMissionRepository,
             MessagePronunciationRepository pronunciationRepository,
-            ConversationTopicRepository topicRepository,
+            ConversationRepository conversationRepository,
+            UserConversationProgressRepository progressRepository,
             RoleplayAIService roleplayAIService,
             MissionEvaluatorAI missionEvaluatorAI,
             SessionEvaluatorAI sessionEvaluatorAI,
@@ -89,13 +106,18 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             RoleplayMissionMapper missionMapper,
             RoleplayProperties properties,
             ObjectMapper objectMapper,
-            @Qualifier("roleplayTaskExecutor") Executor roleplayTaskExecutor) {
+            @Qualifier("roleplayTaskExecutor") Executor roleplayTaskExecutor,
+            AchievementService achievementService,
+            LearningLevelService learningLevelService,
+            StreakServiceImpl streakService
+    ) {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
         this.missionRepository = missionRepository;
         this.sessionMissionRepository = sessionMissionRepository;
         this.pronunciationRepository = pronunciationRepository;
-        this.topicRepository = topicRepository;
+        this.conversationRepository = conversationRepository;
+        this.progressRepository = progressRepository;
         this.roleplayAIService = roleplayAIService;
         this.missionEvaluatorAI = missionEvaluatorAI;
         this.sessionEvaluatorAI = sessionEvaluatorAI;
@@ -106,17 +128,20 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.roleplayTaskExecutor = roleplayTaskExecutor;
+        this.achievementService = achievementService;
+        this.learningLevelService = learningLevelService;
+        this.streakService = streakService;
     }
 
     @Override
     @Transactional
     public SessionResponse startSession(StartSessionRequest request, UUID userId) {
-        // 1. Validate topic
-        ConversationTopic topic = topicRepository.findById(request.getTopicId())
-                .filter(t -> t.getDeletedAt() == null)
-                .filter(t -> Course.ContentStatus.PUBLISHED.equals(t.getStatus()))
+        // 1. Validate conversation
+        Conversation conversation = conversationRepository.findById(request.getConversationId())
+                .filter(c -> c.getDeletedAt() == null)
+                .filter(c -> Course.ContentStatus.PUBLISHED.equals(c.getStatus()))
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        "ConversationTopic", "id", request.getTopicId().toString()));
+                        "Conversation", "id", request.getConversationId().toString()));
 
         // 2. Check active sessions limit
         long activeSessions = sessionRepository.countByUserIdAndStatus(userId, ConversationSession.SessionStatus.ACTIVE.name());
@@ -124,20 +149,26 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             throw new BusinessException("SESSION_LIMIT", "Maximum active sessions reached (" + properties.getMaxActiveSessions() + ")");
         }
 
-        // 3. Load missions for topic
+        // 3. Load missions for conversation
         List<ConversationMission> missions = missionRepository
-                .findByTopicIdAndDeletedAtIsNullOrderByOrderIndexAsc(request.getTopicId());
+                .findByConversationIdAndDeletedAtIsNullOrderByOrderIndexAsc(request.getConversationId());
 
         // 4. Create session
         ConversationSession session = ConversationSession.builder()
                 .userId(userId)
                 .sessionType(ConversationSession.SessionType.ROLEPLAY)
-                .topicId(request.getTopicId())
+                .conversationId(request.getConversationId())
                 .status(ConversationSession.SessionStatus.ACTIVE)
                 .conversationPhase("CONVERSATION")
-                .context(topic.getRoleplayContext() != null ? topic.getRoleplayContext() : "{}")
+                .context(conversation.getRoleplayContext() != null ? conversation.getRoleplayContext() : "{}")
                 .build();
         session = sessionRepository.save(session);
+
+        // Race-condition guard: re-count inside transaction to catch concurrent session creation
+        long activeAfterSave = sessionRepository.countByUserIdAndStatus(userId, ConversationSession.SessionStatus.ACTIVE.name());
+        if (activeAfterSave > properties.getMaxActiveSessions()) {
+            throw new BusinessException("SESSION_LIMIT", "Maximum active sessions reached (" + properties.getMaxActiveSessions() + ")");
+        }
 
         // 5. Create session missions (snapshot) — copy Vi fields
         List<SessionMission> sessionMissions = new ArrayList<>();
@@ -159,9 +190,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         }
 
         // 6. Build and cache system prompt
-        String jlptLevel = topic.getJlptLevel() != null ? topic.getJlptLevel().name() : "N5";
+        String jlptLevel = conversation.getJlptLevel() != null ? conversation.getJlptLevel().name() : "N5";
         String systemPrompt = roleplayAIService.buildSystemPrompt(session,
-                topic.getAiRole(), topic.getLearnerRole(), topic.getScenario(),
+                conversation.getAiRole(), conversation.getLearnerRole(), conversation.getScenario(),
                 jlptLevel, sessionMissions);
         roleplayAIService.cacheSystemPrompt(session.getId(), systemPrompt);
 
@@ -184,7 +215,10 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 .map(missionMapper::toSessionMissionResponse)
                 .collect(Collectors.toList()));
 
-        log.info("Started roleplay session {} for user {} on topic {}", session.getId(), userId, request.getTopicId());
+        // Update user_conversation_progress (upsert: increment total_sessions, update last_practiced_at)
+        progressRepository.upsertOnSessionStart(userId, request.getConversationId(), session.getCreatedAt());
+
+        log.info("Started roleplay session {} for user {} on conversation {}", session.getId(), userId, request.getConversationId());
         return response;
     }
 
@@ -201,8 +235,14 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         String jlptLevel = request.getJlptLevel() != null ? request.getJlptLevel() : "N5";
 
         // 3. Create session (no topicId, SETUP phase)
-        String contextJson = "{\"jlptLevel\":\"" + jlptLevel + "\","
-                + "\"language\":\"" + (request.getLanguage() != null ? request.getLanguage() : "vi") + "\"}";
+        String contextJson;
+        try {
+            contextJson = objectMapper.writeValueAsString(Map.of(
+                    "jlptLevel", jlptLevel,
+                    "language", request.getLanguage() != null ? request.getLanguage() : "vi"));
+        } catch (Exception e) {
+            contextJson = "{\"jlptLevel\":\"" + jlptLevel + "\",\"language\":\"vi\"}";
+        }
 
         ConversationSession session = ConversationSession.builder()
                 .userId(userId)
@@ -226,6 +266,12 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         session.setMessageCount(openingMessages.size());
         sessionRepository.save(session);
 
+        // Race-condition guard: re-count inside transaction to catch concurrent session creation
+        long activeAfterSave = sessionRepository.countByUserIdAndStatus(userId, ConversationSession.SessionStatus.ACTIVE.name());
+        if (activeAfterSave > properties.getMaxActiveSessions()) {
+            throw new BusinessException("SESSION_LIMIT", "Maximum active sessions reached (" + properties.getMaxActiveSessions() + ")");
+        }
+
         // 7. Build response (no missions yet during SETUP)
         SessionResponse response = sessionMapper.toResponse(session);
         response.setMessages(openingMessages.stream()
@@ -246,6 +292,16 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         if (session.getStatus() != ConversationSession.SessionStatus.ACTIVE) {
             throw new BusinessException("SESSION_INACTIVE", "Session is not active");
+        }
+
+        // Hint path: triggered by client after user silence — no user message saved, no slot consumed
+        if (request.isHintRequest()) {
+            return handleHintRequest(session, sessionId);
+        }
+
+        // Content required for all regular (non-hint) messages
+        if (request.getContent() == null || request.getContent().isBlank()) {
+            throw new BusinessException("CONTENT_REQUIRED", "Message content is required");
         }
 
         long currentMessages = messageRepository.countBySessionIdAndRole(sessionId, ConversationMessage.MessageRole.USER.name());
@@ -282,14 +338,20 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 .sequenceNumber(nextSeq)
                 .build();
         userMessage = messageRepository.save(userMessage);
+        boolean limitReached = (currentMessages + 1) >= properties.getMaxMessages();
 
         // 3. Load conversation history and missions
         List<ConversationMessage> history = messageRepository.findBySessionIdOrderBySequenceNumberAsc(sessionId);
         List<SessionMission> sessionMissions = sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
         String systemPrompt = roleplayAIService.getCachedSystemPrompt(sessionId);
         if (systemPrompt == null) {
-            // Rebuild a minimal fallback prompt
-            systemPrompt = "You are a helpful Japanese conversation partner. Respond with a JSON array of DIALOGUE segments.";
+            // Redis TTL expired — rebuild from DB to preserve full roleplay context
+            systemPrompt = rebuildSystemPrompt(session, sessionMissions);
+            if (systemPrompt != null) {
+                roleplayAIService.cacheSystemPrompt(sessionId, systemPrompt);
+            } else {
+                systemPrompt = "You are a helpful Japanese conversation partner. Respond with a JSON array of DIALOGUE segments.";
+            }
         }
 
         final String cachedPrompt = systemPrompt;
@@ -304,12 +366,12 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 @Override
                 public void afterCommit() {
                     CompletableFuture.supplyAsync(() ->
-                            pronunciationProvider.assess(AssessmentRequest.builder()
-                                    .audioData(audioBytesRef)
-                                    .audioFormat(audioFormatRef)
-                                    .referenceText(request.getContent())
-                                    .build()),
-                            roleplayTaskExecutor)
+                                            pronunciationProvider.assess(AssessmentRequest.builder()
+                                                    .audioData(audioBytesRef)
+                                                    .audioFormat(audioFormatRef)
+                                                    .referenceText(request.getContent())
+                                                    .build()),
+                                    roleplayTaskExecutor)
                             .thenAccept(result -> savePronunciationResult(result, userMessageId, sessionId))
                             .exceptionally(ex -> {
                                 log.error("Pronunciation assessment failed for message {}: {}", userMessageId, ex.getMessage());
@@ -321,8 +383,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         // Task B: AI response
         CompletableFuture<String> aiResponseFuture = CompletableFuture.supplyAsync(() ->
-                roleplayAIService.generateResponse(sessionId, cachedPrompt, history, request.getContent()),
-                roleplayTaskExecutor)
+                                roleplayAIService.generateResponse(sessionId, cachedPrompt, history, request.getContent()),
+                        roleplayTaskExecutor)
                 .exceptionally(ex -> {
                     log.error("AI response generation failed for session {}: {}", sessionId, ex.getMessage());
                     return "[{\"type\":\"DIALOGUE\",\"japanese_content\":\"すみません、もう一度お願いします。\",\"translation\":\"Xin lỗi, bạn có thể nói lại không?\",\"romaji\":\"Sumimasen, mou ichido onegai shimasu.\",\"corrections\":[]}]";
@@ -333,12 +395,12 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         CompletableFuture<List<MissionEvaluatorAI.MissionProgress>> missionFuture = isSetupPhase
                 ? CompletableFuture.completedFuture(new ArrayList<>())
                 : CompletableFuture.supplyAsync(() ->
-                        missionEvaluatorAI.evaluateProgress(history, request.getContent(), sessionMissions),
+                                missionEvaluatorAI.evaluateProgress(history, request.getContent(), sessionMissions),
                         roleplayTaskExecutor)
-                        .exceptionally(ex -> {
-                            log.error("Mission evaluation failed for session {}: {}", sessionId, ex.getMessage());
-                            return new ArrayList<>();
-                        });
+                .exceptionally(ex -> {
+                    log.error("Mission evaluation failed for session {}: {}", sessionId, ex.getMessage());
+                    return new ArrayList<>();
+                });
 
         // 4. Wait for AI + mission
         CompletableFuture.allOf(aiResponseFuture, missionFuture).join();
@@ -363,6 +425,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         if (hasPhaseTransition && isSetupPhase) {
             session.setConversationPhase("CONVERSATION");
+            updateSessionContextFromTransition(session, aiResponseJson);
             createDynamicMissionFromTransition(aiResponseJson, sessionId);
 
             // Rebuild system prompt for roleplay mode and re-cache
@@ -391,6 +454,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         // 9. Load fresh missions for response
         List<SessionMission> freshMissions = sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+        boolean allMissionsCompleted = !freshMissions.isEmpty() &&
+                freshMissions.stream().allMatch(m -> m.getStatus() == SessionMission.MissionStatus.COMPLETED);
 
         // 10. Build SendMessageResponse
         List<MessageResponse> messageResponses = aiMessages.stream()
@@ -403,17 +468,26 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         return SendMessageResponse.builder()
                 .messages(messageResponses)
                 .missions(missionResponses)
+                .limitReached(limitReached)
+                .allMissionsCompleted(allMissionsCompleted)
                 .build();
     }
 
     @Override
     @Transactional
     public SessionEvaluationResponse completeSession(UUID sessionId, UUID userId) {
-        ConversationSession session = sessionRepository.findByIdAndUserId(sessionId, userId)
+        ConversationSession session = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("ConversationSession", "id", sessionId.toString()));
 
         if (session.getStatus() != ConversationSession.SessionStatus.ACTIVE) {
             throw new BusinessException("SESSION_INACTIVE", "Session is not active");
+        }
+
+        // Guard: require at least one user message before evaluating
+        long userMsgCount = messageRepository.countBySessionIdAndRole(
+                sessionId, ConversationMessage.MessageRole.USER.name());
+        if (userMsgCount == 0) {
+            throw new BusinessException("SESSION_EMPTY", "Cannot complete a session with no messages");
         }
 
         // 1. Load all data
@@ -522,8 +596,54 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         session.setLanguageScore(languageScore);
         session.setOverallScore(overallScore);
         session.setStatus(ConversationSession.SessionStatus.COMPLETED);
-        session.setCompletedAt(LocalDateTime.now());
+        LocalDateTime completedAt = LocalDateTime.now();
+        session.setCompletedAt(completedAt);
         sessionRepository.save(session);
+
+        // Update user_conversation_progress if this was a topic-based session
+        if (session.getConversationId() != null) {
+            progressRepository.markCompleted(
+                    session.getUserId(),
+                    session.getConversationId(),
+                    completedAt,
+                    overallScore,
+                    languageEval.getFluencyScore(),
+                    languageEval.getAccuracyScore(),
+                    languageEval.getVocabularyScore());
+        }
+        // Record daily activity for streak tracking
+        try {
+            streakService.recordDailyActivity(userId, "SPEAKING");
+        } catch (Exception e) {
+            log.error("Error recording daily activity for learner: {}", userId, e);
+        }
+
+        // Award direct EXP for speaking session completion (with level tier + overall score bonus)
+        int expEarned = 0;
+        Integer oldTotalExp = null;
+        try {
+            oldTotalExp = learningLevelService.getTotalExp(userId);
+            int currentLevel = learningLevelService.getCurrentLevel(userId);
+            Integer score = overallScore != null ? overallScore.intValue() : null;
+            expEarned = ActivityExpConfig.ActivityType.SPEAKING.getExpReward(currentLevel, score);
+            learningLevelService.awardExpAndCheckLevelUp(userId, expEarned);
+            log.info("Awarded {} EXP for speaking session to user {} (level {}, score {}%)",
+                    expEarned, userId, currentLevel, score);
+        } catch (Exception e) {
+            log.error("Error awarding EXP for speaking session to user {}", userId, e);
+            // Continue even if EXP fails - don't break speaking session
+        }
+
+        // Check and award achievements for speaking completion
+        try {
+            long speakingCount = sessionRepository.countByUserIdAndStatus(
+                    userId, ConversationSession.SessionStatus.COMPLETED.name());
+            achievementService.checkAndAwardBadges(userId, BadgeType.AI_SPEAKING_COUNT, (int) speakingCount);
+            log.debug("Achievement check completed for user: {} with speaking count: {}", userId, speakingCount);
+        } catch (Exception e) {
+            log.error("Error checking achievements for speaking session", e);
+            // Don't fail the speaking session if achievement check fails
+        }
 
         // 7. Clear Redis cache
         roleplayAIService.clearSessionCache(sessionId);
@@ -540,6 +660,44 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                         .build())
                 .collect(Collectors.toList());
 
+        // Retrieve earned badges from session completion (if any)
+        List<UserAchievementResponse> earnedBadges = new ArrayList<>();
+        try {
+            earnedBadges = achievementService.getUserEarnedBadges(userId).stream()
+                    .filter(badge -> badge.getEarnedAt() != null &&
+                            badge.getEarnedAt().isAfter(session.getCreatedAt()) &&
+                            badge.getEarnedAt().isBefore(completedAt.plusSeconds(10)))
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.error("Error retrieving earned badges for session evaluation", e);
+        }
+        LevelUpNotificationResponse levelUpInfo = null;
+        // Retrieve level-up information
+        try {
+            LearningLevelService.LevelProgressInfo progressInfo = learningLevelService.getProgressToNextLevel(userId);
+            
+            // Calculate previous level from oldTotalExp
+            int previousLevel = 0;
+            if (oldTotalExp != null && oldTotalExp >= 0) {
+                previousLevel = learningLevelService.calculateLevelFromExp(oldTotalExp);
+            }
+            
+            int currentLevel = progressInfo.currentLevel();
+            boolean actuallyLeveledUp = previousLevel < currentLevel;
+            
+            levelUpInfo = LevelUpNotificationResponse.builder()
+                    .previousLevel(previousLevel)
+                    .newLevel(currentLevel)
+                    .expEarned(expEarned)
+                    .oldTotalExp(oldTotalExp)
+                    .totalExp(progressInfo.totalExp())
+                    .expToNextLevel(progressInfo.expToNextLevel())
+                    .progressPercentage(progressInfo.percentToNextLevel())
+                    .isLevelUp(actuallyLeveledUp)
+                    .build();
+        } catch (Exception e) {
+            log.error("Error retrieving level-up info for session summary", e);
+        }
         return SessionEvaluationResponse.builder()
                 .sessionId(sessionId)
                 .missionScore(missionScore)
@@ -549,17 +707,30 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 .missionDetails(missionDetails)
                 .pronunciationSummary(pronunciationSummary)
                 .languageEvaluation(languageEval)
+                .earnedBadges(earnedBadges)
+                .levelUpInfo(levelUpInfo)
                 .build();
     }
 
     @Override
     @Transactional
     public void abandonSession(UUID sessionId, UUID userId) {
-        ConversationSession session = sessionRepository.findByIdAndUserId(sessionId, userId)
+        ConversationSession session = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("ConversationSession", "id", sessionId.toString()));
 
         if (session.getStatus() != ConversationSession.SessionStatus.ACTIVE) {
             throw new BusinessException("SESSION_INACTIVE", "Session is not active");
+        }
+
+        // Mark any pending/in-progress missions as FAILED
+        List<SessionMission> missions = sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+        List<SessionMission> toFail = missions.stream()
+                .filter(m -> m.getStatus() == SessionMission.MissionStatus.PENDING
+                        || m.getStatus() == SessionMission.MissionStatus.IN_PROGRESS)
+                .collect(Collectors.toList());
+        if (!toFail.isEmpty()) {
+            toFail.forEach(m -> m.setStatus(SessionMission.MissionStatus.FAILED));
+            sessionMissionRepository.saveAll(toFail);
         }
 
         session.setStatus(ConversationSession.SessionStatus.ABANDONED);
@@ -734,13 +905,18 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     }
 
     private void updateSessionMissions(List<SessionMission> sessionMissions,
-                                        List<MissionEvaluatorAI.MissionProgress> progressList) {
+                                       List<MissionEvaluatorAI.MissionProgress> progressList) {
         List<SessionMission> updatedMissions = new ArrayList<>();
         for (MissionEvaluatorAI.MissionProgress progress : progressList) {
             sessionMissions.stream()
                     .filter(sm -> sm.getId().toString().equals(progress.getMissionId()))
                     .findFirst()
                     .ifPresent(sm -> {
+                        // Do not downgrade terminal statuses (COMPLETED/FAILED are irreversible)
+                        if (sm.getStatus() == SessionMission.MissionStatus.COMPLETED
+                                || sm.getStatus() == SessionMission.MissionStatus.FAILED) {
+                            return;
+                        }
                         try {
                             SessionMission.MissionStatus newStatus =
                                     SessionMission.MissionStatus.valueOf(progress.getStatus());
@@ -749,7 +925,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                             log.warn("Invalid mission status '{}' from AI for mission {}: {}",
                                     progress.getStatus(), sm.getId(), e.getMessage());
                         }
-                        sm.setProgressPct(progress.getProgressPct());
+                        sm.setProgressPct(Math.max(0, Math.min(100, progress.getProgressPct())));
                         sm.setAiReasoning(progress.getReasoning());
                         updatedMissions.add(sm);
                     });
@@ -847,5 +1023,107 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             case "audio/mp4", "audio/m4a" -> "m4a";
             default -> "wav";
         };
+    }
+
+    /**
+     * Generates a contextual hint without saving a user message or consuming a message slot.
+     * Called when the client fires a hint request (e.g., after user silence).
+     */
+    private SendMessageResponse handleHintRequest(ConversationSession session, UUID sessionId) {
+        List<ConversationMessage> history =
+                messageRepository.findBySessionIdOrderBySequenceNumberAsc(sessionId);
+        List<SessionMission> sessionMissions =
+                sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+
+        String systemPrompt = roleplayAIService.getCachedSystemPrompt(sessionId);
+        if (systemPrompt == null) {
+            systemPrompt = rebuildSystemPrompt(session, sessionMissions);
+            if (systemPrompt == null) {
+                systemPrompt = "You are a helpful Japanese conversation partner.";
+            }
+        }
+
+        String hintJson = roleplayAIService.generateHintResponse(sessionId, systemPrompt, history, sessionMissions);
+        int nextSeq = messageRepository.findMaxSequenceNumberBySessionId(sessionId).orElse(0) + 1;
+        List<ConversationMessage> hintMessages = parseAndSaveAIMessages(sessionId, hintJson, nextSeq);
+
+        // Update total message count (hint messages are stored) but not userMessageCount
+        session.setMessageCount(session.getMessageCount() + hintMessages.size());
+        sessionRepository.save(session);
+
+        List<MessageResponse> hintResponses = hintMessages.stream()
+                .map(messageMapper::toResponse)
+                .collect(Collectors.toList());
+        List<SessionMissionResponse> missionResponses =
+                sessionMissions.stream()
+                        .map(missionMapper::toSessionMissionResponse)
+                        .collect(Collectors.toList());
+
+        return SendMessageResponse.builder()
+                .messages(hintResponses)
+                .missions(missionResponses)
+                .build();
+    }
+
+    /**
+     * Rebuilds the system prompt from DB when the Redis cache has expired.
+     * For ROLEPLAY sessions: loads Conversation to recover aiRole, learnerRole, scenario.
+     * For FREE_TALK CONVERSATION sessions: reads roles/scenario from session context JSON
+     * (populated during PHASE_TRANSITION).
+     * Returns null if no rebuild is possible (caller should use generic fallback).
+     */
+    private String rebuildSystemPrompt(ConversationSession session, List<SessionMission> missions) {
+        if (session.getConversationId() != null) {
+            return conversationRepository.findById(session.getConversationId())
+                    .filter(c -> c.getDeletedAt() == null)
+                    .map(conv -> {
+                        String jlptLevel = conv.getJlptLevel() != null ? conv.getJlptLevel().name() : "N5";
+                        return roleplayAIService.buildSystemPrompt(session,
+                                conv.getAiRole(), conv.getLearnerRole(), conv.getScenario(),
+                                jlptLevel, missions);
+                    })
+                    .orElse(null);
+        }
+        if ("CONVERSATION".equals(session.getConversationPhase())) {
+            return roleplayAIService.buildSystemPrompt(session,
+                    extractStringFromContext(session.getContext(), "aiRole"),
+                    extractStringFromContext(session.getContext(), "userRole"),
+                    extractStringFromContext(session.getContext(), "scenario"),
+                    extractJlptFromContext(session.getContext()),
+                    missions);
+        }
+        return null;
+    }
+
+    /**
+     * Parses the PHASE_TRANSITION segment from the AI response and merges
+     * aiRole, userRole, and scenario into the session's context JSON.
+     * This ensures the context survives Redis TTL expiry for later prompt rebuilds.
+     */
+    private void updateSessionContextFromTransition(ConversationSession session, String aiResponseJson) {
+        try {
+            JsonNode array = objectMapper.readTree(aiResponseJson);
+            if (!array.isArray()) return;
+            for (JsonNode node : array) {
+                if (!"PHASE_TRANSITION".equals(node.path("type").asText())) continue;
+
+                JsonNode existingCtx = objectMapper.readTree(session.getContext());
+                ObjectNode newCtx = objectMapper.createObjectNode();
+                existingCtx.fields().forEachRemaining(e -> newCtx.set(e.getKey(), e.getValue()));
+
+                String aiRole = node.path("aiRole").asText(null);
+                String userRole = node.path("userRole").asText(null);
+                String scenario = node.path("scenario").asText(null);
+                if (aiRole != null && !aiRole.isBlank()) newCtx.put("aiRole", aiRole);
+                if (userRole != null && !userRole.isBlank()) newCtx.put("userRole", userRole);
+                if (scenario != null && !scenario.isBlank()) newCtx.put("scenario", scenario);
+
+                session.setContext(objectMapper.writeValueAsString(newCtx));
+                break;
+            }
+        } catch (Exception e) {
+            log.warn("Failed to update session context from PHASE_TRANSITION for session {}: {}",
+                    session.getId(), e.getMessage());
+        }
     }
 }

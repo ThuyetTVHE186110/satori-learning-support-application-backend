@@ -4,9 +4,10 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.service.agent.prompt.GrammarPromptBuilder;
+import com.fu.curriculumimport.service.agent.prompt.MarkdownGrammarSplitter;
+import com.fu.curriculumimport.service.agent.prompt.MarkdownGrammarSplitter.GrammarSection;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
-import com.fu.curriculumimport.service.ingestion.OcrTextPreprocessor;
 import com.fu.curriculumimport.service.vision.VisionPageExtractor;
 import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +16,7 @@ import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -22,24 +24,27 @@ import java.util.Map;
 /**
  * Specialized Grammar Extraction Agent.
  *
- * Designed for chunks classified as GRAMMAR content.
- * Uses a focused prompt optimized for extracting:
- * - Grammar pattern (e.g., ～ます, ～ている)
- * - Pattern reading in hiragana
- * - Vietnamese and English explanations
- * - Conjugation rules
- * - Category (VERB_FORM, PARTICLE, etc.)
- * - Example sentences with translations
- * - Common mistakes and corrections
+ * <p>Extraction strategy (in priority order):
+ * <ol>
+ *   <li><b>Per-section extraction</b> (preferred): When chunk content is markdown with
+ *       numbered headings (## 1., ## 2., ...), each heading is extracted individually
+ *       using GPT-4o — making it structurally impossible to split one section into
+ *       multiple grammar points.</li>
+ *   <li><b>Vision path</b> (Tier 2): When page images are available and markdown
+ *       splitting is not applicable.</li>
+ *   <li><b>Bulk text extraction</b> (fallback): Sends the entire chunk content to
+ *       GPT-4o-mini when neither per-section nor vision is available.</li>
+ * </ol>
  *
  * <p>Prompt strings live in {@link GrammarPromptBuilder} — this class handles
  * only LLM-call mechanics and response parsing.
- *
- * Reference: Agentic RAG specialized worker pattern
  */
 @Service
 @Slf4j
 public class GrammarExtractionAgent {
+
+    /** Model used for per-section extraction. */
+    private static final String PER_SECTION_MODEL = "gpt-4o";
 
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
@@ -60,49 +65,46 @@ public class GrammarExtractionAgent {
     public ExtractionResult extractGrammar(DocumentChunk chunk, String jlptLevel, RagContext ragContext) {
         long startTime = System.currentTimeMillis();
 
+        // ── Per-section extraction (preferred for markdown content) ───────────
+        // When Layout Parser produces structured markdown with numbered headings,
+        // split by heading and extract each section individually with a smarter model.
+        List<GrammarSection> sections = MarkdownGrammarSplitter.split(chunk.getContent());
+        if (sections.size() >= 2) {
+            log.info("Chunk {}: markdown has {} numbered sections — using per-section extraction ({})",
+                    chunk.getChunkIndex(), sections.size(), PER_SECTION_MODEL);
+            return extractPerSection(sections, chunk, jlptLevel, startTime);
+        }
+
         // ── Vision-first path (Tier 2) ─────────────────────────────────────────
-        // Available when ScannedPdfIngestionService propagated page images to this chunk.
-        if (chunk.getPageImages() != null && !chunk.getPageImages().isEmpty()) {
+        // Skip vision when markdown structure is available — text LLM path handles it well
+        // and avoids redundant Gemini API calls when Document AI already provides structure.
+        boolean hasMarkdownStructure = chunk.getContent() != null
+                && (chunk.getContent().contains("##") || chunk.getContent().contains("|"));
+        if (!hasMarkdownStructure && chunk.getPageImages() != null && !chunk.getPageImages().isEmpty()) {
             String lessonTopic = chunk.getLessonTitle() != null ? chunk.getLessonTitle()
                     : chunk.getContent().substring(0, Math.min(80, chunk.getContent().length()));
             ExtractionResult visionResult = visionPageExtractor.extractGrammar(
                     chunk.getPageImages(), jlptLevel, lessonTopic, chunk.getChunkIndex());
-            if (visionResult.getConfidence() >= VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD) {
+            boolean visionAccepted = visionResult.getConfidence() >= VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD
+                    && !visionResult.getGrammarPoints().isEmpty();
+            if (visionAccepted) {
                 log.info("Chunk {}: vision extracted {} grammar items (confidence={})",
                         chunk.getChunkIndex(), visionResult.getGrammarPoints().size(),
                         visionResult.getConfidence());
                 return visionResult;
             }
-            log.info("Chunk {}: vision confidence {} below threshold {}, falling back to text LLM",
-                    chunk.getChunkIndex(), visionResult.getConfidence(),
-                    VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD);
+            if (visionResult.getGrammarPoints().isEmpty()) {
+                log.info("Chunk {}: vision returned 0 grammar items — falling back to text LLM",
+                        chunk.getChunkIndex());
+            } else {
+                log.info("Chunk {}: vision confidence {} below threshold {}, falling back to text LLM",
+                        chunk.getChunkIndex(), visionResult.getConfidence(),
+                        VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD);
+            }
         }
 
-        // ── Text-based LLM path ────────────────────────────────────────────────
-
-        if (OcrTextPreprocessor.isTrivial(chunk.getContent())) {
-            log.info("Chunk {}: trivial content — skipping grammar LLM extraction",
-                    chunk.getChunkIndex());
-            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - startTime);
-        }
-
-        try {
-            String ragSection = GrammarPromptBuilder.formatRagContext(ragContext);
-            String userPrompt = GrammarPromptBuilder.buildExtractionPrompt(chunk, jlptLevel, ragSection, "");
-
-            String response = chatClient.prompt()
-                    .system(GrammarPromptBuilder.SYSTEM_PROMPT)
-                    .user(userPrompt)
-                    .options(OpenAiChatOptions.builder().maxTokens(4096).build())
-                    .call()
-                    .content();
-
-            return parseResponse(response, chunk.getChunkIndex(), System.currentTimeMillis() - startTime);
-
-        } catch (Exception e) {
-            log.error("Grammar extraction failed for chunk {}: {}", chunk.getChunkIndex(), e.getMessage());
-            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - startTime);
-        }
+        // ── Bulk text-based LLM path (fallback) ─────────────────────────────────
+        return extractBulk(chunk, jlptLevel, ragContext, "", startTime);
     }
 
     /**
@@ -112,25 +114,118 @@ public class GrammarExtractionAgent {
                                                     RagContext ragContext, String validationFeedback) {
         long startTime = System.currentTimeMillis();
 
+        // On re-extraction, try per-section again if markdown structure is available
+        List<GrammarSection> sections = MarkdownGrammarSplitter.split(chunk.getContent());
+        if (sections.size() >= 2) {
+            log.info("Chunk {}: re-extraction using per-section ({} sections, {})",
+                    chunk.getChunkIndex(), sections.size(), PER_SECTION_MODEL);
+            return extractPerSection(sections, chunk, jlptLevel, startTime);
+        }
+
+        return extractBulk(chunk, jlptLevel, ragContext, validationFeedback, startTime);
+    }
+
+    // ── Per-section extraction ────────────────────────────────────────────────
+
+    /**
+     * Extract each numbered markdown section individually with GPT-4o.
+     *
+     * <p>One LLM call per section → structurally enforces one grammar point per heading.
+     * Uses a smarter model (GPT-4o) for better verbatim fidelity.
+     */
+    private ExtractionResult extractPerSection(List<GrammarSection> sections,
+                                                DocumentChunk chunk, String jlptLevel,
+                                                long startTime) {
+        List<ExtractionResult.ExtractedGrammar> allGrammar = new ArrayList<>();
+        int totalTokens = 0;
+        // Track already-extracted patterns so subsequent sections can avoid duplicates
+        List<String> extractedPatterns = new ArrayList<>();
+
+        for (GrammarSection section : sections) {
+            try {
+                String alreadyExtracted = extractedPatterns.isEmpty() ? ""
+                        : "\n\n⚠ CÁC MẪU ĐÃ TRÍCH XUẤT (KHÔNG trích lại):\n- "
+                        + String.join("\n- ", extractedPatterns) + "\n";
+
+                String userPrompt = GrammarPromptBuilder.buildSingleSectionPrompt(
+                        section.fullSection(), section.stt(),
+                        chunk.getLessonTitle(), jlptLevel,
+                        chunk.getFullPageContext(),
+                        alreadyExtracted);
+
+                String response = chatClient.prompt()
+                        .system(GrammarPromptBuilder.SINGLE_SECTION_SYSTEM_PROMPT)
+                        .user(userPrompt)
+                        .options(OpenAiChatOptions.builder()
+                                .model(PER_SECTION_MODEL)
+                                .maxTokens(4096)
+                                .build())
+                        .call()
+                        .content();
+
+                ExtractionResult sectionResult = parseResponse(
+                        response, chunk.getChunkIndex(), 0);
+                allGrammar.addAll(sectionResult.getGrammarPoints());
+                totalTokens += sectionResult.getTokensUsed();
+                // Accumulate extracted patterns for dedup in subsequent sections
+                for (ExtractionResult.ExtractedGrammar gp : sectionResult.getGrammarPoints()) {
+                    if (gp.getPattern() != null) extractedPatterns.add(gp.getPattern());
+                }
+
+                log.debug("Chunk {} section {}/{} '{}': extracted {} grammar point(s)",
+                        chunk.getChunkIndex(), section.stt(), sections.size(),
+                        section.headingTitle(),
+                        sectionResult.getGrammarPoints().size());
+
+            } catch (Exception e) {
+                log.warn("Chunk {} section {} extraction failed: {}",
+                        chunk.getChunkIndex(), section.stt(), e.getMessage());
+            }
+        }
+
+        long elapsed = System.currentTimeMillis() - startTime;
+        log.info("Chunk {}: per-section extraction complete — {} sections → {} grammar points ({} ms)",
+                chunk.getChunkIndex(), sections.size(), allGrammar.size(), elapsed);
+
+        return ExtractionResult.builder()
+                .chunkIndex(chunk.getChunkIndex())
+                .confidence(allGrammar.isEmpty() ? 0.0 : 0.92)
+                .tokensUsed(totalTokens)
+                .processingTimeMs(elapsed)
+                .lessons(Collections.emptyList())
+                .vocabulary(Collections.emptyList())
+                .grammarPoints(allGrammar)
+                .build();
+    }
+
+    // ── Bulk text extraction ─────────────────────────────────────────────────
+
+    private ExtractionResult extractBulk(DocumentChunk chunk, String jlptLevel,
+                                          RagContext ragContext, String validationFeedback,
+                                          long startTime) {
         try {
             String ragSection = GrammarPromptBuilder.formatRagContext(ragContext);
-            String feedbackSection = "\n\nPREVIOUS EXTRACTION ISSUES (please fix):\n" + validationFeedback;
+            String feedbackSection = validationFeedback.isEmpty() ? ""
+                    : "\n\nPREVIOUS EXTRACTION ISSUES (please fix):\n" + validationFeedback;
             String userPrompt = GrammarPromptBuilder.buildExtractionPrompt(
                     chunk, jlptLevel, ragSection, feedbackSection);
 
+            String systemPrompt = validationFeedback.isEmpty()
+                    ? GrammarPromptBuilder.SYSTEM_PROMPT
+                    : GrammarPromptBuilder.SYSTEM_PROMPT + GrammarPromptBuilder.REEXTRACTION_SYSTEM_SUFFIX;
+
             String response = chatClient.prompt()
-                    .system(GrammarPromptBuilder.SYSTEM_PROMPT
-                            + GrammarPromptBuilder.REEXTRACTION_SYSTEM_SUFFIX)
+                    .system(systemPrompt)
                     .user(userPrompt)
-                    .options(OpenAiChatOptions.builder().maxTokens(4096).build())
+                    .options(OpenAiChatOptions.builder().maxTokens(8192).build())
                     .call()
                     .content();
 
             return parseResponse(response, chunk.getChunkIndex(), System.currentTimeMillis() - startTime);
 
         } catch (Exception e) {
-            log.error("Grammar re-extraction failed for chunk {}: {}", chunk.getChunkIndex(), e.getMessage());
-            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - startTime);
+            log.error("Grammar extraction failed for chunk {}: {}", chunk.getChunkIndex(), e.getMessage());
+            return ExtractionResult.empty(chunk.getChunkIndex(), System.currentTimeMillis() - startTime);
         }
     }
 
@@ -158,7 +253,7 @@ public class GrammarExtractionAgent {
 
         } catch (JsonProcessingException e) {
             log.error("Failed to parse grammar extraction response for chunk {}: {}", chunkIndex, e.getMessage());
-            return emptyResult(chunkIndex, processingTimeMs);
+            return ExtractionResult.empty(chunkIndex, processingTimeMs);
         }
     }
 
@@ -172,17 +267,5 @@ public class GrammarExtractionAgent {
         } catch (JsonProcessingException e) {
             return null;
         }
-    }
-
-    private ExtractionResult emptyResult(int chunkIndex, long processingTimeMs) {
-        return ExtractionResult.builder()
-                .chunkIndex(chunkIndex)
-                .confidence(0.0)
-                .tokensUsed(0)
-                .processingTimeMs(processingTimeMs)
-                .lessons(Collections.emptyList())
-                .vocabulary(Collections.emptyList())
-                .grammarPoints(Collections.emptyList())
-                .build();
     }
 }

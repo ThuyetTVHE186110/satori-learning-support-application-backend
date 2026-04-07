@@ -1,0 +1,121 @@
+# =============================================================================
+# UAT (User Acceptance Testing) Profile
+# =============================================================================
+# Activated by: SPRING_PROFILES_ACTIVE=uat
+# Infrastructure: environment/docker-compose.uat.yml
+#   - PostgreSQL: localhost:5434 / DB: satori_uat
+#   - Redis:      localhost:6381 / password required
+#   - Adminer UI: localhost:8082
+#
+# Required env vars (set in CI secrets or .env file):
+#   OPENAI_API_KEY, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET
+#   POSTGRES_UAT_PASSWORD, REDIS_UAT_PASSWORD
+#   MAIL_USERNAME, MAIL_PASSWORD (if email enabled)
+# =============================================================================
+
+server:
+    port: ${APP_PORT:8080}
+
+spring:
+    # ==================== PostgreSQL (UAT) ====================
+    datasource:
+        url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5434}/${POSTGRES_DB:satori_uat}?stringtype=unspecified
+        username: ${POSTGRES_USER:satori_user}
+        password: ${POSTGRES_PASSWORD:SatoriUAT2026!}
+        hikari:
+            maximum-pool-size: 10
+            minimum-idle: 3
+            connection-timeout: 30000
+
+    jpa:
+        hibernate:
+            ddl-auto: validate
+        show-sql: false
+        properties:
+            hibernate:
+                format_sql: false
+
+    # ==================== Redis (UAT) ====================
+    data:
+        redis:
+            host: ${REDIS_HOST:localhost}
+            port: ${REDIS_PORT:6381}
+            password: ${REDIS_PASSWORD:SatoriRedisUAT2026!}
+            timeout: 5000
+
+    # ==================== AI — enabled with real key ====================
+    ai:
+        openai:
+            api-key: ${OPENAI_API_KEY:}
+            chat:
+                options:
+                    model: gpt-4o-mini
+                    temperature: 0.7
+                    max-tokens: 2048
+            embedding:
+                options:
+                    model: text-embedding-3-large
+                    dimensions: 1536
+
+# ==================== Security ====================
+app:
+    security:
+        jwt:
+            access-token-secret: ${JWT_ACCESS_SECRET:SatoriUATAccess2026!VeryLongSecretKeyForJWT256Bits}
+            refresh-token-secret: ${JWT_REFRESH_SECRET:SatoriUATRefresh2026!AnotherLongSecretKeyForJWT256}
+            access-token-expiration-ms: ${JWT_ACCESS_EXPIRATION:1800000}
+            refresh-token-expiration-ms: ${JWT_REFRESH_EXPIRATION:604800000}
+        max-failed-attempts: 5
+        lock-duration-minutes: 30
+        otp-expiration-minutes: 10
+        activation-token-expiration-hours: 24
+
+    google:
+        firebase:
+            enabled: ${FIREBASE_ENABLED:false}
+
+    email:
+        enabled: ${EMAIL_ENABLED:true}
+        from: ${EMAIL_FROM:noreply@satori-learning.com}
+        from-name: Satori Learning UAT
+        base-url: ${APP_BASE_URL:http://localhost:3000}
+
+    cloudinary:
+        enabled: ${CLOUDINARY_ENABLED:false}
+        cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+        api-key: ${CLOUDINARY_API_KEY:}
+        api-secret: ${CLOUDINARY_API_SECRET:}
+
+# ==================== Mail ====================
+spring.mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+        mail:
+            smtp:
+                auth: true
+                starttls:
+                    enable: true
+
+# ==================== Curriculum Import ====================
+curriculum-import:
+    ocr:
+        enabled: ${OCR_ENABLED:false}
+    agentic-rag:
+        embedding-enabled: ${RAG_EMBEDDING_ENABLED:true}
+        validation-enabled: true
+        self-reflection-enabled: true
+        grounding-enabled: true
+        parallel-processing: true
+        parallel-batch-size: 2
+        confidence-threshold: 0.6
+
+# ==================== Logging ====================
+logging:
+    level:
+        root: INFO
+        com.fu: INFO
+        org.hibernate.SQL: WARN
+        org.springframework.data.redis: WARN

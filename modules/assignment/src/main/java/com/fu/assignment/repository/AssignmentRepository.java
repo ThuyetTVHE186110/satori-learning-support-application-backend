@@ -23,6 +23,8 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
     @Query("SELECT a FROM Assignment a WHERE a.id = :id AND a.deletedAt IS NULL")
     Optional<Assignment> findByIdAndNotDeleted(@Param("id") UUID id);
 
+    List<Assignment> findAllByStatusAndDeletedAtIsNull(AssignmentStatus status);
+
     /**
      * Get counts by status for a specific class.
      */
@@ -34,4 +36,90 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
             GROUP BY a.status
             """, nativeQuery = true)
     List<Object[]> countByStatusForClass(@Param("classId") UUID classId);
+
+    /**
+     * Find learner assignments sorted by urgency and filtered by submission status.
+     * 
+     * Logic for Filtering by Status (Virtual Logic):
+     * - NOT_STARTED: No submission exists AND not past due.
+     * - IN_PROGRESS: Current submission is IN_PROGRESS AND not past due.
+     * - OVERDUE: Submission is explicitly OVERDUE OR past due date without finished submission.
+     * - SUBMITTED/GRADED: Matches the status exactly.
+     */
+    @Query(value = """
+            SELECT a.*
+            FROM assignment.assignments a
+            LEFT JOIN LATERAL (
+                SELECT CAST(s.status AS text) as status
+                FROM assignment.assignment_submissions s
+                WHERE s.assignment_id = a.id AND s.user_id = :learnerId
+                ORDER BY s.attempt_number DESC
+                LIMIT 1
+            ) sub ON TRUE
+            WHERE EXISTS (
+                SELECT 1 FROM assignment.assignment_targets t
+                WHERE t.assignment_id = a.id
+                  AND (t.class_id IN (:classIds) OR t.user_id = :learnerId)
+            )
+              AND a.deleted_at IS NULL
+              AND a.status IN ('PUBLISHED', 'CLOSED')
+              AND (CAST(:title AS text) = '' OR LOWER(a.title) LIKE LOWER(CONCAT('%', CAST(:title AS text), '%')))
+              AND (CAST(:type AS text) = '' OR CAST(a.assignment_type AS text) = CAST(:type AS text))
+              AND (
+                  CAST(:status AS text) = ''
+                  OR (CAST(:status AS text) = 'NOT_STARTED' AND sub.status IS NULL AND a.due_date >= CURRENT_TIMESTAMP)
+                  OR (CAST(:status AS text) = 'IN_PROGRESS' AND sub.status = 'IN_PROGRESS' AND a.due_date >= CURRENT_TIMESTAMP)
+                  OR (CAST(:status AS text) = 'OVERDUE' AND (sub.status = 'OVERDUE' OR ((sub.status IS NULL OR sub.status = 'IN_PROGRESS') AND a.due_date < CURRENT_TIMESTAMP)))
+                  OR (CAST(:status AS text) NOT IN ('NOT_STARTED', 'IN_PROGRESS', 'OVERDUE') AND sub.status = CAST(:status AS text))
+              )
+            ORDER BY
+              CASE
+                  -- 1. NOT_STARTED / IN_PROGRESS (Within deadline)
+                  WHEN (sub.status IS NULL OR sub.status = 'IN_PROGRESS') AND a.due_date >= CURRENT_TIMESTAMP THEN 0
+                  -- 2. OVERDUE (Explicit status OR past deadline and not submitted/graded)
+                  WHEN sub.status = 'OVERDUE' OR ((sub.status IS NULL OR sub.status = 'IN_PROGRESS') AND a.due_date < CURRENT_TIMESTAMP) THEN 1
+                  -- 3. SUBMITTED / GRADED
+                  ELSE 2
+              END ASC,
+              CASE
+                  -- Sorting within Group 0: Closest due date first (ASC)
+                  WHEN (sub.status IS NULL OR sub.status = 'IN_PROGRESS') AND a.due_date >= CURRENT_TIMESTAMP THEN a.due_date
+              END ASC,
+              a.due_date DESC
+            """,
+            countQuery = """
+            SELECT COUNT(*)
+            FROM assignment.assignments a
+            LEFT JOIN LATERAL (
+                SELECT CAST(s.status AS text) as status
+                FROM assignment.assignment_submissions s
+                WHERE s.assignment_id = a.id AND s.user_id = :learnerId
+                ORDER BY s.attempt_number DESC
+                LIMIT 1
+            ) sub ON TRUE
+            WHERE EXISTS (
+                SELECT 1 FROM assignment.assignment_targets t
+                WHERE t.assignment_id = a.id
+                  AND (t.class_id IN (:classIds) OR t.user_id = :learnerId)
+            )
+              AND a.deleted_at IS NULL
+              AND a.status IN ('PUBLISHED', 'CLOSED')
+              AND (CAST(:title AS text) = '' OR LOWER(a.title) LIKE LOWER(CONCAT('%', CAST(:title AS text), '%')))
+              AND (CAST(:type AS text) = '' OR CAST(a.assignment_type AS text) = CAST(:type AS text))
+              AND (
+                  CAST(:status AS text) = ''
+                  OR (CAST(:status AS text) = 'NOT_STARTED' AND sub.status IS NULL AND a.due_date >= CURRENT_TIMESTAMP)
+                  OR (CAST(:status AS text) = 'IN_PROGRESS' AND sub.status = 'IN_PROGRESS' AND a.due_date >= CURRENT_TIMESTAMP)
+                  OR (CAST(:status AS text) = 'OVERDUE' AND (sub.status = 'OVERDUE' OR ((sub.status IS NULL OR sub.status = 'IN_PROGRESS') AND a.due_date < CURRENT_TIMESTAMP)))
+                  OR (CAST(:status AS text) NOT IN ('NOT_STARTED', 'IN_PROGRESS', 'OVERDUE') AND sub.status = CAST(:status AS text))
+              )
+            """,
+            nativeQuery = true)
+    Page<Assignment> findLearnerAssignmentsSorted(
+            @Param("learnerId") UUID learnerId,
+            @Param("classIds") List<UUID> classIds,
+            @Param("title") String title,
+            @Param("type") String type,
+            @Param("status") String status,
+            Pageable pageable);
 }

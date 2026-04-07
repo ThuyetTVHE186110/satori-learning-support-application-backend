@@ -1,6 +1,6 @@
 package com.fu.roleplay.repository;
 
-import com.fu.roleplay.dto.entity.ConversationSession;
+import com.fu.roleplay.entity.ConversationSession;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -21,8 +21,6 @@ public interface ConversationSessionRepository extends JpaRepository<Conversatio
            nativeQuery = true)
     Page<ConversationSession> findByUserIdAndSessionTypeOrderByCreatedAtDesc(
             @Param("userId") UUID userId, @Param("sessionType") String sessionType, Pageable pageable);
-
-    Page<ConversationSession> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
 
     Optional<ConversationSession> findByIdAndUserId(UUID id, UUID userId);
 

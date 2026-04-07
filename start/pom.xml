@@ -54,6 +54,22 @@
             <groupId>com.fu</groupId>
             <artifactId>assignment</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.fu</groupId>
+            <artifactId>monitoring</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fu</groupId>
+            <artifactId>practice</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fu</groupId>
+            <artifactId>achievement</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fu</groupId>
+            <artifactId>notification</artifactId>
+        </dependency>
 
         <!-- Spring Boot -->
         <dependency>

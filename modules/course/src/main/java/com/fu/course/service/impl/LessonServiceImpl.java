@@ -1,5 +1,6 @@
 package com.fu.course.service.impl;
 
+import com.fu.common.exception.BusinessException;
 import com.fu.course.dto.request.CreateLessonRequest;
 import com.fu.course.dto.request.UpdateLessonRequest;
 import com.fu.course.dto.response.LessonResponse;
@@ -11,7 +12,9 @@ import com.fu.course.exception.CourseNotFoundException;
 import com.fu.course.exception.LessonNotFoundException;
 import com.fu.course.mapper.LessonMapper;
 import com.fu.course.repository.CourseRepository;
+import com.fu.course.repository.LessonGrammarRepository;
 import com.fu.course.repository.LessonRepository;
+import com.fu.course.repository.LessonVocabularyRepository;
 import com.fu.course.service.LessonService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,6 +38,8 @@ public class LessonServiceImpl implements LessonService {
     private final LessonRepository lessonRepository;
     private final CourseRepository courseRepository;
     private final LessonMapper lessonMapper;
+    private final LessonVocabularyRepository lessonVocabularyRepository;
+    private final LessonGrammarRepository lessonGrammarRepository;
 
     // ===== CRUD =====
 
@@ -70,7 +75,7 @@ public class LessonServiceImpl implements LessonService {
         if (request.getTitle() != null
                 && !request.getTitle().equalsIgnoreCase(lesson.getTitle())
                 && lessonRepository.existsByTitleIgnoreCaseAndCourseIdAndIdNot(
-                        request.getTitle(), lesson.getCourse().getId(), lessonId)) {
+                request.getTitle(), lesson.getCourse().getId(), lessonId)) {
             throw new com.fu.common.exception.BusinessException(
                     "Lesson with title '" + request.getTitle() + "' already exists in this course");
         }
@@ -90,10 +95,7 @@ public class LessonServiceImpl implements LessonService {
         Lesson lesson = findLessonOrThrow(lessonId);
 
         LessonResponse response = lessonMapper.toResponse(lesson);
-        // TODO: Set vocabularyCount and grammarPointCount from join tables
-        response.setVocabularyCount(0L);
-        response.setGrammarPointCount(0L);
-
+        enrichWithCounts(response, lessonId);
         return response;
     }
 
@@ -116,15 +118,20 @@ public class LessonServiceImpl implements LessonService {
         log.debug("Fetching all lessons for course: {}", courseId);
         return lessonRepository.findByCourseIdAndNotDeleted(courseId)
                 .stream()
-                .map(lessonMapper::toSummaryResponse)
+                .map(lesson -> enrichSummaryWithCounts(lessonMapper.toSummaryResponse(lesson), lesson.getId()))
                 .toList();
     }
 
     @Override
-    public Page<LessonSummaryResponse> getLessonsByCourseId(UUID courseId, Pageable pageable) {
-        log.debug("Fetching lessons for course {} with pagination", courseId);
-        return lessonRepository.findByCourseIdAndNotDeleted(courseId, pageable)
-                .map(lessonMapper::toSummaryResponse);
+    public Page<LessonSummaryResponse> getLessonsByCourseId(UUID courseId, ContentStatus status, Pageable pageable) {
+        log.debug("Fetching lessons for course {} with status: {}", courseId, status);
+        Page<Lesson> lessonPage;
+        if (status != null) {
+            lessonPage = lessonRepository.findByCourseIdAndStatusAndNotDeleted(courseId, status.name(), pageable);
+        } else {
+            lessonPage = lessonRepository.findByCourseIdAndNotDeleted(courseId, pageable);
+        }
+        return lessonPage.map(lesson -> enrichSummaryWithCounts(lessonMapper.toSummaryResponse(lesson), lesson.getId()));
     }
 
     @Override
@@ -132,7 +139,7 @@ public class LessonServiceImpl implements LessonService {
         log.debug("Fetching published lessons for course: {}", courseId);
         return lessonRepository.findPublishedByCourseId(courseId)
                 .stream()
-                .map(lessonMapper::toSummaryResponse)
+                .map(lesson -> enrichSummaryWithCounts(lessonMapper.toSummaryResponse(lesson), lesson.getId()))
                 .toList();
     }
 
@@ -140,14 +147,19 @@ public class LessonServiceImpl implements LessonService {
     public Page<LessonSummaryResponse> searchLessons(String keyword, Pageable pageable) {
         log.debug("Searching lessons by keyword: {}", keyword);
         return lessonRepository.searchByTitle(keyword, pageable)
-                .map(lessonMapper::toSummaryResponse);
+                .map(lesson -> enrichSummaryWithCounts(lessonMapper.toSummaryResponse(lesson), lesson.getId()));
     }
 
     @Override
-    public Page<LessonSummaryResponse> searchLessonsInCourse(UUID courseId, String keyword, Pageable pageable) {
-        log.debug("Searching lessons in course {} by keyword: {}", courseId, keyword);
-        return lessonRepository.searchByTitleInCourse(courseId, keyword, pageable)
-                .map(lessonMapper::toSummaryResponse);
+    public Page<LessonSummaryResponse> searchLessonsInCourse(UUID courseId, String keyword, ContentStatus status, Pageable pageable) {
+        log.debug("Searching lessons in course {} by keyword: {} and status: {}", courseId, keyword, status);
+        Page<Lesson> lessonPage;
+        if (status != null) {
+            lessonPage = lessonRepository.searchByTitleAndStatusInCourse(courseId, keyword, status.name(), pageable);
+        } else {
+            lessonPage = lessonRepository.searchByTitleInCourse(courseId, keyword, pageable);
+        }
+        return lessonPage.map(lesson -> enrichSummaryWithCounts(lessonMapper.toSummaryResponse(lesson), lesson.getId()));
     }
 
     // ===== Status Management =====
@@ -158,6 +170,9 @@ public class LessonServiceImpl implements LessonService {
         log.info("Publishing lesson {} by manager {}", lessonId, managerId);
 
         Lesson lesson = findLessonOrThrow(lessonId);
+        if (lesson.getStatus() == ContentStatus.PUBLISHED) {
+            throw new BusinessException("ALREADY_PUBLISHED", "Bài học đã được mở trước đó rồi.");
+        }
         lesson.setStatus(ContentStatus.PUBLISHED);
         lesson.setUpdatedBy(managerId);
 
@@ -173,6 +188,9 @@ public class LessonServiceImpl implements LessonService {
         log.info("Archiving lesson {} by manager {}", lessonId, managerId);
 
         Lesson lesson = findLessonOrThrow(lessonId);
+        if (lesson.getStatus() == ContentStatus.DRAFT) {
+            throw new BusinessException("INVALID_STATUS", "Không thể lưu trữ bài ở trạng thái nháp");
+        }
         lesson.setStatus(ContentStatus.ARCHIVED);
         lesson.setUpdatedBy(managerId);
 
@@ -204,6 +222,17 @@ public class LessonServiceImpl implements LessonService {
     }
 
     // ===== Helper =====
+
+    private void enrichWithCounts(LessonResponse response, UUID lessonId) {
+        response.setVocabularyCount(lessonVocabularyRepository.countByLessonId(lessonId));
+        response.setGrammarPointCount(lessonGrammarRepository.countByLessonId(lessonId));
+    }
+
+    private LessonSummaryResponse enrichSummaryWithCounts(LessonSummaryResponse response, UUID lessonId) {
+        response.setVocabularyCount(lessonVocabularyRepository.countByLessonId(lessonId));
+        response.setGrammarPointCount(lessonGrammarRepository.countByLessonId(lessonId));
+        return response;
+    }
 
     private Lesson findLessonOrThrow(UUID lessonId) {
         return lessonRepository.findByIdAndNotDeleted(lessonId)

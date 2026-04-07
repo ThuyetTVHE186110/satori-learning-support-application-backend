@@ -1,6 +1,6 @@
 package com.fu.roleplay.dto.response;
 
-import com.fu.roleplay.dto.entity.ConversationSession;
+import com.fu.roleplay.entity.ConversationSession;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -17,7 +17,7 @@ import java.util.UUID;
 public class SessionSummaryResponse {
 
     private UUID id;
-    private UUID topicId;
+    private UUID conversationId;
     private ConversationSession.SessionType sessionType;
     private ConversationSession.SessionStatus status;
     private Integer messageCount;

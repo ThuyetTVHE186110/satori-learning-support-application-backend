@@ -30,7 +30,7 @@ import java.util.UUID;
 
 /**
  * REST Controller for Manager Course CRUD operations.
- *
+ * <p>
  * All endpoints require ROLE_MANAGER.
  * Base path: /api/v1/manager/courses
  */
@@ -38,46 +38,40 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/manager/courses")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('MANAGER')")
+@PreAuthorize("hasRole('CONTENT_MANAGER')")
 public class ManagerCourseController {
 
     private final CourseService courseService;
     private final CloudinaryService cloudinaryService;
 
     /**
-     * Create a new course with optional thumbnail upload.
+     * Create a new course
      * POST /api/v1/manager/courses
-     * Content-Type: multipart/form-data
-     *   - "request" part: JSON course data
-     *   - "thumbnail" part: image file (optional)
      */
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping
     public ResponseEntity<ApiResponse<CourseResponse>> createCourse(
-            @Valid @RequestPart("request") CreateCourseRequest request,
-            @RequestPart(value = "thumbnail", required = false) MultipartFile thumbnail,
+            @Valid @RequestBody CreateCourseRequest request,
             @AuthenticationPrincipal UUID managerId) {
 
         log.info("Manager {} creating course: {}", managerId, request.getName());
-        CourseResponse response = courseService.createCourse(request, thumbnail, managerId);
+        CourseResponse response = courseService.createCourse(request, managerId);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success("Course created successfully", response));
+                .body(ApiResponse.success("Tạo khóa học thành công.", response));
     }
 
     /**
-     * Update an existing course with optional thumbnail upload.
+     * Update an existing course
      * PUT /api/v1/manager/courses/{courseId}
-     * Content-Type: multipart/form-data
      */
-    @PutMapping(value = "/{courseId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PutMapping(value = "/{courseId}")
     public ResponseEntity<ApiResponse<CourseResponse>> updateCourse(
             @PathVariable UUID courseId,
-            @Valid @RequestPart("request") UpdateCourseRequest request,
-            @RequestPart(value = "thumbnail", required = false) MultipartFile thumbnail,
+            @Valid @RequestBody UpdateCourseRequest request,
             @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
         log.info("Manager {} updating course: {}", managerId, courseId);
-        CourseResponse response = courseService.updateCourse(courseId, request, thumbnail, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Course updated successfully", response));
+        CourseResponse response = courseService.updateCourse(courseId, request, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Cập nhật khóa học thành công!", response));
     }
 
     /**
@@ -121,54 +115,6 @@ public class ManagerCourseController {
     }
 
     /**
-     * Activate a course (INACTIVE -> ACTIVE).
-     * PATCH /api/v1/manager/courses/{courseId}/activate
-     */
-    @PatchMapping("/{courseId}/activate")
-    public ResponseEntity<ApiResponse<CourseResponse>> activateCourse(
-            @PathVariable UUID courseId,
-            @AuthenticationPrincipal(expression = "id") UUID managerId) {
-
-        log.info("Manager {} activating course: {}", managerId, courseId);
-        CourseResponse response = courseService.activateCourse(courseId, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Course activated successfully", response));
-    }
-
-    /**
-     * Deactivate a course (ACTIVE -> INACTIVE).
-     * PATCH /api/v1/manager/courses/{courseId}/deactivate
-     */
-    @PatchMapping("/{courseId}/deactivate")
-    public ResponseEntity<ApiResponse<CourseResponse>> deactivateCourse(
-            @PathVariable UUID courseId,
-            @AuthenticationPrincipal(expression = "id") UUID managerId) {
-
-        log.info("Manager {} deactivating course: {}", managerId, courseId);
-        CourseResponse response = courseService.deactivateCourse(courseId, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Course deactivated successfully", response));
-    }
-
-    /**
-     * Upload or update course thumbnail.
-     * POST /api/v1/manager/courses/{courseId}/thumbnail
-     */
-    @PostMapping("/{courseId}/thumbnail")
-    public ResponseEntity<ApiResponse<CourseResponse>> uploadThumbnail(
-            @PathVariable UUID courseId,
-            @RequestParam("file") MultipartFile file,
-            @AuthenticationPrincipal UUID managerId) {
-
-        log.info("Manager {} uploading thumbnail for course: {}", managerId, courseId);
-
-        // Upload image to Cloudinary
-        String thumbnailUrl = cloudinaryService.uploadImage(file, "courses/thumbnails");
-
-        // Update course with new thumbnail URL
-        CourseResponse response = courseService.updateThumbnail(courseId, thumbnailUrl, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Thumbnail uploaded successfully", response));
-    }
-
-    /**
      * Soft-delete a course.
      * DELETE /api/v1/manager/courses/{courseId}
      */
@@ -179,7 +125,7 @@ public class ManagerCourseController {
 
         log.info("Manager {} deleting course: {}", managerId, courseId);
         courseService.deleteCourse(courseId, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Course deleted successfully", null));
+        return ResponseEntity.ok(ApiResponse.success("Xóa khóa học thành công.", null));
     }
 
     /**

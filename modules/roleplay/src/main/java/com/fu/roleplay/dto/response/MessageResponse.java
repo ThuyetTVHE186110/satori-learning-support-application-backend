@@ -1,6 +1,6 @@
 package com.fu.roleplay.dto.response;
 
-import com.fu.roleplay.dto.entity.ConversationMessage;
+import com.fu.roleplay.entity.ConversationMessage;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;

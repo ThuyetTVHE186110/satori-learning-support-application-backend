@@ -101,6 +101,24 @@ class ScannedPdfIngestionServiceTest {
                 "file", "scan.pdf", "application/pdf", bytes);
     }
 
+    /**
+     * Helper: create batch OCR result with same OcrTextResult for all pages.
+     */
+    private List<OcrTextResult> batchResults(int pageCount, OcrTextResult result) {
+        List<OcrTextResult> results = new java.util.ArrayList<>();
+        for (int i = 0; i < pageCount; i++) {
+            results.add(result);
+        }
+        return results;
+    }
+
+    /**
+     * Helper: create batch OCR result with specific results per page.
+     */
+    private List<OcrTextResult> batchResults(OcrTextResult... results) {
+        return java.util.Arrays.asList(results);
+    }
+
     // ── Default mock setup ──────────────────────────────────────────────────
 
     @BeforeEach
@@ -121,8 +139,7 @@ class ScannedPdfIngestionServiceTest {
         @DisplayName("All pages produce empty OCR → InvalidImportFileException('no text')")
         void parse_allPagesEmptyOcr_throwsNoText() throws Exception {
             byte[] pdf = blankPdf(2);
-            given(ocrClient.extractText(any(BufferedImage.class)))
-                    .willReturn(OcrTextResult.empty());
+            given(ocrClient.extractTextBatch(anyList(), any(byte[].class))).willReturn(batchResults(2, OcrTextResult.empty()));
 
             assertThatThrownBy(() -> service.parse(wrapPdf(pdf)))
                     .isInstanceOf(InvalidImportFileException.class)
@@ -138,15 +155,14 @@ class ScannedPdfIngestionServiceTest {
 
             assertThatThrownBy(() -> service.parse(broken))
                     .isInstanceOf(InvalidImportFileException.class)
-                    .hasMessageContaining("Failed to process scanned PDF");
+                    .hasMessageContaining("Failed to read PDF bytes");
         }
 
         @Test
         @DisplayName("OcrClient returns empty for every page → throws even if there are 3 pages")
         void parse_threePagesAllEmpty_throws() throws Exception {
             byte[] pdf = blankPdf(3);
-            given(ocrClient.extractText(any(BufferedImage.class)))
-                    .willReturn(OcrTextResult.empty());
+            given(ocrClient.extractTextBatch(anyList(), any(byte[].class))).willReturn(batchResults(3, OcrTextResult.empty()));
 
             assertThatThrownBy(() -> service.parse(wrapPdf(pdf)))
                     .isInstanceOf(InvalidImportFileException.class);
@@ -165,8 +181,7 @@ class ScannedPdfIngestionServiceTest {
         @DisplayName("Single page, OCR returns short text → 1 chunk with chunkType=SCANNED")
         void parse_singlePageShortText_oneScannedChunk() throws Exception {
             byte[] pdf = blankPdf(1);
-            given(ocrClient.extractText(any(BufferedImage.class)))
-                    .willReturn(new OcrTextResult(SHORT_OCR, HIGH_CONF));
+            given(ocrClient.extractTextBatch(anyList(), any(byte[].class))).willReturn(batchResults(1, new OcrTextResult(SHORT_OCR, HIGH_CONF)));
 
             DocumentParseResult result = service.parse(wrapPdf(pdf));
 
@@ -179,8 +194,7 @@ class ScannedPdfIngestionServiceTest {
         @DisplayName("Single page → pageTexts.size() == 1")
         void parse_singlePage_pageTextsHasOneEntry() throws Exception {
             byte[] pdf = blankPdf(1);
-            given(ocrClient.extractText(any(BufferedImage.class)))
-                    .willReturn(new OcrTextResult(SHORT_OCR, HIGH_CONF));
+            given(ocrClient.extractTextBatch(anyList(), any(byte[].class))).willReturn(batchResults(1, new OcrTextResult(SHORT_OCR, HIGH_CONF)));
 
             DocumentParseResult result = service.parse(wrapPdf(pdf));
 
@@ -192,8 +206,7 @@ class ScannedPdfIngestionServiceTest {
         @DisplayName("Single page → fullText is non-blank and contains OCR output")
         void parse_singlePage_fullTextContainsOcrOutput() throws Exception {
             byte[] pdf = blankPdf(1);
-            given(ocrClient.extractText(any(BufferedImage.class)))
-                    .willReturn(new OcrTextResult(SHORT_OCR, HIGH_CONF));
+            given(ocrClient.extractTextBatch(anyList(), any(byte[].class))).willReturn(batchResults(1, new OcrTextResult(SHORT_OCR, HIGH_CONF)));
 
             DocumentParseResult result = service.parse(wrapPdf(pdf));
 
@@ -205,8 +218,7 @@ class ScannedPdfIngestionServiceTest {
         @DisplayName("Low-confidence page (< minConfidence) → still included in result")
         void parse_lowConfidencePage_stillIncluded() throws Exception {
             byte[] pdf = blankPdf(1);
-            given(ocrClient.extractText(any(BufferedImage.class)))
-                    .willReturn(new OcrTextResult(SHORT_OCR, LOW_CONF));
+            given(ocrClient.extractTextBatch(anyList(), any(byte[].class))).willReturn(batchResults(1, new OcrTextResult(SHORT_OCR, LOW_CONF)));
 
             DocumentParseResult result = service.parse(wrapPdf(pdf));
 
@@ -228,8 +240,7 @@ class ScannedPdfIngestionServiceTest {
         @DisplayName("4 pages, combined text < 2000 chars → single chunk spanning all pages")
         void parse_fourPagesUnder2000Chars_singleChunkSpansAllPages() throws Exception {
             byte[] pdf = blankPdf(4);
-            given(ocrClient.extractText(any(BufferedImage.class)))
-                    .willReturn(new OcrTextResult(SHORT_OCR, HIGH_CONF)); // ~40 chars × 4 = ~160 chars total
+            given(ocrClient.extractTextBatch(anyList(), any(byte[].class))).willReturn(batchResults(4, new OcrTextResult(SHORT_OCR, HIGH_CONF))); // ~40 chars × 4 = ~160 chars total
 
             DocumentParseResult result = service.parse(wrapPdf(pdf));
 
@@ -246,8 +257,7 @@ class ScannedPdfIngestionServiceTest {
         void parse_fourPagesOver2000Chars_multipleChunks() throws Exception {
             byte[] pdf = blankPdf(4);
             // Each page returns LONG_OCR (~630 chars); 4 pages = ~2520 chars → should produce 2+ chunks
-            given(ocrClient.extractText(any(BufferedImage.class)))
-                    .willReturn(new OcrTextResult(LONG_OCR, HIGH_CONF));
+            given(ocrClient.extractTextBatch(anyList(), any(byte[].class))).willReturn(batchResults(4, new OcrTextResult(LONG_OCR, HIGH_CONF)));
 
             DocumentParseResult result = service.parse(wrapPdf(pdf));
 
@@ -258,9 +268,9 @@ class ScannedPdfIngestionServiceTest {
         @DisplayName("One page empty, one page with text → empty contributes empty string only")
         void parse_mixedEmptyAndTextPages_emptyPageContributesEmptyString() throws Exception {
             byte[] pdf = blankPdf(2);
-            given(ocrClient.extractText(any(BufferedImage.class)))
-                    .willReturn(OcrTextResult.empty())         // page 1: no OCR
-                    .willReturn(new OcrTextResult(SHORT_OCR, HIGH_CONF)); // page 2: has text
+            // extractTextBatch returns all pages at once - page 1 empty, page 2 has text
+            given(ocrClient.extractTextBatch(anyList(), any(byte[].class))).willReturn(
+                    batchResults(OcrTextResult.empty(), new OcrTextResult(SHORT_OCR, HIGH_CONF)));
 
             DocumentParseResult result = service.parse(wrapPdf(pdf));
 
@@ -273,10 +283,9 @@ class ScannedPdfIngestionServiceTest {
         @DisplayName("Some empty, some text pages → fullText only contains non-empty pages")
         void parse_mixedPages_fullTextContainsOnlyNonEmptyContent() throws Exception {
             byte[] pdf = blankPdf(3);
-            given(ocrClient.extractText(any(BufferedImage.class)))
-                    .willReturn(OcrTextResult.empty())
-                    .willReturn(new OcrTextResult(SHORT_OCR, HIGH_CONF))
-                    .willReturn(OcrTextResult.empty());
+            // extractTextBatch returns all 3 pages at once: page 1 empty, page 2 has text, page 3 empty
+            given(ocrClient.extractTextBatch(anyList(), any(byte[].class))).willReturn(
+                    batchResults(OcrTextResult.empty(), new OcrTextResult(SHORT_OCR, HIGH_CONF), OcrTextResult.empty()));
 
             DocumentParseResult result = service.parse(wrapPdf(pdf));
 
@@ -298,8 +307,7 @@ class ScannedPdfIngestionServiceTest {
         @DisplayName("chunkType is always 'SCANNED'")
         void parse_chunks_chunkTypeIsAlwaysScanned() throws Exception {
             byte[] pdf = blankPdf(2);
-            given(ocrClient.extractText(any(BufferedImage.class)))
-                    .willReturn(new OcrTextResult(LONG_OCR, HIGH_CONF));
+            given(ocrClient.extractTextBatch(anyList(), any(byte[].class))).willReturn(batchResults(2, new OcrTextResult(LONG_OCR, HIGH_CONF)));
 
             DocumentParseResult result = service.parse(wrapPdf(pdf));
 
@@ -312,8 +320,7 @@ class ScannedPdfIngestionServiceTest {
         @DisplayName("estimatedTokenCount = content.length / 4")
         void parse_chunk_estimatedTokenCountIsContentLengthDiv4() throws Exception {
             byte[] pdf = blankPdf(1);
-            given(ocrClient.extractText(any(BufferedImage.class)))
-                    .willReturn(new OcrTextResult(SHORT_OCR, HIGH_CONF));
+            given(ocrClient.extractTextBatch(anyList(), any(byte[].class))).willReturn(batchResults(1, new OcrTextResult(SHORT_OCR, HIGH_CONF)));
 
             DocumentParseResult result = service.parse(wrapPdf(pdf));
             DocumentChunk chunk = result.getChunks().get(0);
@@ -326,8 +333,7 @@ class ScannedPdfIngestionServiceTest {
         @DisplayName("chunkIndex values are sequential starting from 0")
         void parse_multipleChunks_chunkIndicesAreSequential() throws Exception {
             byte[] pdf = blankPdf(5);
-            given(ocrClient.extractText(any(BufferedImage.class)))
-                    .willReturn(new OcrTextResult(LONG_OCR, HIGH_CONF));
+            given(ocrClient.extractTextBatch(anyList(), any(byte[].class))).willReturn(batchResults(5, new OcrTextResult(LONG_OCR, HIGH_CONF)));
 
             DocumentParseResult result = service.parse(wrapPdf(pdf));
 
@@ -341,8 +347,7 @@ class ScannedPdfIngestionServiceTest {
         @DisplayName("pageStart >= 1 and pageEnd >= pageStart for all chunks")
         void parse_chunkPageBoundaries_areValid() throws Exception {
             byte[] pdf = blankPdf(4);
-            given(ocrClient.extractText(any(BufferedImage.class)))
-                    .willReturn(new OcrTextResult(LONG_OCR, HIGH_CONF));
+            given(ocrClient.extractTextBatch(anyList(), any(byte[].class))).willReturn(batchResults(4, new OcrTextResult(LONG_OCR, HIGH_CONF)));
 
             DocumentParseResult result = service.parse(wrapPdf(pdf));
 
@@ -356,8 +361,7 @@ class ScannedPdfIngestionServiceTest {
         @DisplayName("chunk content is trimmed and non-blank")
         void parse_chunkContent_isTrimmedAndNonBlank() throws Exception {
             byte[] pdf = blankPdf(1);
-            given(ocrClient.extractText(any(BufferedImage.class)))
-                    .willReturn(new OcrTextResult(SHORT_OCR, HIGH_CONF));
+            given(ocrClient.extractTextBatch(anyList(), any(byte[].class))).willReturn(batchResults(1, new OcrTextResult(SHORT_OCR, HIGH_CONF)));
 
             DocumentParseResult result = service.parse(wrapPdf(pdf));
 
@@ -376,24 +380,22 @@ class ScannedPdfIngestionServiceTest {
     class OcrClientInteractionTests {
 
         @Test
-        @DisplayName("OcrClient.extractText() is called once per page")
-        void parse_extractTextCalledOncePerPage() throws Exception {
+        @DisplayName("OcrClient.extractTextBatch() is called once with all pages")
+        void parse_extractTextBatchCalledOnce() throws Exception {
             byte[] pdf = blankPdf(3);
-            given(ocrClient.extractText(any(BufferedImage.class)))
-                    .willReturn(new OcrTextResult(SHORT_OCR, HIGH_CONF));
+            given(ocrClient.extractTextBatch(anyList(), any(byte[].class))).willReturn(batchResults(3, new OcrTextResult(SHORT_OCR, HIGH_CONF)));
 
             service.parse(wrapPdf(pdf));
 
-            then(ocrClient).should(times(3)).extractText(any(BufferedImage.class));
+            then(ocrClient).should(times(1)).extractTextBatch(anyList(), any(byte[].class));
         }
 
         @Test
         @DisplayName("If first page empty but second page has text → no exception thrown")
         void parse_firstPageEmptySecondHasText_succeeds() throws Exception {
             byte[] pdf = blankPdf(2);
-            given(ocrClient.extractText(any(BufferedImage.class)))
-                    .willReturn(OcrTextResult.empty())
-                    .willReturn(new OcrTextResult(SHORT_OCR, HIGH_CONF));
+            given(ocrClient.extractTextBatch(anyList(), any(byte[].class))).willReturn(
+                    batchResults(OcrTextResult.empty(), new OcrTextResult(SHORT_OCR, HIGH_CONF)));
 
             assertThatNoException().isThrownBy(() -> service.parse(wrapPdf(pdf)));
         }

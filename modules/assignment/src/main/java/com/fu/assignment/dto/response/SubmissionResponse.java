@@ -1,6 +1,10 @@
 package com.fu.assignment.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fu.assignment.entity.SubmissionStatus;
+import com.fu.achievement.dto.response.UserAchievementResponse;
+import com.fu.achievement.dto.response.LevelUpNotificationResponse;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -15,6 +19,7 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class SubmissionResponse {
 
     private UUID id;
@@ -38,19 +43,22 @@ public class SubmissionResponse {
     private Integer totalQuestions;
     private String feedback;
 
-    private Integer timeSpentSeconds;
-
     // Answers (JSON) — only returned to learner (own submission) or teacher/manager
     private String answers;
 
     // Writing submissions
-    private String writtenAnswer;
     private List<String> imageUrls;
 
-    // Teacher grading
-    private BigDecimal teacherScore;
     // Detailed feedback for quiz
     private List<QuizSubmissionDetailResponse> quizDetails;
+
+    /** Badges earned when submitting this assignment. */
+    @JsonProperty("newBadgesEarned")
+    private List<UserAchievementResponse> earnedBadges;
+
+    /** Level-up notification if user leveled up during submission. */
+    @JsonProperty("levelUp")
+    private LevelUpNotificationResponse levelUpInfo;
 
     private LocalDateTime createdAt;
 }

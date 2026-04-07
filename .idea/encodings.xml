@@ -5,6 +5,8 @@
     <file url="file://$PROJECT_DIR$/common/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/infrastructure/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/infrastructure/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/modules/achievement/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/modules/achievement/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/modules/assignment/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/modules/assignment/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/modules/class/src/main/java" charset="UTF-8" />
@@ -18,6 +20,12 @@
     <file url="file://$PROJECT_DIR$/modules/course/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/modules/curriculum-import/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/modules/curriculum-import/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/modules/monitoring/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/modules/monitoring/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/modules/notification/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/modules/notification/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/modules/practice/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/modules/practice/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/modules/pronunciation/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/modules/pronunciation/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/modules/roleplay/src/main/java" charset="UTF-8" />

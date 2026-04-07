@@ -3,6 +3,7 @@ package com.fu.assignment.service;
 import com.fu.assignment.dto.request.*;
 import com.fu.assignment.dto.response.*;
 import com.fu.assignment.entity.AssignmentType;
+import com.fu.assignment.entity.SubmissionStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -87,7 +88,23 @@ public interface AssignmentService {
 
     // ── Submissions — Learner Flow ────────────────────────────────────────────
 
-    Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, String title, AssignmentType type, Pageable pageable);
+    /**
+     * Get learner's available assignments with optional class filter.
+     * @param learnerId Current learner ID
+     * @param classId Optional class filter. If null, shows assignments from THE single active enrolled class.
+     *                If provided, shows assignments from that specific class.
+     * @param title Optional title search filter
+     * @param type Optional assignment type filter
+     * @param status Optional submission status filter
+     * @param pageable Pagination parameters
+     */
+    Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(
+            UUID learnerId, 
+            UUID classId, 
+            String title, 
+            AssignmentType type, 
+            SubmissionStatus status, 
+            Pageable pageable);
 
 
     /** Start or Resume assignment → returns full assignment details + current session */
@@ -97,9 +114,15 @@ public interface AssignmentService {
     SubmissionResponse submitQuiz(UUID assignmentId, SubmitAssignmentRequest request, UUID learnerId);
 
     /** Submit Writing or Translation (pending teacher grading). Supports optional image uploads. */
-    SubmissionResponse submitWriting(UUID assignmentId, SubmitWritingRequest request, MultipartFile[] images, UUID learnerId);
+    SubmissionResponse submitWriting(UUID assignmentId, MultipartFile[] images, UUID learnerId);
 
     Page<SubmissionSummaryResponse> getMySubmissions(UUID learnerId, Pageable pageable);
 
     SubmissionResponse getMySubmission(UUID submissionId, UUID learnerId);
+
+    /** Cancel a SUBMITTED writing/translation assignment, returning it to IN_PROGRESS */
+    SubmissionResponse cancelSubmission(UUID assignmentId, UUID learnerId);
+
+    /** Evaluate a writing submission's images and prompt before official submission */
+    WritingEvaluationResponse evaluateWriting(WritingEvaluationRequest request, MultipartFile[] images);
 }

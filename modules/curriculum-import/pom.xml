@@ -59,7 +59,6 @@
         <dependency>
             <groupId>org.apache.poi</groupId>
             <artifactId>poi-ooxml</artifactId>
-            <version>5.3.0</version>
         </dependency>
 
         <!-- Spring Web (RestClient for OCR microservice) -->
@@ -68,11 +67,25 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
-        <!-- Google Cloud Vision API (only used when ocr.provider=google_vision or auto) -->
+        <!-- Google Cloud Vision API (OCR Tier 1 fallback) -->
+        <!-- Version managed by libraries-bom in root pom -->
         <dependency>
             <groupId>com.google.cloud</groupId>
             <artifactId>google-cloud-vision</artifactId>
-            <version>3.37.0</version>
+        </dependency>
+
+        <!-- Google Cloud Document AI (OCR Tier 0 — Layout Parser for structured table extraction) -->
+        <!-- Version managed by libraries-bom in root pom -->
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-document-ai</artifactId>
+        </dependency>
+
+        <!-- Google GenAI Java SDK (Gemini 2.5 Flash — Vision Tier 2 replacement for GPT-4o) -->
+        <dependency>
+            <groupId>com.google.genai</groupId>
+            <artifactId>google-genai</artifactId>
+            <version>1.5.0</version>
         </dependency>
 
         <!-- Test dependencies -->

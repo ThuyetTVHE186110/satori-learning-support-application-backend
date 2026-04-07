@@ -13,17 +13,25 @@ import java.util.List;
  * @param text               extracted plain text (may be empty string)
  * @param confidence         average line-level confidence [0.0, 1.0]; 0.0 when OCR failed
  * @param structuredTableRows optional list of tab-separated table rows detected on the page
+ * @param sectionHint        optional MnN section type inferred from Document AI layout blocks
+ *                           (e.g. {@code "VOCABULARY"}, {@code "GRAMMAR_PATTERN"}); null when unknown
  */
-public record OcrTextResult(String text, double confidence, List<String> structuredTableRows) {
+public record OcrTextResult(String text, double confidence,
+                             List<String> structuredTableRows, String sectionHint) {
 
-    /** Convenience constructor without table rows (backward compatible). */
+    /** Convenience constructor without table rows or section hint (backward compatible). */
     public OcrTextResult(String text, double confidence) {
-        this(text, confidence, List.of());
+        this(text, confidence, List.of(), null);
+    }
+
+    /** Convenience constructor with table rows but no section hint. */
+    public OcrTextResult(String text, double confidence, List<String> structuredTableRows) {
+        this(text, confidence, structuredTableRows, null);
     }
 
     /** Sentinel value for when the OCR service is unavailable or returned nothing. */
     public static OcrTextResult empty() {
-        return new OcrTextResult("", 0.0, List.of());
+        return new OcrTextResult("", 0.0, List.of(), null);
     }
 
     public boolean hasText() {
@@ -32,5 +40,9 @@ public record OcrTextResult(String text, double confidence, List<String> structu
 
     public boolean hasTableData() {
         return structuredTableRows != null && !structuredTableRows.isEmpty();
+    }
+
+    public boolean hasSectionHint() {
+        return sectionHint != null && !sectionHint.isBlank();
     }
 }

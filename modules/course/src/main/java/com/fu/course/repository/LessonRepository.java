@@ -2,7 +2,6 @@ package com.fu.course.repository;
 
 import com.fu.course.entity.Lesson;
 import com.fu.course.entity.Lesson.ContentStatus;
-import com.fu.course.entity.Lesson.LessonType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -30,7 +29,15 @@ public interface LessonRepository extends JpaRepository<Lesson, UUID> {
     @Query("SELECT l FROM Lesson l WHERE l.course.id = :courseId AND l.deletedAt IS NULL ORDER BY l.orderIndex ASC")
     List<Lesson> findByCourseIdAndNotDeleted(@Param("courseId") UUID courseId);
 
-    @Query("SELECT l FROM Lesson l WHERE l.course.id = :courseId AND l.deletedAt IS NULL")
+    @Query(value = "SELECT l.* FROM learning_content.lessons l " +
+           "LEFT JOIN system_admin.curriculum_imports ci ON l.import_id = ci.id " +
+           "WHERE l.course_id = :courseId AND l.deleted_at IS NULL " +
+           "AND (l.import_id IS NULL OR ci.status = 'COMPLETED')",
+           countQuery = "SELECT COUNT(*) FROM learning_content.lessons l " +
+                        "LEFT JOIN system_admin.curriculum_imports ci ON l.import_id = ci.id " +
+                        "WHERE l.course_id = :courseId AND l.deleted_at IS NULL " +
+                        "AND (l.import_id IS NULL OR ci.status = 'COMPLETED')",
+           nativeQuery = true)
     Page<Lesson> findByCourseIdAndNotDeleted(@Param("courseId") UUID courseId, Pageable pageable);
 
     // ===== Find published lessons for a course (student access) =====
@@ -42,14 +49,18 @@ public interface LessonRepository extends JpaRepository<Lesson, UUID> {
 
     Page<Lesson> findByStatusAndDeletedAtIsNull(ContentStatus status, Pageable pageable);
 
-    @Query("SELECT l FROM Lesson l WHERE l.course.id = :courseId AND l.status = :status AND l.deletedAt IS NULL")
+    @Query(value = "SELECT l.* FROM learning_content.lessons l " +
+           "LEFT JOIN system_admin.curriculum_imports ci ON l.import_id = ci.id " +
+           "WHERE l.course_id = :courseId AND l.status = CAST(:status AS content_status) AND l.deleted_at IS NULL " +
+           "AND (l.import_id IS NULL OR ci.status = 'COMPLETED')",
+           countQuery = "SELECT COUNT(*) FROM learning_content.lessons l " +
+                        "LEFT JOIN system_admin.curriculum_imports ci ON l.import_id = ci.id " +
+                        "WHERE l.course_id = :courseId AND l.status = CAST(:status AS content_status) AND l.deleted_at IS NULL " +
+                        "AND (l.import_id IS NULL OR ci.status = 'COMPLETED')",
+           nativeQuery = true)
     Page<Lesson> findByCourseIdAndStatusAndNotDeleted(@Param("courseId") UUID courseId,
-                                                       @Param("status") ContentStatus status,
+                                                       @Param("status") String status,
                                                        Pageable pageable);
-
-    // ===== Filter by lesson type =====
-
-    Page<Lesson> findByLessonTypeAndDeletedAtIsNull(LessonType lessonType, Pageable pageable);
 
     // ===== Search =====
 
@@ -58,12 +69,40 @@ public interface LessonRepository extends JpaRepository<Lesson, UUID> {
            "LOWER(l.titleJapanese) LIKE LOWER(CONCAT('%', :keyword, '%')))")
     Page<Lesson> searchByTitle(@Param("keyword") String keyword, Pageable pageable);
 
-    @Query("SELECT l FROM Lesson l WHERE l.course.id = :courseId AND l.deletedAt IS NULL AND " +
-           "(LOWER(l.title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
-           "LOWER(l.titleJapanese) LIKE LOWER(CONCAT('%', :keyword, '%')))")
+    @Query(value = "SELECT l.* FROM learning_content.lessons l " +
+           "LEFT JOIN system_admin.curriculum_imports ci ON l.import_id = ci.id " +
+           "WHERE l.course_id = :courseId AND l.deleted_at IS NULL " +
+           "AND (l.import_id IS NULL OR ci.status = 'COMPLETED') " +
+           "AND (LOWER(l.title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+           "LOWER(l.title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')))",
+           countQuery = "SELECT COUNT(*) FROM learning_content.lessons l " +
+                        "LEFT JOIN system_admin.curriculum_imports ci ON l.import_id = ci.id " +
+                        "WHERE l.course_id = :courseId AND l.deleted_at IS NULL " +
+                        "AND (l.import_id IS NULL OR ci.status = 'COMPLETED') " +
+                        "AND (LOWER(l.title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                        "LOWER(l.title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')))",
+           nativeQuery = true)
     Page<Lesson> searchByTitleInCourse(@Param("courseId") UUID courseId,
                                         @Param("keyword") String keyword,
                                         Pageable pageable);
+
+    @Query(value = "SELECT l.* FROM learning_content.lessons l " +
+           "LEFT JOIN system_admin.curriculum_imports ci ON l.import_id = ci.id " +
+           "WHERE l.course_id = :courseId AND l.status = CAST(:status AS content_status) AND l.deleted_at IS NULL " +
+           "AND (l.import_id IS NULL OR ci.status = 'COMPLETED') " +
+           "AND (LOWER(l.title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+           "LOWER(l.title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')))",
+           countQuery = "SELECT COUNT(*) FROM learning_content.lessons l " +
+                        "LEFT JOIN system_admin.curriculum_imports ci ON l.import_id = ci.id " +
+                        "WHERE l.course_id = :courseId AND l.status = CAST(:status AS content_status) AND l.deleted_at IS NULL " +
+                        "AND (l.import_id IS NULL OR ci.status = 'COMPLETED') " +
+                        "AND (LOWER(l.title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                        "LOWER(l.title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')))",
+           nativeQuery = true)
+    Page<Lesson> searchByTitleAndStatusInCourse(@Param("courseId") UUID courseId,
+                                                 @Param("keyword") String keyword,
+                                                 @Param("status") String status,
+                                                 Pageable pageable);
 
     // ===== Counting =====
 
@@ -80,6 +119,9 @@ public interface LessonRepository extends JpaRepository<Lesson, UUID> {
 
     @Query("SELECT l FROM Lesson l WHERE l.importId = :importId AND LOWER(l.title) = LOWER(:title) AND l.deletedAt IS NULL")
     Optional<Lesson> findByImportIdAndTitleIgnoreCase(@Param("importId") UUID importId, @Param("title") String title);
+
+    @Query("SELECT l FROM Lesson l WHERE l.course.id = :courseId AND l.orderIndex = :orderIndex AND l.deletedAt IS NULL ORDER BY l.createdAt DESC")
+    List<Lesson> findByCourseIdAndOrderIndexAndNotDeleted(@Param("courseId") UUID courseId, @Param("orderIndex") int orderIndex);
 
     // ===== Exists checks =====
 

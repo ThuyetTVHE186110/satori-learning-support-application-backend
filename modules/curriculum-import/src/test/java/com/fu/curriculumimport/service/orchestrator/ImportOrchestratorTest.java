@@ -28,6 +28,7 @@ import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
@@ -66,7 +67,7 @@ import static org.mockito.BDDMockito.*;
  *   - VOCABULARY → uses vocabularyAgent.extractVocabulary
  *   - GRAMMAR → uses grammarAgent.extractGrammar
  *   - EXERCISE / OTHER → returns empty result (no AI call)
- *   - MIXED / default → uses extractionAgent.extractContent
+ *   - MIXED / default → uses both vocab + grammar agents + LessonMetadataParser
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -74,7 +75,6 @@ import static org.mockito.BDDMockito.*;
 class ImportOrchestratorTest {
 
     @Mock private FileIngestionRouter fileIngestionRouter;
-    @Mock private ContentExtractionAgent extractionAgent;
     @Mock private ContentClassifierAgent classifierAgent;
     @Mock private VocabularyExtractionAgent vocabularyAgent;
     @Mock private GrammarExtractionAgent grammarAgent;
@@ -86,6 +86,7 @@ class ImportOrchestratorTest {
     @Mock private CourseRepository courseRepository;
     @Mock private AgenticRagProperties ragProperties;
     @Mock private Executor importTaskExecutor;
+    @Mock private ApplicationEventPublisher eventPublisher;
     @Spy  private ObjectMapper objectMapper = new ObjectMapper();
 
     @InjectMocks
@@ -107,9 +108,11 @@ class ImportOrchestratorTest {
     }
 
     private DocumentChunk docChunk(int index) {
+        // Content must have >= 60 meaningful (non-whitespace, non-punctuation) chars
+        // to pass OcrTextPreprocessor.isTrivial() check and trigger agent processing
         return DocumentChunk.builder()
                 .chunkIndex(index)
-                .content("Japanese lesson content 食べる N5 vocabulary")
+                .content("Japanese lesson content 食べる 飲む 勉強する 読む 書く vocabulary N5 grammar particles は が を に で と へ from まで")
                 .pageStart(1).pageEnd(3)
                 .chunkType("TEXT")
                 .estimatedTokenCount(100)
@@ -183,7 +186,7 @@ class ImportOrchestratorTest {
             });
             disableAllRagFeatures();
             given(persistenceService.persistChunks(any(), any())).willReturn(List.of(dbChunk(0)));
-            given(classifierAgent.classify(any())).willReturn(ClassificationResult.fallback());
+            given(classifierAgent.heuristicClassify(any())).willReturn(ClassificationResult.fallback());
 
             MultipartFile file = mock(MultipartFile.class);
             orchestrator.processImportAsync(IMPORT_ID, file);
@@ -219,10 +222,11 @@ class ImportOrchestratorTest {
             given(persistenceService.persistChunks(any(), any())).willReturn(List.of(dbChunk0));
 
             ClassificationResult classification = ClassificationResult.fallback(); // MIXED
-            given(classifierAgent.classify(any())).willReturn(classification);
+            given(classifierAgent.heuristicClassify(any())).willReturn(classification);
 
             ExtractionResult result = emptyResult(0);
-            given(extractionAgent.extractContent(any(), any())).willReturn(result);
+            given(vocabularyAgent.extractVocabulary(any(), any(), any())).willReturn(result);
+            given(grammarAgent.extractGrammar(any(), any(), any())).willReturn(result);
 
             disableAllRagFeatures();
 
@@ -232,7 +236,7 @@ class ImportOrchestratorTest {
             orchestrator.processImportAsync(IMPORT_ID, file);
 
             // Assert
-            assertThat(entity.getStatus()).isEqualTo(ImportStatus.COMPLETED);
+            assertThat(entity.getStatus()).isEqualTo(ImportStatus.PENDING_APPROVAL);
             then(persistenceService).should(atLeastOnce()).updateImportProgress(entity);
             then(persistenceService).should().persistExtractedContent(eq(entity), any());
         }
@@ -281,9 +285,10 @@ class ImportOrchestratorTest {
             given(persistenceService.persistChunks(any(), any())).willReturn(List.of(dbChunk0));
 
             ClassificationResult classification = ClassificationResult.fallback(); // MIXED
-            given(classifierAgent.classify(any())).willReturn(classification);
+            given(classifierAgent.heuristicClassify(any())).willReturn(classification);
             ExtractionResult result = emptyResult(0);
-            given(extractionAgent.extractContent(any(), any())).willReturn(result);
+            given(vocabularyAgent.extractVocabulary(any(), any(), any())).willReturn(result);
+            given(grammarAgent.extractGrammar(any(), any(), any())).willReturn(result);
 
             disableAllRagFeatures();
 
@@ -291,7 +296,7 @@ class ImportOrchestratorTest {
             orchestrator.processImportAsync(IMPORT_ID, file);
 
             // Should complete without consulting courseRepository
-            assertThat(entity.getStatus()).isEqualTo(ImportStatus.COMPLETED);
+            assertThat(entity.getStatus()).isEqualTo(ImportStatus.PENDING_APPROVAL);
             then(courseRepository).should(never()).findById(any());
         }
 
@@ -308,7 +313,7 @@ class ImportOrchestratorTest {
 
             ClassificationResult vocabClassification = new ClassificationResult();
             vocabClassification.setContentType(ClassificationResult.ContentType.VOCABULARY);
-            given(classifierAgent.classify(any())).willReturn(vocabClassification);
+            given(classifierAgent.heuristicClassify(any())).willReturn(vocabClassification);
 
             given(vocabularyAgent.extractVocabulary(any(), any(), any())).willReturn(emptyResult(0));
 
@@ -318,7 +323,6 @@ class ImportOrchestratorTest {
 
             then(vocabularyAgent).should().extractVocabulary(any(), any(), any());
             then(grammarAgent).should(never()).extractGrammar(any(), any(), any());
-            then(extractionAgent).should(never()).extractContent(any(), any());
         }
 
         @Test
@@ -334,7 +338,7 @@ class ImportOrchestratorTest {
 
             ClassificationResult grammarClassification = new ClassificationResult();
             grammarClassification.setContentType(ClassificationResult.ContentType.GRAMMAR);
-            given(classifierAgent.classify(any())).willReturn(grammarClassification);
+            given(classifierAgent.heuristicClassify(any())).willReturn(grammarClassification);
 
             given(grammarAgent.extractGrammar(any(), any(), any())).willReturn(emptyResult(0));
 
@@ -359,7 +363,7 @@ class ImportOrchestratorTest {
 
             ClassificationResult exerciseClassification = new ClassificationResult();
             exerciseClassification.setContentType(ClassificationResult.ContentType.EXERCISE);
-            given(classifierAgent.classify(any())).willReturn(exerciseClassification);
+            given(classifierAgent.heuristicClassify(any())).willReturn(exerciseClassification);
 
             disableAllRagFeatures();
 
@@ -367,8 +371,7 @@ class ImportOrchestratorTest {
 
             then(vocabularyAgent).should(never()).extractVocabulary(any(), any(), any());
             then(grammarAgent).should(never()).extractGrammar(any(), any(), any());
-            then(extractionAgent).should(never()).extractContent(any(), any());
-            assertThat(entity.getStatus()).isEqualTo(ImportStatus.COMPLETED);
+            assertThat(entity.getStatus()).isEqualTo(ImportStatus.PENDING_APPROVAL);
         }
 
         @Test
@@ -383,7 +386,7 @@ class ImportOrchestratorTest {
 
             orchestrator.processImportAsync(IMPORT_ID, mock(MultipartFile.class));
 
-            assertThat(entity.getStatus()).isEqualTo(ImportStatus.COMPLETED);
+            assertThat(entity.getStatus()).isEqualTo(ImportStatus.PENDING_APPROVAL);
             then(classifierAgent).should(never()).classify(any());
             then(persistenceService).should().persistExtractedContent(eq(entity), any());
         }
@@ -439,13 +442,14 @@ class ImportOrchestratorTest {
 
             ClassificationResult classification = ClassificationResult.fallback();
             given(classifierAgent.classify(any())).willReturn(classification);
-            given(extractionAgent.extractContent(any(), any())).willReturn(emptyResult(0));
+            given(vocabularyAgent.extractVocabulary(any(), any(), any())).willReturn(emptyResult(0));
+            given(grammarAgent.extractGrammar(any(), any(), any())).willReturn(emptyResult(0));
 
             disableAllRagFeatures();
 
             orchestrator.processRetryAsync(IMPORT_ID);
 
-            assertThat(entity.getStatus()).isEqualTo(ImportStatus.COMPLETED);
+            assertThat(entity.getStatus()).isEqualTo(ImportStatus.PENDING_APPROVAL);
             then(classifierAgent).should().classify(any());
             then(persistenceService).should().persistExtractedContent(eq(entity), any());
         }
@@ -477,3 +481,4 @@ class ImportOrchestratorTest {
         }
     }
 }
+

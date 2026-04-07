@@ -1,7 +1,7 @@
 package com.fu.roleplay.mapper;
 
 import com.fu.roleplay.dto.response.MessageResponse;
-import com.fu.roleplay.dto.entity.ConversationMessage;
+import com.fu.roleplay.entity.ConversationMessage;
 import org.mapstruct.*;
 
 @Mapper(

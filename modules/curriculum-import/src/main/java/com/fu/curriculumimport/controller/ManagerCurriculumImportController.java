@@ -8,6 +8,7 @@ import com.fu.curriculumimport.service.CurriculumImportService;
 import com.fu.curriculumimport.service.CurriculumImportService.LessonSummaryDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -16,12 +17,13 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
 /**
  * REST Controller for Curriculum Import operations.
- *
+ * <p>
  * All endpoints require ROLE_MANAGER.
  * Base path: /api/v1/manager/curriculum-imports
  */
@@ -29,7 +31,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/manager/curriculum-imports")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('MANAGER')")
+@PreAuthorize("hasRole('CONTENT_MANAGER')")
 public class ManagerCurriculumImportController {
 
     private final CurriculumImportService importService;
@@ -45,7 +47,7 @@ public class ManagerCurriculumImportController {
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<CurriculumImportResponse>> uploadAndImport(
             @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "courseId", required = false) UUID courseId,
+            @RequestParam(value = "courseId") UUID courseId,
             @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
         log.info("Manager {} uploading curriculum file: {}, courseId: {}",
@@ -70,18 +72,28 @@ public class ManagerCurriculumImportController {
     }
 
     /**
-     * List all imports with optional filters.
-     * GET /api/v1/manager/curriculum-imports?courseId=...&status=...&page=0&size=10
+     * List all imports with pagination and optional filters.
+     * GET /api/v1/manager/curriculum-imports?courseId=...&status=...&startDate=...&endDate=...&page=0&size=10
+     *
+     * @param courseId optional - filter by course
+     * @param status optional - filter by import status
+     * @param startDate optional - filter by creation date (inclusive), format: ISO 8601 (e.g., 2024-01-15T10:30:00)
+     * @param endDate optional - filter by creation date (inclusive), format: ISO 8601 (e.g., 2024-01-15T23:59:59)
+     * @param page page number (0-indexed, default: 0)
+     * @param size page size (default: 10, max: 100)
+     * @return paginated list of imports ordered by creation date (newest first)
      */
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<CurriculumImportSummaryResponse>>> listImports(
             @RequestParam(required = false) UUID courseId,
             @RequestParam(required = false) ImportStatus status,
+            @RequestParam(required = false) LocalDateTime startDate,
+            @RequestParam(required = false) LocalDateTime endDate,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
 
         PageResponse<CurriculumImportSummaryResponse> response =
-                importService.listImports(courseId, status, page, size);
+                importService.listImports(courseId, status, startDate, endDate, page, size);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

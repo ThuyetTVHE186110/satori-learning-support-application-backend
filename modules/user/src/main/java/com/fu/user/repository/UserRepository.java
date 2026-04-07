@@ -3,6 +3,7 @@ package com.fu.user.repository;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
+import com.fu.user.entity.AuthProvider;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -11,6 +12,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -21,6 +24,12 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
      * Find user by email (for login, uniqueness check)
      */
     Optional<User> findByEmail(String email);
+
+    /**
+     * Batch fetch users by a set of emails.
+     * Used by Excel import to replace N+1 findByEmail calls with a single IN query.
+     */
+    List<User> findByEmailIn(Collection<String> emails);
 
     /**
      * Find active user by email (not soft-deleted)
@@ -60,7 +69,7 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
             "AND (:#{#status == null} = true OR u.status = :status)")
     Page<User> searchUsers(
             @Param("keyword") String keyword,
-            @Param("role") UserRole role,
+            @Param("role" ) UserRole role,
             @Param("status") UserStatus status,
             Pageable pageable
     );
@@ -132,18 +141,115 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
      */
     @Query("SELECT u FROM User u WHERE u.deletedAt IS NULL " +
             "AND u.role = 'LEARNER' " +
-            "AND u.status IN ('ACTIVE', 'INACTIVE') " +
+            "AND u.status IN ('INACTIVE') " +
             "AND (:#{#keyword == null || #keyword.length() == 0} = true OR " +
             "     LOWER(u.firstName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
             "     LOWER(u.lastName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
             "     LOWER(u.displayName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
             "     LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
-            "AND u.id NOT IN (" +
-            "   SELECT m.userId FROM ClassMember m WHERE m.classId = :classId AND m.removedAt IS NULL" +
-            ")")
+            "AND (:#{#excludedUserIds == null || #excludedUserIds.isEmpty()} = true OR u.id NOT IN :excludedUserIds)")
     Page<User> findEligibleLearnersForClass(
-            @Param("classId") UUID classId,
             @Param("keyword") String keyword,
+            @Param("excludedUserIds") java.util.List<UUID> excludedUserIds,
             Pageable pageable
     );
+
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("UPDATE User u SET u.status = :status, u.updatedAt = CURRENT_TIMESTAMP WHERE u.id IN :ids AND u.role = 'LEARNER'")
+    void updateStatusByUserIdIn(@Param("ids") java.util.Collection<java.util.UUID> ids, @Param("status") UserStatus status);
+
+    /**
+     * Fetch the single active class enrollment for a learner.
+     * Business rule: 1 learner → at most 1 active class → 1 course at any time.
+     *
+         * Returns at most one row: (class_id, class_name, course_id,
+         *                           course_name, start_date, end_date, status).
+     * Cross-schema JOIN: user_management (class_members, classes) → learning_content (courses).
+     */
+    @Query(value = """
+            SELECT
+                c.id                                                    AS class_id,
+                c.name                                                  AS class_name,
+                c.course_id                                             AS course_id,
+                co.name                                                 AS course_name,
+                c.start_date                                            AS start_date,
+                c.end_date                                              AS end_date,
+                                c.status::TEXT                                          AS status
+            FROM user_management.class_members cm
+            JOIN user_management.classes c   ON c.id  = cm.class_id
+            JOIN learning_content.courses co ON co.id = c.course_id
+            WHERE cm.user_id    = :userId
+              AND cm.removed_at IS NULL
+              AND c.deleted_at  IS NULL
+              AND c.status      = 'ACTIVE'
+              AND co.deleted_at IS NULL
+            LIMIT 1
+            """, nativeQuery = true)
+    java.util.List<Object[]> findActiveEnrollment(@Param("userId") UUID userId);
+
+    @Query("SELECT u FROM User u WHERE u.email = :email AND u.deletedAt IS NULL")
+    Optional<User> findByEmailAndNotDeleted(@Param("email") String email);
+
+    /**
+     * Count total learners with status ACTIVE or INACTIVE in the system.
+     */
+    @Query("SELECT COUNT(u) FROM User u WHERE u.role = 'LEARNER' AND u.status IN ('ACTIVE', 'INACTIVE') AND u.deletedAt IS NULL")
+    long countTotalLearners();
+    @Query("SELECT u FROM User  u where u.role = 'TEACHER' and u.status = 'ACTIVE' and u.deletedAt IS NULL")
+    List<User> findAllTeacher();
+
+    /**
+     * Count users by authentication provider (for admin dashboard)
+     */
+    @Query("SELECT COUNT(u) FROM User u WHERE u.authProvider = :provider AND u.deletedAt IS NULL")
+    long countByAuthProvider(@Param("provider") AuthProvider provider);
+
+    /**
+     * Get gender distribution of users (for admin dashboard)
+     */
+    @Query("SELECT u.gender, COUNT(u) FROM User u WHERE u.gender IS NOT NULL AND u.deletedAt IS NULL GROUP BY u.gender")
+    List<Object[]> findGenderDistribution();
+
+    /**
+     * Count new users registered in date range
+     */
+    @Query("SELECT COUNT(u) FROM User u WHERE u.createdAt >= :startDate AND u.createdAt < :endDate AND u.deletedAt IS NULL")
+    long countNewUsersByDateRange(@Param("startDate") java.time.LocalDateTime startDate, @Param("endDate") java.time.LocalDateTime endDate);
+
+    /**
+     * Find daily new user registration trend for admin dashboard
+     */
+    @Query("SELECT FUNCTION('DATE', u.createdAt) as date, COUNT(u) FROM User u WHERE FUNCTION('DATE', u.createdAt) >= :startDate AND FUNCTION('DATE', u.createdAt) <= :endDate AND u.deletedAt IS NULL GROUP BY FUNCTION('DATE', u.createdAt) ORDER BY FUNCTION('DATE', u.createdAt) DESC")
+    List<Object[]> findNewUserTrendByDateRange(@Param("startDate") java.time.LocalDate startDate, @Param("endDate") java.time.LocalDate endDate);
+
+    /**
+     * Count failed login attempts in period
+     */
+    @Query("SELECT COUNT(u) FROM User u WHERE u.failedLoginAttempts > 0 AND u.updatedAt >= :since AND u.deletedAt IS NULL")
+    long countFailedLoginsInPeriod(@Param("since") java.time.LocalDateTime since);
+
+    /**
+     * Count currently locked accounts
+     */
+    @Query("SELECT COUNT(u) FROM User u WHERE u.failedLoginAttempts > 0 AND u.lockedUntil > CURRENT_TIMESTAMP AND u.deletedAt IS NULL")
+    long countLockedAccounts();
+
+
+    /**
+     * Daily failed login trend
+     */
+    @Query("SELECT FUNCTION('DATE', u.updatedAt) as date, COUNT(u) FROM User u WHERE u.failedLoginAttempts > 0 AND FUNCTION('DATE', u.updatedAt) >= :startDate AND FUNCTION('DATE', u.updatedAt) <= :endDate AND u.deletedAt IS NULL GROUP BY FUNCTION('DATE', u.updatedAt) ORDER BY FUNCTION('DATE', u.updatedAt) DESC")
+    List<Object[]> findFailedLoginTrendByDateRange(@Param("startDate") java.time.LocalDate startDate, @Param("endDate") java.time.LocalDate endDate);
+
+    /**
+     * Count users active (last login) in a date range
+     */
+    @Query("SELECT COUNT(u) FROM User u WHERE u.lastLoginAt >= :startDate AND u.lastLoginAt < :endDate AND u.deletedAt IS NULL")
+    long countActiveUsersByDateRange(@Param("startDate") java.time.LocalDateTime startDate, @Param("endDate") java.time.LocalDateTime endDate);
+
+    /**
+     * Daily active user trend
+     */
+    @Query("SELECT FUNCTION('DATE', u.lastLoginAt) as date, COUNT(u) FROM User u WHERE FUNCTION('DATE', u.lastLoginAt) >= :startDate AND FUNCTION('DATE', u.lastLoginAt) <= :endDate AND u.deletedAt IS NULL GROUP BY FUNCTION('DATE', u.lastLoginAt) ORDER BY FUNCTION('DATE', u.lastLoginAt) DESC")
+    List<Object[]> findActiveUsersTrendByDateRange(@Param("startDate") java.time.LocalDate startDate, @Param("endDate") java.time.LocalDate endDate);
 }

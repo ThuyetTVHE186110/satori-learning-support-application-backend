@@ -6,8 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.service.agent.prompt.VocabularyPromptBuilder;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
+import com.fu.curriculumimport.service.ingestion.MarkdownVocabParser;
 import com.fu.curriculumimport.service.ingestion.MnNTableParser;
-import com.fu.curriculumimport.service.ingestion.OcrTextPreprocessor;
 import com.fu.curriculumimport.service.vision.VisionPageExtractor;
 import com.fu.curriculumimport.util.LlmResponseUtils;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +19,8 @@ import org.springframework.stereotype.Service;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Specialized Vocabulary Extraction Agent.
@@ -47,12 +49,18 @@ public class VocabularyExtractionAgent {
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
     private final VisionPageExtractor visionPageExtractor;
+    private final MnNTableParser mnNTableParser;
+    private final MarkdownVocabParser markdownVocabParser;
 
     public VocabularyExtractionAgent(OpenAiChatModel chatModel, ObjectMapper objectMapper,
-                                      VisionPageExtractor visionPageExtractor) {
+                                      VisionPageExtractor visionPageExtractor,
+                                      MnNTableParser mnNTableParser,
+                                      MarkdownVocabParser markdownVocabParser) {
         this.chatClient = ChatClient.builder(chatModel).build();
         this.objectMapper = objectMapper;
         this.visionPageExtractor = visionPageExtractor;
+        this.mnNTableParser = mnNTableParser;
+        this.markdownVocabParser = markdownVocabParser;
     }
 
     // ── Public API ───────────────────────────────────────────────────────────
@@ -72,7 +80,7 @@ public class VocabularyExtractionAgent {
         // ── Fast path 1: structured table rows from OCR ────────────────────────
         if (chunk.getStructuredTableRows() != null && !chunk.getStructuredTableRows().isEmpty()) {
             List<ExtractionResult.ExtractedVocabulary> tableVocab =
-                    MnNTableParser.parse(chunk.getStructuredTableRows(), jlptLevel);
+                    mnNTableParser.parse(chunk.getStructuredTableRows(), jlptLevel);
             if (!tableVocab.isEmpty()) {
                 log.info("Chunk {}: table parser extracted {} vocab items (no LLM call)",
                         chunk.getChunkIndex(), tableVocab.size());
@@ -86,34 +94,61 @@ public class VocabularyExtractionAgent {
                         .grammarPoints(Collections.emptyList())
                         .build();
             }
-            log.debug("Chunk {}: table parse failed (low rate), trying vision", chunk.getChunkIndex());
+            log.debug("Chunk {}: table parse failed (low rate), trying markdown tables", chunk.getChunkIndex());
+        }
+
+        // ── Fast path 1.5: markdown tables from Document AI / Gemini ─────────
+        // When content contains pipe-delimited markdown tables, parse standard
+        // vocab tables directly (0 LLM calls). Complex tables (country/grid)
+        // return empty → fall through to vision or LLM path.
+        if (chunk.getContent() != null && chunk.getContent().contains("|")) {
+            List<ExtractionResult.ExtractedVocabulary> mdVocab =
+                    markdownVocabParser.parse(chunk.getContent(), jlptLevel);
+            if (!mdVocab.isEmpty()) {
+                log.info("Chunk {}: markdown table parser extracted {} vocab items (no LLM call)",
+                        chunk.getChunkIndex(), mdVocab.size());
+                return ExtractionResult.builder()
+                        .chunkIndex(chunk.getChunkIndex())
+                        .confidence(0.90)
+                        .tokensUsed(0)
+                        .processingTimeMs(System.currentTimeMillis() - t0)
+                        .lessons(Collections.emptyList())
+                        .vocabulary(mdVocab)
+                        .grammarPoints(Collections.emptyList())
+                        .build();
+            }
         }
 
         // ── Fast path 2: vision-first extraction (Tier 2) ─────────────────────
         // Available when ScannedPdfIngestionService propagated page images to this chunk.
-        if (chunk.getPageImages() != null && !chunk.getPageImages().isEmpty()) {
+        // Skip vision when structured data exists (table rows or markdown tables) — the
+        // text LLM path is cheaper and sufficient when Document AI provided good text.
+        boolean hasStructuredData = (chunk.getStructuredTableRows() != null && !chunk.getStructuredTableRows().isEmpty())
+                || (chunk.getContent() != null && chunk.getContent().contains("|"));
+        if (!hasStructuredData && chunk.getPageImages() != null && !chunk.getPageImages().isEmpty()) {
             String lessonTopic = chunk.getLessonTitle() != null ? chunk.getLessonTitle()
                     : chunk.getContent().substring(0, Math.min(80, chunk.getContent().length()));
             ExtractionResult visionResult = visionPageExtractor.extractVocabulary(
                     chunk.getPageImages(), jlptLevel, lessonTopic, chunk.getChunkIndex());
-            if (visionResult.getConfidence() >= VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD) {
+            boolean visionAccepted = visionResult.getConfidence() >= VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD
+                    && !visionResult.getVocabulary().isEmpty();
+            if (visionAccepted) {
                 log.info("Chunk {}: vision extracted {} vocab items (confidence={})",
                         chunk.getChunkIndex(), visionResult.getVocabulary().size(),
                         visionResult.getConfidence());
                 return visionResult;
             }
-            log.info("Chunk {}: vision confidence {} below threshold {}, falling back to text LLM",
-                    chunk.getChunkIndex(), visionResult.getConfidence(),
-                    VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD);
+            if (visionResult.getVocabulary().isEmpty()) {
+                log.info("Chunk {}: vision returned 0 vocab items (confidence={}) — falling back to text LLM",
+                        chunk.getChunkIndex(), visionResult.getConfidence());
+            } else {
+                log.info("Chunk {}: vision confidence {} below threshold {}, falling back to text LLM",
+                        chunk.getChunkIndex(), visionResult.getConfidence(),
+                        VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD);
+            }
         }
 
         // ── LLM path (text-based fallback) ────────────────────────────────────
-
-        if (OcrTextPreprocessor.isTrivial(chunk.getContent())) {
-            log.info("Chunk {}: trivial content — skipping vocabulary LLM extraction",
-                    chunk.getChunkIndex());
-            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - t0);
-        }
 
         try {
             String ragSection = VocabularyPromptBuilder.formatRagContext(ragContext);
@@ -122,14 +157,14 @@ public class VocabularyExtractionAgent {
             String response = chatClient.prompt()
                     .system(VocabularyPromptBuilder.SYSTEM_PROMPT)
                     .user(prompt)
-                    .options(OpenAiChatOptions.builder().maxTokens(4096).build())
+                    .options(OpenAiChatOptions.builder().maxTokens(16384).build())
                     .call()
                     .content();
 
             return parseResponse(response, chunk.getChunkIndex(), System.currentTimeMillis() - t0);
         } catch (Exception e) {
             log.error("Vocabulary extraction failed for chunk {}: {}", chunk.getChunkIndex(), e.getMessage());
-            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - t0);
+            return ExtractionResult.empty(chunk.getChunkIndex(), System.currentTimeMillis() - t0);
         }
     }
 
@@ -152,14 +187,14 @@ public class VocabularyExtractionAgent {
                     .system(VocabularyPromptBuilder.SYSTEM_PROMPT
                             + VocabularyPromptBuilder.REEXTRACTION_SYSTEM_SUFFIX)
                     .user(prompt)
-                    .options(OpenAiChatOptions.builder().maxTokens(4096).build())
+                    .options(OpenAiChatOptions.builder().maxTokens(16384).build())
                     .call()
                     .content();
 
             return parseResponse(response, chunk.getChunkIndex(), System.currentTimeMillis() - t0);
         } catch (Exception e) {
             log.error("Vocabulary re-extraction failed for chunk {}: {}", chunk.getChunkIndex(), e.getMessage());
-            return emptyResult(chunk.getChunkIndex(), System.currentTimeMillis() - t0);
+            return ExtractionResult.empty(chunk.getChunkIndex(), System.currentTimeMillis() - t0);
         }
     }
 
@@ -175,9 +210,15 @@ public class VocabularyExtractionAgent {
 
             if (vocab != null) {
                 vocab.forEach(v -> {
+                    // MnN Vietnamese edition always has meanings in source;
+                    // fall back to SOURCE (not AI_INFERRED) when the LLM omits the field.
                     if (v.getMeaningSource() == null || v.getMeaningSource().isBlank()) {
-                        v.setMeaningSource("AI_INFERRED");
+                        v.setMeaningSource("SOURCE");
                     }
+                    if (v.getUsageNote() == null) v.setUsageNote("");
+                    if (v.getSuffixNote() == null) v.setSuffixNote("");
+                    // Post-process: fix furigana-instead-of-kanji issues from LLM output
+                    fixFuriganaKanji(v);
                 });
             }
 
@@ -193,7 +234,91 @@ public class VocabularyExtractionAgent {
 
         } catch (JsonProcessingException e) {
             log.error("Failed to parse vocab response for chunk {}: {}", chunkIndex, e.getMessage());
-            return emptyResult(chunkIndex, ms);
+            return ExtractionResult.empty(chunkIndex, ms);
+        }
+    }
+
+    // ── Post-processing: furigana/kanji fix ──────────────────────────────────
+
+    /** Pure hiragana (may include prolonged sound mark ー). */
+    private static final Pattern PURE_HIRAGANA = Pattern.compile(
+            "^[\\u3040-\\u309Fー]+$");
+
+    /** Pure kana — hiragana or katakana. */
+    private static final Pattern PURE_KANA = Pattern.compile(
+            "^[\\u3040-\\u30FFー]+$");
+
+    /** CJK ideographs (kanji). */
+    private static final Pattern HAS_KANJI = Pattern.compile("[\\u4E00-\\u9FFF]");
+
+    /**
+     * Glued "kana+kanji" pattern: 2+ kana chars followed by kanji portion.
+     * E.g. "かんこく韓国", "えいご英語", "アメリカじん人".
+     */
+    private static final Pattern KANA_GLUED_KANJI = Pattern.compile(
+            "^([\\u3040-\\u30FFー]{2,})([\\u4E00-\\u9FFF][\\u4E00-\\u9FFF\\u3040-\\u30FFー]*)$");
+
+    /**
+     * Fix common LLM mistakes with furigana/kanji in vocabulary items.
+     *
+     * <p>Cases handled:
+     * <ol>
+     *   <li><b>japaneseText is pure kana but kanjiWriting has kanji</b> —
+     *       swap: japaneseText=kanjiWriting, reading=old japaneseText</li>
+     *   <li><b>japaneseText contains glued furigana+kanji</b> (e.g. "かんこく韓国") —
+     *       split: japaneseText=kanji, reading=kana</li>
+     *   <li><b>japaneseText is pure kana, reading is same, kanjiWriting empty</b> —
+     *       no fix possible (genuinely kana-only word like わたし)</li>
+     * </ol>
+     */
+    static void fixFuriganaKanji(ExtractionResult.ExtractedVocabulary v) {
+        String jp = v.getJapaneseText();
+        if (jp == null || jp.isBlank()) return;
+
+        String kanji = v.getKanjiWriting();
+        String reading = v.getReading();
+
+        // Case 1: japaneseText is pure kana but kanjiWriting has actual kanji
+        // e.g. japaneseText="かんこく", kanjiWriting="韓国" → swap
+        if (PURE_KANA.matcher(jp).matches()
+                && kanji != null && !kanji.isBlank() && HAS_KANJI.matcher(kanji).find()) {
+            if (reading == null || reading.isBlank() || reading.equals(kanji)) {
+                v.setReading(jp);
+            }
+            v.setJapaneseText(kanji);
+            log.debug("fixFuriganaKanji: swapped japaneseText='{}' ← kanjiWriting='{}'", kanji, jp);
+            return;
+        }
+
+        // Case 2: japaneseText contains glued furigana+kanji (e.g. "かんこく韓国")
+        Matcher gluedMatch = KANA_GLUED_KANJI.matcher(jp);
+        if (gluedMatch.matches()) {
+            String kanaPart = gluedMatch.group(1);   // "かんこく" or "アメリカじん"
+            String kanjiPart = gluedMatch.group(2);   // "韓国" or "人"
+
+            // Extract leading katakana prefix shared between reading and word
+            int kataEnd = 0;
+            for (int i = 0; i < kanaPart.length(); ) {
+                int cp = kanaPart.codePointAt(i);
+                if ((cp >= 0x30A0 && cp <= 0x30FF) || cp == 'ー') {
+                    kataEnd = i + Character.charCount(cp);
+                    i = kataEnd;
+                } else {
+                    break;
+                }
+            }
+            String kataPrefix = kanaPart.substring(0, kataEnd);
+            String fixedWord = kataPrefix + kanjiPart;
+
+            if (reading == null || reading.isBlank() || reading.equals(jp)) {
+                v.setReading(kanaPart);
+            }
+            v.setJapaneseText(fixedWord);
+            if (HAS_KANJI.matcher(fixedWord).find()) {
+                v.setKanjiWriting(fixedWord);
+            }
+            log.debug("fixFuriganaKanji: split glued '{}' → japaneseText='{}', reading='{}'",
+                    jp, fixedWord, kanaPart);
         }
     }
 
@@ -208,10 +333,4 @@ public class VocabularyExtractionAgent {
         }
     }
 
-    private ExtractionResult emptyResult(int chunkIndex, long ms) {
-        return ExtractionResult.builder()
-                .chunkIndex(chunkIndex).confidence(0.0).tokensUsed(0).processingTimeMs(ms)
-                .lessons(Collections.emptyList()).vocabulary(Collections.emptyList())
-                .grammarPoints(Collections.emptyList()).build();
-    }
 }

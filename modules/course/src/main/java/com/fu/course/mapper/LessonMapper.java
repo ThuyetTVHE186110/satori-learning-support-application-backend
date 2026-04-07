@@ -46,7 +46,6 @@ public interface LessonMapper {
     @BeanMapping(nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "course", ignore = true)
-    @Mapping(target = "lessonType", ignore = true)
     @Mapping(target = "status", ignore = true)
     @Mapping(target = "processingStatus", ignore = true)
     @Mapping(target = "processedAt", ignore = true)

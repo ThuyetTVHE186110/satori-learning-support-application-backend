@@ -87,7 +87,7 @@ class ContentValidationAgentTest {
                 .patternReading("〜ている")
                 .meaningVi("đang làm gì đó")
                 .meaningEn("is doing; ongoing action")
-                .shortExplanation("Indicates an ongoing action or state.")
+                .shortExplanationVi("Diễn tả hành động đang xảy ra hoặc trạng thái hiện tại.")
                 .jlptLevel("N5")
                 .category("TENSE")
                 .build();
@@ -129,7 +129,7 @@ class ContentValidationAgentTest {
         void validate_perfectVocab_valid() {
             ExtractionResult result = resultWith(List.of(validVocab()), List.of(), 0.9);
 
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getStatus()).isEqualTo(ValidationStatus.VALID);
             assertThat(vr.getValidVocabCount()).isEqualTo(1);
@@ -142,7 +142,7 @@ class ContentValidationAgentTest {
         void validate_perfectGrammar_valid() {
             ExtractionResult result = resultWith(List.of(), List.of(validGrammar()), 0.9);
 
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getStatus()).isEqualTo(ValidationStatus.VALID);
             assertThat(vr.getValidGrammarCount()).isEqualTo(1);
@@ -153,7 +153,7 @@ class ContentValidationAgentTest {
         void validate_emptyExtraction_invalid() {
             ExtractionResult result = resultWith(List.of(), List.of(), 0.9);
 
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getStatus()).isEqualTo(ValidationStatus.INVALID);
             assertThat(vr.isNeedsReExtraction()).isTrue();
@@ -169,7 +169,7 @@ class ContentValidationAgentTest {
             bad.setJapaneseText("");
 
             ExtractionResult result = resultWith(List.of(bad), List.of(), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getIssues()).anyMatch(i ->
                     i.getField().equals("japaneseText") &&
@@ -184,7 +184,7 @@ class ContentValidationAgentTest {
             bad.setJapaneseText("taberu"); // Latin only, no Japanese
 
             ExtractionResult result = resultWith(List.of(bad), List.of(), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getIssues()).anyMatch(i ->
                     i.getField().equals("japaneseText") &&
@@ -203,7 +203,7 @@ class ContentValidationAgentTest {
                     .build();
 
             ExtractionResult result = resultWith(List.of(incomplete), List.of(), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             // 3 warnings → reading, meaningVi, meaningEn
             long warningCount = vr.getIssues().stream()
@@ -219,7 +219,7 @@ class ContentValidationAgentTest {
             bad.setJlptLevel("N6"); // Invalid
 
             ExtractionResult result = resultWith(List.of(bad), List.of(), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getIssues()).anyMatch(i ->
                     i.getField().equals("jlptLevel") &&
@@ -233,7 +233,7 @@ class ContentValidationAgentTest {
             bad.setRomaji("たべる"); // Hiragana, not romaji
 
             ExtractionResult result = resultWith(List.of(bad), List.of(), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getIssues()).anyMatch(i ->
                     i.getField().equals("romaji") &&
@@ -247,7 +247,7 @@ class ContentValidationAgentTest {
             bad.setPattern("");
 
             ExtractionResult result = resultWith(List.of(), List.of(bad), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getIssues()).anyMatch(i ->
                     i.getField().equals("pattern") &&
@@ -261,12 +261,12 @@ class ContentValidationAgentTest {
                     .pattern("〜ている")
                     .meaningVi(null)
                     .meaningEn(null)
-                    .shortExplanation(null)
-                    .detailedExplanation(null)
+                    .shortExplanationVi(null)
+                    .detailedExplanationVi(null)
                     .build();
 
             ExtractionResult result = resultWith(List.of(), List.of(incomplete), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             long warningCount = vr.getIssues().stream()
                     .filter(i -> i.getSeverity() == ValidationResult.ValidationIssue.IssueSeverity.WARNING)
@@ -281,7 +281,7 @@ class ContentValidationAgentTest {
             bad.setJlptLevel("N0");
 
             ExtractionResult result = resultWith(List.of(), List.of(bad), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getIssues()).anyMatch(i ->
                     i.getField().equals("jlptLevel"));
@@ -292,7 +292,7 @@ class ContentValidationAgentTest {
         void validate_lowConfidence_warningIssue() {
             ExtractionResult result = resultWith(List.of(validVocab()), List.of(), 0.3);
 
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getIssues()).anyMatch(i ->
                     i.getField().equals("confidence") &&
@@ -307,7 +307,7 @@ class ContentValidationAgentTest {
                     validVocab(), validVocab(), validVocab(), validVocab(), validVocab());
 
             ExtractionResult result = resultWith(vocabList, List.of(), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.getStatus()).isEqualTo(ValidationStatus.VALID);
         }
@@ -328,7 +328,7 @@ class ContentValidationAgentTest {
                     validVocab(), validVocab(), validVocab(), flaggedVocab);
 
             ExtractionResult result = resultWith(vocabList, List.of(), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             // Quality = 3/4 = 0.75 → PARTIAL
             assertThat(vr.getQualityScore()).isEqualTo(0.75);
@@ -340,7 +340,7 @@ class ContentValidationAgentTest {
         void validate_needsReExtraction_providesHint() {
             // Empty extraction → needsReExtraction = true
             ExtractionResult result = resultWith(List.of(), List.of(), 0.9);
-            ValidationResult vr = agent.validate(result, CONFIDENCE_THRESHOLD);
+            ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
             assertThat(vr.isNeedsReExtraction()).isTrue();
             assertThat(vr.getReExtractionHint()).isNotBlank();
@@ -384,7 +384,17 @@ class ContentValidationAgentTest {
                     .build();
             given(groundingVerifier.verify(any(), any())).willReturn(groundResult);
 
-            ExtractionResult result = resultWith(List.of(validVocab()), List.of(), 0.9);
+            // Vocab with warning to trigger reflection (ruleBasedScore < 0.85)
+            ExtractionResult.ExtractedVocabulary vocabWithWarning = ExtractionResult.ExtractedVocabulary.builder()
+                    .japaneseText("食べる")
+                    .reading("たべる")
+                    .romaji("taberu")
+                    .meaningVi("ăn")
+                    .meaningEn("") // Missing meaningEn → WARNING
+                    .jlptLevel("N5")
+                    .build();
+
+            ExtractionResult result = resultWith(List.of(vocabWithWarning), List.of(), 0.9);
 
             ValidationResult vr = agent.validateFull(result, CONFIDENCE_THRESHOLD, chunk, "N5");
 
@@ -460,8 +470,19 @@ class ContentValidationAgentTest {
                     .build();
             given(groundingVerifier.verify(any(), any())).willReturn(groundResult);
 
-            ExtractionResult result = resultWith(
-                    List.of(validVocab(), validVocab(), validVocab()), List.of(), 0.9);
+            // 3 vocab items with at least one having warning to trigger reflection
+            ExtractionResult.ExtractedVocabulary vocab1 = validVocab();
+            ExtractionResult.ExtractedVocabulary vocab2 = validVocab();
+            ExtractionResult.ExtractedVocabulary vocab3 = ExtractionResult.ExtractedVocabulary.builder()
+                    .japaneseText("飲む")
+                    .reading("のむ")
+                    .romaji("nomu")
+                    .meaningVi("") // WARNING to ensure reflection runs
+                    .meaningEn("to drink")
+                    .jlptLevel("N5")
+                    .build();
+
+            ExtractionResult result = resultWith(List.of(vocab1, vocab2, vocab3), List.of(), 0.9);
 
             ValidationResult vr = agent.validateFull(result, CONFIDENCE_THRESHOLD, chunk, "N5");
 
@@ -484,7 +505,17 @@ class ContentValidationAgentTest {
                     .build();
             given(selfReflectionAgent.reflect(any(), any(), any())).willReturn(reflResult);
 
-            ExtractionResult result = resultWith(List.of(validVocab()), List.of(), 0.9);
+            // Vocab with issue to ensure ruleBasedScore < 0.85 so reflection is NOT skipped
+            ExtractionResult.ExtractedVocabulary vocabWithIssue = ExtractionResult.ExtractedVocabulary.builder()
+                    .japaneseText("食べる")
+                    .reading("") // Missing reading → WARNING
+                    .romaji("taberu")
+                    .meaningVi("ăn")
+                    .meaningEn("to eat")
+                    .jlptLevel("N5")
+                    .build();
+
+            ExtractionResult result = resultWith(List.of(vocabWithIssue), List.of(), 0.9);
 
             ValidationResult vr = agent.validateFull(result, CONFIDENCE_THRESHOLD, chunk, "N5");
 
@@ -520,10 +551,20 @@ class ContentValidationAgentTest {
                     .build();
             given(groundingVerifier.verify(any(), any())).willReturn(groundResult);
 
-            // Single valid vocab (rule-based score = 1.0)
-            ExtractionResult result = resultWith(List.of(validVocab()), List.of(), 0.9);
+            // Vocab with WARNING to ensure ruleBasedScore < 0.85 so reflection is NOT skipped
+            ExtractionResult.ExtractedVocabulary vocabWithWarning = ExtractionResult.ExtractedVocabulary.builder()
+                    .japaneseText("食べる")
+                    .reading("たべる")
+                    .romaji("taberu")
+                    .meaningVi("") // Missing meaningVi → WARNING → score penalty
+                    .meaningEn("to eat")
+                    .jlptLevel("N5")
+                    .build();
+            
+            ExtractionResult result = resultWith(List.of(vocabWithWarning), List.of(), 0.9);
 
-            // combined = 0.30*1.0 + 0.35*0.1 + 0.35*0.1 = 0.30 + 0.035 + 0.035 = 0.37 < 0.5
+            // Rule-based score will be < 1.0 due to WARNING, likely ~0.8
+            // combined = 0.30*0.8 + 0.35*0.1 + 0.35*0.1 = 0.24 + 0.035 + 0.035 = 0.31 < 0.5
             ValidationResult vr = agent.validateFull(result, CONFIDENCE_THRESHOLD, chunk, "N5");
 
             assertThat(vr.getCombinedQualityScore()).isLessThan(0.5);
@@ -548,10 +589,21 @@ class ContentValidationAgentTest {
                     .build();
             given(groundingVerifier.verify(any(), any())).willReturn(groundResult);
 
-            ExtractionResult result = resultWith(
-                    List.of(validVocab(), validVocab()), List.of(), 0.9);
+            // Use vocab with minor warning to ensure reflection is triggered (score < 0.85)
+            // but still high enough for EXCELLENT verdict
+            ExtractionResult.ExtractedVocabulary vocab1 = validVocab();
+            ExtractionResult.ExtractedVocabulary vocab2 = ExtractionResult.ExtractedVocabulary.builder()
+                    .japaneseText("飲む")
+                    .reading("のむ")
+                    .romaji("nomu")
+                    .meaningVi("uống")
+                    .meaningEn("") // Small warning to keep ruleScore around 0.8-0.9
+                    .jlptLevel("N5")
+                    .build();
 
-            // combined ≈ 0.30*1.0 + 0.35*1.0 + 0.35*1.0 = 1.0 → EXCELLENT
+            ExtractionResult result = resultWith(List.of(vocab1, vocab2), List.of(), 0.9);
+
+            // Rule ≈0.8-0.9, reflection=1.0, grounding=1.0 → combined ≈ 0.9+ → EXCELLENT
             ValidationResult vr = agent.validateFull(result, CONFIDENCE_THRESHOLD, chunk, "N5");
 
             assertThat(vr.getStatus()).isEqualTo(ValidationStatus.VALID);
@@ -565,7 +617,7 @@ class ContentValidationAgentTest {
 
             ReflectionResult reflResult = ReflectionResult.builder()
                     .reflectionVerdict(ReflectionVerdict.NEEDS_IMPROVEMENT)
-                    .reflectionScore(0.5)
+                    .reflectionScore(0.6)
                     .itemReflections(List.of())
                     .llmRecommendsReExtraction(false)
                     .groundedCount(0)
@@ -577,18 +629,30 @@ class ContentValidationAgentTest {
 
             GroundingVerifier.GroundingResult groundResult = GroundingVerifier.GroundingResult.builder()
                     .groundingScore(0.5)
-                    .groundedCount(1)
+                    .groundedCount(2)
                     .hallucinatedCount(1)
                     .groundingChecks(List.of())
                     .hallucinatedItems(List.of())
                     .build();
             given(groundingVerifier.verify(any(), any())).willReturn(groundResult);
 
-            ExtractionResult result = resultWith(
-                    List.of(validVocab(), validVocab()), List.of(), 0.9);
+            // 3 vocab: 2 valid, 1 with minor warning → ruleScore = 2/3 ≈ 0.67 
+            ExtractionResult.ExtractedVocabulary vocab1 = ExtractionResult.ExtractedVocabulary.builder()
+                    .japaneseText("食べる")
+                    .reading("たべる")
+                    .romaji("taberu")
+                    .meaningVi("") // Warning but not error
+                    .meaningEn("to eat")
+                    .jlptLevel("N5")
+                    .build();
+            ExtractionResult.ExtractedVocabulary vocab2 = validVocab();
+            ExtractionResult.ExtractedVocabulary vocab3 = validVocab();
 
-            // combined = 0.30*1.0 + 0.35*0.5 + 0.35*0.5 = 0.65
-            // grounding=0.5 < 0.6 → not GOOD; combined=0.65 >= 0.5 → MARGINAL → NEEDS_REVIEW
+            ExtractionResult result = resultWith(List.of(vocab1, vocab2, vocab3), List.of(), 0.9);
+
+            // ruleScore ≈ 0.67, reflectionScore = 0.6, groundingScore = 0.5
+            // combined = 0.30*0.67 + 0.35*0.6 + 0.35*0.5 = 0.201 + 0.21 + 0.175 = 0.586
+            // combined = 0.586 >= 0.5 → MARGINAL (not >= 0.7 with grounding < 0.6)
             ValidationResult vr = agent.validateFull(result, CONFIDENCE_THRESHOLD, chunk, "N5");
 
             assertThat(vr.getStatus()).isEqualTo(ValidationStatus.NEEDS_REVIEW);
@@ -612,7 +676,17 @@ class ContentValidationAgentTest {
                     .build();
             given(groundingVerifier.verify(any(), any())).willReturn(groundResult);
 
-            ExtractionResult result = resultWith(List.of(validVocab()), List.of(), 0.9);
+            // Vocab with warning to trigger reflection
+            ExtractionResult.ExtractedVocabulary vocabWithWarning = ExtractionResult.ExtractedVocabulary.builder()
+                    .japaneseText("食べる")
+                    .reading("たべる")
+                    .romaji("taberu")
+                    .meaningVi("ăn")
+                    .meaningEn("") // Missing meaningEn → WARNING
+                    .jlptLevel("N5")
+                    .build();
+
+            ExtractionResult result = resultWith(List.of(vocabWithWarning), List.of(), 0.9);
 
             ValidationResult vr = agent.validateFull(result, CONFIDENCE_THRESHOLD, chunk, "N5");
 

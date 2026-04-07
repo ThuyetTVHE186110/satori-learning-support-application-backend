@@ -1,6 +1,7 @@
 package com.fu.curriculumimport.service.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -17,7 +18,10 @@ import org.springframework.ai.openai.OpenAiChatModel;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
 /**
@@ -46,6 +50,7 @@ import static org.mockito.Mockito.mock;
 class ContentClassifierAgentTest {
 
     @Mock private OpenAiChatModel chatModel;
+    @Mock private PromptTemplateLoader promptLoader;
 
     // Use a real ObjectMapper so JSON parsing logic is tested for real
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -54,7 +59,9 @@ class ContentClassifierAgentTest {
 
     @BeforeEach
     void setUp() {
-        agent = new ContentClassifierAgent(chatModel, objectMapper);
+        lenient().when(promptLoader.load(anyString())).thenReturn("system prompt");
+        lenient().when(promptLoader.render(anyString(), anyMap())).thenReturn("user prompt");
+        agent = new ContentClassifierAgent(chatModel, objectMapper, promptLoader);
     }
 
     // -------------------------------------------------------------------------
@@ -112,9 +119,6 @@ class ContentClassifierAgentTest {
                     .isEqualTo(ClassificationResult.ContentType.VOCABULARY);
             assertThat(result.getConfidence()).isEqualTo(0.95);
             assertThat(result.getReasoning()).isEqualTo("Contains word lists");
-            assertThat(result.getEstimatedVocabCount()).isEqualTo(20);
-            assertThat(result.getEstimatedGrammarCount()).isZero();
-            assertThat(result.isContainsExercises()).isFalse();
         }
 
         @Test
@@ -200,7 +204,6 @@ class ContentClassifierAgentTest {
 
             assertThat(result.getContentType())
                     .isEqualTo(ClassificationResult.ContentType.EXERCISE);
-            assertThat(result.isContainsExercises()).isTrue();
         }
 
         @Test

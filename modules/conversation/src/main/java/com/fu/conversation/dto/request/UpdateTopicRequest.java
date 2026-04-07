@@ -1,8 +1,6 @@
 package com.fu.conversation.dto.request;
 
 import com.fu.course.entity.Course;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
@@ -18,7 +16,6 @@ import java.util.UUID;
 @AllArgsConstructor
 public class UpdateTopicRequest {
 
-    private UUID courseId;
     @NotBlank(message = "Title is required")
     @Size(max = 255)
     private String title;
@@ -30,25 +27,10 @@ public class UpdateTopicRequest {
 
     private String descriptionVi;
 
-    private String scenario;
-
-    private String vocabularyHints;
-
-    private String grammarPoints;
-
-    private String usefulExpressions;
-
     @Size(max = 100)
     private String category;
 
-    @Min(1) @Max(10)
-    private Integer difficultyScore;
-
-    private String aiRole;
-
-    private String learnerRole;
-
-    private String roleplayContext;
+    private UUID courseId;
 
     private String thumbnailUrl;
 

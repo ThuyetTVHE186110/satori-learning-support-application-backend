@@ -1,5 +1,6 @@
 package com.fu.user.service.impl;
 
+import com.fu.common.event.PasswordChangedEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.infrastructure.email.EmailService;
@@ -16,6 +17,7 @@ import com.google.firebase.auth.FirebaseToken;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -43,10 +46,11 @@ public class AuthServiceImpl implements AuthService {
     // Firebase Auth is optional - may be null if not configured
     private final Optional<FirebaseAuth> firebaseAuth;
     private final LoginAttemptService loginAttemptService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Value("${app.security.otp-expiration-minutes:1}")
     private int otpExpirationMinutes;
-
+    private static final String EMAIL_REGEX = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$";
     private static final String OTP_CHARACTERS = "0123456789";
     private static final int OTP_LENGTH = 6;
     private static final int RESET_TOKEN_EXPIRATION_MINUTES = 5;
@@ -56,10 +60,16 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public LoginResponse login(LoginRequest request, String ipAddress, String userAgent) {
+        String trimedEmail = request.getEmail() != null ? request.getEmail().trim() : null;
         log.info("Login attempt for email: {}", request.getEmail());
+        // Validate email format
+        if (request.getEmail() == null || request.getEmail().isBlank() || !Pattern.matches(EMAIL_REGEX, trimedEmail)) {
+            throw new BusinessException("INVALID_INCREDENTIALS",
+                    "Sai email hoặc mật khẩu. Hãy thử lại");
+        }
 
         // Find user by email
-        User user = userRepository.findByEmail(request.getEmail())
+        User user = userRepository.findByEmail(trimedEmail)
                 .orElseThrow(() -> {
                     log.warn("Login failed - email not found: {}", request.getEmail());
                     return new BusinessException("INVALID_CREDENTIALS",
@@ -68,21 +78,21 @@ public class AuthServiceImpl implements AuthService {
 
         // Check if account is soft-deleted
         if (user.isDeleted()) {
-            log.warn("Login failed - account deleted: {}", request.getEmail());
+            log.warn("Login failed - account deleted: {}", trimedEmail);
             throw new BusinessException("ACCOUNT_DELETED",
                     "Tài khoản không tồn tại");
         }
 
         // E6.4: Check if account is suspended
         if (user.getStatus() == UserStatus.SUSPENDED) {
-            log.warn("Login failed - account suspended: {}", request.getEmail());
+            log.warn("Login failed - account suspended: {}", trimedEmail);
             throw new BusinessException("ACCOUNT_SUSPENDED",
                     "Tài khoản của bạn đã bị chặn. Hãy liên hệ quản lý");
         }
 
         // Check if account is pending activation
         if (user.getStatus() == UserStatus.PENDING_ACTIVATION) {
-            log.warn("Login failed - account pending activation: {}", request.getEmail());
+            log.warn("Login failed - account pending activation: {}", trimedEmail);
             throw new BusinessException("ACCOUNT_NOT_ACTIVATED",
                     "Tài khoản chưa được kích hoạt. Vui lòng kiểm tra email");
         }
@@ -99,11 +109,11 @@ public class AuthServiceImpl implements AuthService {
             loginAttemptService.handleFailedLogin(user);
 
             if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(LocalDateTime.now())) {
-                log.warn("Login failed - account just locked due to max attempts: {}", request.getEmail());
+                log.warn("Login failed - account just locked due to max attempts: {}", trimedEmail);
                 throw new BusinessException("ACCOUNT_LOCKED",
                         "Tài khoản đã bị khóa tạm thời. Vui lòng thử lại sau");
             } else {
-                log.warn("Login failed - wrong password for: {}", request.getEmail());
+                log.warn("Login failed - wrong password for: {}", trimedEmail);
                 throw new BusinessException("INVALID_CREDENTIALS",
                         "Sai email hoặc mật khẩu. Hãy thử lại");
             }
@@ -206,8 +216,8 @@ public class AuthServiceImpl implements AuthService {
         log.info("Verify OTP for email: {}", request.getEmail());
 
         User user = userRepository.findActiveByEmail(request.getEmail())
-                .orElseThrow(() -> new BusinessException("INVALID_REQUEST",
-                        "Yêu cầu không hợp lệ"));
+                .orElseThrow(() -> new BusinessException("INVALID_OTP",
+                        "Mã OTP không hợp lệ"));
 
         // Verify OTP
         if (user.getPasswordResetToken() == null ||
@@ -277,6 +287,10 @@ public class AuthServiceImpl implements AuthService {
         // Send password changed notification email
         emailService.sendPasswordChangedNotification(user.getEmail(), user.getFullName());
 
+        // Publish event so notification module can send push + deactivate FCM tokens
+        eventPublisher.publishEvent(new PasswordChangedEvent(this, user.getId(), user.getEmail(),
+                "Unknown device", "Unknown IP"));
+
         log.info("Password reset successful for: {}", user.getEmail());
     }
 
@@ -313,13 +327,17 @@ public class AuthServiceImpl implements AuthService {
         user.setLastPasswordChangeAt(LocalDateTime.now());
         userRepository.save(user);
 
-        // Revoke other sessions if requested
-        if (request.isLogoutOtherDevices() && currentSessionId != null) {
-            sessionRepository.revokeOtherSessionsByUserId(userId, currentSessionId, LocalDateTime.now());
+        // BR-63: Revoke ALL sessions (including current) when logoutOtherDevices = true
+        if (request.isLogoutOtherDevices()) {
+            sessionRepository.revokeAllSessionsByUserId(userId, LocalDateTime.now());
         }
 
         // Send password changed notification email
         emailService.sendPasswordChangedNotification(user.getEmail(), user.getFullName());
+
+        // Publish event so notification module can send push + deactivate FCM tokens
+        eventPublisher.publishEvent(new PasswordChangedEvent(this, userId, user.getEmail(),
+                "Unknown device", "Unknown IP"));
 
         log.info("Password changed successfully for user: {}", userId);
     }
@@ -417,7 +435,7 @@ public class AuthServiceImpl implements AuthService {
     // ==================== Private Helper Methods ====================
 
     private LoginResponse createSessionAndGenerateTokens(User user, DeviceInfo deviceInfo,
-            String ipAddress, String userAgent) {
+                                                         String ipAddress, String userAgent) {
         // Detect device info from User-Agent and client-provided DeviceInfo
         // This properly distinguishes between Mobile App and Web Browser sessions
         Map<String, Object> detectedDeviceInfo = DeviceDetector.detectDevice(userAgent, deviceInfo);

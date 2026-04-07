@@ -1,20 +1,24 @@
 package com.fu.clazz.service;
 
+import com.fu.clazz.entity.ClassStatus;
 import com.fu.clazz.dto.request.AddMemberRequest;
 import com.fu.clazz.dto.request.CreateClassRequest;
 import com.fu.clazz.dto.request.UpdateClassRequest;
 import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
+import com.fu.clazz.dto.response.LearnerClassResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
  * Service interface for Class management
  */
 public interface ClassService {
+    ClassResponse closeClass(UUID classId, UUID managerId);
 
     /**
      * Create a new class (MANAGER only)
@@ -34,8 +38,8 @@ public interface ClassService {
     /**
      * Get classes with dynamic filters (combines all options with AND)
      */
-    Page<ClassSummaryResponse> getClasses(String keyword, UUID teacherId, UUID courseId, Boolean isActive,
-            Pageable pageable);
+    Page<ClassSummaryResponse> getClasses(String keyword, UUID teacherId, UUID courseId, ClassStatus status,
+                                          Pageable pageable);
 
     /**
      * Delete a class (MANAGER only) — soft delete: records deletion metadata
@@ -54,9 +58,9 @@ public interface ClassService {
     void removeMember(UUID classId, UUID userId, UUID managerId);
 
     /**
-     * Get active members of a class
+     * Get active members of a class with optional keyword search
      */
-    Page<ClassMemberResponse> getClassMembers(UUID classId, Pageable pageable);
+    Page<ClassMemberResponse> getClassMembers(UUID classId, String keyword, Pageable pageable);
 
     /**
      * Get class by ID for teacher (validates teacher ownership)
@@ -64,12 +68,18 @@ public interface ClassService {
     ClassResponse getClassByIdForTeacher(UUID classId, UUID teacherId);
 
     /**
-     * Get class members for teacher (validates teacher ownership)
+     * Get class members for teacher (validates teacher ownership) with optional keyword search
      */
-    Page<ClassMemberResponse> getClassMembersForTeacher(UUID classId, UUID teacherId, Pageable pageable);
+    Page<ClassMemberResponse> getClassMembersForTeacher(UUID classId, UUID teacherId, String keyword, Pageable pageable);
 
     /**
      * Get eligible learners to add to a class (Active or Inactive, and not currently an active member)
      */
     Page<com.fu.user.dto.UserResponse> getEligibleLearners(UUID classId, String keyword, Pageable pageable);
+
+    /**
+     * Get learner's enrolled classes (ACTIVE or CLOSED status, active membership only)
+     * Returns classes where ClassMember.removedAt IS NULL
+     */
+    List<LearnerClassResponse> getLearnerClasses(UUID learnerId);
 }

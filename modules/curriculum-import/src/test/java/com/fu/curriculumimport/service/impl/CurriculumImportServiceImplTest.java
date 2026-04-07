@@ -1,5 +1,6 @@
 package com.fu.curriculumimport.service.impl;
 
+import com.fu.common.exception.BusinessException;
 import com.fu.common.response.PageResponse;
 import com.fu.course.entity.Course;
 import com.fu.course.entity.GrammarPoint;
@@ -38,7 +39,9 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.*;
 
 import static org.assertj.core.api.Assertions.*;
@@ -52,6 +55,7 @@ import static org.mockito.BDDMockito.*;
  * - initiateImport: happy path, empty file, wrong MIME, oversized, course not found, null courseId
  * - getImportById: found, not found
  * - listImports: all 4 filter combinations (courseId+status, courseId only, status only, all)
+ *   + integration tested via ManagerCurriculumImportControllerTest
  * - getImportChunks: import not found, empty chunks, with chunks
  * - retryImport: FAILED+retryable, FAILED+maxRetriesReached, non-FAILED status, not found
  * - cancelImport: COMPLETED guard, CANCELLED guard, active import, not found
@@ -111,64 +115,85 @@ class CurriculumImportServiceImplTest {
 
         @Mock private MultipartFile validPdf;
 
+        // PDF magic bytes: %PDF- (0x25 0x50 0x44 0x46 0x2D) + padding
+        private static final byte[] PDF_HEADER =
+                {0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34}; // %PDF-1.4
+        // PPTX/ZIP magic bytes: PK\x03\x04 (Office Open XML is a ZIP archive)
+        private static final byte[] PPTX_HEADER =
+                {0x50, 0x4B, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00}; // PK..
+
         @BeforeEach
-        void setupValidFile() {
+        void setupValidFile() throws java.io.IOException {
             given(validPdf.isEmpty()).willReturn(false);
             given(validPdf.getContentType()).willReturn("application/pdf");
             given(validPdf.getSize()).willReturn(1024L);
             given(validPdf.getOriginalFilename()).willReturn("lesson.pdf");
+            given(validPdf.getBytes()).willReturn(new byte[1024]); // needed for InMemoryMultipartFile.from()
+            // Return a fresh stream each call — magic bytes check reads from position 0
+            given(validPdf.getInputStream()).willAnswer(inv -> new ByteArrayInputStream(PDF_HEADER));
         }
 
         @Test
         @DisplayName("Happy path — valid PDF with courseId creates import and triggers processing")
         void initiateImport_validPdfWithCourse_createsAndTriggers() {
-            // Arrange
-            Course course = new Course();
-            course.setName("Korean N5");
-            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
+            try (var txSyncMock = org.mockito.Mockito.mockStatic(
+                    org.springframework.transaction.support.TransactionSynchronizationManager.class)) {
+                
+                // Enable synchronization in mocked context
+                txSyncMock.when(org.springframework.transaction.support.TransactionSynchronizationManager::isSynchronizationActive)
+                        .thenReturn(true);
+                
+                // Capture the synchronization callback and execute it immediately
+                txSyncMock.when(() -> org.springframework.transaction.support.TransactionSynchronizationManager
+                        .registerSynchronization(any(org.springframework.transaction.support.TransactionSynchronization.class)))
+                        .thenAnswer(invocation -> {
+                            var sync = invocation.getArgument(0, org.springframework.transaction.support.TransactionSynchronization.class);
+                            sync.afterCommit(); // simulate immediate commit
+                            return null;
+                        });
 
-            CurriculumImport savedEntity = makeImport(ImportStatus.QUEUED);
-            given(importRepository.save(any(CurriculumImport.class))).willReturn(savedEntity);
+                // Arrange
+                Course course = new Course();
+                course.setName("Korean N5");
+                given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
 
-            CurriculumImportResponse expectedResponse = new CurriculumImportResponse();
-            expectedResponse.setId(IMPORT_ID);
-            given(importMapper.toResponse(savedEntity)).willReturn(expectedResponse);
+                CurriculumImport savedEntity = makeImport(ImportStatus.QUEUED);
+                given(importRepository.save(any(CurriculumImport.class))).willReturn(savedEntity);
 
-            // Act
-            CurriculumImportResponse result = service.initiateImport(validPdf, COURSE_ID, MANAGER_ID);
+                CurriculumImportResponse expectedResponse = new CurriculumImportResponse();
+                expectedResponse.setId(IMPORT_ID);
+                given(importMapper.toResponse(savedEntity)).willReturn(expectedResponse);
 
-            // Assert
-            assertThat(result).isNotNull();
-            assertThat(result.getCourseName()).isEqualTo("Korean N5");
+                // Act
+                CurriculumImportResponse result = service.initiateImport(validPdf, COURSE_ID, MANAGER_ID);
 
-            ArgumentCaptor<CurriculumImport> captor = ArgumentCaptor.forClass(CurriculumImport.class);
-            then(importRepository).should().save(captor.capture());
-            CurriculumImport captured = captor.getValue();
-            assertThat(captured.getStatus()).isEqualTo(ImportStatus.QUEUED);
-            assertThat(captured.getCourseId()).isEqualTo(COURSE_ID);
-            assertThat(captured.getCreatedBy()).isEqualTo(MANAGER_ID);
+                // Assert
+                assertThat(result).isNotNull();
+                assertThat(result.getCourseName()).isEqualTo("Korean N5");
 
-            then(orchestrator).should().processImportAsync(any(), eq(validPdf));
+                ArgumentCaptor<CurriculumImport> captor = ArgumentCaptor.forClass(CurriculumImport.class);
+                then(importRepository).should().save(captor.capture());
+                CurriculumImport captured = captor.getValue();
+                assertThat(captured.getStatus()).isEqualTo(ImportStatus.QUEUED);
+                assertThat(captured.getCourseId()).isEqualTo(COURSE_ID);
+                assertThat(captured.getCreatedBy()).isEqualTo(MANAGER_ID);
+
+                then(orchestrator).should().processImportAsync(any(), any(MultipartFile.class));
+            }
         }
 
         @Test
-        @DisplayName("Happy path — valid PDF without courseId creates import with null course")
-        void initiateImport_validPdfWithoutCourse_createsImportNoCourse() {
-            // Arrange
-            CurriculumImport savedEntity = makeImport(ImportStatus.QUEUED);
-            savedEntity.setCourseId(null);
-            given(importRepository.save(any(CurriculumImport.class))).willReturn(savedEntity);
+        @DisplayName("Exception — courseId is required, null courseId throws BusinessException")
+        void initiateImport_nullCourseId_throwsBusinessException() {
+            // Act & Assert
+            assertThatThrownBy(() -> service.initiateImport(validPdf, null, MANAGER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("courseId is required");
 
-            CurriculumImportResponse expectedResponse = new CurriculumImportResponse();
-            given(importMapper.toResponse(savedEntity)).willReturn(expectedResponse);
-
-            // Act
-            CurriculumImportResponse result = service.initiateImport(validPdf, null, MANAGER_ID);
-
-            // Assert
-            assertThat(result.getCourseName()).isNull();
+            // Should not proceed to save or orchestrate
             then(courseRepository).should(never()).findById(any());
-            then(orchestrator).should().processImportAsync(any(), eq(validPdf));
+            then(importRepository).should(never()).save(any());
+            then(orchestrator).should(never()).processImportAsync(any(), any());
         }
 
         @Test
@@ -214,6 +239,7 @@ class CurriculumImportServiceImplTest {
             long oversizeBytes = 101L * 1024 * 1024;
             given(bigFile.isEmpty()).willReturn(false);
             given(bigFile.getContentType()).willReturn("application/pdf");
+            given(bigFile.getOriginalFilename()).willReturn("big.pdf"); // must pass extension check first
             given(bigFile.getSize()).willReturn(oversizeBytes);
 
             assertThatThrownBy(() -> service.initiateImport(bigFile, null, MANAGER_ID))
@@ -224,15 +250,28 @@ class CurriculumImportServiceImplTest {
         @Test
         @DisplayName("Edge case — exactly 100 MB file is accepted")
         void initiateImport_exactly100MbFile_accepted() {
-            long exactBytes = 100L * 1024 * 1024;
-            given(validPdf.getSize()).willReturn(exactBytes);
+            try (var txSyncMock = org.mockito.Mockito.mockStatic(
+                    org.springframework.transaction.support.TransactionSynchronizationManager.class)) {
+                txSyncMock.when(org.springframework.transaction.support.TransactionSynchronizationManager::isSynchronizationActive)
+                        .thenReturn(true);
+                txSyncMock.when(() -> org.springframework.transaction.support.TransactionSynchronizationManager
+                        .registerSynchronization(any(org.springframework.transaction.support.TransactionSynchronization.class)))
+                        .thenAnswer(invocation -> {
+                            var sync = invocation.getArgument(0, org.springframework.transaction.support.TransactionSynchronization.class);
+                            sync.afterCommit();
+                            return null;
+                        });
 
-            CurriculumImport savedEntity = makeImport(ImportStatus.QUEUED);
-            given(importRepository.save(any())).willReturn(savedEntity);
-            given(importMapper.toResponse(savedEntity)).willReturn(new CurriculumImportResponse());
-            given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(new Course()));
+                long exactBytes = 100L * 1024 * 1024;
+                given(validPdf.getSize()).willReturn(exactBytes);
 
-            assertThatNoException().isThrownBy(() -> service.initiateImport(validPdf, COURSE_ID, MANAGER_ID));
+                CurriculumImport savedEntity = makeImport(ImportStatus.QUEUED);
+                given(importRepository.save(any())).willReturn(savedEntity);
+                given(importMapper.toResponse(savedEntity)).willReturn(new CurriculumImportResponse());
+                given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(new Course()));
+
+                assertThatNoException().isThrownBy(() -> service.initiateImport(validPdf, COURSE_ID, MANAGER_ID));
+            }
         }
 
         @Test
@@ -248,39 +287,76 @@ class CurriculumImportServiceImplTest {
 
         @Test
         @DisplayName("Happy path — PPTX MIME type is accepted and triggers processing")
-        void initiateImport_validPptxMimeType_accepted() {
-            MultipartFile pptxFile = mock(MultipartFile.class);
-            given(pptxFile.isEmpty()).willReturn(false);
-            given(pptxFile.getContentType()).willReturn(
-                    "application/vnd.openxmlformats-officedocument.presentationml.presentation");
-            given(pptxFile.getSize()).willReturn(1024L);
-            given(pptxFile.getOriginalFilename()).willReturn("slides.pptx");
+        void initiateImport_validPptxMimeType_accepted() throws java.io.IOException {
+            try (var txSyncMock = org.mockito.Mockito.mockStatic(
+                    org.springframework.transaction.support.TransactionSynchronizationManager.class)) {
+                txSyncMock.when(org.springframework.transaction.support.TransactionSynchronizationManager::isSynchronizationActive)
+                        .thenReturn(true);
+                txSyncMock.when(() -> org.springframework.transaction.support.TransactionSynchronizationManager
+                        .registerSynchronization(any(org.springframework.transaction.support.TransactionSynchronization.class)))
+                        .thenAnswer(invocation -> {
+                            var sync = invocation.getArgument(0, org.springframework.transaction.support.TransactionSynchronization.class);
+                            sync.afterCommit();
+                            return null;
+                        });
 
-            CurriculumImport savedEntity = makeImport(ImportStatus.QUEUED);
-            given(importRepository.save(any(CurriculumImport.class))).willReturn(savedEntity);
-            given(importMapper.toResponse(savedEntity)).willReturn(new CurriculumImportResponse());
+                MultipartFile pptxFile = mock(MultipartFile.class);
+                given(pptxFile.isEmpty()).willReturn(false);
+                given(pptxFile.getContentType()).willReturn(
+                        "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+                given(pptxFile.getSize()).willReturn(1024L);
+                given(pptxFile.getOriginalFilename()).willReturn("slides.pptx");
+                given(pptxFile.getBytes()).willReturn(new byte[1024]);
+                given(pptxFile.getInputStream()).willAnswer(inv -> new ByteArrayInputStream(PPTX_HEADER));
 
-            assertThatNoException().isThrownBy(
-                    () -> service.initiateImport(pptxFile, null, MANAGER_ID));
+                Course course = new Course();
+                course.setName("Korean N5");
+                given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
 
-            then(orchestrator).should().processImportAsync(any(), eq(pptxFile));
+                CurriculumImport savedEntity = makeImport(ImportStatus.QUEUED);
+                given(importRepository.save(any(CurriculumImport.class))).willReturn(savedEntity);
+                given(importMapper.toResponse(savedEntity)).willReturn(new CurriculumImportResponse());
+
+                assertThatNoException().isThrownBy(
+                        () -> service.initiateImport(pptxFile, COURSE_ID, MANAGER_ID));
+
+                then(orchestrator).should().processImportAsync(any(), any(MultipartFile.class));
+            }
         }
 
         @Test
         @DisplayName("Happy path — .pptx filename extension accepted even with generic MIME")
-        void initiateImport_pptxExtension_acceptedWithGenericMime() {
-            MultipartFile pptxFile = mock(MultipartFile.class);
-            given(pptxFile.isEmpty()).willReturn(false);
-            given(pptxFile.getContentType()).willReturn("application/octet-stream");
-            given(pptxFile.getSize()).willReturn(2048L);
-            given(pptxFile.getOriginalFilename()).willReturn("curriculum.pptx");
+        void initiateImport_pptxExtension_acceptedWithGenericMime() throws java.io.IOException {
+            try (var txSyncMock = org.mockito.Mockito.mockStatic(
+                    org.springframework.transaction.support.TransactionSynchronizationManager.class)) {
+                txSyncMock.when(org.springframework.transaction.support.TransactionSynchronizationManager::isSynchronizationActive)
+                        .thenReturn(true);
+                txSyncMock.when(() -> org.springframework.transaction.support.TransactionSynchronizationManager
+                        .registerSynchronization(any(org.springframework.transaction.support.TransactionSynchronization.class)))
+                        .thenAnswer(invocation -> {
+                            var sync = invocation.getArgument(0, org.springframework.transaction.support.TransactionSynchronization.class);
+                            sync.afterCommit();
+                            return null;
+                        });
 
-            CurriculumImport savedEntity = makeImport(ImportStatus.QUEUED);
-            given(importRepository.save(any(CurriculumImport.class))).willReturn(savedEntity);
-            given(importMapper.toResponse(savedEntity)).willReturn(new CurriculumImportResponse());
+                MultipartFile pptxFile = mock(MultipartFile.class);
+                given(pptxFile.isEmpty()).willReturn(false);
+                given(pptxFile.getContentType()).willReturn("application/octet-stream");
+                given(pptxFile.getSize()).willReturn(2048L);
+                given(pptxFile.getOriginalFilename()).willReturn("curriculum.pptx");
+                given(pptxFile.getBytes()).willReturn(new byte[2048]);
+                given(pptxFile.getInputStream()).willAnswer(inv -> new ByteArrayInputStream(PPTX_HEADER));
 
-            assertThatNoException().isThrownBy(
-                    () -> service.initiateImport(pptxFile, null, MANAGER_ID));
+                Course course = new Course();
+                given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
+
+                CurriculumImport savedEntity = makeImport(ImportStatus.QUEUED);
+                given(importRepository.save(any(CurriculumImport.class))).willReturn(savedEntity);
+                given(importMapper.toResponse(savedEntity)).willReturn(new CurriculumImportResponse());
+
+                assertThatNoException().isThrownBy(
+                        () -> service.initiateImport(pptxFile, COURSE_ID, MANAGER_ID));
+            }
         }
 
         @Test
@@ -292,9 +368,9 @@ class CurriculumImportServiceImplTest {
             given(docxFile.getSize()).willReturn(1024L);
             given(docxFile.getOriginalFilename()).willReturn("document.docx");
 
-            assertThatThrownBy(() -> service.initiateImport(docxFile, null, MANAGER_ID))
+            assertThatThrownBy(() -> service.initiateImport(docxFile, COURSE_ID, MANAGER_ID))
                     .isInstanceOf(InvalidImportFileException.class)
-                    .hasMessageContaining("PDF and PPTX");
+                    .hasMessageContaining("PDF");  // Message is in Vietnamese but contains "PDF"
         }
     }
 
@@ -379,7 +455,7 @@ class CurriculumImportServiceImplTest {
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(new Course()));
 
             PageResponse<CurriculumImportSummaryResponse> result =
-                    service.listImports(COURSE_ID, ImportStatus.COMPLETED, 0, 10);
+                    service.listImports(COURSE_ID, ImportStatus.COMPLETED, null, null, 0, 10);
 
             assertThat(result.getContent()).hasSize(1);
             assertThat(result.getContent().get(0).getId()).isEqualTo(IMPORT_ID);
@@ -395,7 +471,7 @@ class CurriculumImportServiceImplTest {
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(new Course()));
 
             PageResponse<CurriculumImportSummaryResponse> result =
-                    service.listImports(COURSE_ID, null, 0, 10);
+                    service.listImports(COURSE_ID, null, null, null, 0, 10);
 
             assertThat(result.getContent()).hasSize(1);
         }
@@ -410,7 +486,7 @@ class CurriculumImportServiceImplTest {
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(new Course()));
 
             PageResponse<CurriculumImportSummaryResponse> result =
-                    service.listImports(null, ImportStatus.FAILED, 0, 10);
+                    service.listImports(null, ImportStatus.FAILED, null, null, 0, 10);
 
             assertThat(result.getContent()).hasSize(1);
         }
@@ -424,7 +500,7 @@ class CurriculumImportServiceImplTest {
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(new Course()));
 
             PageResponse<CurriculumImportSummaryResponse> result =
-                    service.listImports(null, null, 0, 10);
+                    service.listImports(null, null, null, null, 0, 10);
 
             assertThat(result.getContent()).hasSize(1);
         }
@@ -435,7 +511,7 @@ class CurriculumImportServiceImplTest {
             Page<CurriculumImport> page = new PageImpl<>(List.of());
             given(importRepository.findAllByOrderByCreatedAtDesc(any(Pageable.class))).willReturn(page);
 
-            service.listImports(null, null, 0, 999);
+            service.listImports(null, null, null, null, 0, 999);
 
             ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
             then(importRepository).should().findAllByOrderByCreatedAtDesc(pageableCaptor.capture());
@@ -694,7 +770,6 @@ class CurriculumImportServiceImplTest {
             lesson.setId(UUID.randomUUID());
             lesson.setTitle("Lesson 1");
             lesson.setTitleJapanese("レッスン 1");
-            lesson.setLessonType(Lesson.LessonType.VOCABULARY);
             lesson.setOrderIndex(1);
             lesson.setPageStart(1);
             lesson.setPageEnd(5);
@@ -708,7 +783,6 @@ class CurriculumImportServiceImplTest {
             LessonSummaryDto dto = result.get(0);
             assertThat(dto.id()).isEqualTo(lesson.getId());
             assertThat(dto.title()).isEqualTo("Lesson 1");
-            assertThat(dto.lessonType()).isEqualTo("VOCABULARY");
             assertThat(dto.status()).isEqualTo("DRAFT");
         }
     }
@@ -731,7 +805,7 @@ class CurriculumImportServiceImplTest {
         }
 
         @Test
-        @DisplayName("Happy path — import has courseId returns vocabulary page")
+        @DisplayName("Happy path — import returns vocabulary page linked to this import")
         void getImportVocabulary_withCourseId_returnsVocabPage() {
             given(importRepository.findById(IMPORT_ID))
                     .willReturn(Optional.of(makeImport(ImportStatus.COMPLETED)));
@@ -740,7 +814,7 @@ class CurriculumImportServiceImplTest {
             vocab.setId(UUID.randomUUID());
 
             Page<Vocabulary> page = new PageImpl<>(List.of(vocab));
-            given(vocabularyRepository.findByCourseId(eq(COURSE_ID), any(Pageable.class)))
+            given(vocabularyRepository.findByImportId(eq(IMPORT_ID), any(Pageable.class)))
                     .willReturn(page);
 
             VocabularyResponse vocabResp = new VocabularyResponse();
@@ -753,17 +827,19 @@ class CurriculumImportServiceImplTest {
         }
 
         @Test
-        @DisplayName("Alternative — import has no courseId returns empty page")
+        @DisplayName("Alternative — import with no vocabulary returns empty page")
         void getImportVocabulary_noCourseId_returnsEmptyPage() {
             CurriculumImport entity = makeImport(ImportStatus.COMPLETED);
-            entity.setCourseId(null);
             given(importRepository.findById(IMPORT_ID)).willReturn(Optional.of(entity));
+
+            Page<Vocabulary> emptyPage = new PageImpl<>(List.of());
+            given(vocabularyRepository.findByImportId(eq(IMPORT_ID), any(Pageable.class)))
+                    .willReturn(emptyPage);
 
             PageResponse<VocabularyResponse> result = service.getImportVocabulary(IMPORT_ID, 0, 10);
 
             assertThat(result.getContent()).isEmpty();
             assertThat(result.getTotalElements()).isZero();
-            then(vocabularyRepository).should(never()).findByCourseId(any(), any());
         }
     }
 
@@ -785,7 +861,7 @@ class CurriculumImportServiceImplTest {
         }
 
         @Test
-        @DisplayName("Happy path — import has courseId returns grammar page")
+        @DisplayName("Happy path — import returns grammar page linked to this import")
         void getImportGrammarPoints_withCourseId_returnsGrammarPage() {
             given(importRepository.findById(IMPORT_ID))
                     .willReturn(Optional.of(makeImport(ImportStatus.COMPLETED)));
@@ -794,7 +870,7 @@ class CurriculumImportServiceImplTest {
             gp.setId(UUID.randomUUID());
 
             Page<GrammarPoint> page = new PageImpl<>(List.of(gp));
-            given(grammarPointRepository.findByCourseId(eq(COURSE_ID), any(Pageable.class)))
+            given(grammarPointRepository.findByImportId(eq(IMPORT_ID), any(Pageable.class)))
                     .willReturn(page);
 
             GrammarPointResponse gpResp = new GrammarPointResponse();
@@ -807,16 +883,18 @@ class CurriculumImportServiceImplTest {
         }
 
         @Test
-        @DisplayName("Alternative — import has no courseId returns empty page")
+        @DisplayName("Alternative — import with no grammar returns empty page")
         void getImportGrammarPoints_noCourseId_returnsEmptyPage() {
             CurriculumImport entity = makeImport(ImportStatus.COMPLETED);
-            entity.setCourseId(null);
             given(importRepository.findById(IMPORT_ID)).willReturn(Optional.of(entity));
+
+            Page<GrammarPoint> emptyPage = new PageImpl<>(List.of());
+            given(grammarPointRepository.findByImportId(eq(IMPORT_ID), any(Pageable.class)))
+                    .willReturn(emptyPage);
 
             PageResponse<GrammarPointResponse> result = service.getImportGrammarPoints(IMPORT_ID, 0, 10);
 
             assertThat(result.getContent()).isEmpty();
-            then(grammarPointRepository).should(never()).findByCourseId(any(), any());
         }
     }
 
@@ -835,6 +913,8 @@ class CurriculumImportServiceImplTest {
             given(importRepository.countByStatus(ImportStatus.COMPLETED)).willReturn(6L);
             given(importRepository.countByStatus(ImportStatus.FAILED)).willReturn(2L);
             given(importRepository.countByStatus(ImportStatus.QUEUED)).willReturn(1L);
+            given(importRepository.countByStatus(ImportStatus.ROLLED_BACK)).willReturn(1L);
+            given(importRepository.countByStatus(ImportStatus.PENDING_APPROVAL)).willReturn(2L);
             given(importRepository.countByStatus(ImportStatus.CANCELLED)).willReturn(0L);
             given(importRepository.sumLessonsCreated()).willReturn(50L);
             given(importRepository.sumVocabularyCreated()).willReturn(300L);
@@ -853,6 +933,8 @@ class CurriculumImportServiceImplTest {
             assertThat(result.getCompletedImports()).isEqualTo(6L);
             assertThat(result.getFailedImports()).isEqualTo(2L);
             assertThat(result.getQueuedImports()).isEqualTo(1L);
+            assertThat(result.getRollbackImports()).isEqualTo(1L);
+            assertThat(result.getPendingApprovalImports()).isEqualTo(2L);
             // in-progress = 10 - 6 - 2 - 1 - 0 = 1
             assertThat(result.getInProgressImports()).isEqualTo(1L);
             assertThat(result.getTotalLessonsCreated()).isEqualTo(50L);
@@ -893,6 +975,8 @@ class CurriculumImportServiceImplTest {
             given(importRepository.countByStatus(ImportStatus.COMPLETED)).willReturn(5L);
             given(importRepository.countByStatus(ImportStatus.FAILED)).willReturn(2L); // sum > total
             given(importRepository.countByStatus(ImportStatus.QUEUED)).willReturn(0L);
+            given(importRepository.countByStatus(ImportStatus.ROLLED_BACK)).willReturn(0L);
+            given(importRepository.countByStatus(ImportStatus.PENDING_APPROVAL)).willReturn(0L);
             given(importRepository.countByStatus(ImportStatus.CANCELLED)).willReturn(0L);
             given(importRepository.sumLessonsCreated()).willReturn(0L);
             given(importRepository.sumVocabularyCreated()).willReturn(0L);
@@ -907,6 +991,8 @@ class CurriculumImportServiceImplTest {
 
             ImportStatisticsResponse result = service.getStatistics();
 
+            assertThat(result.getRollbackImports()).isZero();
+            assertThat(result.getPendingApprovalImports()).isZero();
             assertThat(result.getInProgressImports()).isGreaterThanOrEqualTo(0L);
         }
     }

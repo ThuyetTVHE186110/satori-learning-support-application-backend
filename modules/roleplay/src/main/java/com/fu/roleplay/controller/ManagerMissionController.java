@@ -21,7 +21,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/manager/roleplay/missions")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('MANAGER')")
+@PreAuthorize("hasRole('CONTENT_MANAGER')")
 public class ManagerMissionController {
 
     private final MissionService missionService;
@@ -31,17 +31,17 @@ public class ManagerMissionController {
             @Valid @RequestBody CreateMissionRequest request,
             @AuthenticationPrincipal(expression = "id") UUID managerId) {
 
-        log.info("Manager {} creating mission for topic {}", managerId, request.getTopicId());
+        log.info("Manager {} creating mission for conversation {}", managerId, request.getConversationId());
         MissionResponse response = missionService.createMission(request, managerId);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Mission created successfully", response));
     }
 
     @GetMapping
-    public ResponseEntity<ApiResponse<List<MissionResponse>>> getMissionsByTopic(
-            @RequestParam UUID topicId) {
+    public ResponseEntity<ApiResponse<List<MissionResponse>>> getMissionsByConversation(
+            @RequestParam UUID conversationId) {
 
-        List<MissionResponse> response = missionService.getMissionsByTopic(topicId);
+        List<MissionResponse> response = missionService.getMissionsByConversation(conversationId);
         return ResponseEntity.ok(ApiResponse.success("Missions retrieved", response));
     }
 

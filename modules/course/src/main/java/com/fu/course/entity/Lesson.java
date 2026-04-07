@@ -5,6 +5,8 @@ import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.hibernate.annotations.ColumnTransformer;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -21,7 +23,6 @@ import java.util.UUID;
 @Table(name = "lessons", schema = "learning_content", indexes = {
     @Index(name = "idx_lessons_course_id", columnList = "course_id"),
     @Index(name = "idx_lessons_status", columnList = "status"),
-    @Index(name = "idx_lessons_lesson_type", columnList = "lesson_type"),
     @Index(name = "idx_lessons_order_index", columnList = "order_index"),
     @Index(name = "idx_lessons_import_id", columnList = "import_id")
 })
@@ -46,11 +47,6 @@ public class Lesson extends SoftDeletableEntity {
 
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "lesson_type", nullable = false, length = 20)
-    @ColumnTransformer(write = "CAST(? AS lesson_type)")
-    private LessonType lessonType;
 
     /**
      * Flexible content structure stored as JSONB in PostgreSQL.
@@ -80,8 +76,8 @@ public class Lesson extends SoftDeletableEntity {
     private String contentFileName;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "processing_status", length = 20)
-    @ColumnTransformer(write = "CAST(? AS processing_status)")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "processing_status", columnDefinition = "processing_status")
     @Builder.Default
     private ProcessingStatus processingStatus = ProcessingStatus.COMPLETED;
 
@@ -112,22 +108,10 @@ public class Lesson extends SoftDeletableEntity {
     // --- Status ---
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", length = 20)
-    @ColumnTransformer(write = "CAST(? AS content_status)")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "status", columnDefinition = "content_status")
     @Builder.Default
     private ContentStatus status = ContentStatus.DRAFT;
-
-    /**
-     * Lesson Type enum - categorizes lesson content.
-     */
-    public enum LessonType {
-        VOCABULARY,
-        GRAMMAR,
-        KANJI,
-        LISTENING,
-        READING,
-        MIXED
-    }
 
     /**
      * Processing Status enum - tracks AI/import pipeline progress.

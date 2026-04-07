@@ -29,31 +29,31 @@ import java.util.UUID;
 
 /**
  * Unified REST Controller for Class operations.
- *
- * Accessible by both MANAGER and TEACHER roles.
- * - MANAGER: full CRUD, member management, view all classes
+ * <p>
+ * Accessible by both OPERATION_MANAGER and TEACHER roles.
+ * - OPERATION_MANAGER: full CRUD, member management, view all classes
  * - TEACHER: read-only, view own assigned active classes only
- *
+ * <p>
  * Base path: /api/v1/classes
  */
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/classes")
 @RequiredArgsConstructor
-@PreAuthorize("hasAnyRole('MANAGER', 'TEACHER')")
+@PreAuthorize("hasAnyRole('OPERATION_MANAGER', 'TEACHER')")
 public class ClassController {
 
     private final ClassService clazzService;
 
     // =====================================================
-    // READ OPERATIONS (MANAGER + TEACHER)
+    // READ OPERATIONS (OPERATION_MANAGER + TEACHER)
     // =====================================================
 
     /**
      * Get all classes with pagination and optional filters.
-     * - MANAGER: sees all non-deleted classes with full filter support
+     * - OPERATION_MANAGER: sees all non-deleted classes with full filter support
      * - TEACHER: sees only their own active classes (filtered by teacher ID auto)
-     *
+     * <p>
      * GET
      * /api/v1/classes?page=0&size=10&isActive=true&courseId=xxx&teacherId=xxx&keyword=xxx
      */
@@ -62,7 +62,7 @@ public class ClassController {
             @AuthenticationPrincipal UUID userId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
-            @RequestParam(required = false) Boolean isActive,
+            @RequestParam(required = false) com.fu.clazz.entity.ClassStatus status,
             @RequestParam(required = false) UUID courseId,
             @RequestParam(required = false) UUID teacherId,
             @RequestParam(required = false) String keyword) {
@@ -71,11 +71,11 @@ public class ClassController {
         Page<ClassSummaryResponse> classPage;
 
         if (isManager()) {
-            // MANAGER: full access with dynamic filters combined by AND
-            classPage = clazzService.getClasses(keyword, teacherId, courseId, isActive, pageable);
+            // OPERATION_MANAGER: full access with dynamic filters combined by AND
+            classPage = clazzService.getClasses(keyword, teacherId, courseId, status, pageable);
         } else {
             // TEACHER: only their own active classes (force filter)
-            classPage = clazzService.getClasses(keyword, userId, courseId, true, pageable);
+            classPage = clazzService.getClasses(keyword, userId, courseId, com.fu.clazz.entity.ClassStatus.ACTIVE, pageable);
         }
 
         PageResponse<ClassSummaryResponse> pageResponse = PageResponse.of(
@@ -84,14 +84,14 @@ public class ClassController {
                 classPage.getSize(),
                 classPage.getTotalElements(),
                 classPage.getTotalPages());
-        return ResponseEntity.ok(ApiResponse.success(pageResponse));
+        return ResponseEntity.ok(ApiResponse.success(pageResponse.getTotalElements() == 0 ? "Không có lớp học nào." : "Operation completed successfully", pageResponse));
     }
 
     /**
      * Get class detail by ID.
-     * - MANAGER: can view any non-deleted class
+     * - OPERATION_MANAGER: can view any non-deleted class
      * - TEACHER: can only view classes assigned to them
-     *
+     * <p>
      * GET /api/v1/classes/{classId}
      */
     @GetMapping("/{classId}")
@@ -110,9 +110,9 @@ public class ClassController {
 
     /**
      * Get members of a class with pagination.
-     * - MANAGER: can view members of any class
+     * - OPERATION_MANAGER: can view members of any class
      * - TEACHER: can only view members of their assigned classes
-     *
+     * <p>
      * GET /api/v1/classes/{classId}/members?page=0&size=10
      */
     @GetMapping("/{classId}/members")
@@ -120,15 +120,16 @@ public class ClassController {
             @PathVariable UUID classId,
             @AuthenticationPrincipal UUID userId,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String keyword) {
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("joinedAt").descending());
 
         Page<ClassMemberResponse> memberPage;
         if (isManager()) {
-            memberPage = clazzService.getClassMembers(classId, pageable);
+            memberPage = clazzService.getClassMembers(classId, keyword, pageable);
         } else {
-            memberPage = clazzService.getClassMembersForTeacher(classId, userId, pageable);
+            memberPage = clazzService.getClassMembersForTeacher(classId, userId, keyword, pageable);
         }
 
         PageResponse<ClassMemberResponse> pageResponse = PageResponse.of(
@@ -143,12 +144,12 @@ public class ClassController {
     /**
      * Get learners eligible to be added to a class.
      * Eligible learners are those with role LEARNER, status ACTIVE/INACTIVE, and not currently an active member.
-     * - MANAGER: can view eligible learners for any class
-     *
+     * - OPERATION_MANAGER: can view eligible learners for any class
+     * <p>
      * GET /api/v1/classes/{classId}/eligible-learners?page=0&size=10&keyword=...
      */
     @GetMapping("/{classId}/eligible-learners")
-    @PreAuthorize("hasRole('MANAGER')")
+    @PreAuthorize("hasRole('OPERATION_MANAGER')")
     public ResponseEntity<ApiResponse<PageResponse<com.fu.user.dto.UserResponse>>> getEligibleLearners(
             @PathVariable UUID classId,
             @RequestParam(defaultValue = "0") int page,
@@ -169,7 +170,7 @@ public class ClassController {
     }
 
     // =====================================================
-    // WRITE OPERATIONS (MANAGER ONLY)
+    // WRITE OPERATIONS (OPERATION_MANAGER ONLY)
     // =====================================================
 
     /**
@@ -177,7 +178,7 @@ public class ClassController {
      * POST /api/v1/classes
      */
     @PostMapping
-    @PreAuthorize("hasRole('MANAGER')")
+    @PreAuthorize("hasRole('OPERATION_MANAGER')")
     public ResponseEntity<ApiResponse<ClassResponse>> createClass(
             @Valid @RequestBody CreateClassRequest request,
             @AuthenticationPrincipal UUID managerId) {
@@ -193,7 +194,7 @@ public class ClassController {
      * PUT /api/v1/classes/{classId}
      */
     @PutMapping("/{classId}")
-    @PreAuthorize("hasRole('MANAGER')")
+    @PreAuthorize("hasRole('OPERATION_MANAGER')")
     public ResponseEntity<ApiResponse<ClassResponse>> updateClass(
             @PathVariable UUID classId,
             @Valid @RequestBody UpdateClassRequest request,
@@ -205,11 +206,25 @@ public class ClassController {
     }
 
     /**
+     * Close an existing class (set isActive to false).
+     * PUT /api/v1/classes/{classId}/close
+     */
+    @PutMapping("/{classId}/close")
+    @PreAuthorize("hasRole('OPERATION_MANAGER')")
+    public ResponseEntity<ApiResponse<ClassResponse>> closeClass(
+            @PathVariable UUID classId,
+            @AuthenticationPrincipal UUID managerId) {
+        ClassResponse response = clazzService.closeClass(classId, managerId);
+        log.info("Manager {} closed class: {}", managerId, classId);
+        return ResponseEntity.ok(ApiResponse.success("Đóng lớp học thành công.", response));
+    }
+
+    /**
      * Delete a class (soft delete only — does NOT change isActive).
      * DELETE /api/v1/classes/{classId}
      */
     @DeleteMapping("/{classId}")
-    @PreAuthorize("hasRole('MANAGER')")
+    @PreAuthorize("hasRole('OPERATION_MANAGER')")
     public ResponseEntity<ApiResponse<ClassResponse>> deleteClass(
             @PathVariable UUID classId,
             @AuthenticationPrincipal UUID managerId) {
@@ -224,7 +239,7 @@ public class ClassController {
      * POST /api/v1/classes/{classId}/members
      */
     @PostMapping("/{classId}/members")
-    @PreAuthorize("hasRole('MANAGER')")
+    @PreAuthorize("hasRole('OPERATION_MANAGER')")
     public ResponseEntity<ApiResponse<ClassMemberResponse>> addMember(
             @PathVariable UUID classId,
             @Valid @RequestBody AddMemberRequest request,
@@ -241,7 +256,7 @@ public class ClassController {
      * DELETE /api/v1/classes/{classId}/members/{userId}
      */
     @DeleteMapping("/{classId}/members/{userId}")
-    @PreAuthorize("hasRole('MANAGER')")
+    @PreAuthorize("hasRole('OPERATION_MANAGER')")
     public ResponseEntity<ApiResponse<Void>> removeMember(
             @PathVariable UUID classId,
             @PathVariable UUID userId,
@@ -257,12 +272,12 @@ public class ClassController {
     // =====================================================
 
     /**
-     * Check if the current authenticated user has the MANAGER role.
+     * Check if the current authenticated user has the OPERATION_MANAGER role.
      */
     private boolean isManager() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         return auth.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
-                .anyMatch(role -> role.equals("ROLE_MANAGER"));
+                .anyMatch(role -> role.equals("ROLE_OPERATION_MANAGER"));
     }
 }

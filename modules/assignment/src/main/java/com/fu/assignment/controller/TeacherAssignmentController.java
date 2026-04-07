@@ -32,7 +32,6 @@ import java.util.UUID;
 public class TeacherAssignmentController {
 
     private final AssignmentService assignmentService;
-    private final ObjectMapper objectMapper;
 
     // Helper method to extract user ID from UserDetails (assuming username is the UUID string)
     private UUID getUserId(UserDetails userDetails) {
@@ -231,7 +230,7 @@ public class TeacherAssignmentController {
      * @return empty success response
      */
     @DeleteMapping("/{id}")
-    @Operation(summary = "Delete an assignment (soft delete, DRAFT only)")
+    @Operation(summary = "Delete an assignment (soft delete)")
     public ApiResponse<Void> deleteAssignment(@PathVariable UUID id,
                                               @AuthenticationPrincipal UserDetails userDetails) {
         assignmentService.deleteAssignment(id, getUserId(userDetails));

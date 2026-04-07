@@ -15,7 +15,7 @@ import com.fu.course.repository.CourseRepository;
 import com.fu.course.repository.LessonRepository;
 import com.fu.course.repository.specification.CourseSpecification;
 import com.fu.course.service.CourseService;
-import com.fu.infrastructure.cloudinary.CloudinaryService;
+import com.fu.course.service.CourseUsageChecker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -39,36 +39,18 @@ public class CourseServiceImpl implements CourseService {
     private final CourseRepository courseRepository;
     private final CourseMapper courseMapper;
     private final LessonRepository lessonRepository;
-    private final CloudinaryService cloudinaryService;
-
-    private static final String THUMBNAIL_FOLDER = "courses/thumbnails";
+    private final List<CourseUsageChecker> courseUsageCheckers;
 
     @Override
     @Transactional
     public CourseResponse createCourse(CreateCourseRequest request, UUID managerId) {
-        return createCourse(request, null, managerId);
-    }
-
-    @Override
-    @Transactional
-    public CourseResponse createCourse(CreateCourseRequest request, MultipartFile thumbnail, UUID managerId) {
         log.info("Creating course: {} by manager: {}", request.getName(), managerId);
-
         // Check if course name already exists
         if (courseRepository.existsByNameIgnoreCase(request.getName())) {
             throw new CourseNameAlreadyExistsException(request.getName());
         }
-
-        // Upload thumbnail to Cloudinary if provided
-        String thumbnailUrl = null;
-        if (thumbnail != null && !thumbnail.isEmpty()) {
-            log.info("Uploading thumbnail for new course: {}", request.getName());
-            thumbnailUrl = cloudinaryService.uploadImage(thumbnail, THUMBNAIL_FOLDER);
-        }
-
         // Create course entity
         Course course = courseMapper.toEntity(request);
-        course.setThumbnailUrl(thumbnailUrl);
         course.setCreatedBy(managerId);
         course.setUpdatedBy(managerId);
 
@@ -81,16 +63,16 @@ public class CourseServiceImpl implements CourseService {
 
     @Override
     @Transactional
-    public CourseResponse updateCourse(UUID courseId, UpdateCourseRequest request, MultipartFile thumbnail, UUID managerId) {
+    public CourseResponse updateCourse(UUID courseId, UpdateCourseRequest request, UUID managerId) {
         log.info("Updating course: {} by manager: {}", courseId, managerId);
 
         // Find course
         Course course = findCourseOrThrow(courseId);
 
         // Check if new name conflicts with existing courses
-        if (request.getName() != null && 
-            !request.getName().equalsIgnoreCase(course.getName()) &&
-            courseRepository.existsByNameIgnoreCaseAndIdNot(request.getName(), courseId)) {
+        if (request.getName() != null &&
+                !request.getName().equalsIgnoreCase(course.getName()) &&
+                courseRepository.existsByNameIgnoreCaseAndIdNot(request.getName(), courseId)) {
             throw new CourseNameAlreadyExistsException(request.getName());
         }
 
@@ -99,28 +81,12 @@ public class CourseServiceImpl implements CourseService {
             throw new BusinessException("INVALID_STATUS",
                     "Không thể cập nhật trạng thái thành DELETED. Vui lòng sử dụng chức năng xóa để xóa khóa học.");
         }
-
-        // Handle thumbnail upload if a new file is provided
-        if (thumbnail != null && !thumbnail.isEmpty()) {
-            log.info("Uploading new thumbnail for course: {}", courseId);
-            String thumbnailUrl = cloudinaryService.uploadImage(thumbnail, THUMBNAIL_FOLDER);
-            
-            // Delete old thumbnail if it exists
-            if (course.getThumbnailUrl() != null) {
-                try {
-                    String oldPublicId = cloudinaryService.extractPublicId(course.getThumbnailUrl());
-                    if (oldPublicId != null) {
-                        cloudinaryService.deleteImage(oldPublicId);
-                    }
-                } catch (Exception e) {
-                    log.error("Failed to delete old thumbnail: {}", e.getMessage());
-                    // Continue with update even if old thumbnail deletion fails
-                }
+        if (request.getStatus() == CourseStatus.INACTIVE) {
+            // Check if course is used by active classes
+            if (isCourseInUse(courseId)) {
+                throw new BusinessException("COURSE_IN_USE", "Không thể chuyển trạng thái khóa học khi đang có lớp đang hoạt động.");
             }
-            
-            course.setThumbnailUrl(thumbnailUrl);
         }
-
         // Update course
         courseMapper.updateEntity(course, request);
         course.setUpdatedBy(managerId);
@@ -135,12 +101,12 @@ public class CourseServiceImpl implements CourseService {
     public CourseResponse getCourseById(UUID courseId) {
         log.debug("Fetching course by ID: {}", courseId);
         Course course = findCourseOrThrow(courseId);
-        
+
         CourseResponse response = courseMapper.toResponse(course);
         response.setLessonCount(lessonRepository.countByCourseIdAndDeletedAtIsNull(courseId));
         // TODO: Set studentCount from enrollment table when available
         response.setStudentCount(0L);
-        
+
         return response;
     }
 
@@ -148,67 +114,67 @@ public class CourseServiceImpl implements CourseService {
     public Page<CourseSummaryResponse> getAllCourses(Pageable pageable) {
         log.debug("Fetching all courses with pagination");
         return courseRepository.findAll(pageable)
-            .map(courseMapper::toSummaryResponse);
+                .map(this::toSummaryResponseWithCounts);
     }
 
     @Override
     public Page<CourseSummaryResponse> getCoursesByStatus(Course.CourseStatus status, Pageable pageable) {
         log.debug("Fetching courses by status: {}", status);
         return courseRepository.findByStatusAndDeletedAtIsNull(status, pageable)
-            .map(courseMapper::toSummaryResponse);
+                .map(this::toSummaryResponseWithCounts);
     }
 
     @Override
     public Page<CourseSummaryResponse> getCoursesByJlptLevel(JlptLevel jlptLevel, Pageable pageable) {
         log.debug("Fetching courses by JLPT level: {}", jlptLevel);
         return courseRepository.findByJlptLevelAndDeletedAtIsNull(jlptLevel, pageable)
-            .map(courseMapper::toSummaryResponse);
+                .map(this::toSummaryResponseWithCounts);
     }
 
     @Override
     public List<CourseSummaryResponse> getActiveCourses() {
         log.debug("Fetching all active courses");
         return courseRepository.findActiveCourses()
-            .stream()
-            .map(courseMapper::toSummaryResponse)
-            .toList();
+                .stream()
+                .map(this::toSummaryResponseWithCounts)
+                .toList();
     }
 
     @Override
     public List<CourseSummaryResponse> getActiveCoursesByLevel(JlptLevel jlptLevel) {
         log.debug("Fetching active courses by level: {}", jlptLevel);
         return courseRepository.findActiveCoursesByLevel(jlptLevel)
-            .stream()
-            .map(courseMapper::toSummaryResponse)
-            .toList();
+                .stream()
+                .map(this::toSummaryResponseWithCounts)
+                .toList();
     }
 
     @Override
     public Page<CourseSummaryResponse> searchCourses(String keyword, Pageable pageable) {
         log.debug("Searching courses by keyword: {}", keyword);
         return courseRepository.searchByName(keyword, pageable)
-            .map(courseMapper::toSummaryResponse);
+                .map(this::toSummaryResponseWithCounts);
     }
 
     @Override
     public Page<CourseSummaryResponse> filterCourses(CourseStatus status, JlptLevel level, String keyword, Pageable pageable) {
         log.debug("Filtering courses - status: {}, level: {}, keyword: {}", status, level, keyword);
         return courseRepository.findAll(CourseSpecification.withFilters(status, level, keyword), pageable)
-            .map(courseMapper::toSummaryResponse);
+                .map(this::toSummaryResponseWithCounts);
     }
 
     @Override
     @Transactional
     public CourseResponse activateCourse(UUID courseId, UUID managerId) {
         log.info("Activating course: {} by manager: {}", courseId, managerId);
-        
+
         Course course = findCourseOrThrow(courseId);
         course.setStatus(Course.CourseStatus.ACTIVE);
         course.setUpdatedBy(managerId);
-        
+
         Course updatedCourse = courseRepository.save(course);
         log.info("Course activated successfully: {}", courseId);
-        
+
         return courseMapper.toResponse(updatedCourse);
     }
 
@@ -216,14 +182,20 @@ public class CourseServiceImpl implements CourseService {
     @Transactional
     public CourseResponse deactivateCourse(UUID courseId, UUID managerId) {
         log.info("Deactivating course: {} by manager: {}", courseId, managerId);
-        
+
         Course course = findCourseOrThrow(courseId);
+
+        // Check if course is used by active classes
+        if (isCourseInUse(courseId)) {
+            throw new BusinessException("COURSE_IN_USE", "Không thể chuyển trạng thái khóa học khi đang có lớp đang hoạt động.");
+        }
+
         course.setStatus(CourseStatus.INACTIVE);
         course.setUpdatedBy(managerId);
-        
+
         Course updatedCourse = courseRepository.save(course);
         log.info("Course deactivated successfully: {}", courseId);
-        
+
         return courseMapper.toResponse(updatedCourse);
     }
 
@@ -233,8 +205,14 @@ public class CourseServiceImpl implements CourseService {
         log.info("Soft-deleting course: {} by manager: {}", courseId, managerId);
 
         Course course = findCourseOrThrow(courseId);
-        course.softDelete(managerId);
 
+        // Check if course is used by active classes
+        if (isCourseInUse(courseId)) {
+            throw new BusinessException("COURSE_IN_USE", "Không thể xóa khóa học đang có lớp đang hoạt động.");
+        }
+
+        course.softDelete(managerId);
+        course.setStatus(CourseStatus.DELETED);
         courseRepository.save(course);
         log.info("Course soft-deleted successfully: {}", courseId);
     }
@@ -246,51 +224,42 @@ public class CourseServiceImpl implements CourseService {
     }
 
     @Override
-    @Transactional
-    public CourseResponse updateThumbnail(UUID courseId, String thumbnailUrl, UUID managerId) {
-        log.info("Updating thumbnail for course: {} by manager: {}", courseId, managerId);
-
-        Course course = findCourseOrThrow(courseId);
-
-        course.setThumbnailUrl(thumbnailUrl);
-        course.setUpdatedBy(managerId);
-
-        Course updatedCourse = courseRepository.save(course);
-        log.info("Course thumbnail updated successfully: {}", courseId);
-
-        CourseResponse response = courseMapper.toResponse(updatedCourse);
-        response.setLessonCount(lessonRepository.countByCourseIdAndDeletedAtIsNull(courseId));
-        response.setStudentCount(0L);
-
-        return response;
-    }
-
-    @Override
     public CourseStatistics getCourseStatistics() {
         log.debug("Fetching course statistics");
-        
+
         long totalCourses = courseRepository.count();
         long activeCourses = courseRepository.countByStatusAndDeletedAtIsNull(Course.CourseStatus.ACTIVE);
         long inactiveCourses = courseRepository.countByStatusAndDeletedAtIsNull(Course.CourseStatus.INACTIVE);
         long deletedCourses = courseRepository.countByStatusAndDeletedAtIsNull(CourseStatus.DELETED);
-        
+
         long n5Courses = courseRepository.countByJlptLevelAndDeletedAtIsNull(JlptLevel.N5);
         long n4Courses = courseRepository.countByJlptLevelAndDeletedAtIsNull(JlptLevel.N4);
         long n3Courses = courseRepository.countByJlptLevelAndDeletedAtIsNull(JlptLevel.N3);
         long n2Courses = courseRepository.countByJlptLevelAndDeletedAtIsNull(JlptLevel.N2);
         long n1Courses = courseRepository.countByJlptLevelAndDeletedAtIsNull(JlptLevel.N1);
-        
+
         return new CourseStatistics(
-            totalCourses,
-            activeCourses,
-            inactiveCourses,
-            deletedCourses,
-            n5Courses,
-            n4Courses,
-            n3Courses,
-            n2Courses,
-            n1Courses
+                totalCourses,
+                activeCourses,
+                inactiveCourses,
+                deletedCourses,
+                n5Courses,
+                n4Courses,
+                n3Courses,
+                n2Courses,
+                n1Courses
         );
+    }
+
+    /**
+     * Helper method to convert course to summary response and enrich with counts
+     */
+    private CourseSummaryResponse toSummaryResponseWithCounts(Course course) {
+        CourseSummaryResponse response = courseMapper.toSummaryResponse(course);
+        response.setLessonCount(lessonRepository.countByCourseIdAndDeletedAtIsNull(course.getId()));
+        // TODO: Set studentCount from enrollment table when available
+        response.setStudentCount(0L);
+        return response;
     }
 
     /**
@@ -298,6 +267,16 @@ public class CourseServiceImpl implements CourseService {
      */
     private Course findCourseOrThrow(UUID courseId) {
         return courseRepository.findByIdAndNotDeleted(courseId)
-            .orElseThrow(() -> new CourseNotFoundException(courseId));
+                .orElseThrow(() -> new CourseNotFoundException(courseId));
+    }
+
+    /**
+     * Call all registered course usage checkers to validate if course can be deactivated/deleted
+     */
+    private boolean isCourseInUse(UUID courseId) {
+        if (courseUsageCheckers != null) {
+            return courseUsageCheckers.stream().anyMatch(checker -> checker.checkActiveUsage(courseId));
+        }
+        return false;
     }
 }

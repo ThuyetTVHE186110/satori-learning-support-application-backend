@@ -1,5 +1,6 @@
 package com.fu.clazz.dto.response;
 
+import com.fu.clazz.entity.ClassStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -24,6 +25,6 @@ public class ClassSummaryResponse {
     private String courseName;
     private String courseLevel;
     private String courseStatus;
-    private Boolean isActive;
+    private ClassStatus status;
     private Long memberCount;
 }
