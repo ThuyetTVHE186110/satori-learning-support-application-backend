@@ -20,6 +20,14 @@ public class StreakHistoryItem {
     @Schema(description = "Date of streak record (YYYY-MM-DD)", example = "2026-04-05")
     private LocalDate date;
     
+    @JsonProperty("day_of_week")
+    @Schema(description = "Day of week (MON, TUE, WED, THU, FRI, SAT, SUN)", example = "MON")
+    private String dayOfWeek;
+    
+    @JsonProperty("is_today")
+    @Schema(description = "Whether this day is today", example = "false")
+    private Boolean isToday;
+    
     @JsonProperty("streak_count")
     @Schema(description = "Running streak count on this date", example = "15")
     private Integer streakCount;
