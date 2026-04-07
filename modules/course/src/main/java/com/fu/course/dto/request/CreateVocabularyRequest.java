@@ -23,6 +23,7 @@ import java.util.UUID;
 public class CreateVocabularyRequest {
 
     /** Optional: link vocabulary to a lesson on creation. */
+    @NotNull
     private UUID lessonId;
 
     @NotBlank(message = "Japanese text is required")
@@ -35,6 +36,8 @@ public class CreateVocabularyRequest {
     @Size(max = 255, message = "Romaji must not exceed 255 characters")
     private String romaji;
 
+    @NotBlank
+    @Size(max = 1000, message = "Vietnamese meaning must not exceed 1000 characters")
     private String meaningVi;
 
     private String meaningEn;
@@ -42,7 +45,6 @@ public class CreateVocabularyRequest {
     @Size(max = 50, message = "Part of speech must not exceed 50 characters")
     private String partOfSpeech;
 
-    @NotNull(message = "JLPT level is required")
     private JlptLevel jlptLevel;
 
     @Size(max = 255, message = "Kanji writing must not exceed 255 characters")

@@ -46,54 +46,65 @@ public class GrammarPointServiceImpl implements GrammarPointService {
     public GrammarPointResponse createGrammarPoint(CreateGrammarPointRequest request, UUID managerId) {
         log.info("Manager {} creating grammar point: {}", managerId, request.getPattern());
 
-        if (grammarPointRepository.existsByPatternAndJlptLevelAndDeletedAtIsNull(
-                request.getPattern(), request.getJlptLevel())) {
-            throw new BusinessException(
-                    "Grammar point '" + request.getPattern() + "' already exists at level "
-                            + request.getJlptLevel());
-        }
-
-        GrammarPoint grammar = GrammarPoint.builder()
-                .pattern(request.getPattern())
-                .jlptLevel(request.getJlptLevel())
-                .patternReading(request.getPatternReading())
-                .patternRomaji(request.getPatternRomaji())
-                .meaningVi(request.getMeaningVi())
-                .meaningEn(request.getMeaningEn())
-                .shortExplanation(request.getShortExplanation())
-                .detailedExplanation(request.getDetailedExplanation())
-                .category(request.getCategory() != null ? request.getCategory() : GrammarCategory.OTHER)
-                .structure(request.getStructure())
-                .conjugationRules(request.getConjugationRules())
-                .formationRules(request.getFormationRules())
-                .exampleSentences(request.getExampleSentences() != null ? request.getExampleSentences() : "[]")
-                .commonMistakes(request.getCommonMistakes() != null ? request.getCommonMistakes() : "[]")
-                .tips(request.getTips())
-                .relatedGrammar(listToArray(request.getRelatedGrammar()))
-                .tags(listToArray(request.getTags()))
-                .audioUrl(request.getAudioUrl())
-                .createdBy(managerId)
-                .updatedBy(managerId)
-                .build();
-
-        GrammarPoint saved = grammarPointRepository.save(grammar);
-        log.info("Grammar point created: {}", saved.getId());
-
+        Lesson lesson = null;
         if (request.getLessonId() != null) {
-            Lesson lesson = lessonRepository.findByIdAndNotDeleted(request.getLessonId())
+            lesson = lessonRepository.findByIdAndNotDeleted(request.getLessonId())
                     .orElseThrow(() -> new ResourceNotFoundException("Lesson", request.getLessonId()));
-            if (!lessonGrammarRepository.existsByLessonIdAndGrammarPointId(lesson.getId(), saved.getId())) {
-                long orderIndex = lessonGrammarRepository.countByLessonId(lesson.getId());
-                lessonGrammarRepository.save(LessonGrammar.builder()
-                        .lesson(lesson)
-                        .grammarPoint(saved)
-                        .orderIndex((int) orderIndex)
-                        .build());
-                log.info("Linked grammar point {} to lesson {}", saved.getId(), lesson.getId());
+
+            if (lesson.getCourse() != null && lesson.getCourse().getJlptLevel() != null) {
+                JlptLevel courseLevel = lesson.getCourse().getJlptLevel();
+                if (request.getJlptLevel() != null && !courseLevel.equals(request.getJlptLevel())) {
+                    throw new BusinessException("JLPT level of grammar point must match the course level (" + courseLevel + ")");
+                }
+                request.setJlptLevel(courseLevel);
             }
         }
 
-        return toResponse(saved);
+        GrammarPoint grammarPoint = grammarPointRepository
+                .findByPatternAndJlptLevelAndDeletedAtIsNull(request.getPattern(), request.getJlptLevel())
+                .orElseGet(() -> {
+                    GrammarPoint newGp = GrammarPoint.builder()
+                            .pattern(request.getPattern())
+                            .jlptLevel(request.getJlptLevel())
+                            .patternReading(request.getPatternReading())
+                            .patternRomaji(request.getPatternRomaji())
+                            .meaningVi(request.getMeaningVi())
+                            .meaningEn(request.getMeaningEn())
+                            .shortExplanation(request.getShortExplanation())
+                            .detailedExplanation(request.getDetailedExplanation())
+                            .category(request.getCategory() != null ? request.getCategory() : GrammarCategory.OTHER)
+                            .structure(request.getStructure())
+                            .conjugationRules(request.getConjugationRules())
+                            .formationRules(request.getFormationRules())
+                            .exampleSentences(request.getExampleSentences() != null ? request.getExampleSentences() : "[]")
+                            .commonMistakes(request.getCommonMistakes() != null ? request.getCommonMistakes() : "[]")
+                            .tips(request.getTips())
+                            .relatedGrammar(listToArray(request.getRelatedGrammar()))
+                            .tags(listToArray(request.getTags()))
+                            .audioUrl(request.getAudioUrl())
+                            .createdBy(managerId)
+                            .updatedBy(managerId)
+                            .build();
+                    return grammarPointRepository.save(newGp);
+                });
+
+        if (lesson != null) {
+            boolean existsInLesson = lessonGrammarRepository.existsByLessonIdAndGrammarPointId(lesson.getId(), grammarPoint.getId());
+            if (existsInLesson) {
+                throw new BusinessException("Grammar point '" + request.getPattern() + "' already exists in this lesson");
+            }
+
+            long orderIndex = lessonGrammarRepository.countByLessonId(lesson.getId());
+            lessonGrammarRepository.save(LessonGrammar.builder()
+                    .lesson(lesson)
+                    .grammarPoint(grammarPoint)
+                    .orderIndex((int) orderIndex)
+                    .build());
+
+            log.info("Linked grammar point {} to lesson {}", grammarPoint.getId(), lesson.getId());
+        }
+
+        return toResponse(grammarPoint);
     }
 
     @Override

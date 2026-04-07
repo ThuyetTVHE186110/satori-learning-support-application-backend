@@ -44,53 +44,60 @@ public class VocabularyServiceImpl implements VocabularyService {
     @Transactional
     public VocabularyResponse createVocabulary(CreateVocabularyRequest request, UUID managerId) {
         log.info("Manager {} creating vocabulary: {}", managerId, request.getJapaneseText());
-
-        if (vocabularyRepository.existsByJapaneseTextAndJlptLevelAndDeletedAtIsNull(
-                request.getJapaneseText(), request.getJlptLevel())) {
-            throw new BusinessException(
-                    "Vocabulary '" + request.getJapaneseText() + "' already exists at level "
-                            + request.getJlptLevel());
-        }
-
-        Vocabulary vocab = Vocabulary.builder()
-                .japaneseText(request.getJapaneseText())
-                .reading(request.getReading())
-                .romaji(request.getRomaji())
-                .meaningVi(request.getMeaningVi())
-                .meaningEn(request.getMeaningEn())
-                .partOfSpeech(request.getPartOfSpeech())
-                .jlptLevel(request.getJlptLevel())
-                .kanjiWriting(request.getKanjiWriting())
-                .exampleSentences(request.getExampleSentences() != null ? request.getExampleSentences() : "[]")
-                .synonyms(listToArray(request.getSynonyms()))
-                .antonyms(listToArray(request.getAntonyms()))
-                .audioUrl(request.getAudioUrl())
-                .imageUrl(request.getImageUrl())
-                .usageNotes(request.getUsageNotes())
-                .tags(listToArray(request.getTags()))
-                .createdBy(managerId)
-                .updatedBy(managerId)
-                .build();
-
-        Vocabulary saved = vocabularyRepository.save(vocab);
-        log.info("Vocabulary created: {}", saved.getId());
-
+        //Get jlptLevel from lesson via course if lessonId is provided, else use jlptLevel from request
+        Lesson lesson = null;
         if (request.getLessonId() != null) {
-            Lesson lesson = lessonRepository.findByIdAndNotDeleted(request.getLessonId())
+            lesson = lessonRepository.findByIdAndNotDeleted(request.getLessonId())
                     .orElseThrow(() -> new ResourceNotFoundException("Lesson", request.getLessonId()));
-            if (!lessonVocabularyRepository.existsByLessonIdAndVocabularyId(lesson.getId(), saved.getId())) {
+            JlptLevel courseLevel = lesson.getCourse().getJlptLevel();
+            if (courseLevel != null && request.getJlptLevel() != null && courseLevel != request.getJlptLevel()) {
+                throw new BusinessException("JLPT level mismatch: Course is " + courseLevel + " but vocabulary is " + request.getJlptLevel());
+            }
+            request.setJlptLevel(courseLevel); // Override JLPT level with course's level
+        }
+        //Check if the same vocabulary already exists in the same lesson
+        Vocabulary vocabulary = vocabularyRepository
+                .findByJapaneseTextAndJlptLevelAndDeletedAtIsNull(request.getJapaneseText(), request.getJlptLevel())
+                .orElseGet(() -> {
+                    Vocabulary newVocab = Vocabulary.builder()
+                            .japaneseText(request.getJapaneseText())
+                            .reading(request.getReading())
+                            .romaji(request.getRomaji())
+                            .meaningVi(request.getMeaningVi())
+                            .meaningEn(request.getMeaningEn())
+                            .partOfSpeech(request.getPartOfSpeech())
+                            .jlptLevel(request.getJlptLevel())
+                            .kanjiWriting(request.getKanjiWriting())
+                            .exampleSentences(request.getExampleSentences() != null ? request.getExampleSentences() : "[]")
+                            .synonyms(listToArray(request.getSynonyms()))
+                            .antonyms(listToArray(request.getAntonyms()))
+                            .audioUrl(request.getAudioUrl())
+                            .imageUrl(request.getImageUrl())
+                            .usageNotes(request.getUsageNotes())
+                            .tags(listToArray(request.getTags()))
+                            .createdBy(managerId)
+                            .updatedBy(managerId)
+                            .build();
+                    return vocabularyRepository.save(newVocab);
+                });
+        if (lesson != null) {
+            boolean existsInLesson = lessonVocabularyRepository.existsByLessonIdAndVocabularyId(lesson.getId(), vocabulary.getId());
+            if (existsInLesson) {
+                throw new BusinessException(
+                        "Vocabulary '" + request.getJapaneseText() + "' already exists in the same lesson");
+            } else {
                 long orderIndex = lessonVocabularyRepository.countByLessonId(lesson.getId());
                 lessonVocabularyRepository.save(LessonVocabulary.builder()
                         .lesson(lesson)
-                        .vocabulary(saved)
+                        .vocabulary(vocabulary)
                         .orderIndex((int) orderIndex)
                         .build());
-                log.info("Linked vocabulary {} to lesson {}", saved.getId(), lesson.getId());
+                log.info("Linked vocabulary {} to lesson {}", vocabulary.getId(), lesson.getId());
             }
         }
-
-        return toResponse(saved);
+        return toResponse(vocabulary);
     }
+
 
     @Override
     @Transactional
