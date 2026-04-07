@@ -1,4 +1,88 @@
 services:
+    # ==================== Application ====================
+    app:
+        build:
+            # Build context is the project root so Dockerfile can access all modules
+            context: ..
+            dockerfile: environment/Dockerfile
+        container_name: satori-app
+        restart: unless-stopped
+        ports:
+            - "${APP_PORT:-8080}:8080"
+        environment:
+            SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
+            APP_PORT: 8080
+
+            # Database
+            POSTGRES_HOST: postgres
+            POSTGRES_PORT: 5432
+            POSTGRES_DB: ${POSTGRES_DB:-satori_learning}
+            POSTGRES_USER: ${POSTGRES_USER:-satori_user}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-SatoriSecure2026!}
+
+            # Redis
+            REDIS_HOST: redis
+            REDIS_PORT: 6379
+            REDIS_PASSWORD: ${REDIS_PASSWORD:-SatoriRedis2026!}
+
+            # OpenAI
+            OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+            # JWT
+            JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-SatoriAccessTokenSecret2026!VeryLongSecretKeyForJWT256Bits}
+            JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-SatoriRefreshTokenSecret2026!AnotherLongSecretKeyForJWT256}
+
+            # Firebase / FCM (optional)
+            FIREBASE_ENABLED: ${FIREBASE_ENABLED:-false}
+            FCM_ENABLED: ${FCM_ENABLED:-false}
+            FIREBASE_CREDENTIALS_FILE: ${FIREBASE_CREDENTIALS_FILE:-}
+            FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+
+            # Email (optional)
+            EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
+            MAIL_USERNAME: ${MAIL_USERNAME:-}
+            MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+
+            # OCR (optional)
+            OCR_ENABLED: ${OCR_ENABLED:-false}
+            GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+
+            # Azure Speech (optional)
+            AZURE_SPEECH_ENABLED: ${AZURE_SPEECH_ENABLED:-false}
+            AZURE_SPEECH_KEY: ${AZURE_SPEECH_KEY:-}
+
+            # CORS — frontend URL
+            APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
+
+            # Cloudinary (optional)
+            CLOUDINARY_ENABLED: ${CLOUDINARY_ENABLED:-false}
+            CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+            CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+            CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+
+        volumes:
+            # Mount secrets directory read-only for Firebase credentials
+            - ../environment/secrets:/app/environment/secrets:ro
+        networks:
+            - satori-network
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        healthcheck:
+            test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/actuator/health/liveness || exit 1"]
+            interval: 30s
+            timeout: 10s
+            start_period: 90s
+            retries: 3
+        deploy:
+            resources:
+                limits:
+                    memory: 1024M
+                reservations:
+                    memory: 512M
+
     # ==================== PostgreSQL ====================
     # Main database for all structured data (users, lessons, AI conversations via JSONB)
     postgres:
@@ -70,7 +154,7 @@ services:
             retries: 5
 
     # ==================== Adminer ====================
-    # Database management UI
+    # Database management UI — for development only, do not expose in production
     adminer:
         image: adminer:latest
         container_name: satori-adminer
@@ -81,9 +165,11 @@ services:
             - satori-network
         depends_on:
             - postgres
+        profiles:
+            - dev
 
     # ==================== Redis Commander ====================
-    # Redis management UI
+    # Redis management UI — for development only, do not expose in production
     redis-commander:
         image: rediscommander/redis-commander:latest
         container_name: satori-redis-commander
@@ -96,6 +182,8 @@ services:
             - satori-network
         depends_on:
             - redis
+        profiles:
+            - dev
 
 networks:
     satori-network:
