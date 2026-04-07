@@ -28,4 +28,5 @@ public class ClassMemberResponse {
     private String email;
     private String avatarUrl;
     private String role;
+    private String phoneNumber;
 }
