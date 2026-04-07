@@ -2,6 +2,8 @@ package com.fu.course.repository;
 
 import com.fu.course.entity.Course.JlptLevel;
 import com.fu.course.entity.Vocabulary;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -9,6 +11,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.lang.ScopedValue;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -27,6 +30,7 @@ public interface VocabularyRepository extends JpaRepository<Vocabulary, UUID> {
 
     /**
      * Find vocabulary by japanese text and JLPT level (includes soft-deleted).
+     *
      * @deprecated Use {@link #findByJapaneseTextAndJlptLevelAndDeletedAtIsNull} to exclude deleted records.
      */
     @Deprecated
@@ -83,4 +87,8 @@ public interface VocabularyRepository extends JpaRepository<Vocabulary, UUID> {
             "LOWER(v.meaningVi) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
             "LOWER(v.meaningEn) LIKE LOWER(CONCAT('%', :keyword, '%')))")
     Page<Vocabulary> searchByKeyword(@Param("keyword") String keyword, Pageable pageable);
+
+    Optional<Vocabulary> findVocabularyByJapaneseTextAndDeletedAtIsNull(String japaneseText);
+
+    Optional<Vocabulary> findIdByJapaneseTextAndJlptLevel(String japaneseText, JlptLevel jlptLevel);
 }
