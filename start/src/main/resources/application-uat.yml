@@ -21,7 +21,7 @@ spring:
     datasource:
         url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5434}/${POSTGRES_DB:satori_uat}?stringtype=unspecified
         username: ${POSTGRES_USER:satori_user}
-        password: ${POSTGRES_PASSWORD:SatoriUAT2026!}
+        password: ${POSTGRES_PASSWORD}
         hikari:
             maximum-pool-size: 10
             minimum-idle: 3
@@ -40,7 +40,7 @@ spring:
         redis:
             host: ${REDIS_HOST:localhost}
             port: ${REDIS_PORT:6381}
-            password: ${REDIS_PASSWORD:SatoriRedisUAT2026!}
+            password: ${REDIS_PASSWORD}
             timeout: 5000
 
     # ==================== AI — enabled with real key ====================
