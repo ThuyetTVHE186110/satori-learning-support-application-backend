@@ -40,6 +40,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.*;
 
 import static org.assertj.core.api.Assertions.*;
@@ -53,6 +54,7 @@ import static org.mockito.BDDMockito.*;
  * - initiateImport: happy path, empty file, wrong MIME, oversized, course not found, null courseId
  * - getImportById: found, not found
  * - listImports: all 4 filter combinations (courseId+status, courseId only, status only, all)
+ *   + integration tested via ManagerCurriculumImportControllerTest
  * - getImportChunks: import not found, empty chunks, with chunks
  * - retryImport: FAILED+retryable, FAILED+maxRetriesReached, non-FAILED status, not found
  * - cancelImport: COMPLETED guard, CANCELLED guard, active import, not found
@@ -440,7 +442,7 @@ class CurriculumImportServiceImplTest {
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(new Course()));
 
             PageResponse<CurriculumImportSummaryResponse> result =
-                    service.listImports(COURSE_ID, ImportStatus.COMPLETED, 0, 10);
+                    service.listImports(COURSE_ID, ImportStatus.COMPLETED, null, null, 0, 10);
 
             assertThat(result.getContent()).hasSize(1);
             assertThat(result.getContent().get(0).getId()).isEqualTo(IMPORT_ID);
@@ -456,7 +458,7 @@ class CurriculumImportServiceImplTest {
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(new Course()));
 
             PageResponse<CurriculumImportSummaryResponse> result =
-                    service.listImports(COURSE_ID, null, 0, 10);
+                    service.listImports(COURSE_ID, null, null, null, 0, 10);
 
             assertThat(result.getContent()).hasSize(1);
         }
@@ -471,7 +473,7 @@ class CurriculumImportServiceImplTest {
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(new Course()));
 
             PageResponse<CurriculumImportSummaryResponse> result =
-                    service.listImports(null, ImportStatus.FAILED, 0, 10);
+                    service.listImports(null, ImportStatus.FAILED, null, null, 0, 10);
 
             assertThat(result.getContent()).hasSize(1);
         }
@@ -485,7 +487,7 @@ class CurriculumImportServiceImplTest {
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(new Course()));
 
             PageResponse<CurriculumImportSummaryResponse> result =
-                    service.listImports(null, null, 0, 10);
+                    service.listImports(null, null, null, null, 0, 10);
 
             assertThat(result.getContent()).hasSize(1);
         }
@@ -496,7 +498,7 @@ class CurriculumImportServiceImplTest {
             Page<CurriculumImport> page = new PageImpl<>(List.of());
             given(importRepository.findAllByOrderByCreatedAtDesc(any(Pageable.class))).willReturn(page);
 
-            service.listImports(null, null, 0, 999);
+            service.listImports(null, null, null, null, 0, 999);
 
             ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
             then(importRepository).should().findAllByOrderByCreatedAtDesc(pageableCaptor.capture());
@@ -898,6 +900,8 @@ class CurriculumImportServiceImplTest {
             given(importRepository.countByStatus(ImportStatus.COMPLETED)).willReturn(6L);
             given(importRepository.countByStatus(ImportStatus.FAILED)).willReturn(2L);
             given(importRepository.countByStatus(ImportStatus.QUEUED)).willReturn(1L);
+            given(importRepository.countByStatus(ImportStatus.ROLLED_BACK)).willReturn(1L);
+            given(importRepository.countByStatus(ImportStatus.PENDING_APPROVAL)).willReturn(2L);
             given(importRepository.countByStatus(ImportStatus.CANCELLED)).willReturn(0L);
             given(importRepository.sumLessonsCreated()).willReturn(50L);
             given(importRepository.sumVocabularyCreated()).willReturn(300L);
@@ -916,6 +920,8 @@ class CurriculumImportServiceImplTest {
             assertThat(result.getCompletedImports()).isEqualTo(6L);
             assertThat(result.getFailedImports()).isEqualTo(2L);
             assertThat(result.getQueuedImports()).isEqualTo(1L);
+            assertThat(result.getRollbackImports()).isEqualTo(1L);
+            assertThat(result.getPendingApprovalImports()).isEqualTo(2L);
             // in-progress = 10 - 6 - 2 - 1 - 0 = 1
             assertThat(result.getInProgressImports()).isEqualTo(1L);
             assertThat(result.getTotalLessonsCreated()).isEqualTo(50L);
@@ -956,6 +962,8 @@ class CurriculumImportServiceImplTest {
             given(importRepository.countByStatus(ImportStatus.COMPLETED)).willReturn(5L);
             given(importRepository.countByStatus(ImportStatus.FAILED)).willReturn(2L); // sum > total
             given(importRepository.countByStatus(ImportStatus.QUEUED)).willReturn(0L);
+            given(importRepository.countByStatus(ImportStatus.ROLLED_BACK)).willReturn(0L);
+            given(importRepository.countByStatus(ImportStatus.PENDING_APPROVAL)).willReturn(0L);
             given(importRepository.countByStatus(ImportStatus.CANCELLED)).willReturn(0L);
             given(importRepository.sumLessonsCreated()).willReturn(0L);
             given(importRepository.sumVocabularyCreated()).willReturn(0L);
@@ -970,6 +978,8 @@ class CurriculumImportServiceImplTest {
 
             ImportStatisticsResponse result = service.getStatistics();
 
+            assertThat(result.getRollbackImports()).isZero();
+            assertThat(result.getPendingApprovalImports()).isZero();
             assertThat(result.getInProgressImports()).isGreaterThanOrEqualTo(0L);
         }
     }

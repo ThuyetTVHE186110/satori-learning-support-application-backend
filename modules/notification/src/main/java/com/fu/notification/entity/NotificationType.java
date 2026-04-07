@@ -31,6 +31,13 @@ public enum NotificationType {
     ROLEPLAY_FEEDBACK,
     PRONUNCIATION_RESULT,
     
+    // ── Curriculum Import Notifications (MANAGER only) ───────────────────────
+    CURRICULUM_IMPORT_PENDING_APPROVAL,
+    CURRICULUM_IMPORT_FAILED,
+
+    // ── Practice Notifications ────────────────────────────────────────────────
+    PRACTICE_FEEDBACK_READY,
+
     // ── System Notifications ──────────────────────────────────────────────────
     ACCOUNT_SECURITY,
     PASSWORD_CHANGED,

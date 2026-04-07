@@ -37,12 +37,6 @@ public interface UserNotificationPreferencesRepository extends JpaRepository<Use
     List<UUID> findUsersWithDailyReminderAt(@Param("reminderTime") LocalTime reminderTime);
 
     /**
-     * Find users with push notifications enabled.
-     */
-    @Query("SELECT p.userId FROM UserNotificationPreferences p WHERE p.pushEnabled = true")
-    List<UUID> findUsersWithPushEnabled();
-
-    /**
      * Find preferences for multiple users.
      */
     @Query("SELECT p FROM UserNotificationPreferences p WHERE p.userId IN :userIds")

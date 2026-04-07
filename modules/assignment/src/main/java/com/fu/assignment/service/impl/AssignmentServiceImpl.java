@@ -673,7 +673,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     public LearnerAssignmentResponse startAssignment(UUID assignmentId, UUID learnerId) {
         Assignment assignment = findAssignmentOrThrow(assignmentId);
 
-        if (assignment.getStatus() == AssignmentStatus.DRAFT) {
+        if (assignment.getStatus() == AssignmentStatus.DRAFT || assignment.getStatus() == AssignmentStatus.CLOSED) {
             throw new BusinessException("ASSIGNMENT_NOT_PUBLISHED", "Bài tập này hiện không khả dụng.");
         }
 

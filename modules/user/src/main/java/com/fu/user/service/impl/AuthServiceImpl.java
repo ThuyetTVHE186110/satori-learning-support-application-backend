@@ -1,5 +1,6 @@
 package com.fu.user.service.impl;
 
+import com.fu.common.event.PasswordChangedEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.infrastructure.email.EmailService;
@@ -16,6 +17,7 @@ import com.google.firebase.auth.FirebaseToken;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,6 +46,7 @@ public class AuthServiceImpl implements AuthService {
     // Firebase Auth is optional - may be null if not configured
     private final Optional<FirebaseAuth> firebaseAuth;
     private final LoginAttemptService loginAttemptService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Value("${app.security.otp-expiration-minutes:1}")
     private int otpExpirationMinutes;
@@ -284,6 +287,10 @@ public class AuthServiceImpl implements AuthService {
         // Send password changed notification email
         emailService.sendPasswordChangedNotification(user.getEmail(), user.getFullName());
 
+        // Publish event so notification module can send push + deactivate FCM tokens
+        eventPublisher.publishEvent(new PasswordChangedEvent(this, user.getId(), user.getEmail(),
+                "Unknown device", "Unknown IP"));
+
         log.info("Password reset successful for: {}", user.getEmail());
     }
 
@@ -327,6 +334,10 @@ public class AuthServiceImpl implements AuthService {
 
         // Send password changed notification email
         emailService.sendPasswordChangedNotification(user.getEmail(), user.getFullName());
+
+        // Publish event so notification module can send push + deactivate FCM tokens
+        eventPublisher.publishEvent(new PasswordChangedEvent(this, userId, user.getEmail(),
+                "Unknown device", "Unknown IP"));
 
         log.info("Password changed successfully for user: {}", userId);
     }

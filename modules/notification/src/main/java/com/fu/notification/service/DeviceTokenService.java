@@ -46,13 +46,6 @@ public interface DeviceTokenService {
     int deactivateAllTokens(UUID userId);
 
     /**
-     * Update the last active timestamp for a token.
-     *
-     * @param fcmToken the FCM token
-     */
-    void markTokenActive(String fcmToken);
-
-    /**
      * Handle invalid tokens returned by FCM.
      * Marks them as inactive.
      *

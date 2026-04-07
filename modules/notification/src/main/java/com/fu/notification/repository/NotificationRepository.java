@@ -33,11 +33,6 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
     long countByUserIdAndIsReadFalse(UUID userId);
 
     /**
-     * Find notifications by type for a user.
-     */
-    Page<Notification> findByUserIdAndTypeOrderByCreatedAtDesc(UUID userId, NotificationType type, Pageable pageable);
-
-    /**
      * Mark all notifications as read for a user.
      */
     @Modifying
