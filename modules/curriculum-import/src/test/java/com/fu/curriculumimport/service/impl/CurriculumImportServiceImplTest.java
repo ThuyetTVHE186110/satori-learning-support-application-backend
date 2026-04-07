@@ -40,6 +40,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.*;
 
 import static org.assertj.core.api.Assertions.*;
@@ -53,6 +54,7 @@ import static org.mockito.BDDMockito.*;
  * - initiateImport: happy path, empty file, wrong MIME, oversized, course not found, null courseId
  * - getImportById: found, not found
  * - listImports: all 4 filter combinations (courseId+status, courseId only, status only, all)
+ *   + integration tested via ManagerCurriculumImportControllerTest
  * - getImportChunks: import not found, empty chunks, with chunks
  * - retryImport: FAILED+retryable, FAILED+maxRetriesReached, non-FAILED status, not found
  * - cancelImport: COMPLETED guard, CANCELLED guard, active import, not found
@@ -440,7 +442,7 @@ class CurriculumImportServiceImplTest {
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(new Course()));
 
             PageResponse<CurriculumImportSummaryResponse> result =
-                    service.listImports(COURSE_ID, ImportStatus.COMPLETED, 0, 10);
+                    service.listImports(COURSE_ID, ImportStatus.COMPLETED, null, null, 0, 10);
 
             assertThat(result.getContent()).hasSize(1);
             assertThat(result.getContent().get(0).getId()).isEqualTo(IMPORT_ID);
@@ -456,7 +458,7 @@ class CurriculumImportServiceImplTest {
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(new Course()));
 
             PageResponse<CurriculumImportSummaryResponse> result =
-                    service.listImports(COURSE_ID, null, 0, 10);
+                    service.listImports(COURSE_ID, null, null, null, 0, 10);
 
             assertThat(result.getContent()).hasSize(1);
         }
@@ -471,7 +473,7 @@ class CurriculumImportServiceImplTest {
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(new Course()));
 
             PageResponse<CurriculumImportSummaryResponse> result =
-                    service.listImports(null, ImportStatus.FAILED, 0, 10);
+                    service.listImports(null, ImportStatus.FAILED, null, null, 0, 10);
 
             assertThat(result.getContent()).hasSize(1);
         }
@@ -485,7 +487,7 @@ class CurriculumImportServiceImplTest {
             given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(new Course()));
 
             PageResponse<CurriculumImportSummaryResponse> result =
-                    service.listImports(null, null, 0, 10);
+                    service.listImports(null, null, null, null, 0, 10);
 
             assertThat(result.getContent()).hasSize(1);
         }
@@ -496,7 +498,7 @@ class CurriculumImportServiceImplTest {
             Page<CurriculumImport> page = new PageImpl<>(List.of());
             given(importRepository.findAllByOrderByCreatedAtDesc(any(Pageable.class))).willReturn(page);
 
-            service.listImports(null, null, 0, 999);
+            service.listImports(null, null, null, null, 0, 999);
 
             ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
             then(importRepository).should().findAllByOrderByCreatedAtDesc(pageableCaptor.capture());
