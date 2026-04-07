@@ -1,0 +1,177 @@
+# =============================================================================
+# Production Profile
+# =============================================================================
+# Activated by: SPRING_PROFILES_ACTIVE=prod
+#
+# All sensitive values MUST be supplied as environment variables.
+# No default credentials are accepted in this profile — startup fails if
+# required env vars are missing (Spring will throw a placeholder resolution error).
+#
+# Required env vars:
+#   POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
+#   REDIS_HOST, REDIS_PORT, REDIS_PASSWORD
+#   OPENAI_API_KEY
+#   JWT_ACCESS_SECRET, JWT_REFRESH_SECRET
+#   APP_ALLOWED_ORIGINS  (comma-separated, e.g. "https://satori-learning.com")
+#   MAIL_USERNAME, MAIL_PASSWORD
+#   FIREBASE_CREDENTIALS_FILE, FIREBASE_PROJECT_ID  (if FCM_ENABLED=true)
+#   CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
+# =============================================================================
+
+server:
+    port: ${APP_PORT:8080}
+
+spring:
+    datasource:
+        url: jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}?stringtype=unspecified
+        username: ${POSTGRES_USER}
+        password: ${POSTGRES_PASSWORD}
+        hikari:
+            maximum-pool-size: 20
+            minimum-idle: 5
+            connection-timeout: 30000
+            idle-timeout: 600000
+            max-lifetime: 1800000
+
+    jpa:
+        hibernate:
+            ddl-auto: validate
+        show-sql: false
+        properties:
+            hibernate:
+                format_sql: false
+
+    data:
+        redis:
+            host: ${REDIS_HOST}
+            port: ${REDIS_PORT}
+            password: ${REDIS_PASSWORD}
+            timeout: 5000
+            lettuce:
+                pool:
+                    max-active: 16
+                    max-idle: 8
+                    min-idle: 2
+
+    ai:
+        openai:
+            api-key: ${OPENAI_API_KEY}
+            chat:
+                options:
+                    model: gpt-4o-mini
+                    temperature: 0.3
+                    max-tokens: 2048
+            embedding:
+                options:
+                    model: text-embedding-3-large
+                    dimensions: 1536
+
+# ==================== Security ====================
+app:
+    security:
+        jwt:
+            access-token-secret: ${JWT_ACCESS_SECRET}
+            refresh-token-secret: ${JWT_REFRESH_SECRET}
+            access-token-expiration-ms: ${JWT_ACCESS_EXPIRATION:1800000}
+            refresh-token-expiration-ms: ${JWT_REFRESH_EXPIRATION:604800000}
+        max-failed-attempts: 5
+        lock-duration-minutes: 30
+
+        cors:
+            # Must be set to actual frontend URL(s) in production.
+            # Comma-separated list: "https://satori-learning.com,https://www.satori-learning.com"
+            allowed-origins: ${APP_ALLOWED_ORIGINS}
+
+        # Swagger/OpenAPI UI is disabled in production.
+        # API docs are not exposed to end users.
+        swagger:
+            public: false
+
+    google:
+        firebase:
+            enabled: ${FIREBASE_ENABLED:false}
+            credentials-file: ${FIREBASE_CREDENTIALS_FILE:}
+            project-id: ${FIREBASE_PROJECT_ID:}
+
+    notification:
+        firebase:
+            enabled: ${FCM_ENABLED:false}
+            credentials-file: ${FIREBASE_CREDENTIALS_FILE:}
+            project-id: ${FIREBASE_PROJECT_ID:}
+
+    email:
+        enabled: ${EMAIL_ENABLED:true}
+        from: ${EMAIL_FROM:noreply@satori-learning.com}
+        from-name: ${EMAIL_FROM_NAME:Satori Learning}
+        base-url: ${APP_BASE_URL}
+
+    cloudinary:
+        enabled: ${CLOUDINARY_ENABLED:true}
+        cloud-name: ${CLOUDINARY_CLOUD_NAME}
+        api-key: ${CLOUDINARY_API_KEY}
+        api-secret: ${CLOUDINARY_API_SECRET}
+
+# ==================== Mail ====================
+spring.mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    properties:
+        mail:
+            smtp:
+                auth: true
+                starttls:
+                    enable: true
+                    required: true
+                connectiontimeout: 5000
+                timeout: 5000
+                writetimeout: 5000
+
+# ==================== Actuator ====================
+# In prod, only expose health (for load-balancer probes) and prometheus (for Grafana).
+# Metrics endpoint excluded from web — use prometheus scraping instead.
+# Access to /actuator/** (except health probes) requires ADMIN role — see SecurityConfig.
+management:
+    endpoints:
+        web:
+            exposure:
+                include: health,prometheus
+    endpoint:
+        health:
+            show-details: when-authorized
+            probes:
+                enabled: true
+
+# ==================== SpringDoc / Swagger ====================
+# Completely disables the /swagger-ui and /v3/api-docs endpoints.
+# SecurityConfig also restricts these to ADMIN role as defence-in-depth,
+# but disabling at the framework level is the primary control.
+springdoc:
+    swagger-ui:
+        enabled: false
+    api-docs:
+        enabled: false
+
+# ==================== Logging ====================
+logging:
+    level:
+        root: WARN
+        com.fu: INFO
+        org.springframework: WARN
+        org.hibernate: WARN
+        org.springframework.data.redis: WARN
+
+# ==================== Curriculum Import ====================
+curriculum-import:
+    ocr:
+        enabled: ${OCR_ENABLED:true}
+        render-dpi: ${OCR_RENDER_DPI:300}
+    agentic-rag:
+        embedding-enabled: ${RAG_EMBEDDING_ENABLED:true}
+        validation-enabled: true
+        self-reflection-enabled: true
+        grounding-enabled: true
+        parallel-processing: true
+        parallel-batch-size: ${RAG_PARALLEL_BATCH_SIZE:2}
+        confidence-threshold: 0.6

@@ -37,9 +37,11 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -71,21 +73,21 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
         log.info("Initiating curriculum import by manager: {}, courseId: {}, file: {}",
                 managerId, courseId, file.getOriginalFilename());
 
-        // Validate file
-        validateImportFile(file);
+        // 1. Fast metadata checks (no file I/O): null, extension, size
+        String filename = validateFileMetadata(file);
 
-        // courseId is required — lessons cannot be created without a target course.
-        // Use PATCH /{importId}/link-course after import if the course is not yet known.
+        // 2. Business checks: courseId and course existence
+        // Do these before reading file bytes to avoid unnecessary I/O on invalid requests.
         if (courseId == null) {
             throw new BusinessException("VALIDATION_ERROR",
                     "courseId is required. Please select a course before uploading the curriculum.");
         }
-
-        // Validate course exists
-        String courseName = null;
         var course = courseRepository.findById(courseId)
                 .orElseThrow(() -> new CourseNotFoundException(courseId));
-        courseName = course.getName();
+        String courseName = course.getName();
+
+        // 3. Content I/O: magic bytes validation (actual file content, not client-reported type)
+        validateMagicBytes(file, filename);
 
         // Create import record
         CurriculumImport importEntity = CurriculumImport.builder()
@@ -529,29 +531,31 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
      */
     private static final long MAX_FILE_SIZE_BYTES = 100L * 1024 * 1024;
 
-    private static final Set<String> ACCEPTED_MIME_TYPES = Set.of(
-            "application/pdf",
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
-            "application/zip"   // some browsers report PPTX as generic zip
-    );
-
     private static final Set<String> ACCEPTED_EXTENSIONS = Set.of(".pdf", ".pptx");
 
-    private void validateImportFile(MultipartFile file) {
+    /**
+     * PDF magic bytes: "%PDF-" (0x25 0x50 0x44 0x46 0x2D)
+     * PPTX/XLSX/ZIP magic bytes: "PK\x03\x04" (Office Open XML is a ZIP archive)
+     */
+    private static final byte[] PDF_MAGIC  = {0x25, 0x50, 0x44, 0x46, 0x2D}; // %PDF-
+    private static final byte[] PPTX_MAGIC = {0x50, 0x4B, 0x03, 0x04};        // PK..
+
+    /**
+     * Validates file metadata (no content I/O): null/empty, extension, size.
+     *
+     * @return lowercase filename for reuse in magic-bytes check
+     */
+    private String validateFileMetadata(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new InvalidImportFileException("File is required and must not be empty");
         }
 
-        String contentType = file.getContentType() == null ? "" : file.getContentType().toLowerCase();
         String filename = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
-        boolean mimeOk = ACCEPTED_MIME_TYPES.contains(contentType);
         boolean extOk = ACCEPTED_EXTENSIONS.stream().anyMatch(filename::endsWith);
 
-        if (!mimeOk && !extOk) {
+        if (!extOk) {
             throw new InvalidImportFileException(
-                    "Chỉ chấp nhận các tệp PDF và PPTX. Loại MIME nhận được: " + contentType
-                            + ", tên tệp: " + file.getOriginalFilename());
+                    "Chỉ chấp nhận các tệp PDF và PPTX. Tên tệp nhận được: " + file.getOriginalFilename());
         }
 
         if (file.getSize() > MAX_FILE_SIZE_BYTES) {
@@ -560,6 +564,39 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
                     file.getSize() / (1024.0 * 1024.0),
                     MAX_FILE_SIZE_BYTES / (1024 * 1024)));
         }
+
+        return filename;
+    }
+
+    private void validateMagicBytes(MultipartFile file, String lowercaseFilename) {
+        int headerLength = PDF_MAGIC.length; // 5 bytes — longest magic sequence
+        byte[] header = new byte[headerLength];
+
+        try (InputStream is = file.getInputStream()) {
+            int bytesRead = is.read(header, 0, headerLength);
+            if (bytesRead < 4) {
+                throw new InvalidImportFileException("File quá nhỏ hoặc rỗng");
+            }
+        } catch (IOException e) {
+            throw new InvalidImportFileException("Không thể đọc file để xác thực: " + e.getMessage());
+        }
+
+        if (lowercaseFilename.endsWith(".pdf")) {
+            if (!startsWith(header, PDF_MAGIC)) {
+                throw new InvalidImportFileException(
+                        "File không phải PDF hợp lệ. Nội dung không khớp với định dạng PDF (%PDF-).");
+            }
+        } else if (lowercaseFilename.endsWith(".pptx")) {
+            if (!startsWith(header, PPTX_MAGIC)) {
+                throw new InvalidImportFileException(
+                        "File không phải PPTX hợp lệ. Nội dung không khớp với định dạng Office Open XML (PK).");
+            }
+        }
+    }
+
+    private static boolean startsWith(byte[] data, byte[] prefix) {
+        if (data.length < prefix.length) return false;
+        return Arrays.equals(Arrays.copyOf(data, prefix.length), prefix);
     }
 
     private CurriculumImport findImportOrThrow(UUID importId) {

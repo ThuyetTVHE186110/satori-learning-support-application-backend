@@ -1,58 +1,126 @@
-version: "3.8"
+# =============================================================================
+# Docker Compose — Production
+# =============================================================================
+# Usage (from project root):
+#   docker compose -f environment/docker-compose.prod.yml up -d
+#
+# ALL sensitive env vars must be set in the host environment or a .env file
+# that is NOT committed to git.  There are no fallback defaults for secrets —
+# the service will refuse to start if a required variable is missing.
+#
+# Required env vars (no defaults — will fail-fast if unset):
+#   POSTGRES_PASSWORD
+#   REDIS_PASSWORD
+#   OPENAI_API_KEY
+#   JWT_ACCESS_SECRET
+#   JWT_REFRESH_SECRET
+#   APP_ALLOWED_ORIGINS          e.g. "https://satori-learning.com"
+#   APP_BASE_URL                 e.g. "https://satori-learning.com"
+#
+# Optional env vars (have safe defaults):
+#   APP_PORT                     (default: 8080)
+#   POSTGRES_DB                  (default: satori_learning)
+#   POSTGRES_USER                (default: satori_user)
+#   FIREBASE_ENABLED / FCM_ENABLED
+#   FIREBASE_CREDENTIALS_FILE / FIREBASE_PROJECT_ID
+#   EMAIL_ENABLED, MAIL_USERNAME, MAIL_PASSWORD
+#   CLOUDINARY_ENABLED, CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
+#   AZURE_SPEECH_ENABLED, AZURE_SPEECH_KEY
+#   OCR_ENABLED, GOOGLE_APPLICATION_CREDENTIALS
+# =============================================================================
 
-# Docker Compose for Production with Application
 services:
+
     # ==================== Application ====================
     app:
         build:
             context: ..
-            dockerfile: Dockerfile
+            dockerfile: environment/Dockerfile
+        image: satori-backend:prod
         container_name: satori-app
         restart: unless-stopped
-        environment:
-            - SPRING_PROFILES_ACTIVE=prod
-            - POSTGRES_HOST=postgres
-            - POSTGRES_PORT=5432
-            - POSTGRES_DB=satori_learning
-            - POSTGRES_USER=satori_user
-            - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-SatoriSecure2026!}
-            - MONGO_HOST=mongodb
-            - MONGO_PORT=27017
-            - MONGO_DB=satori_conversations
-            - MONGO_USER=satori_app
-            - MONGO_PASSWORD=SatoriApp2026!
-            - REDIS_HOST=redis
-            - REDIS_PORT=6379
-            - REDIS_PASSWORD=${REDIS_PASSWORD:-SatoriRedis2026!}
-            - OPENAI_API_KEY=${OPENAI_API_KEY}
-            - JWT_SECRET=${JWT_SECRET}
-            - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
-            - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
-            - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
         ports:
-            - "8080:8080"
+            - "${APP_PORT:-8080}:8080"
+        environment:
+            SPRING_PROFILES_ACTIVE: prod
+
+            # Database — no defaults, fail-fast if unset
+            POSTGRES_HOST: postgres
+            POSTGRES_PORT: 5432
+            POSTGRES_DB: ${POSTGRES_DB:-satori_learning}
+            POSTGRES_USER: ${POSTGRES_USER:-satori_user}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+            # Redis — no defaults
+            REDIS_HOST: redis
+            REDIS_PORT: 6379
+            REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+            # OpenAI — no default
+            OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+            # JWT — no defaults
+            JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+            JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+
+            # CORS — no default in prod
+            APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS}
+            APP_BASE_URL: ${APP_BASE_URL}
+
+            # Firebase / FCM
+            FIREBASE_ENABLED: ${FIREBASE_ENABLED:-false}
+            FCM_ENABLED: ${FCM_ENABLED:-false}
+            FIREBASE_CREDENTIALS_FILE: ${FIREBASE_CREDENTIALS_FILE:-}
+            FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+
+            # Email
+            EMAIL_ENABLED: ${EMAIL_ENABLED:-true}
+            EMAIL_FROM: ${EMAIL_FROM:-noreply@satori-learning.com}
+            MAIL_USERNAME: ${MAIL_USERNAME:-}
+            MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+
+            # Cloudinary
+            CLOUDINARY_ENABLED: ${CLOUDINARY_ENABLED:-true}
+            CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+            CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+            CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+
+            # OCR / Google Document AI
+            OCR_ENABLED: ${OCR_ENABLED:-true}
+            GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+
+            # Azure Speech
+            AZURE_SPEECH_ENABLED: ${AZURE_SPEECH_ENABLED:-false}
+            AZURE_SPEECH_KEY: ${AZURE_SPEECH_KEY:-}
+            AZURE_SPEECH_REGION: ${AZURE_SPEECH_REGION:-southeastasia}
+
+        volumes:
+            # Firebase / Google credentials — mounted read-only
+            - ./secrets:/app/environment/secrets:ro
         networks:
             - satori-network
         depends_on:
             postgres:
                 condition: service_healthy
-            mongodb:
-                condition: service_healthy
             redis:
                 condition: service_healthy
         healthcheck:
-            test:
-                [
-                    "CMD",
-                    "wget",
-                    "-q",
-                    "--spider",
-                    "http://localhost:8080/actuator/health",
-                ]
+            test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/actuator/health/liveness || exit 1"]
             interval: 30s
             timeout: 10s
+            start_period: 120s
             retries: 3
-            start_period: 60s
+        deploy:
+            resources:
+                limits:
+                    memory: 3072M
+                reservations:
+                    memory: 1024M
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "50m"
+                max-file: "5"
 
     # ==================== PostgreSQL ====================
     postgres:
@@ -60,77 +128,94 @@ services:
         container_name: satori-postgres
         restart: unless-stopped
         environment:
-            POSTGRES_DB: satori_learning
-            POSTGRES_USER: satori_user
-            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-SatoriSecure2026!}
-        ports:
-            - "5432:5432"
+            POSTGRES_DB: ${POSTGRES_DB:-satori_learning}
+            POSTGRES_USER: ${POSTGRES_USER:-satori_user}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+            POSTGRES_INITDB_ARGS: "--auth-local=trust"
+        command: >
+            postgres
+            -c shared_buffers=512MB
+            -c effective_cache_size=1536MB
+            -c work_mem=32MB
+            -c maintenance_work_mem=256MB
+            -c max_connections=50
+            -c wal_level=replica
+            -c checkpoint_completion_target=0.9
+            -c random_page_cost=1.1
+        # Do NOT expose 5432 to the host in production.
+        # The app container connects via the internal Docker network.
         volumes:
             - postgres_data:/var/lib/postgresql/data
-            - ./docker/init-scripts/postgres:/docker-entrypoint-initdb.d
+            - ./docker/init-scripts/postgres:/docker-entrypoint-initdb.d:ro
         networks:
             - satori-network
+        deploy:
+            resources:
+                limits:
+                    memory: 2048M
+                reservations:
+                    memory: 768M
         healthcheck:
-            test: ["CMD-SHELL", "pg_isready -U satori_user -d satori_learning"]
+            test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-satori_user} -d ${POSTGRES_DB:-satori_learning}"]
             interval: 10s
             timeout: 5s
             retries: 5
-
-    # ==================== MongoDB ====================
-    mongodb:
-        image: mongo:7.0
-        container_name: satori-mongodb
-        restart: unless-stopped
-        environment:
-            MONGO_INITDB_ROOT_USERNAME: satori_admin
-            MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-SatoriMongo2026!}
-            MONGO_INITDB_DATABASE: satori_conversations
-        ports:
-            - "27017:27017"
-        volumes:
-            - mongodb_data:/data/db
-            - ./docker/init-scripts/mongo:/docker-entrypoint-initdb.d
-        networks:
-            - satori-network
-        healthcheck:
-            test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-            interval: 10s
-            timeout: 5s
-            retries: 5
+            start_period: 30s
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "20m"
+                max-file: "3"
 
     # ==================== Redis ====================
     redis:
         image: redis:7.2-alpine
         container_name: satori-redis
         restart: unless-stopped
-        command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-SatoriRedis2026!}
-        ports:
-            - "6379:6379"
+        # requirepass is the only auth mechanism — must match REDIS_PASSWORD above.
+        # maxmemory + allkeys-lru: evict least-recently-used keys when memory is full.
+        command: >
+            redis-server
+            --appendonly yes
+            --requirepass ${REDIS_PASSWORD}
+            --maxmemory 512mb
+            --maxmemory-policy allkeys-lru
+            --tcp-keepalive 60
+            --timeout 300
+        # Do NOT expose 6379 to the host in production.
         volumes:
             - redis_data:/data
         networks:
             - satori-network
+        deploy:
+            resources:
+                limits:
+                    memory: 640M
+                reservations:
+                    memory: 256M
         healthcheck:
-            test:
-                [
-                    "CMD",
-                    "redis-cli",
-                    "-a",
-                    "${REDIS_PASSWORD:-SatoriRedis2026!}",
-                    "ping",
-                ]
+            test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
             interval: 10s
             timeout: 5s
             retries: 5
+            start_period: 10s
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "10m"
+                max-file: "3"
 
 networks:
     satori-network:
         driver: bridge
+        # Restrict inter-container communication to named network only.
+        # Services not on this network cannot reach the DB or Redis.
+        ipam:
+            config:
+                - subnet: 172.28.0.0/16
 
 volumes:
     postgres_data:
-        name: satori-postgres-data
-    mongodb_data:
-        name: satori-mongodb-data
+        name: satori-postgres-prod-data
     redis_data:
-        name: satori-redis-data
+        name: satori-redis-prod-data
