@@ -17,10 +17,12 @@ import com.fu.roleplay.ai.SessionEvaluatorAI;
 import com.fu.roleplay.dto.response.SessionEvaluationResponse;
 import com.fu.roleplay.entity.ConversationMessage;
 import com.fu.conversation.entity.ConversationMission;
+import com.fu.conversation.entity.UserConversationProgress;
 import com.fu.roleplay.entity.ConversationSession;
 import com.fu.roleplay.entity.SessionMission;
 import com.fu.roleplay.repository.ConversationMessageRepository;
 import com.fu.conversation.repository.ConversationMissionRepository;
+import com.fu.conversation.repository.UserConversationProgressRepository;
 import com.fu.roleplay.repository.ConversationSessionRepository;
 import com.fu.roleplay.repository.MessagePronunciationRepository;
 import com.fu.roleplay.repository.SessionMissionRepository;
@@ -101,6 +103,7 @@ class SpeakingPracticeIntegrationTest {
     @Autowired private ConversationSessionRepository sessionRepository;
     @Autowired private ConversationMessageRepository messageRepository;
     @Autowired private ConversationMissionRepository missionRepository;
+    @Autowired private UserConversationProgressRepository progressRepository;
     @Autowired private SessionMissionRepository sessionMissionRepository;
     @Autowired private MessagePronunciationRepository pronunciationRepository;
 
@@ -246,6 +249,21 @@ class SpeakingPracticeIntegrationTest {
                 .build());
     }
 
+    private UserConversationProgress saveProgress(UUID userId, UUID conversationId) {
+        return saveProgress(userId, conversationId, 1);
+    }
+
+    private UserConversationProgress saveProgress(UUID userId, UUID conversationId, int totalSessions) {
+        return progressRepository.save(UserConversationProgress.builder()
+                .userId(userId)
+                .conversationId(conversationId)
+                .totalSessions(totalSessions)
+                .totalMessagesSent(0)
+                .lastPracticedAt(LocalDateTime.now())
+                .isCompleted(false)
+                .build());
+    }
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     @BeforeEach
@@ -291,7 +309,7 @@ class SpeakingPracticeIntegrationTest {
             saveTopic("Theme Draft", Course.ContentStatus.DRAFT, 0);
             saveSoftDeletedTopic("Theme Deleted", UUID.randomUUID());
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes")
+            mockMvc.perform(get("/api/v1/learner/conversation/topics")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.content.length()").value(2))
@@ -309,7 +327,7 @@ class SpeakingPracticeIntegrationTest {
             saveTopic("Shopping", Course.ContentStatus.PUBLISHED, 1);
             saveTopic("Travel", Course.ContentStatus.PUBLISHED, 2);
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes")
+            mockMvc.perform(get("/api/v1/learner/conversation/topics")
                             .param("keyword", "shop")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
@@ -323,7 +341,7 @@ class SpeakingPracticeIntegrationTest {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com");
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes")
+            mockMvc.perform(get("/api/v1/learner/conversation/topics")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isForbidden());
         }
@@ -331,7 +349,7 @@ class SpeakingPracticeIntegrationTest {
         @Test
         @DisplayName("TC_SP_VTL_004 — no token returns 401")
         void tc_sp_vtl_004() throws Exception {
-            mockMvc.perform(get("/api/v1/learner/conversation/themes"))
+            mockMvc.perform(get("/api/v1/learner/conversation/topics"))
                     .andExpect(status().isUnauthorized());
         }
 
@@ -344,7 +362,7 @@ class SpeakingPracticeIntegrationTest {
             saveTopicWithLevel("N5 Theme", Course.ContentStatus.PUBLISHED, 0, Course.JlptLevel.N5);
             saveTopicWithLevel("N4 Theme", Course.ContentStatus.PUBLISHED, 1, Course.JlptLevel.N4);
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes")
+            mockMvc.perform(get("/api/v1/learner/conversation/topics")
                             .param("level", "N5")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
@@ -363,7 +381,7 @@ class SpeakingPracticeIntegrationTest {
             saveTopic("Theme B", Course.ContentStatus.PUBLISHED, 1);
             saveTopic("Theme C", Course.ContentStatus.PUBLISHED, 2);
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes")
+            mockMvc.perform(get("/api/v1/learner/conversation/topics")
                             .param("page", "1")
                             .param("size", "2")
                             .header("Authorization", "Bearer " + token))
@@ -385,7 +403,7 @@ class SpeakingPracticeIntegrationTest {
                 saveTopic("Theme " + i, Course.ContentStatus.PUBLISHED, i);
             }
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes")
+            mockMvc.perform(get("/api/v1/learner/conversation/topics")
                             .param("size", "100")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
@@ -400,7 +418,7 @@ class SpeakingPracticeIntegrationTest {
             saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes")
+            mockMvc.perform(get("/api/v1/learner/conversation/topics")
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.totalElements").value(0))
@@ -416,7 +434,7 @@ class SpeakingPracticeIntegrationTest {
             saveTopicWithLevel("N5 Theme hahaa", Course.ContentStatus.PUBLISHED, 0, Course.JlptLevel.N5);
             saveTopicWithLevel("N4 Theme", Course.ContentStatus.PUBLISHED, 1, Course.JlptLevel.N4);
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes")
+            mockMvc.perform(get("/api/v1/learner/conversation/topics")
                             .param("keyword", "ha")
                             .param("filter", "N5")
                             .header("Authorization", "Bearer " + token))
@@ -443,7 +461,7 @@ class SpeakingPracticeIntegrationTest {
                     .compact();
 
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes")
+            mockMvc.perform(get("/api/v1/learner/conversation/topics")
                             .header("Authorization", "Bearer " + expiredToken))
                     .andExpect(status().isUnauthorized())
                     .andExpect(jsonPath("$.success").value(false))
@@ -470,7 +488,7 @@ class SpeakingPracticeIntegrationTest {
             saveConversation(topic.getId(), "Topic A", Course.ContentStatus.PUBLISHED, 1, true);
             saveConversation(topic.getId(), "Topic Draft", Course.ContentStatus.DRAFT, 0, true);
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", topic.getId())
+            mockMvc.perform(get("/api/v1/learner/conversation/topics/{topicId}/conversations", topic.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.length()").value(2))
@@ -494,9 +512,10 @@ class SpeakingPracticeIntegrationTest {
 
             ConversationTopic topic = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             Conversation conversation = saveConversation(topic.getId(), "Topic A", Course.ContentStatus.PUBLISHED, 1, true);
-            saveSession(learner.getId(), topic.getId());
+            saveSession(learner.getId(), conversation.getId());
+            saveProgress(learner.getId(), conversation.getId());
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", topic.getId())
+            mockMvc.perform(get("/api/v1/learner/conversation/topics/{topicId}/conversations", topic.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data[0].practiced").value(true))
@@ -512,7 +531,7 @@ class SpeakingPracticeIntegrationTest {
 
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", theme.getId())
+            mockMvc.perform(get("/api/v1/learner/conversation/topics/{topicId}/conversations", theme.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isForbidden());
         }
@@ -527,13 +546,13 @@ class SpeakingPracticeIntegrationTest {
             Conversation conversation = saveConversation(topic.getId(), "Topic A", Course.ContentStatus.PUBLISHED, 1, true);
 
             // Add missions for the topic
-            ConversationMission mission1 = saveMission(topic.getId(), "Mission 1", 1);
-            ConversationMission mission2 = saveMission(topic.getId(), "Mission 2", 2);
+            ConversationMission mission1 = saveMission(conversation.getId(), "Mission 1", 1);
+            ConversationMission mission2 = saveMission(conversation.getId(), "Mission 2", 2);
 
-            mockMvc.perform(get("/api/v1/learner/conversation/topics/{topicId}", topic.getId())
+            mockMvc.perform(get("/api/v1/learner/conversation/conversations/{conversationId}", conversation.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.id").value(topic.getId().toString()))
+                    .andExpect(jsonPath("$.data.id").value(conversation.getId().toString()))
                     .andExpect(jsonPath("$.data.status").value("PUBLISHED"))
                     .andExpect(jsonPath("$.data.title").value("Topic A"))
                     .andExpect(jsonPath("$.data.orderIndex").value(1))
@@ -558,7 +577,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic topic = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             Conversation conversation = saveConversation(topic.getId(), "Topic Draft", Course.ContentStatus.DRAFT, 1, true);
 
-            mockMvc.perform(get("/api/v1/learner/conversation/topics/{topicId}", topic.getId())
+            mockMvc.perform(get("/api/v1/learner/conversation/conversations/{conversationId}", topic.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isNotFound());
         }
@@ -568,7 +587,7 @@ class SpeakingPracticeIntegrationTest {
         void tc_sp_vtp_006() throws Exception {
             ConversationTopic topic = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", topic.getId()))
+            mockMvc.perform(get("/api/v1/learner/conversation/topics/{topicId}/conversations", topic.getId()))
                     .andExpect(status().isUnauthorized());
         }
 
@@ -581,7 +600,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             saveConversation(theme.getId(), "Topic A", Course.ContentStatus.PUBLISHED, 1, true);
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", theme.getId())
+            mockMvc.perform(get("/api/v1/learner/conversation/topics/{topicId}/conversations", theme.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data[0].practiced").value(false))
@@ -598,7 +617,7 @@ class SpeakingPracticeIntegrationTest {
             saveConversation(theme.getId(), "Topic A", Course.ContentStatus.PUBLISHED, 1, true);
             saveSoftDeletedTopic(theme.getId(), "Deleted", learner.getId());
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", theme.getId())
+            mockMvc.perform(get("/api/v1/learner/conversation/topics/{topicId}/conversations", theme.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.length()").value(1))
@@ -613,7 +632,7 @@ class SpeakingPracticeIntegrationTest {
 
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", theme.getId())
+            mockMvc.perform(get("/api/v1/learner/conversation/topics/{topicId}/conversations", theme.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.length()").value(0));
@@ -629,8 +648,9 @@ class SpeakingPracticeIntegrationTest {
             Conversation topic = saveConversation(theme.getId(), "Topic A", Course.ContentStatus.PUBLISHED, 1, true);
             saveSession(learner.getId(), topic.getId());
             saveSession(learner.getId(), topic.getId());
+            saveProgress(learner.getId(), topic.getId(), 2);
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", theme.getId())
+            mockMvc.perform(get("/api/v1/learner/conversation/topics/{topicId}/conversations", theme.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data[0].practiceCount").value(2))
@@ -646,8 +666,9 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             Conversation topic = saveConversation(theme.getId(), "Topic A", Course.ContentStatus.PUBLISHED, 1, true);
             saveSession(learner.getId(), topic.getId());
+            saveProgress(learner.getId(), topic.getId());
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", theme.getId())
+            mockMvc.perform(get("/api/v1/learner/conversation/topics/{topicId}/conversations", theme.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data[0].practiced").value(true))
@@ -679,8 +700,11 @@ class SpeakingPracticeIntegrationTest {
             saveSession(learner.getId(), topics.get(0).getId());
             saveSession(learner.getId(), topics.get(1).getId());
             saveSession(learner.getId(), topics.get(2).getId());
+            saveProgress(learner.getId(), topics.get(0).getId());
+            saveProgress(learner.getId(), topics.get(1).getId());
+            saveProgress(learner.getId(), topics.get(2).getId());
 
-            mockMvc.perform(get("/api/v1/learner/conversation/themes/{themeId}/topics", theme.getId())
+            mockMvc.perform(get("/api/v1/learner/conversation/topics/{topicId}/conversations", theme.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.length()").value(20))
@@ -728,7 +752,7 @@ class SpeakingPracticeIntegrationTest {
                             "{\"type\":\"SCENE_INTRO\",\"japanese_content\":\"Scene\",\"translation\":\"Scene\",\"romaji\":\"\"}," +
                             "{\"type\":\"DIALOGUE\",\"japanese_content\":\"Hello\",\"translation\":\"Hello\",\"romaji\":\"\"}]");
 
-            String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
+            String body = String.format("{\"conversationId\":\"%s\"}", topic.getId());
 
             mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -775,7 +799,7 @@ class SpeakingPracticeIntegrationTest {
                     .thenReturn(List.of());
             when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
 
-            String startBody = String.format("{\"topicId\":\"%s\"}", topic.getId());
+            String startBody = String.format("{\"conversationId\":\"%s\"}", topic.getId());
             MvcResult startResult = mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(startBody)
@@ -861,7 +885,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             Conversation topic = saveConversation(theme.getId(), "Draft", Course.ContentStatus.DRAFT, 1, true);
 
-            String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
+            String body = String.format("{\"conversationId\":\"%s\"}", topic.getId());
 
             mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -907,7 +931,7 @@ class SpeakingPracticeIntegrationTest {
             when(roleplayAIService.generateOpeningMessage(any()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
 
-            String startBody = String.format("{\"topicId\":\"%s\"}", topic.getId());
+            String startBody = String.format("{\"conversationId\":\"%s\"}", topic.getId());
             MvcResult startResult = mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(startBody)
@@ -962,7 +986,7 @@ class SpeakingPracticeIntegrationTest {
             saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
 
-            String body = String.format("{\"topicId\":\"%s\"}", UUID.randomUUID());
+            String body = String.format("{\"conversationId\":\"%s\"}", UUID.randomUUID());
 
             mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -986,7 +1010,7 @@ class SpeakingPracticeIntegrationTest {
             when(roleplayAIService.generateOpeningMessage(any()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
 
-            String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
+            String body = String.format("{\"conversationId\":\"%s\"}", topic.getId());
 
             mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -1013,7 +1037,7 @@ class SpeakingPracticeIntegrationTest {
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}," +
                             "{\"type\":\"SCENE_INTRO\",\"japanese_content\":\"Scene\",\"translation\":\"Scene\",\"romaji\":\"\"}]" );
 
-            String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
+            String body = String.format("{\"conversationId\":\"%s\"}", topic.getId());
 
             MvcResult result = mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -1219,7 +1243,7 @@ class SpeakingPracticeIntegrationTest {
                     .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"AI reply\",\"translation\":\"AI reply\",\"romaji\":\"\",\"corrections\":[]}]" );
             when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
 
-            String startBody = String.format("{\"topicId\":\"%s\"}", topic.getId());
+            String startBody = String.format("{\"conversationId\":\"%s\"}", topic.getId());
             MvcResult startResult = mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(startBody)
@@ -1412,7 +1436,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             Conversation topic = saveConversation(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
 
-            String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
+            String body = String.format("{\"conversationId\":\"%s\"}", topic.getId());
 
             mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -1449,7 +1473,7 @@ class SpeakingPracticeIntegrationTest {
             when(roleplayAIService.generateOpeningMessage(any()))
                     .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"Hello\",\"translation\":\"Hello\",\"romaji\":\"\"}]");
 
-            String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
+            String body = String.format("{\"conversationId\":\"%s\"}", topic.getId());
 
             mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -1607,7 +1631,7 @@ class SpeakingPracticeIntegrationTest {
                     .thenReturn(List.of());
             when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
 
-            String startBody = String.format("{\"topicId\":\"%s\"}", topic.getId());
+            String startBody = String.format("{\"conversationId\":\"%s\"}", topic.getId());
             MvcResult startResult = mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(startBody)
@@ -1660,7 +1684,7 @@ class SpeakingPracticeIntegrationTest {
 
             String body = "{\"title\":\"My Topic\",\"scenario\":\"Practice shopping\"}";
 
-            mockMvc.perform(post("/api/v1/learner/conversation/my-topics")
+            mockMvc.perform(post("/api/v1/learner/conversation/my-conversations")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body)
                             .header("Authorization", "Bearer " + token))
@@ -1688,7 +1712,7 @@ class SpeakingPracticeIntegrationTest {
             when(conversationGenerationService.generateUserConversationContext(anyString(), any()))
                     .thenReturn("{\"vocabularyHints\":[\"a\"]}");
 
-            mockMvc.perform(post("/api/v1/learner/conversation/my-topics/{id}/generate-context", topic.getId())
+            mockMvc.perform(post("/api/v1/learner/conversation/my-conversations/{id}/generate-context", topic.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.aiGeneratedContext").isNotEmpty());
@@ -1707,7 +1731,7 @@ class SpeakingPracticeIntegrationTest {
                     .status(Course.ContentStatus.DRAFT)
                     .build());
 
-            mockMvc.perform(post("/api/v1/learner/conversation/my-topics/{id}/generate-context", topic.getId())
+            mockMvc.perform(post("/api/v1/learner/conversation/my-conversations/{id}/generate-context", topic.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest());
         }
@@ -1740,7 +1764,7 @@ class SpeakingPracticeIntegrationTest {
 
             String body = "{\"title\":\"  \",\"scenario\":\"Practice shopping\"}";
 
-            mockMvc.perform(post("/api/v1/learner/conversation/my-topics")
+            mockMvc.perform(post("/api/v1/learner/conversation/my-conversations")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body)
                             .header("Authorization", "Bearer " + token))
@@ -1752,7 +1776,7 @@ class SpeakingPracticeIntegrationTest {
         void tc_sp_ct_006() throws Exception {
             String body = "{\"title\":\"My Topic\",\"scenario\":\"Practice shopping\"}";
 
-            mockMvc.perform(post("/api/v1/learner/conversation/my-topics")
+            mockMvc.perform(post("/api/v1/learner/conversation/my-conversations")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body))
                     .andExpect(status().isUnauthorized());
@@ -1792,7 +1816,7 @@ class SpeakingPracticeIntegrationTest {
                     .status(Course.ContentStatus.DRAFT)
                     .build());
 
-            mockMvc.perform(get("/api/v1/learner/conversation/my-topics")
+            mockMvc.perform(get("/api/v1/learner/conversation/my-conversations")
                             .param("page", "0")
                             .param("size", "1")
                             .header("Authorization", "Bearer " + token))
@@ -1814,7 +1838,7 @@ class SpeakingPracticeIntegrationTest {
                     .status(Course.ContentStatus.DRAFT)
                     .build());
 
-            mockMvc.perform(get("/api/v1/learner/conversation/my-topics/{id}", topic.getId())
+            mockMvc.perform(get("/api/v1/learner/conversation/my-conversations/{id}", topic.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.title").value("Topic 1"));
@@ -1835,7 +1859,7 @@ class SpeakingPracticeIntegrationTest {
 
             String body = "{\"title\":\"Updated\",\"scenario\":\"New scenario\"}";
 
-            mockMvc.perform(put("/api/v1/learner/conversation/my-topics/{id}", topic.getId())
+            mockMvc.perform(put("/api/v1/learner/conversation/my-conversations/{id}", topic.getId())
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body)
                             .header("Authorization", "Bearer " + token))
@@ -1856,11 +1880,11 @@ class SpeakingPracticeIntegrationTest {
                     .status(Course.ContentStatus.DRAFT)
                     .build());
 
-            mockMvc.perform(delete("/api/v1/learner/conversation/my-topics/{id}", topic.getId())
+            mockMvc.perform(delete("/api/v1/learner/conversation/my-conversations/{id}", topic.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk());
 
-            mockMvc.perform(get("/api/v1/learner/conversation/my-topics/{id}", topic.getId())
+            mockMvc.perform(get("/api/v1/learner/conversation/my-conversations/{id}", topic.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isNotFound());
         }
@@ -1879,7 +1903,7 @@ class SpeakingPracticeIntegrationTest {
                     .status(Course.ContentStatus.DRAFT)
                     .build());
 
-            mockMvc.perform(get("/api/v1/learner/conversation/my-topics/{id}", topic.getId())
+            mockMvc.perform(get("/api/v1/learner/conversation/my-conversations/{id}", topic.getId())
                             .header("Authorization", "Bearer " + otherToken))
                     .andExpect(status().isNotFound());
         }
@@ -1897,7 +1921,7 @@ class SpeakingPracticeIntegrationTest {
                     .status(Course.ContentStatus.DRAFT)
                     .build());
 
-            mockMvc.perform(post("/api/v1/learner/conversation/my-topics/{id}/generate-context", topic.getId())
+            mockMvc.perform(post("/api/v1/learner/conversation/my-conversations/{id}/generate-context", topic.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest());
         }
@@ -1918,7 +1942,7 @@ class SpeakingPracticeIntegrationTest {
             when(conversationGenerationService.generateUserConversationContext(anyString(), any()))
                     .thenReturn("{\"vocabularyHints\":[\"a\"]}");
 
-            mockMvc.perform(post("/api/v1/learner/conversation/my-topics/{id}/generate-context", topic.getId())
+            mockMvc.perform(post("/api/v1/learner/conversation/my-conversations/{id}/generate-context", topic.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk());
 
@@ -1944,7 +1968,7 @@ class SpeakingPracticeIntegrationTest {
 
             String body = "{\"title\":\"Hacked\",\"scenario\":\"Hacked scenario\"}";
 
-            mockMvc.perform(put("/api/v1/learner/conversation/my-topics/{id}", topic.getId())
+            mockMvc.perform(put("/api/v1/learner/conversation/my-conversations/{id}", topic.getId())
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body)
                             .header("Authorization", "Bearer " + attackerToken))
@@ -1965,7 +1989,7 @@ class SpeakingPracticeIntegrationTest {
                     .status(Course.ContentStatus.DRAFT)
                     .build());
 
-            mockMvc.perform(delete("/api/v1/learner/conversation/my-topics/{id}", topic.getId())
+            mockMvc.perform(delete("/api/v1/learner/conversation/my-conversations/{id}", topic.getId())
                             .header("Authorization", "Bearer " + attackerToken))
                     .andExpect(status().isNotFound());
 
@@ -1987,7 +2011,7 @@ class SpeakingPracticeIntegrationTest {
                     .status(Course.ContentStatus.DRAFT)
                     .build());
 
-            mockMvc.perform(post("/api/v1/learner/conversation/my-topics/{id}/generate-context", topic.getId())
+            mockMvc.perform(post("/api/v1/learner/conversation/my-conversations/{id}/generate-context", topic.getId())
                             .header("Authorization", "Bearer " + attackerToken))
                     .andExpect(status().isNotFound());
         }
@@ -2002,7 +2026,7 @@ class SpeakingPracticeIntegrationTest {
 
             String body = "{\"title\":\"My Topic\",\"scenario\":\"Practice shopping\"}";
 
-            mockMvc.perform(post("/api/v1/learner/conversation/my-topics")
+            mockMvc.perform(post("/api/v1/learner/conversation/my-conversations")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body)
                             .header("Authorization", "Bearer " + token))
@@ -2046,7 +2070,7 @@ class SpeakingPracticeIntegrationTest {
              when(roleplayAIService.generateOpeningMessage(any()))
                      .thenReturn("[]");
 
-             String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
+             String body = String.format("{\"conversationId\":\"%s\"}", topic.getId());
 
              mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
                              .contentType(MediaType.APPLICATION_JSON)
@@ -2554,7 +2578,7 @@ class SpeakingPracticeIntegrationTest {
             String fallbackJson = "[{\"type\":\"DIALOGUE\",\"japanese_content\":\"申し訳ありません、エラーが発生しました。\",\"translation\":\"Xin lỗi, đã có lỗi xảy ra.\",\"romaji\":\"Moushiwake arimasen, eraa ga hassei shimashita.\",\"corrections\":[]}]";
             when(roleplayAIService.generateOpeningMessage(any())).thenReturn(fallbackJson);
 
-            String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
+            String body = String.format("{\"conversationId\":\"%s\"}", topic.getId());
 
             mockMvc.perform(post("/api/v1/learner/roleplay/sessions")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -2864,7 +2888,7 @@ class SpeakingPracticeIntegrationTest {
             java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
             List<java.util.concurrent.Future<MvcResult>> futures = new ArrayList<>();
 
-            String body = String.format("{\"topicId\":\"%s\"}", topic.getId());
+            String body = String.format("{\"conversationId\":\"%s\"}", topic.getId());
 
             for (int i = 0; i < threadCount; i++) {
                 futures.add(executor.submit(() -> {
@@ -2979,7 +3003,7 @@ class SpeakingPracticeIntegrationTest {
             for (int i = 0; i < threadCount; i++) {
                 futures.add(executor.submit(() -> {
                     latch.await();
-                    return mockMvc.perform(post("/api/v1/learner/conversation/my-topics/{id}/generate-context", topic.getId())
+                    return mockMvc.perform(post("/api/v1/learner/conversation/my-conversations/{id}/generate-context", topic.getId())
                                     .header("Authorization", "Bearer " + token))
                             .andReturn();
                 }));
