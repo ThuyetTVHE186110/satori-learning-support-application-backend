@@ -63,6 +63,15 @@ public interface AssignmentService {
 
     ClassAssignmentStatisticsResponse getClassAssignmentStatistics(UUID classId, UUID teacherId);
 
+    /**
+     * Get statistics for a specific assignment in a class.
+     * Returns submitted count, not submitted count, and average graded score.
+     */
+    AssignmentClassStatisticsResponse getAssignmentStatisticsForClass(
+            UUID assignmentId,
+            UUID classId,
+            UUID teacherId);
+
     Page<AssignmentSummaryResponse> getMyAssignments(UUID teacherId, String title, com.fu.assignment.entity.AssignmentStatus status, AssignmentType type, Pageable pageable);
 
 

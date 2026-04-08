@@ -417,6 +417,54 @@ public class AssignmentServiceImpl implements AssignmentService {
     }
 
     @Override
+    public AssignmentClassStatisticsResponse getAssignmentStatisticsForClass(
+            UUID assignmentId, UUID classId, UUID teacherId) {
+        
+        // Verify assignment exists and is not deleted
+        Assignment assignment = assignmentRepository.findByIdAndNotDeleted(assignmentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy bài tập"));
+        
+        // Verify assignment belongs to the specified class
+        if (!classId.equals(assignment.getClassId())) {
+            throw new BusinessException("ASSIGNMENT_NOT_IN_CLASS", "Bài tập không thuộc về lớp học này");
+        }
+        
+        // Verify teacher access
+        Clazz clazz = classRepository.findByIdAndNotDeleted(classId)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy lớp học"));
+        verifyTeacherAccess(clazz, teacherId);
+        
+        // Get total active students in class
+        long totalStudents = classMemberRepository.countActiveByClassId(classId);
+        
+        // Get count of submitted/graded submissions
+        long submittedCount = submissionRepository.countSubmissionsInClassForAssignment(assignmentId, classId);
+        
+        // Calculate not submitted count
+        long notSubmittedCount = totalStudents - submittedCount;
+        
+        // Get average score of graded submissions (default to 0 if null)
+        Double averageScore = submissionRepository.getAverageScoreForAssignmentInClass(assignmentId, classId);
+        if (averageScore == null) {
+            averageScore = 0.0;
+        }
+        
+        // Get assignment title
+        String title = assignmentRepository.getAssignmentTitleById(assignmentId)
+                .orElse("");
+        
+        return AssignmentClassStatisticsResponse.builder()
+                .assignmentId(assignmentId)
+                .classId(classId)
+                .assignmentTitle(title)
+                .totalStudents(totalStudents)
+                .submittedCount(submittedCount)
+                .notSubmittedCount(notSubmittedCount)
+                .averageScore(averageScore)
+                .build();
+    }
+
+    @Override
     public Page<AssignmentSummaryResponse> getMyAssignments(UUID teacherId, String title, com.fu.assignment.entity.AssignmentStatus status, AssignmentType type, Pageable pageable) {
         log.warn("title={}, status={}, type={}", title, status, type);
         Specification<Assignment> spec = Specification.where(AssignmentSpecification.withCreatedBy(teacherId)).and(AssignmentSpecification.isNotDeleted()).and(AssignmentSpecification.withTitle(title)).and(AssignmentSpecification.withStatus(status)).and(AssignmentSpecification.withType(type));

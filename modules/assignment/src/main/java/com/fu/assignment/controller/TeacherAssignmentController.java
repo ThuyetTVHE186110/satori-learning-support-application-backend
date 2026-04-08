@@ -300,6 +300,16 @@ public class TeacherAssignmentController {
         return ApiResponse.success(assignmentService.getClassAssignmentStatistics(classId, getUserId(userDetails)));
     }
 
+    @GetMapping("/{assignmentId}/class/{classId}/statistics")
+    @Operation(summary = "Get submission statistics for a specific assignment in a class")
+    public ApiResponse<AssignmentClassStatisticsResponse> getAssignmentStatisticsForClass(
+            @PathVariable UUID assignmentId,
+            @PathVariable UUID classId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ApiResponse.success(assignmentService.getAssignmentStatisticsForClass(
+                assignmentId, classId, getUserId(userDetails)));
+    }
+
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CLONE

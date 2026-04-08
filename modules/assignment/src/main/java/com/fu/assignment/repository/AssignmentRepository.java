@@ -138,4 +138,10 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
               AND a.deleted_at IS NULL
             """, nativeQuery = true)
     List<Assignment> findPublishedByClassAndDueWithin24h(@Param("classId") UUID classId);
+
+    /**
+     * Get title of assignment by ID (excludes deleted assignments).
+     */
+    @Query("SELECT a.title FROM Assignment a WHERE a.id = :assignmentId AND a.deletedAt IS NULL")
+    Optional<String> getAssignmentTitleById(@Param("assignmentId") UUID assignmentId);
 }

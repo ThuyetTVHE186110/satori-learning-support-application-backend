@@ -1260,4 +1260,156 @@ class AssignmentServiceImplTest {
     }
 
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 16. GET ASSIGNMENT STATISTICS FOR CLASS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("GetAssignmentStatisticsForClass Tests")
+    class GetAssignmentStatisticsForClassTests {
+
+        private UUID assignmentId;
+
+        @BeforeEach
+        void setUp() {
+            assignmentId = UUID.randomUUID();
+        }
+
+        @Test
+        @DisplayName("Should return statistics for assignment in class")
+        void shouldReturnStatisticsForAssignment() {
+            testQuizAssignment.setId(assignmentId);
+            testQuizAssignment.setTitle("Test Quiz");
+            testQuizAssignment.setClassId(classId);
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(30L);
+            given(submissionRepository.countSubmissionsInClassForAssignment(assignmentId, classId))
+                    .willReturn(25L);
+            given(submissionRepository.getAverageScoreForAssignmentInClass(assignmentId, classId))
+                    .willReturn(82.5);
+            given(assignmentRepository.getAssignmentTitleById(assignmentId))
+                    .willReturn(Optional.of("Test Quiz"));
+
+            AssignmentClassStatisticsResponse result = assignmentService.getAssignmentStatisticsForClass(
+                    assignmentId, classId, teacherId);
+
+            assertThat(result).isNotNull();
+            assertThat(result.getAssignmentId()).isEqualTo(assignmentId);
+            assertThat(result.getClassId()).isEqualTo(classId);
+            assertThat(result.getAssignmentTitle()).isEqualTo("Test Quiz");
+            assertThat(result.getTotalStudents()).isEqualTo(30L);
+            assertThat(result.getSubmittedCount()).isEqualTo(25L);
+            assertThat(result.getNotSubmittedCount()).isEqualTo(5L);
+            assertThat(result.getAverageScore()).isEqualTo(82.5);
+        }
+
+        @Test
+        @DisplayName("Should calculate not submitted count correctly")
+        void shouldCalculateNotSubmittedCount() {
+            testQuizAssignment.setId(assignmentId);
+            testQuizAssignment.setTitle("Test Quiz");
+            testQuizAssignment.setClassId(classId);
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(50L);
+            given(submissionRepository.countSubmissionsInClassForAssignment(assignmentId, classId))
+                    .willReturn(30L);
+            given(submissionRepository.getAverageScoreForAssignmentInClass(assignmentId, classId))
+                    .willReturn(75.0);
+            given(assignmentRepository.getAssignmentTitleById(assignmentId))
+                    .willReturn(Optional.of("Test Quiz"));
+
+            AssignmentClassStatisticsResponse result = assignmentService.getAssignmentStatisticsForClass(
+                    assignmentId, classId, teacherId);
+
+            assertThat(result.getNotSubmittedCount()).isEqualTo(20L);
+        }
+
+        @Test
+        @DisplayName("Should return 0.0 average score when no graded submissions")
+        void shouldReturnZeroAverageWhenNoGradedSubmissions() {
+            testQuizAssignment.setId(assignmentId);
+            testQuizAssignment.setTitle("Test Quiz");
+            testQuizAssignment.setClassId(classId);
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(30L);
+            given(submissionRepository.countSubmissionsInClassForAssignment(assignmentId, classId))
+                    .willReturn(5L);
+            given(submissionRepository.getAverageScoreForAssignmentInClass(assignmentId, classId))
+                    .willReturn(null);
+            given(assignmentRepository.getAssignmentTitleById(assignmentId))
+                    .willReturn(Optional.of("Test Quiz"));
+
+            AssignmentClassStatisticsResponse result = assignmentService.getAssignmentStatisticsForClass(
+                    assignmentId, classId, teacherId);
+
+            assertThat(result.getAverageScore()).isEqualTo(0.0);
+        }
+
+        @Test
+        @DisplayName("Should throw exception when teacher not verified")
+        void shouldThrowExceptionWhenTeacherNotVerified() {
+            testQuizAssignment.setId(assignmentId);
+            testQuizAssignment.setClassId(classId);
+
+            UUID otherTeacherId = UUID.randomUUID();
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(otherTeacherId));
+
+            assertThatThrownBy(() -> assignmentService.getAssignmentStatisticsForClass(
+                    assignmentId, classId, teacherId))
+                    .isInstanceOf(BusinessException.class);
+        }
+
+        @Test
+        @DisplayName("Should throw exception when assignment not in class")
+        void shouldThrowExceptionWhenAssignmentNotInClass() {
+            UUID otherClassId = UUID.randomUUID();
+            testQuizAssignment.setId(assignmentId);
+            testQuizAssignment.setClassId(otherClassId);
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+
+            assertThatThrownBy(() -> assignmentService.getAssignmentStatisticsForClass(
+                    assignmentId, classId, teacherId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("không thuộc về lớp học này");
+        }
+
+        @Test
+        @DisplayName("Should throw exception when assignment not found")
+        void shouldThrowExceptionWhenAssignmentNotFound() {
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.empty());
+
+            assertThatThrownBy(() -> assignmentService.getAssignmentStatisticsForClass(
+                    assignmentId, classId, teacherId))
+                    .isInstanceOf(ResourceNotFoundException.class);
+        }
+    }
+
+
 }

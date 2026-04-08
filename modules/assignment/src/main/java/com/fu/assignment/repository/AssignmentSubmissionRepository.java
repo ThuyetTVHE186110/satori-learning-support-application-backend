@@ -133,4 +133,40 @@ public interface AssignmentSubmissionRepository extends JpaRepository<Assignment
               AND s.status = com.fu.assignment.entity.SubmissionStatus.IN_PROGRESS
             """)
     Optional<AssignmentSubmission> findActiveByAssignmentIdAndUserId(@Param("assignmentId") UUID assignmentId, @Param("userId") UUID userId);
+
+    /**
+     * Count distinct students who submitted (SUBMITTED or GRADED) for a specific assignment in a class.
+     * Returns count of distinct user_ids that have submissions with SUBMITTED or GRADED status.
+     */
+    @Query(value = """
+            SELECT COUNT(DISTINCT s.user_id)
+            FROM assignment.assignment_submissions s
+            JOIN assignment.assignments a ON a.id = s.assignment_id
+            JOIN assignment.assignment_targets t ON t.assignment_id = a.id
+            WHERE a.id = :assignmentId
+              AND t.class_id = :classId
+              AND s.status IN ('SUBMITTED', 'GRADED')
+              AND a.deleted_at IS NULL
+            """, nativeQuery = true)
+    long countSubmissionsInClassForAssignment(
+            @Param("assignmentId") UUID assignmentId,
+            @Param("classId") UUID classId);
+
+    /**
+     * Get average score of GRADED submissions for a specific assignment in a class.
+     * Returns null if no graded submissions exist.
+     */
+    @Query(value = """
+            SELECT AVG(CAST(s.score AS NUMERIC))
+            FROM assignment.assignment_submissions s
+            JOIN assignment.assignments a ON a.id = s.assignment_id
+            JOIN assignment.assignment_targets t ON t.assignment_id = a.id
+            WHERE a.id = :assignmentId
+              AND t.class_id = :classId
+              AND s.status = 'GRADED'
+              AND a.deleted_at IS NULL
+            """, nativeQuery = true)
+    Double getAverageScoreForAssignmentInClass(
+            @Param("assignmentId") UUID assignmentId,
+            @Param("classId") UUID classId);
 }
