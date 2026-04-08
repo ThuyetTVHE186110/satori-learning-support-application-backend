@@ -9,9 +9,7 @@
 # =============================================================================
 
 # ==================== Build Stage ====================
-FROM eclipse-temurin:21-jdk-alpine AS builder
-
-RUN apk add --no-cache maven
+FROM maven:3.9-eclipse-temurin-21-alpine AS builder
 
 WORKDIR /app
 
@@ -34,8 +32,8 @@ COPY modules/roleplay/pom.xml modules/roleplay/
 COPY modules/user/pom.xml modules/user/
 COPY start/pom.xml start/
 
-# Pre-fetch all dependencies (cached layer — only invalidated when a pom changes)
-RUN mvn dependency:go-offline -B
+# Pre-fetch all dependencies including plugin dependencies
+RUN mvn dependency:go-offline dependency:resolve-plugins -B
 
 # Copy all source code
 COPY common/src common/src
@@ -58,12 +56,16 @@ COPY start/src start/src
 RUN mvn clean package -DskipTests -B
 
 # ==================== Runtime Stage ====================
-FROM eclipse-temurin:21-jre-alpine AS runtime
+# Use Debian-based image instead of Alpine to avoid musl libc incompatibility
+# with native libraries (e.g. grpc-netty-tcnative used by Firebase/Google Cloud SDK).
+FROM eclipse-temurin:21-jre-jammy AS runtime
 
 WORKDIR /app
 
-# Non-root user for security (principle of least privilege)
-RUN addgroup -S satori && adduser -S satori -G satori
+# Install wget for healthcheck and create non-root user
+RUN apt-get update && apt-get install -y --no-install-recommends wget \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -r satori && useradd -r -g satori satori
 
 # Copy only the assembled jar from the builder stage
 COPY --from=builder /app/start/target/*.jar app.jar
