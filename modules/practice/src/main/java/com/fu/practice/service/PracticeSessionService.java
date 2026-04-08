@@ -190,8 +190,8 @@ public class PracticeSessionService {
                         masteryMap);
 
         // Phase 8: Persist
-        List<UUID> savedVocabIds   = selectedVocab.stream().map(Vocabulary::getId).collect(Collectors.toList());
-        List<UUID> savedGrammarIds = selectedGrammar.stream().map(GrammarPoint::getId).collect(Collectors.toList());
+        UUID[] savedVocabIds   = selectedVocab.stream().map(Vocabulary::getId).toArray(UUID[]::new);
+        UUID[] savedGrammarIds = selectedGrammar.stream().map(GrammarPoint::getId).toArray(UUID[]::new);
 
         return persistNewSession(userId, request, lessonCtx, allItems,
                 hasPool, savedVocabIds, savedGrammarIds, sessionDimension);
@@ -246,8 +246,8 @@ public class PracticeSessionService {
                                                    LessonContext lessonCtx,
                                                    List<ExerciseGeneratorAgent.GeneratedItem> firstItemList,
                                                    boolean isExplicitMode,
-                                                   List<UUID> selectedVocabIds,
-                                                   List<UUID> selectedGrammarIds,
+                                                   UUID[] selectedVocabIds,
+                                                   UUID[] selectedGrammarIds,
                                                    QuestionDimension sessionDimension) {
         // Lưu jlptLevel + itemTypes vào context JSON để dùng lại khi cần
         String itemTypesJson = buildItemTypesJson(request.getItemTypes());

@@ -10,7 +10,6 @@ import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -105,14 +104,12 @@ public class PracticeSession extends BaseEntity {
     private boolean explicitMode = false;
 
     /** UUIDs của Vocabulary items được chọn (null = auto mode). */
-    @JdbcTypeCode(SqlTypes.ARRAY)
     @Column(name = "selected_vocab_ids", columnDefinition = "uuid[]")
-    private List<UUID> selectedVocabIds;
+    private UUID[] selectedVocabIds;
 
     /** UUIDs của GrammarPoint items được chọn (null = auto mode). */
-    @JdbcTypeCode(SqlTypes.ARRAY)
     @Column(name = "selected_grammar_ids", columnDefinition = "uuid[]")
-    private List<UUID> selectedGrammarIds;
+    private UUID[] selectedGrammarIds;
 
     /** QuestionDimension áp dụng cho session này. */
     @Column(name = "session_dimension")
