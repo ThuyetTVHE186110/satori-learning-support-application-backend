@@ -21,6 +21,7 @@ public class SubmissionSummaryResponse {
     private String assignmentTitle;
     private UUID userId;
     private String userFullName;
+    private String userEmail;
     private SubmissionStatus status;
     private Integer attemptNumber;
     private BigDecimal score;

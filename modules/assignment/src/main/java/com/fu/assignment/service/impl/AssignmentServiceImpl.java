@@ -609,6 +609,25 @@ public class AssignmentServiceImpl implements AssignmentService {
     }
 
     @Override
+    public Page<SubmissionSummaryResponse> getSubmissionsByAssignment(
+            UUID assignmentId,
+            String keyword,
+            Pageable pageable,
+            UUID teacherId) {
+        Assignment assignment = findAssignmentOrThrow(assignmentId);
+        verifyAssignmentAccess(assignment, teacherId);
+        
+        // If keyword is null or blank, use the non-keyword path
+        if (keyword == null || keyword.isBlank()) {
+            return getSubmissionsByAssignment(assignmentId, pageable, teacherId);
+        }
+        
+        // Search by keyword
+        return submissionRepository.findByAssignmentIdAndKeyword(assignmentId, keyword, pageable)
+                .map(s -> enrichSummaryResponse(s));
+    }
+
+    @Override
     public SubmissionResponse getSubmission(UUID submissionId, UUID teacherId) {
         AssignmentSubmission submission = findSubmissionOrThrow(submissionId);
         Assignment assignment = findAssignmentOrThrow(submission.getAssignmentId());
@@ -1313,7 +1332,10 @@ public class AssignmentServiceImpl implements AssignmentService {
         assignmentRepository.findByIdAndNotDeleted(s.getAssignmentId()).ifPresent(a -> {
             r.setAssignmentTitle(a.getTitle());
         });
-        userRepository.findById(s.getUserId()).ifPresent(u -> r.setUserFullName(u.getFullName()));
+        userRepository.findById(s.getUserId()).ifPresent(u -> {
+            r.setUserFullName(u.getFullName());
+            r.setUserEmail(u.getEmail());
+        });
         return r;
     }
 

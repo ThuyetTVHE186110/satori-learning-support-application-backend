@@ -90,6 +90,20 @@ public interface AssignmentService {
 
     Page<SubmissionSummaryResponse> getSubmissionsByAssignment(UUID assignmentId, Pageable pageable, UUID teacherId);
 
+    /**
+     * Get submissions for an assignment with optional keyword search by learner name/email.
+     * @param assignmentId Assignment UUID
+     * @param keyword Optional search term (firstName, lastName, displayName, email)
+     * @param pageable Pagination parameters
+     * @param teacherId Teacher UUID for access verification
+     * @return Paginated list of submission summaries with learner email
+     */
+    Page<SubmissionSummaryResponse> getSubmissionsByAssignment(
+            UUID assignmentId,
+            String keyword,
+            Pageable pageable,
+            UUID teacherId);
+
     SubmissionResponse getSubmission(UUID submissionId, UUID teacherId);
 
     /** Grade a WRITING or TRANSLATION submission */

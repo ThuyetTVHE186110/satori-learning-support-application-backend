@@ -169,4 +169,37 @@ public interface AssignmentSubmissionRepository extends JpaRepository<Assignment
     Double getAverageScoreForAssignmentInClass(
             @Param("assignmentId") UUID assignmentId,
             @Param("classId") UUID classId);
+
+    /**
+     * Find submissions by assignment ID and learner keyword search.
+     * Searches by firstName, lastName, displayName, or email with case-insensitive LIKE matching.
+     */
+    @Query(value = """
+            SELECT s.*
+            FROM assignment.assignment_submissions s
+            JOIN assignment.assignments a ON a.id = s.assignment_id
+            JOIN user_management.users u ON u.id = s.user_id
+            WHERE a.id = :assignmentId
+              AND (LOWER(u.first_name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                   OR LOWER(u.last_name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                   OR LOWER(u.display_name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                   OR LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%')))
+            ORDER BY s.attempt_number DESC, s.created_at DESC
+            """,
+            countQuery = """
+            SELECT COUNT(*)
+            FROM assignment.assignment_submissions s
+            JOIN assignment.assignments a ON a.id = s.assignment_id
+            JOIN "user".users u ON u.id = s.user_id
+            WHERE a.id = :assignmentId
+              AND (LOWER(u.first_name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                   OR LOWER(u.last_name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                   OR LOWER(u.display_name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                   OR LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%')))
+            """,
+            nativeQuery = true)
+    Page<AssignmentSubmission> findByAssignmentIdAndKeyword(
+            @Param("assignmentId") UUID assignmentId,
+            @Param("keyword") String keyword,
+            Pageable pageable);
 }
