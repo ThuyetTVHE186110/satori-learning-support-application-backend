@@ -82,6 +82,12 @@ class ConversationTopicServiceImplTest {
                 .id(topicId)
                 .title("Daily Shopping")
                 .status(Course.ContentStatus.DRAFT)
+                .conversationCount(0L)
+                .n5ConversationCount(0L)
+                .n4ConversationCount(0L)
+                .n3ConversationCount(0L)
+                .n2ConversationCount(0L)
+                .n1ConversationCount(0L)
                 .build();
 
         summaryResponse = ConversationTopicSummaryResponse.builder()
@@ -310,11 +316,22 @@ class ConversationTopicServiceImplTest {
             when(topicRepository.findById(topicId)).thenReturn(Optional.of(activeTopic));
             when(topicMapper.toResponse(activeTopic)).thenReturn(topicResponse);
             when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(3L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N5")).thenReturn(1L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N4")).thenReturn(1L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N3")).thenReturn(1L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N2")).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N1")).thenReturn(0L);
 
             ConversationTopicResponse result = topicService.getTopic(topicId);
 
             assertThat(result).isNotNull();
             assertThat(result.getId()).isEqualTo(topicId);
+            assertThat(result.getConversationCount()).isEqualTo(3L);
+            assertThat(result.getN5ConversationCount()).isEqualTo(1L);
+            assertThat(result.getN4ConversationCount()).isEqualTo(1L);
+            assertThat(result.getN3ConversationCount()).isEqualTo(1L);
+            assertThat(result.getN2ConversationCount()).isEqualTo(0L);
+            assertThat(result.getN1ConversationCount()).isEqualTo(0L);
         }
 
         @Test
@@ -338,15 +355,16 @@ class ConversationTopicServiceImplTest {
         @DisplayName("Should return paginated topics from repository")
         void shouldReturnPaginatedTopics() {
             Pageable pageable = PageRequest.of(0, 10);
-            Page<ConversationTopic> page = new PageImpl<>(List.of(activeTopic), pageable, 1);
-            when(topicRepository.findByDeletedAtIsNull(pageable)).thenReturn(page);
+            Pageable sortedPageable = PageRequest.of(0, 10, Sort.by("orderIndex").ascending());
+            Page<ConversationTopic> page = new PageImpl<>(List.of(activeTopic), sortedPageable, 1);
+            when(topicRepository.findByDeletedAtIsNull(sortedPageable)).thenReturn(page);
             when(topicMapper.toSummaryResponse(activeTopic)).thenReturn(summaryResponse);
             when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(2L);
 
             Page<ConversationTopicSummaryResponse> result = topicService.getAllTopics(pageable);
 
             assertThat(result.getTotalElements()).isEqualTo(1);
-            verify(topicRepository).findByDeletedAtIsNull(pageable);
+            verify(topicRepository).findByDeletedAtIsNull(sortedPageable);
         }
 
         @Test
@@ -359,6 +377,97 @@ class ConversationTopicServiceImplTest {
             when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(0L);
 
             Page<ConversationTopicSummaryResponse> result = topicService.searchTopics("shop", pageable);
+
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            verify(topicRepository).searchByKeyword("shop", pageable);
+        }
+
+        @Test
+        @DisplayName("Should populate JLPT level conversation counts in response")
+        void shouldPopulateJlptLevelCounts() {
+            // Mock the getTopic method which already has count mocking
+            when(topicRepository.findById(topicId)).thenReturn(Optional.of(activeTopic));
+            when(topicMapper.toResponse(activeTopic)).thenReturn(topicResponse);
+            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(5L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N5")).thenReturn(2L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N4")).thenReturn(2L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N3")).thenReturn(1L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N2")).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N1")).thenReturn(0L);
+
+            ConversationTopicResponse result = topicService.getTopic(topicId);
+
+            assertThat(result.getConversationCount()).isEqualTo(5L);
+            assertThat(result.getN5ConversationCount()).isEqualTo(2L);
+            assertThat(result.getN4ConversationCount()).isEqualTo(2L);
+            assertThat(result.getN3ConversationCount()).isEqualTo(1L);
+            assertThat(result.getN2ConversationCount()).isEqualTo(0L);
+            assertThat(result.getN1ConversationCount()).isEqualTo(0L);
+
+            // Verify all count methods were called
+            verify(conversationRepository).countByTopicIdAndDeletedAtIsNull(topicId);
+            verify(conversationRepository).countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N5");
+            verify(conversationRepository).countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N4");
+            verify(conversationRepository).countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N3");
+            verify(conversationRepository).countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N2");
+            verify(conversationRepository).countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N1");
+        }
+
+        @Test
+        @DisplayName("Should search topics by keyword and status")
+        void shouldSearchByKeywordAndStatus() {
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<ConversationTopic> page = new PageImpl<>(List.of(activeTopic), pageable, 1);
+            when(topicRepository.searchByKeywordAndStatus("shop", Course.ContentStatus.DRAFT.name(), pageable)).thenReturn(page);
+            when(topicMapper.toSummaryResponse(activeTopic)).thenReturn(summaryResponse);
+            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(0L);
+
+            Page<ConversationTopicSummaryResponse> result = topicService.searchTopics("shop", Course.ContentStatus.DRAFT, pageable);
+
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            verify(topicRepository).searchByKeywordAndStatus("shop", Course.ContentStatus.DRAFT.name(), pageable);
+        }
+
+        @Test
+        @DisplayName("Should search topics by status alone")
+        void shouldSearchByStatusAlone() {
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<ConversationTopic> page = new PageImpl<>(List.of(activeTopic), pageable, 1);
+            when(topicRepository.findByStatusAndDeletedAtIsNull(Course.ContentStatus.PUBLISHED.name(), pageable)).thenReturn(page);
+            when(topicMapper.toSummaryResponse(activeTopic)).thenReturn(summaryResponse);
+            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(0L);
+
+            Page<ConversationTopicSummaryResponse> result = topicService.searchTopics(null, Course.ContentStatus.PUBLISHED, pageable);
+
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            verify(topicRepository).findByStatusAndDeletedAtIsNull(Course.ContentStatus.PUBLISHED.name(), pageable);
+        }
+
+        @Test
+        @DisplayName("Should return all topics when no filters provided")
+        void shouldReturnAllTopicsWhenNoFilters() {
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<ConversationTopic> page = new PageImpl<>(List.of(activeTopic), pageable, 1);
+            when(topicRepository.findByDeletedAtIsNull(pageable)).thenReturn(page);
+            when(topicMapper.toSummaryResponse(activeTopic)).thenReturn(summaryResponse);
+            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(0L);
+
+            Page<ConversationTopicSummaryResponse> result = topicService.searchTopics(null, null, pageable);
+
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            verify(topicRepository).findByDeletedAtIsNull(pageable);
+        }
+
+        @Test
+        @DisplayName("Should search by keyword when keyword provided but status is null")
+        void shouldSearchByKeywordAloneWhenStatusNull() {
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<ConversationTopic> page = new PageImpl<>(List.of(activeTopic), pageable, 1);
+            when(topicRepository.searchByKeyword("shop", pageable)).thenReturn(page);
+            when(topicMapper.toSummaryResponse(activeTopic)).thenReturn(summaryResponse);
+            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(0L);
+
+            Page<ConversationTopicSummaryResponse> result = topicService.searchTopics("shop", null, pageable);
 
             assertThat(result.getTotalElements()).isEqualTo(1);
             verify(topicRepository).searchByKeyword("shop", pageable);

@@ -17,7 +17,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -97,7 +96,8 @@ public class LearnerRoleplayController {
             @RequestParam(defaultValue = "10") @Min(1) int size,
             @AuthenticationPrincipal(expression = "id") UUID userId) {
 
-        Pageable pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("createdAt").descending());
+        // Keep Pageable unsorted because repository native SQL already orders by created_at DESC.
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
         Page<SessionSummaryResponse> result = sessionService.getSessionHistory(userId, pageable);
         return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
                 result.getContent(), result.getNumber(), result.getSize(),

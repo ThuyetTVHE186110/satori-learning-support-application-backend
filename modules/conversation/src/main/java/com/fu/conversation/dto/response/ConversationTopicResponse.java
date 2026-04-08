@@ -35,4 +35,9 @@ public class ConversationTopicResponse {
     private LocalDateTime updatedAt;
 
     private Long conversationCount;
+    private Long n5ConversationCount;
+    private Long n4ConversationCount;
+    private Long n3ConversationCount;
+    private Long n2ConversationCount;
+    private Long n1ConversationCount;
 }
