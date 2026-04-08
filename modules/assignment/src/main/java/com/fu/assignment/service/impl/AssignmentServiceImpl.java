@@ -392,6 +392,27 @@ public class AssignmentServiceImpl implements AssignmentService {
         builder.inProgressSubmissions(inProgress);
         builder.overdueSubmissions(overdue);
 
+        // Get average score of graded submissions
+        Double averageScore = submissionRepository.getAverageScoreForGradedSubmissions(classId);
+        builder.averageGradedScore(averageScore != null ? averageScore : 0.0);
+
+        // Get count of assignments due within 24 hours
+        List<Assignment> dueSoon = assignmentRepository.findPublishedByClassAndDueWithin24h(classId);
+        builder.dueSoon24hCount((long) dueSoon.size());
+
+        // Get count of active class members
+        long activeStudents = classMemberRepository.countActiveByClassId(classId);
+
+        // Calculate completion rate: (SUBMITTED + GRADED) / (total assignments * active students) * 100
+        double completionRate = 0.0;
+        if (totalA > 0 && activeStudents > 0) {
+            long submittedAndGraded = ungraded + graded;
+            completionRate = ((double) submittedAndGraded / (totalA * activeStudents)) * 100.0;
+            // Cap at 100% as a defensive measure
+            completionRate = Math.round(Math.min(completionRate, 100.0) * 100.0) / 100.0; // Round to 2 decimal places
+        }
+        builder.completionRate(completionRate);
+
         return builder.build();
     }
 
@@ -1157,16 +1178,16 @@ public class AssignmentServiceImpl implements AssignmentService {
         // Add level-up information (only for submit operations)
         try {
             LearningLevelService.LevelProgressInfo progressInfo = learningLevelService.getProgressToNextLevel(s.getUserId());
-            
+
             // Calculate previous level from oldTotalExp
             int previousLevel = 0;
             if (oldTotalExp != null && oldTotalExp >= 0) {
                 previousLevel = learningLevelService.calculateLevelFromExp(oldTotalExp);
             }
-            
+
             int currentLevel = progressInfo.currentLevel();
             boolean actuallyLeveledUp = previousLevel < currentLevel;
-            
+
             LevelUpNotificationResponse levelUpInfo = LevelUpNotificationResponse.builder()
                     .previousLevel(previousLevel)
                     .newLevel(currentLevel)
@@ -1183,6 +1204,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         }
         return response;
     }
+
     private List<QuizSubmissionDetailResponse> enrichQuizDetails(String answersJson) {
         List<QuizSubmissionDetailResponse> details = new ArrayList<>();
         if (answersJson == null || answersJson.isBlank()) return details;

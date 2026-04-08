@@ -100,6 +100,19 @@ public interface AssignmentSubmissionRepository extends JpaRepository<Assignment
     List<Object[]> countSubmissionsByStatusForClass(@Param("classId") UUID classId);
 
     /**
+     * Get average score of all GRADED submissions for a class.
+     * Returns null if no graded submissions exist.
+     */
+    @Query(value = """
+            SELECT AVG(CAST(s.score AS NUMERIC))
+            FROM assignment.assignment_submissions s
+            JOIN assignment.assignments a ON a.id = s.assignment_id
+            JOIN assignment.assignment_targets t ON t.assignment_id = a.id
+            WHERE t.class_id = :classId AND a.deleted_at IS NULL AND s.status = 'GRADED'
+            """, nativeQuery = true)
+    Double getAverageScoreForGradedSubmissions(@Param("classId") UUID classId);
+
+    /**
      * Find the latest submission status and ID for a list of assignments for a specific user.
      * Returns a list of [assignmentId, status, submissionId] arrays.
      */

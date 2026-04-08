@@ -122,4 +122,20 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
             @Param("type") String type,
             @Param("status") String status,
             Pageable pageable);
+
+    /**
+     * Find PUBLISHED assignments in a class due within 24 hours (not yet overdue).
+     * Returns assignments where: due_date > NOW() AND due_date <= NOW() + 24 hours
+     */
+    @Query(value = """
+            SELECT a.*
+            FROM assignment.assignments a
+            JOIN assignment.assignment_targets t ON t.assignment_id = a.id
+            WHERE t.class_id = :classId
+              AND a.status = 'PUBLISHED'
+              AND a.due_date > CURRENT_TIMESTAMP
+              AND a.due_date <= CURRENT_TIMESTAMP + INTERVAL '24 hours'
+              AND a.deleted_at IS NULL
+            """, nativeQuery = true)
+    List<Assignment> findPublishedByClassAndDueWithin24h(@Param("classId") UUID classId);
 }

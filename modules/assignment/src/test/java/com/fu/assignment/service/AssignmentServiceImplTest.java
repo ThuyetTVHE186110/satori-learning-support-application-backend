@@ -951,20 +951,22 @@ class AssignmentServiceImplTest {
         void shouldReturnStatistics() {
             stubTeacherAccess();
 
-            List<Object[]> assignmentCounts = List.of(
-                    new Object[]{"DRAFT", 2L},
-                    new Object[]{"PUBLISHED", 3L},
-                    new Object[]{"CLOSED", 1L}
-            );
-            List<Object[]> submissionCounts = List.of(
-                    new Object[]{"SUBMITTED", 5L},
-                    new Object[]{"GRADED", 10L},
-                    new Object[]{"IN_PROGRESS", 2L},
-                    new Object[]{"OVERDUE", 1L}
-            );
+            List<Object[]> assignmentCounts = new ArrayList<>();
+            assignmentCounts.add(new Object[]{"DRAFT", 2L});
+            assignmentCounts.add(new Object[]{"PUBLISHED", 3L});
+            assignmentCounts.add(new Object[]{"CLOSED", 1L});
+
+            List<Object[]> submissionCounts = new ArrayList<>();
+            submissionCounts.add(new Object[]{"SUBMITTED", 5L});
+            submissionCounts.add(new Object[]{"GRADED", 10L});
+            submissionCounts.add(new Object[]{"IN_PROGRESS", 2L});
+            submissionCounts.add(new Object[]{"OVERDUE", 1L});
 
             given(assignmentRepository.countByStatusForClass(classId)).willReturn(assignmentCounts);
             given(submissionRepository.countSubmissionsByStatusForClass(classId)).willReturn(submissionCounts);
+            given(submissionRepository.getAverageScoreForGradedSubmissions(classId)).willReturn(85.5);
+            given(assignmentRepository.findPublishedByClassAndDueWithin24h(classId)).willReturn(Collections.emptyList());
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(20L);
 
             ClassAssignmentStatisticsResponse result = assignmentService.getClassAssignmentStatistics(classId, teacherId);
 
@@ -978,6 +980,167 @@ class AssignmentServiceImplTest {
             assertThat(result.getGradedSubmissions()).isEqualTo(10L);
             assertThat(result.getInProgressSubmissions()).isEqualTo(2L);
             assertThat(result.getOverdueSubmissions()).isEqualTo(1L);
+            assertThat(result.getAverageGradedScore()).isEqualTo(85.5);
+            assertThat(result.getDueSoon24hCount()).isEqualTo(0L);
+            assertThat(result.getCompletionRate()).isEqualTo((15.0 / (6L * 20L)) * 100.0);
+        }
+
+        @Test
+        @DisplayName("Should calculate average graded score correctly")
+        void shouldCalculateAverageGradedScore() {
+            stubTeacherAccess();
+
+            List<Object[]> assignmentCounts = new ArrayList<>();
+            assignmentCounts.add(new Object[]{"PUBLISHED", 1L});
+            List<Object[]> submissionCounts = new ArrayList<>();
+            submissionCounts.add(new Object[]{"GRADED", 5L});
+
+            given(assignmentRepository.countByStatusForClass(classId)).willReturn(assignmentCounts);
+            given(submissionRepository.countSubmissionsByStatusForClass(classId)).willReturn(submissionCounts);
+            given(submissionRepository.getAverageScoreForGradedSubmissions(classId)).willReturn(92.0);
+            given(assignmentRepository.findPublishedByClassAndDueWithin24h(classId)).willReturn(Collections.emptyList());
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(10L);
+
+            ClassAssignmentStatisticsResponse result = assignmentService.getClassAssignmentStatistics(classId, teacherId);
+
+            assertThat(result.getAverageGradedScore()).isEqualTo(92.0);
+            verify(submissionRepository).getAverageScoreForGradedSubmissions(classId);
+        }
+
+        @Test
+        @DisplayName("Should return 0.0 when no graded submissions exist")
+        void shouldReturnZeroWhenNoGradedSubmissions() {
+            stubTeacherAccess();
+
+            List<Object[]> assignmentCounts = new ArrayList<>();
+            assignmentCounts.add(new Object[]{"PUBLISHED", 2L});
+            List<Object[]> submissionCounts = new ArrayList<>();
+            submissionCounts.add(new Object[]{"SUBMITTED", 3L});
+
+            given(assignmentRepository.countByStatusForClass(classId)).willReturn(assignmentCounts);
+            given(submissionRepository.countSubmissionsByStatusForClass(classId)).willReturn(submissionCounts);
+            given(submissionRepository.getAverageScoreForGradedSubmissions(classId)).willReturn(null);
+            given(assignmentRepository.findPublishedByClassAndDueWithin24h(classId)).willReturn(Collections.emptyList());
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(15L);
+
+            ClassAssignmentStatisticsResponse result = assignmentService.getClassAssignmentStatistics(classId, teacherId);
+
+            assertThat(result.getAverageGradedScore()).isEqualTo(0.0);
+        }
+
+        @Test
+        @DisplayName("Should count assignments due within 24 hours")
+        void shouldCountAssignmentsDueWithin24Hours() {
+            stubTeacherAccess();
+
+            List<Object[]> assignmentCounts = new ArrayList<>();
+            assignmentCounts.add(new Object[]{"PUBLISHED", 5L});
+            List<Object[]> submissionCounts = new ArrayList<>();
+            submissionCounts.add(new Object[]{"GRADED", 4L});
+
+            Assignment dueSoonAssignment1 = new Assignment();
+            dueSoonAssignment1.setId(UUID.randomUUID());
+            Assignment dueSoonAssignment2 = new Assignment();
+            dueSoonAssignment2.setId(UUID.randomUUID());
+
+            given(assignmentRepository.countByStatusForClass(classId)).willReturn(assignmentCounts);
+            given(submissionRepository.countSubmissionsByStatusForClass(classId)).willReturn(submissionCounts);
+            given(submissionRepository.getAverageScoreForGradedSubmissions(classId)).willReturn(75.0);
+            given(assignmentRepository.findPublishedByClassAndDueWithin24h(classId))
+                    .willReturn(List.of(dueSoonAssignment1, dueSoonAssignment2));
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(10L);
+
+            ClassAssignmentStatisticsResponse result = assignmentService.getClassAssignmentStatistics(classId, teacherId);
+
+            assertThat(result.getDueSoon24hCount()).isEqualTo(2L);
+            verify(assignmentRepository).findPublishedByClassAndDueWithin24h(classId);
+        }
+
+        @Test
+        @DisplayName("Should calculate completion rate correctly")
+        void shouldCalculateCompletionRateCorrectly() {
+            stubTeacherAccess();
+
+            List<Object[]> assignmentCounts = new ArrayList<>();
+            assignmentCounts.add(new Object[]{"PUBLISHED", 10L});
+            List<Object[]> submissionCounts = new ArrayList<>();
+            submissionCounts.add(new Object[]{"SUBMITTED", 30L});
+            submissionCounts.add(new Object[]{"GRADED", 50L});
+
+            given(assignmentRepository.countByStatusForClass(classId)).willReturn(assignmentCounts);
+            given(submissionRepository.countSubmissionsByStatusForClass(classId)).willReturn(submissionCounts);
+            given(submissionRepository.getAverageScoreForGradedSubmissions(classId)).willReturn(80.0);
+            given(assignmentRepository.findPublishedByClassAndDueWithin24h(classId)).willReturn(Collections.emptyList());
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(10L);
+
+            ClassAssignmentStatisticsResponse result = assignmentService.getClassAssignmentStatistics(classId, teacherId);
+
+            // completion rate = (30 + 50) / (10 * 10) * 100 = 80 / 100 * 100 = 80.0%
+            assertThat(result.getCompletionRate()).isEqualTo(80.0);
+        }
+
+        @Test
+        @DisplayName("Should return 0.0 completion rate when no assignments exist")
+        void shouldReturnZeroCompletionRateWhenNoAssignments() {
+            stubTeacherAccess();
+
+            List<Object[]> assignmentCounts = Collections.emptyList();
+            List<Object[]> submissionCounts = Collections.emptyList();
+
+            given(assignmentRepository.countByStatusForClass(classId)).willReturn(assignmentCounts);
+            given(submissionRepository.countSubmissionsByStatusForClass(classId)).willReturn(submissionCounts);
+            given(submissionRepository.getAverageScoreForGradedSubmissions(classId)).willReturn(null);
+            given(assignmentRepository.findPublishedByClassAndDueWithin24h(classId)).willReturn(Collections.emptyList());
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(15L);
+
+            ClassAssignmentStatisticsResponse result = assignmentService.getClassAssignmentStatistics(classId, teacherId);
+
+            assertThat(result.getCompletionRate()).isEqualTo(0.0);
+            assertThat(result.getTotalAssignments()).isEqualTo(0L);
+        }
+
+        @Test
+        @DisplayName("Should return 0.0 completion rate when no students exist")
+        void shouldReturnZeroCompletionRateWhenNoStudents() {
+            stubTeacherAccess();
+
+            List<Object[]> assignmentCounts = new ArrayList<>();
+            assignmentCounts.add(new Object[]{"PUBLISHED", 5L});
+            List<Object[]> submissionCounts = new ArrayList<>();
+            submissionCounts.add(new Object[]{"GRADED", 10L});
+
+            given(assignmentRepository.countByStatusForClass(classId)).willReturn(assignmentCounts);
+            given(submissionRepository.countSubmissionsByStatusForClass(classId)).willReturn(submissionCounts);
+            given(submissionRepository.getAverageScoreForGradedSubmissions(classId)).willReturn(75.0);
+            given(assignmentRepository.findPublishedByClassAndDueWithin24h(classId)).willReturn(Collections.emptyList());
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
+
+            ClassAssignmentStatisticsResponse result = assignmentService.getClassAssignmentStatistics(classId, teacherId);
+
+            assertThat(result.getCompletionRate()).isEqualTo(0.0);
+        }
+
+        @Test
+        @DisplayName("Should cap completion rate at 100%")
+        void shouldCapCompletionRateAt100Percent() {
+            stubTeacherAccess();
+
+            List<Object[]> assignmentCounts = new ArrayList<>();
+            assignmentCounts.add(new Object[]{"PUBLISHED", 2L});
+            List<Object[]> submissionCounts = new ArrayList<>();
+            submissionCounts.add(new Object[]{"SUBMITTED", 50L});
+            submissionCounts.add(new Object[]{"GRADED", 100L});
+
+            given(assignmentRepository.countByStatusForClass(classId)).willReturn(assignmentCounts);
+            given(submissionRepository.countSubmissionsByStatusForClass(classId)).willReturn(submissionCounts);
+            given(submissionRepository.getAverageScoreForGradedSubmissions(classId)).willReturn(85.0);
+            given(assignmentRepository.findPublishedByClassAndDueWithin24h(classId)).willReturn(Collections.emptyList());
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
+
+            ClassAssignmentStatisticsResponse result = assignmentService.getClassAssignmentStatistics(classId, teacherId);
+
+            // completion rate would be (50 + 100) / (2 * 5) * 100 = 1500%, capped at 100%
+            assertThat(result.getCompletionRate()).isEqualTo(100.0);
         }
     }
     // ═══════════════════════════════════════════════════════════════════════════
