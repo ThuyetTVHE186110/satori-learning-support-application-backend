@@ -142,6 +142,12 @@ management:
             show-details: when-authorized
             probes:
                 enabled: true
+    health:
+        # Mail SMTP is blocked by Digital Ocean on new droplets — exclude from
+        # overall health status to prevent false DOWN. Mail is still attempted
+        # at runtime; failures are logged but don't affect /actuator/health.
+        mail:
+            enabled: false
 
 # ==================== SpringDoc / Swagger ====================
 # Completely disables the /swagger-ui and /v3/api-docs endpoints.

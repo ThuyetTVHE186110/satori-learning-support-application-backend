@@ -96,6 +96,25 @@ public class PracticeSession extends BaseEntity {
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
 
+    // ── Explicit selection mode ───────────────────────────────────────────────
+
+    /** true khi học viên tự chọn từng vocab/grammar cụ thể. */
+    @Column(name = "is_explicit_mode", nullable = false)
+    @Builder.Default
+    private boolean explicitMode = false;
+
+    /** UUIDs của Vocabulary items được chọn (null = auto mode). */
+    @Column(name = "selected_vocab_ids", columnDefinition = "uuid[]")
+    private UUID[] selectedVocabIds;
+
+    /** UUIDs của GrammarPoint items được chọn (null = auto mode). */
+    @Column(name = "selected_grammar_ids", columnDefinition = "uuid[]")
+    private UUID[] selectedGrammarIds;
+
+    /** QuestionDimension áp dụng cho session này. */
+    @Column(name = "session_dimension")
+    private String sessionDimension;
+
     @Version
     @Column(name = "version", nullable = false)
     @Builder.Default
