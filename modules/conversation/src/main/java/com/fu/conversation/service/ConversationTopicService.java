@@ -31,7 +31,11 @@ public interface ConversationTopicService {
 
     Page<ConversationTopicSummaryResponse> searchTopics(String keyword, Pageable pageable);
 
+    Page<ConversationTopicSummaryResponse> searchTopics(String keyword, Course.ContentStatus status, Pageable pageable);
+
     Page<ConversationTopicSummaryResponse> getPublishedTopics(Course.JlptLevel jlptLevel, Pageable pageable);
 
     Page<ConversationTopicSummaryResponse> searchPublishedTopics(String keyword, Pageable pageable);
+
+    Page<ConversationTopicSummaryResponse> searchPublishedTopics(String keyword, Course.JlptLevel jlptLevel, Pageable pageable);
 }

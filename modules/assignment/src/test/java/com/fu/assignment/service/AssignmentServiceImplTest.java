@@ -11,6 +11,7 @@ import com.fu.assignment.entity.*;
 import com.fu.assignment.exception.AssignmentNotFoundException;
 import com.fu.assignment.mapper.AssignmentMapper;
 import com.fu.assignment.repository.*;
+import com.fu.assignment.scheduler.AssignmentScheduleManager;
 import com.fu.assignment.service.impl.AssignmentServiceImpl;
 import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.repository.ClassMemberRepository;

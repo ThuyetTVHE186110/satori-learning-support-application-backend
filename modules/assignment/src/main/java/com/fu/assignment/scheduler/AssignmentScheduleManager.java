@@ -1,4 +1,4 @@
-package com.fu.assignment.service;
+package com.fu.assignment.scheduler;
 
 import com.fu.assignment.entity.Assignment;
 import com.fu.assignment.entity.AssignmentStatus;
