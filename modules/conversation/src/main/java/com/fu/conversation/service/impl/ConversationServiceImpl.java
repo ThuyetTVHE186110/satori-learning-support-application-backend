@@ -22,6 +22,7 @@ import com.fu.course.repository.CourseRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -186,6 +187,44 @@ public class ConversationServiceImpl implements ConversationService {
     public Page<ConversationSummaryResponse> getAllConversations(Pageable pageable) {
         return conversationRepository.findByDeletedAtIsNull(pageable)
                 .map(conversationMapper::toSummaryResponse);
+    }
+
+    @Override
+    public Page<ConversationSummaryResponse> getAllConversations(String keyword, Course.JlptLevel jlptLevel, Course.ContentStatus status, Pageable pageable) {
+        Pageable unsorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
+        
+        Page<Conversation> page;
+        if (keyword != null && !keyword.isBlank() && jlptLevel != null && status != null) {
+            // All three filters
+            page = conversationRepository.searchByKeywordAndJlptLevelAndStatusAndDeletedAtIsNull(
+                    keyword.trim(), jlptLevel.name(), status.name(), unsorted);
+        } else if (keyword != null && !keyword.isBlank() && jlptLevel != null) {
+            // Keyword + level
+            page = conversationRepository.searchByKeywordAndJlptLevelAndDeletedAtIsNull(
+                    keyword.trim(), jlptLevel.name(), unsorted);
+        } else if (keyword != null && !keyword.isBlank() && status != null) {
+            // Keyword + status
+            page = conversationRepository.searchByKeywordAndStatusAndDeletedAtIsNull(
+                    keyword.trim(), status.name(), unsorted);
+        } else if (jlptLevel != null && status != null) {
+            // Level + status
+            page = conversationRepository.findByJlptLevelAndStatusAndDeletedAtIsNull(
+                    jlptLevel.name(), status.name(), unsorted);
+        } else if (keyword != null && !keyword.isBlank()) {
+            // Keyword only
+            page = conversationRepository.searchByKeywordAndDeletedAtIsNull(keyword.trim(), unsorted);
+        } else if (jlptLevel != null) {
+            // Level only
+            page = conversationRepository.findByJlptLevelAndDeletedAtIsNull(jlptLevel.name(), unsorted);
+        } else if (status != null) {
+            // Status only
+            page = conversationRepository.findByStatusAndDeletedAtIsNull(status.name(), unsorted);
+        } else {
+            // No filters - all conversations
+            page = conversationRepository.findByDeletedAtIsNull(unsorted);
+        }
+        
+        return page.map(conversationMapper::toSummaryResponse);
     }
 
     @Override

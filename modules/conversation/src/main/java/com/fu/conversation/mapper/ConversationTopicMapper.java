@@ -38,6 +38,11 @@ public interface ConversationTopicMapper {
 
     @Mapping(target = "courseName", ignore = true)
     @Mapping(target = "conversationCount", ignore = true)
+    @Mapping(target = "n5ConversationCount", ignore = true)
+    @Mapping(target = "n4ConversationCount", ignore = true)
+    @Mapping(target = "n3ConversationCount", ignore = true)
+    @Mapping(target = "n2ConversationCount", ignore = true)
+    @Mapping(target = "n1ConversationCount", ignore = true)
     ConversationTopicResponse toResponse(ConversationTopic topic);
 
     @Mapping(target = "conversationCount", ignore = true)

@@ -40,6 +40,8 @@ public interface ConversationService {
 
     Page<ConversationSummaryResponse> getAllConversations(Pageable pageable);
 
+    Page<ConversationSummaryResponse> getAllConversations(String keyword, Course.JlptLevel jlptLevel, Course.ContentStatus status, Pageable pageable);
+
     /**
      * Uses AI to generate conversation suggestions for a topic.
      * Suggestions are not persisted — the manager reviews and saves them manually.

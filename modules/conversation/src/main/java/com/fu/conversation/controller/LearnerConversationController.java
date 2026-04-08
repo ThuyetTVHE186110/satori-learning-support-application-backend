@@ -57,14 +57,10 @@ public class LearnerConversationController {
             @RequestParam(defaultValue = "10") int size) {
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 50),
-                Sort.by("orderIndex").ascending());
+                Sort.by("order_index").ascending());
 
-        Page<ConversationTopicSummaryResponse> result;
-        if (keyword != null && !keyword.isBlank()) {
-            result = topicService.searchPublishedTopics(keyword.trim(), pageable);
-        } else {
-            result = topicService.getPublishedTopics(level, pageable);
-        }
+        Page<ConversationTopicSummaryResponse> result = topicService.searchPublishedTopics(
+                keyword, level, pageable);
 
         return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
                 result.getContent(), result.getNumber(), result.getSize(),
