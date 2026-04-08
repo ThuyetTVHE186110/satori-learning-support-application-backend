@@ -12,8 +12,14 @@ import com.fu.achievement.service.StreakService;
 import com.fu.common.event.PracticeFeedbackReadyEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.course.entity.Course;
+import com.fu.course.entity.GrammarPoint;
 import com.fu.course.entity.Lesson;
+import com.fu.course.entity.Vocabulary;
+import com.fu.course.repository.GrammarPointRepository;
 import com.fu.course.repository.LessonRepository;
+import com.fu.course.repository.VocabularyRepository;
+import com.fu.user.entity.UserLearningPreferences;
+import com.fu.user.repository.UserLearningPreferencesRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import com.fu.practice.agent.AnswerEvaluatorAgent;
 import com.fu.practice.agent.ExerciseGeneratorAgent;
@@ -22,6 +28,7 @@ import com.fu.practice.dto.request.StartPracticeRequest;
 import com.fu.practice.dto.request.SubmitAnswerRequest;
 import com.fu.practice.dto.response.*;
 import com.fu.practice.entity.*;
+import com.fu.practice.repository.ItemMasteryRepository;
 import com.fu.practice.repository.LessonProgressRepository;
 import com.fu.practice.repository.PracticeItemRepository;
 import com.fu.practice.repository.PracticeSessionRepository;
@@ -35,15 +42,14 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
+import com.fu.practice.entity.ItemMastery;
+import com.fu.practice.entity.PracticePreset;
+import com.fu.practice.entity.QuestionDimension;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -58,6 +64,11 @@ public class PracticeSessionService {
     private final PracticeItemRepository itemRepository;
     private final LessonProgressRepository progressRepository;
     private final LessonRepository lessonRepository;
+    private final VocabularyRepository vocabularyRepository;
+    private final GrammarPointRepository grammarPointRepository;
+    private final ItemMasteryRepository itemMasteryRepository;
+    private final ItemMasteryService itemMasteryService;
+    private final UserLearningPreferencesRepository userPreferencesRepository;
     private final ExerciseGeneratorAgent exerciseGeneratorAgent;
     private final AnswerEvaluatorAgent answerEvaluatorAgent;
     private final SessionFeedbackAgent sessionFeedbackAgent;
@@ -77,27 +88,146 @@ public class PracticeSessionService {
      * LLM call runs OUTSIDE the transaction to avoid holding a DB connection for 5-30 seconds.
      */
     public StartPracticeResponse startSession(UUID userId, StartPracticeRequest request) {
-        int itemCount = request.getItemCount();
-        if (itemCount < 1 || itemCount > 20) {
-            throw new BusinessException("INVALID_ITEM_COUNT",
-                    "Số lượng câu hỏi phải từ 1 đến 20.");
-        }
-
-        // Phase 1: Read-only — load lesson, validate enrollment
+        // Phase 1: Validate lesson + enrollment
         LessonContext lessonCtx = loadLessonContext(userId, request.getLessonId());
 
-        // Phase 2: LLM call — sinh tất cả câu hỏi một lần (NO transaction held)
+        // Phase 2: Load toàn bộ vocab/grammar của bài học (cần cho distractor pool)
+        List<Vocabulary>   allLessonVocab   = vocabularyRepository.findByLessonId(request.getLessonId());
+        List<GrammarPoint> allLessonGrammar = grammarPointRepository.findByLessonId(request.getLessonId());
+
+        // Phase 3: Xác định items sẽ luyện tập
+        //
+        // Khi frontend gửi selectedIds (hasPool = true):
+        //   → dùng đúng những items đó (frontend đã giới hạn số lượng ≤ preset.itemCount)
+        //
+        // Khi không có selectedIds (hasPool = false, auto mode):
+        //   → backend tự pick top preset.itemCount items, ưu tiên mastery thấp nhất
+        PracticePreset preset = request.getPreset() != null ? request.getPreset() : PracticePreset.STANDARD;
+        boolean hasPool = request.isExplicitMode();
+
+        List<Vocabulary>   selectedVocab;
+        List<GrammarPoint> selectedGrammar;
+
+        if (hasPool) {
+            // Frontend đã pick đúng số lượng → dùng hết
+            Set<UUID> vocabSet = request.getSelectedVocabIds() != null
+                    ? new HashSet<>(request.getSelectedVocabIds()) : Set.of();
+            Set<UUID> grammarSet = request.getSelectedGrammarIds() != null
+                    ? new HashSet<>(request.getSelectedGrammarIds()) : Set.of();
+            selectedVocab = allLessonVocab.stream()
+                    .filter(v -> vocabSet.contains(v.getId()))
+                    .collect(Collectors.toList());
+            selectedGrammar = allLessonGrammar.stream()
+                    .filter(g -> grammarSet.contains(g.getId()))
+                    .collect(Collectors.toList());
+        } else {
+            // Auto mode: backend pick bằng mastery
+            List<Vocabulary> vocabPool = switch (request.getSessionType()) {
+                case GRAMMAR_DRILL -> List.of();
+                default            -> allLessonVocab;
+            };
+            List<GrammarPoint> grammarPool = switch (request.getSessionType()) {
+                case VOCAB_DRILL -> List.of();
+                default          -> allLessonGrammar;
+            };
+            int target = preset.getItemCount();
+            int total  = vocabPool.size() + grammarPool.size();
+            int vSlots = (total == 0) ? 0
+                    : switch (request.getSessionType()) {
+                        case VOCAB_DRILL   -> Math.min(target, vocabPool.size());
+                        case GRAMMAR_DRILL -> 0;
+                        default -> Math.min(                                   // MIXED: tỷ lệ
+                                (int) Math.round((double) vocabPool.size() / total * target),
+                                vocabPool.size());
+                    };
+            int gSlots = Math.min(target - vSlots, grammarPool.size());
+
+            List<UUID> allPoolIds = new ArrayList<>();
+            vocabPool.forEach(v -> allPoolIds.add(v.getId()));
+            grammarPool.forEach(g -> allPoolIds.add(g.getId()));
+            Map<UUID, ItemMastery> poolMastery = itemMasteryService.buildMasteryMap(userId, allPoolIds);
+
+            selectedVocab   = pickByMastery(vocabPool,   poolMastery, vSlots);
+            selectedGrammar = pickByMastery(grammarPool, poolMastery, gSlots);
+        }
+
+        if (selectedVocab.isEmpty() && selectedGrammar.isEmpty()) {
+            throw new BusinessException("PRACTICE_NO_CONTENT",
+                    "Bài học chưa có nội dung để luyện tập. Vui lòng liên hệ giáo viên.");
+        }
+
+        // Phase 4: Mastery map + dimension
+        List<UUID> selectedIds = new ArrayList<>();
+        selectedVocab.forEach(v -> selectedIds.add(v.getId()));
+        selectedGrammar.forEach(g -> selectedIds.add(g.getId()));
+
+        Map<UUID, ItemMastery> masteryMap = itemMasteryService.buildMasteryMap(userId, selectedIds);
+
+        int resolvedCount = selectedIds.size();
+
+        QuestionDimension sessionDimension = itemMasteryService.pickSessionDimension(
+                masteryMap, selectedIds, request.getSessionType());
+
+        // Phase 6: Load user learning preferences (optional)
+        UserLearningPreferences prefs = userPreferencesRepository.findByUserId(userId).orElse(null);
+
+        // Phase 7: LLM call — gen toàn bộ câu hỏi ngoài transaction
         List<ExerciseGeneratorAgent.GeneratedItem> allItems =
                 exerciseGeneratorAgent.generateItems(
                         request.getLessonId(),
                         lessonCtx.courseId(),
                         request.getSessionType(),
-                        itemCount,
+                        resolvedCount,
                         lessonCtx.jlptLevel(),
-                        request.getItemTypes());
+                        request.getItemTypes(),
+                        selectedVocab,
+                        selectedGrammar,
+                        allLessonVocab,
+                        allLessonGrammar,
+                        hasPool,            // isExplicitMode = frontend đã cung cấp pool
+                        prefs,
+                        sessionDimension,
+                        masteryMap);
 
-        // Phase 3: Persist session + all items
-        return persistNewSession(userId, request, lessonCtx, allItems);
+        // Phase 8: Persist
+        List<UUID> savedVocabIds   = selectedVocab.stream().map(Vocabulary::getId).collect(Collectors.toList());
+        List<UUID> savedGrammarIds = selectedGrammar.stream().map(GrammarPoint::getId).collect(Collectors.toList());
+
+        return persistNewSession(userId, request, lessonCtx, allItems,
+                hasPool, savedVocabIds, savedGrammarIds, sessionDimension);
+    }
+
+    /**
+     * Sort pool by mastery level ascending (low mastery = luyện trước),
+     * secondary sort: last_practiced_at ascending (lâu không luyện = ưu tiên hơn).
+     * Pick top n items.
+     */
+    private <T> List<T> pickByMastery(List<T> pool, Map<UUID, ItemMastery> masteryMap,
+                                       int n) {
+        if (n <= 0 || pool.isEmpty()) return List.of();
+        return pool.stream()
+                .sorted(Comparator
+                        .<T, Integer>comparing(item -> {
+                            UUID id = extractId(item);
+                            ItemMastery m = masteryMap.get(id);
+                            return m != null ? m.getMasteryLevel() : 0;
+                        })
+                        .thenComparing(item -> {
+                            UUID id = extractId(item);
+                            ItemMastery m = masteryMap.get(id);
+                            return (m != null && m.getLastPracticedAt() != null)
+                                    ? m.getLastPracticedAt()
+                                    : LocalDateTime.MIN;
+                        }))
+                .limit(n)
+                .collect(Collectors.toList());
+    }
+
+    @SuppressWarnings("unchecked")
+    private UUID extractId(Object item) {
+        if (item instanceof Vocabulary v) return v.getId();
+        if (item instanceof GrammarPoint g) return g.getId();
+        throw new IllegalArgumentException("Unknown item type: " + item.getClass());
     }
 
     @Transactional(readOnly = true)
@@ -114,8 +244,12 @@ public class PracticeSessionService {
     @Transactional
     public StartPracticeResponse persistNewSession(UUID userId, StartPracticeRequest request,
                                                    LessonContext lessonCtx,
-                                                   List<ExerciseGeneratorAgent.GeneratedItem> firstItemList) {
-        // Lưu jlptLevel + itemTypes vào context JSON để dùng lại khi sinh câu tiếp theo
+                                                   List<ExerciseGeneratorAgent.GeneratedItem> firstItemList,
+                                                   boolean isExplicitMode,
+                                                   List<UUID> selectedVocabIds,
+                                                   List<UUID> selectedGrammarIds,
+                                                   QuestionDimension sessionDimension) {
+        // Lưu jlptLevel + itemTypes vào context JSON để dùng lại khi cần
         String itemTypesJson = buildItemTypesJson(request.getItemTypes());
         String contextJson = String.format("{\"jlptLevel\":\"%s\",\"itemTypes\":%s}",
                 lessonCtx.jlptLevel() != null ? lessonCtx.jlptLevel() : "N5",
@@ -127,12 +261,16 @@ public class PracticeSessionService {
                 .courseId(lessonCtx.courseId())
                 .sessionType(request.getSessionType())
                 .status(PracticeStatus.IN_PROGRESS)
-                .totalItems(firstItemList.isEmpty() ? request.getItemCount() : firstItemList.size())
+                .totalItems(firstItemList.isEmpty() ? 0 : firstItemList.size())
                 .completedItems(0)
                 .correctItems(0)
                 .score(BigDecimal.ZERO)
                 .startedAt(LocalDateTime.now())
                 .context(contextJson)
+                .explicitMode(isExplicitMode)
+                .selectedVocabIds(isExplicitMode ? selectedVocabIds : null)
+                .selectedGrammarIds(isExplicitMode ? selectedGrammarIds : null)
+                .sessionDimension(sessionDimension != null ? sessionDimension.name() : null)
                 .build();
         session = sessionRepository.save(session);
 
@@ -245,6 +383,34 @@ public class PracticeSessionService {
             }
         }
 
+        // ── Mastery tracking ──────────────────────────────────────────────────
+        Integer masteryLevelBefore = null;
+        Integer masteryLevelAfter  = null;
+        String  entityJapanese     = null;
+
+        if (item.getRefContentId() != null && item.getRefContentType() != null) {
+            try {
+                ItemMasteryService.MasteryUpdateResult masteryResult = itemMasteryService.upsert(
+                        userId, item.getRefContentId(), item.getRefContentType(), result.isCorrect());
+                masteryLevelBefore = masteryResult.levelBefore();
+                masteryLevelAfter  = masteryResult.levelAfter();
+
+                // Fetch Japanese text for display
+                if ("VOCABULARY".equals(item.getRefContentType())) {
+                    entityJapanese = vocabularyRepository.findById(item.getRefContentId())
+                            .map(v -> v.getJapaneseText() != null ? v.getJapaneseText() : v.getReading())
+                            .orElse(null);
+                } else if ("GRAMMAR".equals(item.getRefContentType())) {
+                    entityJapanese = grammarPointRepository.findById(item.getRefContentId())
+                            .map(g -> g.getPattern())
+                            .orElse(null);
+                }
+            } catch (Exception e) {
+                log.warn("persistAnswerResult: mastery upsert thất bại cho item {}: {}", itemId, e.getMessage());
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         if (sessionCompleted) {
             finishSession(session);
         } else {
@@ -267,6 +433,9 @@ public class PracticeSessionService {
                 .explanation(explanation)
                 .sessionCompleted(sessionCompleted)
                 .nextItem(nextItemResponse)
+                .masteryLevelBefore(masteryLevelBefore)
+                .masteryLevelAfter(masteryLevelAfter)
+                .entityJapanese(entityJapanese)
                 .build();
     }
 
@@ -308,7 +477,36 @@ public class PracticeSessionService {
         if (session.getLessonId() != null) {
             upsertLessonProgress(session);
         }
-        
+
+        // ── Update dimension tracking for all session items ───────────────────
+        if (session.getSessionDimension() != null) {
+            try {
+                List<PracticeItem> sessionItems = itemRepository.findBySessionIdOrderByItemIndex(session.getId());
+                Set<UUID> vocabEntityIds  = new HashSet<>();
+                Set<UUID> grammarEntityIds = new HashSet<>();
+                for (PracticeItem it : sessionItems) {
+                    if (it.getRefContentId() != null && it.getRefContentType() != null) {
+                        if ("VOCABULARY".equals(it.getRefContentType())) {
+                            vocabEntityIds.add(it.getRefContentId());
+                        } else if ("GRAMMAR".equals(it.getRefContentType())) {
+                            grammarEntityIds.add(it.getRefContentId());
+                        }
+                    }
+                }
+                if (!vocabEntityIds.isEmpty()) {
+                    itemMasteryService.updateDimension(session.getUserId(), vocabEntityIds,
+                            "VOCABULARY", session.getSessionDimension());
+                }
+                if (!grammarEntityIds.isEmpty()) {
+                    itemMasteryService.updateDimension(session.getUserId(), grammarEntityIds,
+                            "GRAMMAR", session.getSessionDimension());
+                }
+            } catch (Exception e) {
+                log.warn("finishSession: updateDimension thất bại cho session {}: {}", session.getId(), e.getMessage());
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         // Record daily activity for streak tracking
         // Note: This may be called 2nd time after persistAnswerResult already called it,
         // but recordDailyActivity checks hasActivityOnDate and will return isFirstActivityToday=false
@@ -476,6 +674,10 @@ public class PracticeSessionService {
             }
         }
 
+        // ── Mastery changes summary ────────────────────────────────────────────
+        List<SessionSummaryResponse.MasteryChangeDto> masteryChanges = buildMasteryChanges(userId, items);
+        // ─────────────────────────────────────────────────────────────────────
+
         return SessionSummaryResponse.builder()
                 .sessionId(sessionId)
                 .score(session.getScore())
@@ -486,7 +688,216 @@ public class PracticeSessionService {
                 .earnedBadges(earnedBadges)
                 .levelUpInfo(levelUpInfo)
                 .streakNotification(streakNotification)
+                .masteryChanges(masteryChanges.isEmpty() ? null : masteryChanges)
                 .build();
+    }
+
+    /**
+     * Build mastery change summary từ items đã trả lời trong session.
+     * Hiển thị trạng thái mastery hiện tại cho từng item có refContentId.
+     */
+    private List<SessionSummaryResponse.MasteryChangeDto> buildMasteryChanges(UUID userId,
+                                                                               List<PracticeItem> items) {
+        // Collect unique (entityId, entityType) pairs with refContentId
+        Map<UUID, String> entityTypeMap = new LinkedHashMap<>();
+        for (PracticeItem item : items) {
+            if (item.getRefContentId() != null && item.getRefContentType() != null) {
+                entityTypeMap.putIfAbsent(item.getRefContentId(), item.getRefContentType());
+            }
+        }
+        if (entityTypeMap.isEmpty()) return List.of();
+
+        // Batch load mastery records
+        Map<UUID, ItemMastery> masteryMap = itemMasteryService.buildMasteryMap(userId, entityTypeMap.keySet());
+
+        List<SessionSummaryResponse.MasteryChangeDto> changes = new ArrayList<>();
+        for (Map.Entry<UUID, String> entry : entityTypeMap.entrySet()) {
+            UUID entityId   = entry.getKey();
+            String entityType = entry.getValue();
+            ItemMastery mastery = masteryMap.get(entityId);
+            if (mastery == null) continue; // item never answered
+
+            int levelAfter = mastery.getMasteryLevel();
+
+            String japaneseText = null;
+            try {
+                if ("VOCABULARY".equals(entityType)) {
+                    japaneseText = vocabularyRepository.findById(entityId)
+                            .map(v -> v.getJapaneseText() != null ? v.getJapaneseText() : v.getReading())
+                            .orElse(null);
+                } else if ("GRAMMAR".equals(entityType)) {
+                    japaneseText = grammarPointRepository.findById(entityId)
+                            .map(g -> g.getPattern())
+                            .orElse(null);
+                }
+            } catch (Exception ignored) {}
+
+            changes.add(SessionSummaryResponse.MasteryChangeDto.builder()
+                    .entityId(entityId)
+                    .entityType(entityType)
+                    .japaneseText(japaneseText)
+                    .levelBefore(Math.max(0, levelAfter - 1)) // approximation
+                    .levelAfter(levelAfter)
+                    .newlyMastered(levelAfter == 3)
+                    .build());
+        }
+        return changes;
+    }
+
+    // ── Lesson Items Picker ────────────────────────────────────────────────
+
+    /**
+     * Lấy danh sách vocab/grammar của bài học kèm mastery status — dùng cho UI item picker.
+     * GET /api/v1/learner/practice/lessons/{lessonId}/items
+     */
+    @Transactional(readOnly = true)
+    public LessonItemsResponse getLessonItems(UUID userId, UUID lessonId) {
+        // Validate lesson access
+        Lesson lesson = lessonRepository.findByIdAndNotDeleted(lessonId)
+                .orElseThrow(() -> new BusinessException("LESSON_NOT_FOUND",
+                        "Không tìm thấy bài học."));
+        validateEnrollment(userId, lesson.getCourse().getId());
+
+        List<Vocabulary> vocabList = vocabularyRepository.findByLessonId(lessonId);
+        List<GrammarPoint> grammarList = grammarPointRepository.findByLessonId(lessonId);
+
+        // Batch load mastery for all entity IDs
+        List<UUID> allIds = new ArrayList<>();
+        vocabList.forEach(v -> allIds.add(v.getId()));
+        grammarList.forEach(g -> allIds.add(g.getId()));
+        Map<UUID, ItemMastery> masteryMap = itemMasteryService.buildMasteryMap(userId, allIds);
+
+        List<LessonItemsResponse.VocabItemDto> vocabDtos = vocabList.stream()
+                .map(v -> {
+                    ItemMastery m = masteryMap.get(v.getId());
+                    return LessonItemsResponse.VocabItemDto.builder()
+                            .id(v.getId())
+                            .japaneseText(v.getJapaneseText())
+                            .reading(v.getReading())
+                            .meaningVi(v.getMeaningVi())
+                            .partOfSpeech(v.getPartOfSpeech())
+                            .mastery(m != null ? toMasteryDto(m) : null)
+                            .build();
+                })
+                .collect(Collectors.toList());
+
+        List<LessonItemsResponse.GrammarItemDto> grammarDtos = grammarList.stream()
+                .map(g -> {
+                    ItemMastery m = masteryMap.get(g.getId());
+                    return LessonItemsResponse.GrammarItemDto.builder()
+                            .id(g.getId())
+                            .pattern(g.getPattern())
+                            .meaningVi(g.getMeaningVi())
+                            .shortExplanation(g.getShortExplanation())
+                            .mastery(m != null ? toMasteryDto(m) : null)
+                            .build();
+                })
+                .collect(Collectors.toList());
+
+        int masteredVocab    = (int) vocabDtos.stream()
+                .filter(v -> v.getMastery() != null && v.getMastery().getLevel() == 3).count();
+        int masteredGrammar  = (int) grammarDtos.stream()
+                .filter(g -> g.getMastery() != null && g.getMastery().getLevel() == 3).count();
+        int needsReview      = (int) vocabDtos.stream()
+                .filter(v -> v.getMastery() == null || v.getMastery().getLevel() <= 1).count()
+                + (int) grammarDtos.stream()
+                .filter(g -> g.getMastery() == null || g.getMastery().getLevel() <= 1).count();
+
+        LessonItemsResponse.LessonItemSummary summary = LessonItemsResponse.LessonItemSummary.builder()
+                .totalVocab(vocabDtos.size())
+                .totalGrammar(grammarDtos.size())
+                .masteredVocab(masteredVocab)
+                .masteredGrammar(masteredGrammar)
+                .needsReviewCount(needsReview)
+                .build();
+
+        return LessonItemsResponse.builder()
+                .vocabulary(vocabDtos)
+                .grammar(grammarDtos)
+                .summary(summary)
+                .build();
+    }
+
+    private LessonItemsResponse.MasteryDto toMasteryDto(ItemMastery m) {
+        String label = switch (m.getMasteryLevel()) {
+            case 1  -> "Quen thuộc";
+            case 2  -> "Nắm vững";
+            case 3  -> "Thuộc";
+            default -> "Chưa luyện";
+        };
+        return LessonItemsResponse.MasteryDto.builder()
+                .level(m.getMasteryLevel())
+                .label(label)
+                .attemptCount(m.getAttemptCount())
+                .emaScore(m.getEmaScore().doubleValue())
+                .lastPracticedAt(m.getLastPracticedAt())
+                .build();
+    }
+
+    // ── Retry Wrong Items ─────────────────────────────────────────────────
+
+    /**
+     * Tạo phiên luyện tập mới chỉ với các câu trả lời sai từ phiên đã hoàn thành.
+     * POST /api/v1/learner/practice/sessions/{sessionId}/retry-wrong
+     */
+    public StartPracticeResponse retryWrongItems(UUID sessionId, UUID userId) {
+        PracticeSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new BusinessException("SESSION_NOT_FOUND",
+                        "Không tìm thấy phiên luyện tập."));
+
+        if (!session.getUserId().equals(userId)) {
+            throw new BusinessException("SESSION_ACCESS_DENIED",
+                    "Bạn không có quyền truy cập phiên luyện tập này.");
+        }
+
+        if (session.getStatus() != PracticeStatus.COMPLETED) {
+            throw new BusinessException("SESSION_NOT_COMPLETED",
+                    "Chỉ có thể ôn lại câu sai của phiên đã hoàn thành.");
+        }
+
+        List<PracticeItem> wrongItems = itemRepository.findIncorrectBySessionId(sessionId);
+        if (wrongItems.isEmpty()) {
+            throw new BusinessException("NO_WRONG_ITEMS",
+                    "Bạn đã trả lời đúng tất cả câu hỏi trong phiên này! Hãy thử phiên mới.");
+        }
+
+        // Collect refContentIds split by type
+        List<UUID> selectedVocabIds   = new ArrayList<>();
+        List<UUID> selectedGrammarIds = new ArrayList<>();
+        Set<UUID> seen = new HashSet<>();
+
+        for (PracticeItem item : wrongItems) {
+            if (item.getRefContentId() == null || item.getRefContentType() == null) continue;
+            if (!seen.add(item.getRefContentId())) continue; // deduplicate
+
+            if ("VOCABULARY".equals(item.getRefContentType())) {
+                selectedVocabIds.add(item.getRefContentId());
+            } else if ("GRAMMAR".equals(item.getRefContentType())) {
+                selectedGrammarIds.add(item.getRefContentId());
+            }
+        }
+
+        if (selectedVocabIds.isEmpty() && selectedGrammarIds.isEmpty()) {
+            // fallback: items have no refContentId → redo the whole session
+            log.warn("retryWrongItems: không có refContentId nào trong wrong items của session {}, fallback redo", sessionId);
+            StartPracticeRequest fallback = StartPracticeRequest.builder()
+                    .lessonId(session.getLessonId())
+                    .sessionType(session.getSessionType())
+                    .preset(PracticePreset.STANDARD)
+                    .build();
+            return startSession(userId, fallback);
+        }
+
+        StartPracticeRequest request = StartPracticeRequest.builder()
+                .lessonId(session.getLessonId())
+                .sessionType(session.getSessionType())
+                .selectedVocabIds(selectedVocabIds.isEmpty() ? null : selectedVocabIds)
+                .selectedGrammarIds(selectedGrammarIds.isEmpty() ? null : selectedGrammarIds)
+                .build();
+
+        log.info("retryWrongItems: user={} session={} wrongVocab={} wrongGrammar={}",
+                userId, sessionId, selectedVocabIds.size(), selectedGrammarIds.size());
+        return startSession(userId, request);
     }
 
     // ── Progress ──────────────────────────────────────────────────────────
@@ -579,7 +990,7 @@ public class PracticeSessionService {
         StartPracticeRequest request = StartPracticeRequest.builder()
                 .lessonId(session.getLessonId())
                 .sessionType(session.getSessionType())
-                .itemCount(session.getTotalItems())
+                .preset(PracticePreset.STANDARD)
                 .build();
 
         return startSession(userId, request);
@@ -638,7 +1049,7 @@ public class PracticeSessionService {
         }
 
         // MULTIPLE_CHOICE, TRUE_FALSE: shuffle options (trừ TRUE_FALSE giữ Đúng/Sai cố định)
-        List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.options();
+        List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.getOptions();
         if (options != null && options.size() > 1
                 && resolvedType != PracticeItemType.TRUE_FALSE) {
             options = new ArrayList<>(options);
@@ -649,14 +1060,14 @@ public class PracticeSessionService {
                 .sessionId(session.getId())
                 .itemIndex(index)
                 .itemType(resolvedType)
-                .question(gen.question() != null ? gen.question() : "")
-                .questionJapanese(gen.questionJapanese())
-                .hint(gen.hint())
+                .question(gen.getQuestion() != null ? gen.getQuestion() : "")
+                .questionJapanese(gen.getQuestionJapanese())
+                .hint(gen.getHint())
                 .options(buildOptionsJson(options))
-                .correctAnswer(gen.correctAnswer() != null ? gen.correctAnswer() : "")
-                .explanation(gen.explanation())
-                .refContentId(parseUuid(gen.refContentId()))
-                .refContentType(gen.refContentType())
+                .correctAnswer(gen.getCorrectAnswer() != null ? gen.getCorrectAnswer() : "")
+                .explanation(gen.getExplanation())
+                .refContentId(parseUuid(gen.getRefContentId()))
+                .refContentType(gen.getRefContentType())
                 .build();
     }
 
@@ -671,17 +1082,17 @@ public class PracticeSessionService {
                                              ExerciseGeneratorAgent.GeneratedItem gen,
                                              int index,
                                              PracticeItemType itemType) {
-        List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.options();
+        List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.getOptions();
         if (options == null || options.isEmpty()) {
             log.warn("buildSelectionItem: LLM không trả về options cho {} item {}", itemType, index);
             return PracticeItem.builder()
                     .sessionId(session.getId())
                     .itemIndex(index)
                     .itemType(itemType)
-                    .question(gen.question() != null ? gen.question() : "")
+                    .question(gen.getQuestion() != null ? gen.getQuestion() : "")
                     .options("[]")
-                    .correctAnswer(gen.correctAnswer() != null ? gen.correctAnswer() : "")
-                    .explanation(gen.explanation())
+                    .correctAnswer(gen.getCorrectAnswer() != null ? gen.getCorrectAnswer() : "")
+                    .explanation(gen.getExplanation())
                     .build();
         }
 
@@ -703,13 +1114,13 @@ public class PracticeSessionService {
                     .sessionId(session.getId())
                     .itemIndex(index)
                     .itemType(itemType)
-                    .question(gen.question() != null ? gen.question() : "")
-                    .hint(gen.hint())
+                    .question(gen.getQuestion() != null ? gen.getQuestion() : "")
+                    .hint(gen.getHint())
                     .options(buildOptionsJson(shuffled))
-                    .correctAnswer(gen.correctAnswer() != null ? gen.correctAnswer() : "")
-                    .explanation(gen.explanation())
-                    .refContentId(parseUuid(gen.refContentId()))
-                    .refContentType(gen.refContentType())
+                    .correctAnswer(gen.getCorrectAnswer() != null ? gen.getCorrectAnswer() : "")
+                    .explanation(gen.getExplanation())
+                    .refContentId(parseUuid(gen.getRefContentId()))
+                    .refContentType(gen.getRefContentType())
                     .build();
         }
 
@@ -717,14 +1128,14 @@ public class PracticeSessionService {
                 .sessionId(session.getId())
                 .itemIndex(index)
                 .itemType(itemType)
-                .question(gen.question() != null ? gen.question() : "")
-                .questionJapanese(gen.questionJapanese())
-                .hint(gen.hint())
+                .question(gen.getQuestion() != null ? gen.getQuestion() : "")
+                .questionJapanese(gen.getQuestionJapanese())
+                .hint(gen.getHint())
                 .options(buildOptionsJson(shuffled))
                 .correctAnswer(String.valueOf(correctId))
-                .explanation(gen.explanation())
-                .refContentId(parseUuid(gen.refContentId()))
-                .refContentType(gen.refContentType())
+                .explanation(gen.getExplanation())
+                .refContentId(parseUuid(gen.getRefContentId()))
+                .refContentType(gen.getRefContentType())
                 .build();
     }
 
@@ -739,17 +1150,17 @@ public class PracticeSessionService {
     private PracticeItem buildSentenceOrderItem(PracticeSession session,
                                                  ExerciseGeneratorAgent.GeneratedItem gen,
                                                  int index) {
-        List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.options();
+        List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.getOptions();
         if (options == null || options.isEmpty()) {
             log.warn("buildSentenceOrderItem: LLM không trả về options cho SENTENCE_ORDER item {}", index);
             return PracticeItem.builder()
                     .sessionId(session.getId())
                     .itemIndex(index)
                     .itemType(PracticeItemType.SENTENCE_ORDER)
-                    .question(gen.question() != null ? gen.question() : "")
+                    .question(gen.getQuestion() != null ? gen.getQuestion() : "")
                     .options("[]")
                     .correctAnswer("")
-                    .explanation(gen.explanation())
+                    .explanation(gen.getExplanation())
                     .build();
         }
 
@@ -764,14 +1175,14 @@ public class PracticeSessionService {
                 .sessionId(session.getId())
                 .itemIndex(index)
                 .itemType(PracticeItemType.SENTENCE_ORDER)
-                .question(gen.question() != null ? gen.question() : "")
-                .questionJapanese(gen.questionJapanese())
-                .hint(gen.hint())
+                .question(gen.getQuestion() != null ? gen.getQuestion() : "")
+                .questionJapanese(gen.getQuestionJapanese())
+                .hint(gen.getHint())
                 .options(buildOptionsJson(options))   // giữ thứ tự đúng, frontend tự shuffle
                 .correctAnswer(correctAnswer.toString())
-                .explanation(gen.explanation())
-                .refContentId(parseUuid(gen.refContentId()))
-                .refContentType(gen.refContentType())
+                .explanation(gen.getExplanation())
+                .refContentId(parseUuid(gen.getRefContentId()))
+                .refContentType(gen.getRefContentType())
                 .build();
     }
 
@@ -787,7 +1198,7 @@ public class PracticeSessionService {
     private PracticeItem buildMatchingItem(PracticeSession session,
                                            ExerciseGeneratorAgent.GeneratedItem gen,
                                            int index) {
-        List<ExerciseGeneratorAgent.GeneratedItem.MatchingPair> pairs = gen.pairs();
+        List<ExerciseGeneratorAgent.GeneratedItem.MatchingPair> pairs = gen.getPairs();
         if (pairs == null || pairs.isEmpty()) {
             // Fallback: LLM không trả về pairs — lưu item trống
             log.warn("buildMatchingItem: LLM không trả về pairs cho MATCHING item {}", index);
@@ -795,7 +1206,7 @@ public class PracticeSessionService {
                     .sessionId(session.getId())
                     .itemIndex(index)
                     .itemType(PracticeItemType.MATCHING)
-                    .question(gen.question() != null ? gen.question() : "Nối từ tiếng Nhật với nghĩa tiếng Việt")
+                    .question(gen.getQuestion() != null ? gen.getQuestion() : "Nối từ tiếng Nhật với nghĩa tiếng Việt")
                     .options("[]")
                     .correctAnswer("")
                     .build();
@@ -850,14 +1261,14 @@ public class PracticeSessionService {
                 .sessionId(session.getId())
                 .itemIndex(index)
                 .itemType(PracticeItemType.MATCHING)
-                .question(gen.question() != null ? gen.question() : "Nối từ tiếng Nhật với nghĩa tiếng Việt")
-                .questionJapanese(gen.questionJapanese())
-                .hint(gen.hint())
+                .question(gen.getQuestion() != null ? gen.getQuestion() : "Nối từ tiếng Nhật với nghĩa tiếng Việt")
+                .questionJapanese(gen.getQuestionJapanese())
+                .hint(gen.getHint())
                 .options(optionsJson)
                 .correctAnswer(correctAnswer.toString())
-                .explanation(gen.explanation())
-                .refContentId(parseUuid(gen.refContentId()))
-                .refContentType(gen.refContentType())
+                .explanation(gen.getExplanation())
+                .refContentId(parseUuid(gen.getRefContentId()))
+                .refContentType(gen.getRefContentType())
                 .build();
     }
 
@@ -894,14 +1305,14 @@ public class PracticeSessionService {
      */
     private PracticeItemType resolveItemType(PracticeSessionType sessionType,
                                              ExerciseGeneratorAgent.GeneratedItem gen) {
-        if (gen.itemType() != null && !gen.itemType().isBlank()) {
+        if (gen.getItemType() != null && !gen.getItemType().isBlank()) {
             try {
-                return PracticeItemType.valueOf(gen.itemType().trim().toUpperCase());
+                return PracticeItemType.valueOf(gen.getItemType().trim().toUpperCase());
             } catch (IllegalArgumentException e) {
-                log.warn("resolveItemType: LLM trả về itemType không hợp lệ '{}', fallback.", gen.itemType());
+                log.warn("resolveItemType: LLM trả về itemType không hợp lệ '{}', fallback.", gen.getItemType());
             }
         }
-        List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.options();
+        List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.getOptions();
         if (options != null && options.size() == 2) {
             boolean hasTrueFalse = options.stream()
                     .anyMatch(o -> "Đúng".equals(o.text()) || "Sai".equals(o.text()));
@@ -911,7 +1322,6 @@ public class PracticeSessionService {
             return PracticeItemType.MULTIPLE_CHOICE;
         }
         return switch (sessionType) {
-            case KANJI_READING -> PracticeItemType.FILL_BLANK;
             case VOCAB_DRILL -> PracticeItemType.FILL_BLANK;
             case GRAMMAR_DRILL -> PracticeItemType.FILL_BLANK;
             default -> PracticeItemType.TRANSLATION;
@@ -973,19 +1383,28 @@ public class PracticeSessionService {
             progress.setBestScore(session.getScore());
         }
 
-        // Tính mastery: rolling average giữa mastery cũ và điểm mới
+        // Tính mastery từ item_mastery EMA (aggregateLessonMastery)
         // Vocab mastery dựa trên loại session
         if (session.getSessionType() == PracticeSessionType.VOCAB_DRILL
-                || session.getSessionType() == PracticeSessionType.KANJI_READING
                 || session.getSessionType() == PracticeSessionType.MIXED_LESSON) {
-            BigDecimal newVocab = rollingAverage(progress.getVocabMastery(), session.getScore());
-            progress.setVocabMastery(newVocab);
+            List<UUID> allVocabIds = vocabularyRepository.findByLessonId(session.getLessonId())
+                    .stream().map(v -> v.getId()).collect(Collectors.toList());
+            if (!allVocabIds.isEmpty()) {
+                double vocabMastery = itemMasteryService.aggregateLessonMastery(
+                        session.getUserId(), allVocabIds, "VOCABULARY");
+                progress.setVocabMastery(BigDecimal.valueOf(vocabMastery).setScale(2, RoundingMode.HALF_UP));
+            }
         }
 
         if (session.getSessionType() == PracticeSessionType.GRAMMAR_DRILL
                 || session.getSessionType() == PracticeSessionType.MIXED_LESSON) {
-            BigDecimal newGrammar = rollingAverage(progress.getGrammarMastery(), session.getScore());
-            progress.setGrammarMastery(newGrammar);
+            List<UUID> allGrammarIds = grammarPointRepository.findByLessonId(session.getLessonId())
+                    .stream().map(g -> g.getId()).collect(Collectors.toList());
+            if (!allGrammarIds.isEmpty()) {
+                double grammarMastery = itemMasteryService.aggregateLessonMastery(
+                        session.getUserId(), allGrammarIds, "GRAMMAR");
+                progress.setGrammarMastery(BigDecimal.valueOf(grammarMastery).setScale(2, RoundingMode.HALF_UP));
+            }
         }
 
         progressRepository.save(progress);

@@ -37,4 +37,25 @@ public class AnswerFeedbackResponse {
      * null nếu sessionCompleted = true hoặc nếu việc sinh câu hỏi thất bại.
      */
     private PracticeItemResponse nextItem;
+
+    // ── Mastery delta ───────────────────────────────────────────────────────
+
+    /**
+     * Mastery level trước khi trả lời câu này.
+     * null nếu item không có refContentId (không track được).
+     */
+    private Integer masteryLevelBefore;
+
+    /**
+     * Mastery level sau khi trả lời câu này.
+     * null nếu item không có refContentId.
+     */
+    private Integer masteryLevelAfter;
+
+    /**
+     * Từ / mẫu ngữ pháp tiếng Nhật của item vừa trả lời.
+     * Ví dụ: "先生" — dùng để hiển thị "先生: ◔ → ◑" trên UI.
+     * null nếu không track được.
+     */
+    private String entityJapanese;
 }

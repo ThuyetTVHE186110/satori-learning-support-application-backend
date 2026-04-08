@@ -1,13 +1,13 @@
 package com.fu.practice.agent;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 
 import java.io.IOException;
@@ -15,13 +15,14 @@ import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.common.exception.BusinessException;
 import com.fu.course.entity.GrammarPoint;
 import com.fu.course.entity.Vocabulary;
-import com.fu.course.repository.GrammarPointRepository;
-import com.fu.course.repository.VocabularyRepository;
 import com.fu.curriculumimport.service.embedding.ChatbotFilter;
 import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import com.fu.curriculumimport.service.embedding.RagContext;
+import com.fu.practice.entity.ItemMastery;
 import com.fu.practice.entity.PracticeItemType;
 import com.fu.practice.entity.PracticeSessionType;
+import com.fu.practice.entity.QuestionDimension;
+import com.fu.user.entity.UserLearningPreferences;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
@@ -30,14 +31,7 @@ import org.springframework.ai.openai.api.ResponseFormat;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.EnumMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -47,10 +41,12 @@ import java.util.stream.Collectors;
  * Agent sinh câu hỏi luyện tập dựa trên nội dung bài học.
  *
  * Flow:
- * 1. Tải vocab/grammar của bài học từ DB
- * 2. RAG: lấy thêm context từ embedding store làm distractor
- * 3. Gọi LLM sinh câu hỏi dạng JSON
- * 4. Parse và validate kết quả; retry 1 lần nếu lỗi
+ * 1. Nhận selectedVocab/Grammar (đã filter từ service), allLesson items (distractor source)
+ * 2. Build 8-block prompt: content+UUID, distractor, learner profile, dimension,
+ *    coverage (explicit), anti-repeat, item type rules, diversity directive
+ * 3. Gọi LLM song song theo batch (theo PracticeItemType)
+ * 4. postProcessRefContentIds(): resolve shortId → fullUUID + fuzzy fallback
+ * 5. Trả về GeneratedItem list
  */
 @Service
 @Slf4j
@@ -58,8 +54,6 @@ public class ExerciseGeneratorAgent {
 
     private final ChatClient chatClient;
     private final EmbeddingService embeddingService;
-    private final VocabularyRepository vocabularyRepository;
-    private final GrammarPointRepository grammarPointRepository;
     private final ObjectMapper objectMapper;
     private final PromptTemplateLoader promptLoader;
     private final Executor taskExecutor;
@@ -67,82 +61,84 @@ public class ExerciseGeneratorAgent {
     public ExerciseGeneratorAgent(
             OpenAiChatModel openAiChatModel,
             EmbeddingService embeddingService,
-            VocabularyRepository vocabularyRepository,
-            GrammarPointRepository grammarPointRepository,
             ObjectMapper objectMapper,
             PromptTemplateLoader promptLoader,
             @Qualifier("practiceTaskExecutor") Executor taskExecutor) {
         this.chatClient = ChatClient.builder(openAiChatModel).build();
         this.embeddingService = embeddingService;
-        this.vocabularyRepository = vocabularyRepository;
-        this.grammarPointRepository = grammarPointRepository;
         this.objectMapper = objectMapper;
         this.promptLoader = promptLoader;
         this.taskExecutor = taskExecutor;
     }
 
+    // ── Public API ─────────────────────────────────────────────────────────
+
     /**
-     * Sinh danh sách câu hỏi luyện tập cho bài học.
+     * Sinh danh sách câu hỏi luyện tập.
      *
-     * @param lessonId   ID bài học
-     * @param courseId   ID khóa học
-     * @param type       loại phiên luyện tập (quyết định nội dung: vocab / grammar / mixed)
-     * @param count      số lượng câu hỏi yêu cầu (1-20)
-     * @param jlptLevel  cấp độ JLPT của khóa học (ví dụ: "N5")
-     * @param itemTypes  dạng câu hỏi muốn sinh — null/rỗng = tự chọn theo sessionType
-     * @return danh sách câu hỏi đã sinh
+     * @param lessonId           ID bài học (dùng cho RAG fallback)
+     * @param courseId           ID khóa học (dùng cho RAG fallback)
+     * @param sessionType        VOCAB_DRILL / GRAMMAR_DRILL / MIXED_LESSON
+     * @param resolvedCount      số câu cần sinh (đã tính từ preset hoặc selection)
+     * @param jlptLevel          "N5" ... "N1"
+     * @param itemTypes          dạng câu hỏi (null = auto)
+     * @param selectedVocab      từ vựng được chọn (đã filter)
+     * @param selectedGrammar    ngữ pháp được chọn (đã filter)
+     * @param allLessonVocab     toàn bộ vocab của lesson (dùng làm distractor)
+     * @param allLessonGrammar   toàn bộ grammar của lesson (dùng làm distractor)
+     * @param isExplicitMode     true nếu học viên đã chọn cụ thể
+     * @param prefs              learning preferences (nullable)
+     * @param dimension          góc câu hỏi đã chọn qua mastery-weighted vote
+     * @param masteryMap         map entityId → ItemMastery cho anti-repeat
      */
     public List<GeneratedItem> generateItems(
             UUID lessonId,
             UUID courseId,
-            PracticeSessionType type,
-            int count,
+            PracticeSessionType sessionType,
+            int resolvedCount,
             String jlptLevel,
-            List<PracticeItemType> itemTypes) {
+            List<PracticeItemType> itemTypes,
+            List<Vocabulary> selectedVocab,
+            List<GrammarPoint> selectedGrammar,
+            List<Vocabulary> allLessonVocab,
+            List<GrammarPoint> allLessonGrammar,
+            boolean isExplicitMode,
+            UserLearningPreferences prefs,
+            QuestionDimension dimension,
+            Map<UUID, ItemMastery> masteryMap) {
 
-        // Load vocab and grammar in parallel
-        CompletableFuture<List<Vocabulary>> vocabFuture =
-                CompletableFuture.supplyAsync(() -> loadVocabulary(lessonId, type), taskExecutor);
-        CompletableFuture<List<GrammarPoint>> grammarFuture =
-                CompletableFuture.supplyAsync(() -> loadGrammar(lessonId, type), taskExecutor);
-
-        List<Vocabulary> vocabList;
-        List<GrammarPoint> grammarList;
-        try {
-            vocabList = vocabFuture.get(10, TimeUnit.SECONDS);
-            grammarList = grammarFuture.get(10, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            throw new BusinessException("PRACTICE_LOAD_FAILED",
-                    "Không thể tải nội dung bài học. Vui lòng thử lại.");
-        }
-
-        if (vocabList.isEmpty() && grammarList.isEmpty()) {
+        if ((selectedVocab == null || selectedVocab.isEmpty())
+                && (selectedGrammar == null || selectedGrammar.isEmpty())) {
             throw new BusinessException("PRACTICE_NO_CONTENT",
                     "Bài học chưa có nội dung để luyện tập. Vui lòng liên hệ giáo viên.");
         }
 
-        List<PracticeItemType> resolvedTypes = resolveItemTypes(type, itemTypes);
+        List<PracticeItemType> resolvedTypes = resolveItemTypes(sessionType, itemTypes);
 
-        // Shuffle vocab/grammar order so each session generates different questions
-        // even when the lesson content is identical.
-        List<Vocabulary> shuffledVocab = new ArrayList<>(vocabList);
-        List<GrammarPoint> shuffledGrammar = new ArrayList<>(grammarList);
+        // Shuffle để mỗi session có thứ tự câu hỏi khác nhau
+        List<Vocabulary> shuffledVocab = new ArrayList<>(
+                selectedVocab != null ? selectedVocab : List.of());
+        List<GrammarPoint> shuffledGrammar = new ArrayList<>(
+                selectedGrammar != null ? selectedGrammar : List.of());
         Collections.shuffle(shuffledVocab);
         Collections.shuffle(shuffledGrammar);
 
-        String contentSummary = buildContentSummary(shuffledVocab, shuffledGrammar);
+        // UUID short map: shortId (8 chars) → fullUUID — dùng để resolve refContentId sau khi parse
+        Map<String, UUID> uuidShortMap = new LinkedHashMap<>();
 
-        // RAG runs in a virtual thread in parallel with the LLM batch calls below.
-        // We give it 3 s to complete; if it misses the window we use "" (distractors
-        // from contentSummary are sufficient for practice anyway).
-        CompletableFuture<String> ragFuture = CompletableFuture
-                .supplyAsync(() -> buildRagContext(contentSummary, courseId, lessonId), taskExecutor)
-                .completeOnTimeout("", 3, TimeUnit.SECONDS);
+        // Build 8-block prompt một lần, dùng chung cho tất cả batch
+        String contentBlock    = buildContentBlock(shuffledVocab, shuffledGrammar, uuidShortMap);
+        String distractorBlock = buildDistractorBlock(allLessonVocab, shuffledVocab,
+                                                       allLessonGrammar, shuffledGrammar,
+                                                       isExplicitMode, courseId, lessonId);
+        String profileBlock    = buildLearnerProfileBlock(prefs);
+        String dimensionBlock  = buildDimensionBlock(dimension, prefs);
+        String coverageBlock   = buildCoverageBlock(shuffledVocab, shuffledGrammar, isExplicitMode);
+        String antiRepeatBlock = buildAntiRepeatBlock(masteryMap,
+                                                       allIds(shuffledVocab, shuffledGrammar));
 
-        // Build all LLM batch tasks upfront, then run ALL in parallel via virtual threads.
-        // 20 MC items / 5 per call = 4 futures all in flight simultaneously.
-        // Wall time ≈ max(individual call times), not their sum.
-        Map<PracticeItemType, Integer> distribution = distributeCount(count, resolvedTypes);
+        // Phân bổ và tạo batch tasks
+        Map<PracticeItemType, Integer> distribution = distributeCount(resolvedCount, resolvedTypes);
         List<PracticeItemType> distinctTypes = resolvedTypes.stream().distinct().collect(Collectors.toList());
 
         List<BatchTask> tasks = new ArrayList<>();
@@ -157,41 +153,39 @@ public class ExerciseGeneratorAgent {
             }
         }
 
+        // Chạy tất cả batch song song
         List<CompletableFuture<BatchResult>> futures = tasks.stream()
                 .map(task -> CompletableFuture.supplyAsync(() -> {
-                    // Use ragContext if it is ready; otherwise fall back to "" so this
-                    // batch is never blocked waiting for the embedding search.
-                    String rag = ragFuture.isDone() ? ragFuture.join() : "";
                     List<GeneratedItem> result = generateSingleBatch(
-                            task.batchSize(), type, jlptLevel, contentSummary, rag, task.itemType());
+                            task.batchSize(), sessionType, jlptLevel,
+                            contentBlock, distractorBlock, profileBlock,
+                            dimensionBlock, coverageBlock, antiRepeatBlock,
+                            task.itemType());
                     return new BatchResult(task.itemType(), task.batchIndex(), result);
                 }, taskExecutor))
                 .collect(Collectors.toList());
 
-        // Wait for ALL futures in parallel, then collect results.
-        // allOf() lets every future run to completion (or timeout) concurrently;
-        // individual exceptions are caught per-future so one failed batch
-        // doesn't cancel the others.
+        // Collect results
         Map<PracticeItemType, List<BatchResult>> resultsByType = new LinkedHashMap<>();
-        CompletableFuture<Void> all = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
         try {
-            all.get(120, TimeUnit.SECONDS);
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .get(120, TimeUnit.SECONDS);
         } catch (Exception ignored) {
-            // Some futures may have timed out — we still collect whatever finished.
+            // Thu thập những gì đã hoàn thành
         }
         for (CompletableFuture<BatchResult> f : futures) {
             if (f.isDone() && !f.isCompletedExceptionally()) {
                 try {
                     BatchResult r = f.getNow(null);
-                    if (r != null) {
-                        resultsByType.computeIfAbsent(r.itemType(), k -> new ArrayList<>()).add(r);
-                    }
+                    if (r != null) resultsByType
+                            .computeIfAbsent(r.itemType(), k -> new ArrayList<>()).add(r);
                 } catch (Exception e) {
-                    log.warn("ExerciseGeneratorAgent: Lỗi lấy kết quả batch: {}", e.getMessage());
+                    log.warn("ExerciseGeneratorAgent: Lỗi lấy batch result: {}", e.getMessage());
                 }
             }
         }
 
+        // Merge và interleave
         Map<PracticeItemType, List<GeneratedItem>> byType = new LinkedHashMap<>();
         for (PracticeItemType t : distinctTypes) {
             List<BatchResult> batches = resultsByType.getOrDefault(t, List.of());
@@ -202,28 +196,457 @@ public class ExerciseGeneratorAgent {
             if (!merged.isEmpty()) byType.put(t, merged);
         }
 
-        List<GeneratedItem> items = interleaveItems(byType, resolvedTypes, count);
+        List<GeneratedItem> items = interleaveItems(byType, resolvedTypes, resolvedCount);
 
         if (items.isEmpty()) {
             throw new BusinessException("PRACTICE_GENERATION_FAILED",
                     "Không thể sinh câu hỏi luyện tập. Vui lòng thử lại sau.");
         }
 
+        // Post-process: resolve shortId → fullUUID + fuzzy fallback
+        postProcessRefContentIds(items, shuffledVocab, shuffledGrammar, uuidShortMap);
+
         return items;
     }
 
+    // ── Prompt Blocks ──────────────────────────────────────────────────────
+
     /**
-     * Max items per single LLM call, keyed by item type.
-     *
-     * Rationale — keep per-call output tokens small to avoid JSON truncation:
-     * - MULTIPLE_CHOICE / TRUE_FALSE: 4 options × N items can grow fast → cap at 5
-     * - FILL_BLANK / TRANSLATION: medium output → 5 is safe
-     * - SENTENCE_ORDER: token arrays per item → 4
-     * - MATCHING: 4 pairs per item, most verbose → 3
-     *
-     * Smaller cap = more parallel virtual-thread futures = lower risk of truncation/retry.
-     * Wall time = max(all futures), so more futures does NOT increase total time.
+     * Block 1: Nội dung cần luyện với UUID ngắn gắn vào từng dòng.
+     * LLM dùng shortId để điền refContentId → giải quyết vấn đề refContentId = null.
      */
+    private String buildContentBlock(List<Vocabulary> vocab, List<GrammarPoint> grammar,
+                                     Map<String, UUID> uuidShortMap) {
+        StringBuilder sb = new StringBuilder("=== NỘI DUNG CẦN LUYỆN ===\n");
+
+        if (!vocab.isEmpty()) {
+            sb.append("Từ vựng:\n");
+            for (Vocabulary v : vocab) {
+                String shortId = shortId(v.getId());
+                uuidShortMap.put(shortId, v.getId());
+                sb.append(String.format("  [%s] %s [%s] — %s (%s)\n",
+                        shortId,
+                        v.getJapaneseText(),
+                        v.getReading() != null ? v.getReading() : "",
+                        v.getMeaningVi() != null ? v.getMeaningVi() : v.getMeaningEn(),
+                        v.getPartOfSpeech() != null ? v.getPartOfSpeech() : ""));
+            }
+        }
+
+        if (!grammar.isEmpty()) {
+            sb.append("Ngữ pháp:\n");
+            for (GrammarPoint g : grammar) {
+                String shortId = shortId(g.getId());
+                uuidShortMap.put(shortId, g.getId());
+                sb.append(String.format("  [%s] %s — %s\n",
+                        shortId,
+                        g.getPattern(),
+                        g.getMeaningVi() != null ? g.getMeaningVi() : g.getMeaningEn()));
+            }
+        }
+
+        sb.append("\nrefContentId = shortId [xxxxxxxx] của từ/ngữ pháp bạn đang hỏi. KHÔNG để null.\n");
+        return sb.toString();
+    }
+
+    /**
+     * Block 2: Distractor pool.
+     * Explicit mode: non-selected items của cùng lesson — chất lượng cao hơn RAG.
+     * Auto mode với ít item: fallback sang RAG.
+     */
+    private String buildDistractorBlock(
+            List<Vocabulary> allVocab, List<Vocabulary> selectedVocab,
+            List<GrammarPoint> allGrammar, List<GrammarPoint> selectedGrammar,
+            boolean isExplicitMode, UUID courseId, UUID lessonId) {
+
+        Set<UUID> selVocabIds = selectedVocab.stream()
+                .map(Vocabulary::getId).collect(Collectors.toSet());
+        Set<UUID> selGrammarIds = selectedGrammar.stream()
+                .map(GrammarPoint::getId).collect(Collectors.toSet());
+
+        List<String> lines = new ArrayList<>();
+        allVocab.stream()
+                .filter(v -> !selVocabIds.contains(v.getId()))
+                .limit(10)
+                .forEach(v -> lines.add(String.format("  %s [%s] — %s",
+                        v.getJapaneseText(),
+                        v.getReading() != null ? v.getReading() : "",
+                        v.getMeaningVi() != null ? v.getMeaningVi() : "")));
+        allGrammar.stream()
+                .filter(g -> !selGrammarIds.contains(g.getId()))
+                .limit(5)
+                .forEach(g -> lines.add(String.format("  %s — %s",
+                        g.getPattern(),
+                        g.getMeaningVi() != null ? g.getMeaningVi() : "")));
+
+        // Fallback sang RAG nếu lesson quá ít item và là auto mode
+        if (lines.isEmpty() && !isExplicitMode) {
+            return buildRagDistractorBlock(
+                    buildSimpleContentSummary(selectedVocab, selectedGrammar),
+                    courseId, lessonId);
+        }
+
+        if (lines.isEmpty()) return "";
+
+        return "=== DISTRACTORS (chỉ dùng làm đáp án SAI trong MC/FILL_BLANK) ===\n"
+                + String.join("\n", lines)
+                + "\nKHÔNG hỏi về các nội dung này — chỉ dùng làm nhiễu.\n";
+    }
+
+    /**
+     * Block 3: Hồ sơ học viên từ UserLearningPreferences.
+     * Trả về "" nếu prefs null (người dùng chưa thiết lập).
+     */
+    private String buildLearnerProfileBlock(UserLearningPreferences prefs) {
+        if (prefs == null) return "";
+        StringBuilder sb = new StringBuilder("=== HỒ SƠ NGƯỜI HỌC ===\n");
+
+        if (prefs.getTargetJlptLevel() != null)
+            sb.append("Mục tiêu: ").append(prefs.getTargetJlptLevel()).append("\n");
+
+        if (prefs.getPreferredTopics() != null && prefs.getPreferredTopics().length > 0)
+            sb.append("Chủ đề quan tâm: ")
+              .append(String.join(", ", prefs.getPreferredTopics()))
+              .append(" → ưu tiên đặt ví dụ/câu hỏi vào ngữ cảnh này\n");
+
+        if (prefs.getConversationStyle() != null) {
+            String hint = switch (prefs.getConversationStyle()) {
+                case "business"  -> "môi trường công sở, văn phòng";
+                case "travel"    -> "du lịch, hỏi đường, đặt phòng";
+                case "practical" -> "hội thoại hàng ngày, mua sắm, nhà hàng";
+                case "creative"  -> "sáng tạo, đa dạng ngữ cảnh";
+                default          -> null;
+            };
+            if (hint != null) sb.append("Ngữ cảnh ưa thích: ").append(hint).append("\n");
+        }
+
+        if (prefs.getLearningPace() != null) {
+            String hint = switch (prefs.getLearningPace()) {
+                case "slow" -> "CHẬM → thêm hint, câu hỏi ít bẫy, explanation chi tiết";
+                case "fast" -> "NHANH → ít hint, ưu tiên SENTENCE_ORDER và TRANSLATION, bẫy tinh tế";
+                default     -> null;
+            };
+            if (hint != null) sb.append("Tốc độ học: ").append(hint).append("\n");
+        }
+
+        if (prefs.getPreferredFormality() != null) {
+            String hint = switch (prefs.getPreferredFormality()) {
+                case "casual" -> "thông thường (だ、じゃない)";
+                case "formal" -> "trang trọng (ございます、でしょうか)";
+                default       -> "lịch sự (ます、です)";
+            };
+            sb.append("Văn phong ví dụ: ").append(hint).append("\n");
+        }
+
+        if (prefs.getWeakPoints() != null && !prefs.getWeakPoints().isEmpty())
+            sb.append("Điểm yếu: ").append(prefs.getWeakPoints())
+              .append(" → nhấn mạnh trong explanation và dùng làm bẫy trong đáp án sai\n");
+
+        return sb.toString();
+    }
+
+    /**
+     * Block 4: Dimension (góc câu hỏi) — tín hiệu chính chống lặp.
+     * Inject topic context từ prefs khi dimension = CONTEXT.
+     */
+    private String buildDimensionBlock(QuestionDimension dim, UserLearningPreferences prefs) {
+        String topicCtx = (prefs != null && prefs.getPreferredTopics() != null
+                && prefs.getPreferredTopics().length > 0)
+                ? String.join(", ", prefs.getPreferredTopics())
+                : "hàng ngày";
+
+        return switch (dim) {
+            case MEANING -> """
+                    === GÓC CÂU HỎI: NGHĨA ===
+                    Hỏi nghĩa tiếng Việt ↔ tiếng Nhật.
+                    Luân phiên cả 2 chiều: JP→VN và VN→JP.
+                    TRÁNH hỏi cách đọc hay cách dùng trong câu ở lần này.
+                    """;
+            case READING -> """
+                    === GÓC CÂU HỎI: CÁCH ĐỌC ===
+                    Hỏi furigana / on-yomi / kun-yomi của từ.
+                    Ví dụ: "先生 đọc là gì?" / "Chữ nào đọc là せんせい?"
+                    TRÁNH hỏi nghĩa ở lần này.
+                    """;
+            case USAGE -> """
+                    === GÓC CÂU HỎI: CÁCH DÙNG TRONG CÂU ===
+                    Tạo câu có chỗ trống, học viên chọn từ/mẫu phù hợp.
+                    Ưu tiên FILL_BLANK và SENTENCE_ORDER.
+                    Câu phải có context đủ để phân biệt đáp án đúng/sai.
+                    """;
+            case CONTEXT -> "=== GÓC CÂU HỎI: NGỮ CẢNH THỰC TẾ ===\n"
+                    + "Đặt câu hỏi trong tình huống: " + topicCtx + "\n"
+                    + "Mô phỏng hội thoại thực: nhà hàng, du lịch, trường học, công việc...\n"
+                    + "Ưu tiên TRANSLATION và FILL_BLANK.\n";
+            case ANTONYM_SYNONYM -> """
+                    === GÓC CÂU HỎI: QUAN HỆ TỪ ===
+                    Hỏi về từ trái nghĩa, đồng nghĩa, hoặc từ liên quan.
+                    Ưu tiên MULTIPLE_CHOICE và TRUE_FALSE.
+                    """;
+            case IDENTIFICATION -> """
+                    === GÓC CÂU HỎI: NHẬN DIỆN MẪU NGỮ PHÁP ===
+                    Cho 4 câu, hỏi câu nào dùng mẫu ngữ pháp đúng.
+                    Ưu tiên MULTIPLE_CHOICE và TRUE_FALSE.
+                    """;
+            case FORMATION -> """
+                    === GÓC CÂU HỎI: BIẾN THỂ / CHIA ĐỘNG TỪ ===
+                    Hỏi về て形、た形、ない形 của động từ, hoặc cách kết hợp mẫu.
+                    Ưu tiên FILL_BLANK và SENTENCE_ORDER.
+                    """;
+            case CONTRAST -> """
+                    === GÓC CÂU HỎI: PHÂN BIỆT ===
+                    So sánh 2 từ/mẫu dễ nhầm lẫn trong bài.
+                    Ưu tiên TRUE_FALSE và MULTIPLE_CHOICE với bẫy tinh tế.
+                    Explanation PHẢI giải thích rõ sự khác biệt.
+                    """;
+        };
+    }
+
+    /**
+     * Block 5: Coverage requirement — chỉ explicit mode.
+     * Đảm bảo mỗi item được chọn có ít nhất 1 câu hỏi.
+     */
+    private String buildCoverageBlock(List<Vocabulary> selectedVocab,
+                                       List<GrammarPoint> selectedGrammar,
+                                       boolean isExplicitMode) {
+        if (!isExplicitMode) return "";
+        StringBuilder sb = new StringBuilder(
+                "=== YÊU CẦU BAO PHỦ (BẮT BUỘC) ===\n"
+                + "Mỗi mục sau PHẢI xuất hiện trong ÍT NHẤT 1 câu hỏi:\n");
+        selectedVocab.forEach(v -> sb.append(String.format(
+                "  • %s [%s] (id: %s)\n",
+                v.getJapaneseText(), v.getReading() != null ? v.getReading() : "",
+                shortId(v.getId()))));
+        selectedGrammar.forEach(g -> sb.append(String.format(
+                "  • %s (id: %s)\n", g.getPattern(), shortId(g.getId()))));
+        return sb.toString();
+    }
+
+    /**
+     * Block 6: Anti-repeat — ghi nhú items đã được hỏi gần đây (24h).
+     * Prompt LLM ưu tiên tránh lặp góc đó cho những item này.
+     */
+    private String buildAntiRepeatBlock(Map<UUID, ItemMastery> masteryMap,
+                                         List<UUID> selectedIds) {
+        if (masteryMap == null || masteryMap.isEmpty()) return "";
+
+        java.time.LocalDateTime cutoff = java.time.LocalDateTime.now().minusHours(24);
+        List<String> lines = selectedIds.stream()
+                .map(masteryMap::get)
+                .filter(m -> m != null && m.getLastDimension() != null
+                          && m.getLastPracticedAt() != null
+                          && m.getLastPracticedAt().isAfter(cutoff))
+                .map(m -> "  • entityId=" + shortId(m.getEntityId())
+                        + " vừa được hỏi góc " + m.getLastDimension())
+                .collect(Collectors.toList());
+
+        if (lines.isEmpty()) return "";
+        return "=== GÓC ĐÃ HỎI GẦN ĐÂY (ưu tiên tránh lặp lại) ===\n"
+                + String.join("\n", lines) + "\n";
+    }
+
+    // ── Single batch generation ────────────────────────────────────────────
+
+    private static final String DIVERSITY_DIRECTIVE = """
+            === NGUYÊN TẮC ĐA DẠNG ===
+            1. KHÔNG dùng cùng cấu trúc câu hỏi quá 2 lần liên tiếp
+            2. Luân phiên JP→VN và VN→JP trong cùng session
+            3. Đáp án sai phải cùng loại từ, plausible — không dùng từ ngẫu nhiên vô nghĩa
+            4. Nếu hỏi cùng 1 từ 2 lần → 2 câu phải có cấu trúc khác nhau
+            """;
+
+    private List<GeneratedItem> generateSingleBatch(
+            int count, PracticeSessionType sessionType, String jlptLevel,
+            String contentBlock, String distractorBlock, String profileBlock,
+            String dimensionBlock, String coverageBlock, String antiRepeatBlock,
+            PracticeItemType itemType) {
+
+        String prompt = contentBlock
+                + distractorBlock
+                + profileBlock
+                + dimensionBlock
+                + coverageBlock
+                + antiRepeatBlock
+                + buildItemTypeSection(count, sessionType, jlptLevel, itemType)
+                + DIVERSITY_DIRECTIVE;
+
+        List<GeneratedItem> items = callLlm(prompt, count);
+
+        if (items == null || items.isEmpty()) {
+            log.warn("ExerciseGeneratorAgent: Retry dạng {} với prompt đơn giản hơn", itemType);
+            items = callLlm(buildSimpleRetryPrompt(count, sessionType, jlptLevel,
+                    contentBlock, dimensionBlock, itemType), count);
+        }
+        if (items == null) return List.of();
+        return items.size() <= count ? items : items.subList(0, count);
+    }
+
+    private String buildItemTypeSection(int count, PracticeSessionType sessionType,
+                                         String jlptLevel, PracticeItemType itemType) {
+        String rule = describeTypeRule(itemType);
+        String optionsNote = switch (itemType) {
+            case MULTIPLE_CHOICE -> "array 4 object {\"text\":\"...\",\"isCorrect\":true/false} — đúng 1, sai 3";
+            case FILL_BLANK      -> "array {\"text\":\"...\",\"isCorrect\":true/false} — đúng 1, nhiễu tùy số từ phù hợp";
+            case TRUE_FALSE      -> "array 2 object: [{\"text\":\"Đúng\",\"isCorrect\":X},{\"text\":\"Sai\",\"isCorrect\":Y}]";
+            case SENTENCE_ORDER  -> "array object — mỗi object 1 token tiếng Nhật, TẤT CẢ isCorrect=false";
+            case MATCHING        -> "[] — dùng trường \"pairs\" thay thế";
+            default              -> "[] (rỗng)";
+        };
+        String pairsNote = itemType == PracticeItemType.MATCHING
+                ? "array {\"left\":\"tiếng Nhật\",\"right\":\"tiếng Việt\"} — 4 cặp"
+                : "null";
+        String level = jlptLevel != null ? jlptLevel : "N5";
+
+        return "=== YÊU CẦU KỲ NÀY ===\n"
+                + "Số câu: " + count + " | JLPT: " + level
+                + " | Loại: " + describeSessionType(sessionType) + "\n"
+                + "Dạng câu hỏi: CHỈ sinh dạng " + itemType.name()
+                + " — itemType của MỌI câu PHẢI là \"" + itemType.name() + "\"\n\n"
+                + "QUY TẮC CHO DẠNG " + itemType.name() + ":\n" + rule + "\n\n"
+                + "CẤU TRÚC JSON mỗi phần tử:\n"
+                + "- \"itemType\"        : \"" + itemType.name() + "\"\n"
+                + "- \"question\"        : câu hỏi / yêu cầu\n"
+                + "- \"questionJapanese\": câu tiếng Nhật (null nếu không cần)\n"
+                + "- \"options\"         : " + optionsNote + "\n"
+                + "- \"pairs\"           : " + pairsNote + "\n"
+                + "- \"correctAnswer\"   : đáp án đúng dạng string (null nếu MATCHING)\n"
+                + "- \"hint\"            : gợi ý ngắn (null nếu không có)\n"
+                + "- \"explanation\"     : giải thích tại sao đúng, bằng tiếng Việt\n"
+                + "- \"refContentId\"    : shortId [xxxxxxxx] của từ/ngữ pháp đang hỏi — BẮT BUỘC\n"
+                + "- \"refContentType\"  : \"VOCABULARY\" hoặc \"GRAMMAR\"\n";
+    }
+
+    private String buildSimpleRetryPrompt(int count, PracticeSessionType sessionType,
+                                           String jlptLevel, String contentBlock,
+                                           String dimensionBlock, PracticeItemType itemType) {
+        return promptLoader.render("prompts/exercise-generator-simple.st", Map.of(
+                "count", String.valueOf(count),
+                "jlptLevel", jlptLevel != null ? jlptLevel : "N5",
+                "contentSummary", contentBlock,
+                "dimensionHint", dimensionBlock,
+                "itemTypeInstruction", buildItemTypeInstruction(List.of(itemType)),
+                "exampleType", itemType.name()));
+    }
+
+    // ── Post-processing: resolve refContentId ─────────────────────────────
+
+    /**
+     * Sau khi parse LLM output:
+     * 1. Map shortId → fullUUID nếu LLM điền đúng shortId
+     * 2. Fuzzy fallback: tìm japaneseText / pattern xuất hiện trong question
+     */
+    private void postProcessRefContentIds(List<GeneratedItem> items,
+                                           List<Vocabulary> vocab,
+                                           List<GrammarPoint> grammar,
+                                           Map<String, UUID> uuidShortMap) {
+        for (GeneratedItem item : items) {
+            if (item.getRefContentId() != null) {
+                // Thử resolve shortId → fullUUID
+                UUID full = uuidShortMap.get(item.getRefContentId().replace("-", ""));
+                if (full == null) {
+                    // LLM có thể đã trả về dạng partial UUID — tìm match
+                    final String refId = item.getRefContentId();
+                    full = uuidShortMap.entrySet().stream()
+                            .filter(e -> e.getValue().toString().contains(refId)
+                                      || refId.contains(e.getKey()))
+                            .map(Map.Entry::getValue)
+                            .findFirst().orElse(null);
+                }
+                if (full != null) {
+                    item.setRefContentId(full.toString());
+                }
+                continue; // LLM đã điền, dù có thể sai — fuzzy sẽ overwrite nếu null
+            }
+
+            // Fuzzy fallback: tìm trong question text
+            String q = nullSafe(item.getQuestion()) + nullSafe(item.getQuestionJapanese());
+            boolean found = false;
+            for (Vocabulary v : vocab) {
+                if (q.contains(v.getJapaneseText())) {
+                    item.setRefContentId(v.getId().toString());
+                    item.setRefContentType("VOCABULARY");
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                for (GrammarPoint g : grammar) {
+                    if (g.getPattern() != null && q.contains(g.getPattern())) {
+                        item.setRefContentId(g.getId().toString());
+                        item.setRefContentType("GRAMMAR");
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // ── RAG fallback (auto mode, lesson ít item) ──────────────────────────
+
+    private String buildRagDistractorBlock(String contentSummary, UUID courseId, UUID lessonId) {
+        try {
+            ChatbotFilter filter = ChatbotFilter.forPractice(courseId, lessonId);
+            RagContext rag = CompletableFuture
+                    .supplyAsync(() -> embeddingService.retrieveContext(contentSummary, filter))
+                    .get(3, TimeUnit.SECONDS);
+            if (!rag.hasContext()) return "";
+            StringBuilder sb = new StringBuilder(
+                    "=== DISTRACTORS (từ bài học khác) ===\n");
+            rag.getSimilarItems().forEach(item ->
+                    sb.append("  - ").append(item.getTextContent()).append("\n"));
+            sb.append("KHÔNG hỏi về các nội dung này — chỉ dùng làm nhiễu.\n");
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("ExerciseGeneratorAgent: Bỏ qua RAG distractor (timeout/lỗi): {}", e.getMessage());
+            return "";
+        }
+    }
+
+    // ── Allowed item types ─────────────────────────────────────────────────
+
+    private static final Map<PracticeSessionType, List<PracticeItemType>> ALLOWED_ITEM_TYPES =
+            Map.of(
+                    PracticeSessionType.VOCAB_DRILL,   List.of(
+                            PracticeItemType.MULTIPLE_CHOICE,
+                            PracticeItemType.FILL_BLANK,
+                            PracticeItemType.MATCHING,
+                            PracticeItemType.TRUE_FALSE,
+                            PracticeItemType.SENTENCE_ORDER,
+                            PracticeItemType.TRANSLATION),
+                    PracticeSessionType.GRAMMAR_DRILL, List.of(
+                            PracticeItemType.MULTIPLE_CHOICE,
+                            PracticeItemType.FILL_BLANK,
+                            PracticeItemType.TRUE_FALSE,
+                            PracticeItemType.SENTENCE_ORDER,
+                            PracticeItemType.TRANSLATION),
+                    PracticeSessionType.MIXED_LESSON,  List.of(
+                            PracticeItemType.MULTIPLE_CHOICE,
+                            PracticeItemType.FILL_BLANK,
+                            PracticeItemType.TRUE_FALSE,
+                            PracticeItemType.MATCHING,
+                            PracticeItemType.SENTENCE_ORDER,
+                            PracticeItemType.TRANSLATION)
+            );
+
+    private List<PracticeItemType> resolveItemTypes(PracticeSessionType type,
+                                                     List<PracticeItemType> requested) {
+        List<PracticeItemType> allowed = ALLOWED_ITEM_TYPES.getOrDefault(
+                type, List.of(PracticeItemType.values()));
+
+        if (requested == null || requested.isEmpty()) {
+            return allowed.size() <= 3 ? allowed : allowed.subList(0, 3);
+        }
+        List<PracticeItemType> valid = requested.stream()
+                .filter(allowed::contains).distinct().collect(Collectors.toList());
+        if (valid.isEmpty()) {
+            throw new BusinessException("INVALID_ITEM_TYPES",
+                    "Dạng câu hỏi không hợp lệ với loại phiên \"" + type.name() + "\".");
+        }
+        return valid;
+    }
+
+    // ── Distribution & interleave ─────────────────────────────────────────
+
     private static final Map<PracticeItemType, Integer> MAX_PER_CALL_BY_TYPE;
     static {
         Map<PracticeItemType, Integer> m = new EnumMap<>(PracticeItemType.class);
@@ -240,28 +663,8 @@ public class ExerciseGeneratorAgent {
         return MAX_PER_CALL_BY_TYPE.getOrDefault(type, 5);
     }
 
-    /**
-     * Một LLM call duy nhất cho count ≤ MAX_PER_CALL items.
-     */
-    private List<GeneratedItem> generateSingleBatch(int count, PracticeSessionType sessionType,
-                                                     String jlptLevel, String contentSummary,
-                                                     String ragContext, PracticeItemType itemType) {
-        String prompt = buildSingleTypePrompt(count, sessionType, jlptLevel, contentSummary, ragContext, itemType);
-        List<GeneratedItem> items = callLlm(prompt, count);
-        if (items == null || items.isEmpty()) {
-            log.warn("ExerciseGeneratorAgent: Retry dạng {} với prompt đơn giản hơn", itemType);
-            items = callLlm(buildSimplePrompt(count, sessionType, jlptLevel, contentSummary,
-                    List.of(itemType)), count);
-        }
-        if (items == null) return List.of();
-        return items.size() <= count ? items : items.subList(0, count);
-    }
-
-    /**
-     * Phân bổ số câu đều cho từng loại item type.
-     * Phần dư được phân cho các loại đầu tiên.
-     */
-    private Map<PracticeItemType, Integer> distributeCount(int total, List<PracticeItemType> types) {
+    private Map<PracticeItemType, Integer> distributeCount(int total,
+                                                            List<PracticeItemType> types) {
         List<PracticeItemType> distinct = types.stream().distinct().collect(Collectors.toList());
         if (distinct.isEmpty()) return Map.of();
         int base = total / distinct.size();
@@ -273,12 +676,8 @@ public class ExerciseGeneratorAgent {
         return dist;
     }
 
-    /**
-     * Xen kẽ các câu hỏi theo thứ tự type: type0[0], type1[0], type2[0], type0[1], ...
-     * Đảm bảo learner không phải làm liên tiếp cùng một dạng.
-     */
     private List<GeneratedItem> interleaveItems(Map<PracticeItemType, List<GeneratedItem>> byType,
-                                                List<PracticeItemType> orderedTypes, int maxCount) {
+                                                  List<PracticeItemType> orderedTypes, int maxCount) {
         List<GeneratedItem> result = new ArrayList<>();
         List<PracticeItemType> distinct = orderedTypes.stream().distinct().collect(Collectors.toList());
         int maxSize = byType.values().stream().mapToInt(List::size).max().orElse(0);
@@ -286,305 +685,72 @@ public class ExerciseGeneratorAgent {
             for (PracticeItemType t : distinct) {
                 if (result.size() >= maxCount) break;
                 List<GeneratedItem> bucket = byType.getOrDefault(t, List.of());
-                if (i < bucket.size()) {
-                    result.add(bucket.get(i));
-                }
+                if (i < bucket.size()) result.add(bucket.get(i));
             }
         }
         return result;
     }
 
-    // ── Private helpers ────────────────────────────────────────────────────
-
-    private List<Vocabulary> loadVocabulary(UUID lessonId, PracticeSessionType type) {
-        if (type == PracticeSessionType.GRAMMAR_DRILL) {
-            return List.of();
-        }
-        return vocabularyRepository.findByLessonId(lessonId);
-    }
-
-    private List<GrammarPoint> loadGrammar(UUID lessonId, PracticeSessionType type) {
-        if (type == PracticeSessionType.VOCAB_DRILL || type == PracticeSessionType.KANJI_READING) {
-            return List.of();
-        }
-        return grammarPointRepository.findByLessonId(lessonId);
-    }
-
-    private String buildContentSummary(List<Vocabulary> vocabList, List<GrammarPoint> grammarList) {
-        StringBuilder sb = new StringBuilder();
-
-        if (!vocabList.isEmpty()) {
-            sb.append("=== TỪ VỰNG ===\n");
-            for (Vocabulary v : vocabList) {
-                sb.append(String.format("- %s [%s]: %s",
-                        v.getJapaneseText(),
-                        v.getReading() != null ? v.getReading() : "",
-                        v.getMeaningVi() != null ? v.getMeaningVi() : v.getMeaningEn()));
-                if (v.getPartOfSpeech() != null) {
-                    sb.append(" (").append(v.getPartOfSpeech()).append(")");
-                }
-                sb.append("\n");
-            }
-        }
-
-        if (!grammarList.isEmpty()) {
-            sb.append("=== NGỮ PHÁP ===\n");
-            for (GrammarPoint g : grammarList) {
-                sb.append(String.format("- %s: %s",
-                        g.getPattern(),
-                        g.getMeaningVi() != null ? g.getMeaningVi() : g.getMeaningEn()));
-                if (g.getShortExplanation() != null) {
-                    sb.append(" | ").append(g.getShortExplanation());
-                }
-                sb.append("\n");
-            }
-        }
-
-        return sb.toString();
-    }
-
-    private String buildRagContext(String contentSummary, UUID courseId, UUID lessonId) {
-        try {
-            ChatbotFilter filter = ChatbotFilter.forPractice(courseId, lessonId);
-            // RAG is only used for distractors — cap at 2 s so it never blocks the LLM call
-            RagContext rag = CompletableFuture
-                    .supplyAsync(() -> embeddingService.retrieveContext(contentSummary, filter))
-                    .get(2, TimeUnit.SECONDS);
-            if (!rag.hasContext()) {
-                return "";
-            }
-
-            StringBuilder sb = new StringBuilder("=== NGỮ CẢNH BỔ SUNG (dùng làm distractor) ===\n");
-            rag.getSimilarItems().forEach(item ->
-                    sb.append("- ").append(item.getTextContent()).append("\n"));
-            return sb.toString();
-        } catch (Exception e) {
-            log.warn("ExerciseGeneratorAgent: Bỏ qua RAG context (timeout/lỗi): {}", e.getMessage());
-            return "";
-        }
-    }
-
-    /**
-     * Item types hợp lệ cho từng session type.
-     *
-     * Ràng buộc dựa trên nội dung được nạp:
-     * - VOCAB_DRILL    : vocab only → tất cả item types từ vựng (bao gồm SENTENCE_ORDER, TRANSLATION)
-     * - GRAMMAR_DRILL  : grammar only → tất cả item types ngữ pháp (bao gồm SENTENCE_ORDER, TRANSLATION)
-     * - KANJI_READING  : vocab only, tập trung đọc → MC, FILL_BLANK, MATCHING
-     * - MIXED_LESSON   : vocab + grammar → tất cả item types
-     */
-    private static final Map<PracticeSessionType, List<PracticeItemType>> ALLOWED_ITEM_TYPES =
-            Map.of(
-                    PracticeSessionType.VOCAB_DRILL,   List.of(
-                            PracticeItemType.MULTIPLE_CHOICE,
-                            PracticeItemType.FILL_BLANK,
-                            PracticeItemType.MATCHING,
-                            PracticeItemType.TRUE_FALSE,
-                            PracticeItemType.SENTENCE_ORDER,
-                            PracticeItemType.TRANSLATION),
-                    PracticeSessionType.GRAMMAR_DRILL, List.of(
-                            PracticeItemType.MULTIPLE_CHOICE,
-                            PracticeItemType.FILL_BLANK,
-                            PracticeItemType.TRUE_FALSE,
-                            PracticeItemType.SENTENCE_ORDER,
-                            PracticeItemType.TRANSLATION),
-                    PracticeSessionType.KANJI_READING, List.of(
-                            PracticeItemType.MULTIPLE_CHOICE,
-                            PracticeItemType.FILL_BLANK,
-                            PracticeItemType.MATCHING),
-                    PracticeSessionType.MIXED_LESSON,  List.of(
-                            PracticeItemType.MULTIPLE_CHOICE,
-                            PracticeItemType.FILL_BLANK,
-                            PracticeItemType.TRUE_FALSE,
-                            PracticeItemType.MATCHING,
-                            PracticeItemType.SENTENCE_ORDER,
-                            PracticeItemType.TRANSLATION)
-            );
-
-    /**
-     * Xác định danh sách dạng câu hỏi cần sinh.
-     * - Nếu người dùng không chọn: dùng default của sessionType.
-     * - Nếu người dùng chọn: lọc bỏ các type không hợp lệ với sessionType,
-     *   ném lỗi rõ ràng nếu tất cả đều không hợp lệ.
-     */
-    private List<PracticeItemType> resolveItemTypes(PracticeSessionType type,
-                                                     List<PracticeItemType> requested) {
-        List<PracticeItemType> allowed = ALLOWED_ITEM_TYPES.getOrDefault(type,
-                List.of(PracticeItemType.values()));
-
-        if (requested == null || requested.isEmpty()) {
-            // Default: 2-3 type đầu trong danh sách allowed
-            return allowed.size() <= 3 ? allowed : allowed.subList(0, 3);
-        }
-
-        List<PracticeItemType> valid = requested.stream()
-                .filter(allowed::contains)
-                .distinct()
-                .collect(Collectors.toList());
-
-        if (valid.isEmpty()) {
-            throw new BusinessException("INVALID_ITEM_TYPES",
-                    "Dạng câu hỏi không hợp lệ với loại phiên \"" + type.name() + "\". "
-                    + "Các dạng được hỗ trợ: " + allowed.stream()
-                            .map(Enum::name).collect(Collectors.joining(", ")));
-        }
-
-        if (valid.size() < requested.size()) {
-            List<PracticeItemType> rejected = requested.stream()
-                    .filter(t -> !allowed.contains(t))
-                    .distinct()
-                    .collect(Collectors.toList());
-            log.warn("resolveItemTypes: Bỏ qua {} vì không hợp lệ với session {}: {}",
-                    rejected, type, rejected.stream().map(Enum::name).collect(Collectors.joining(", ")));
-        }
-
-        return valid;
-    }
-
-    /**
-     * Prompt tập trung vào DUY NHẤT một item type.
-     * Không có ví dụ type khác → LLM không bị lẫn lộn cấu trúc options.
-     */
-    private String buildSingleTypePrompt(int count, PracticeSessionType sessionType, String jlptLevel,
-                                          String contentSummary, String ragContext,
-                                          PracticeItemType itemType) {
-        String rule = describeTypeRule(itemType);
-        String optionsNote = switch (itemType) {
-            case MULTIPLE_CHOICE -> "array 4 object {\"text\":\"...\",\"isCorrect\":true/false} — đúng 1, sai 3";
-            case FILL_BLANK      -> "array {\"text\":\"...\",\"isCorrect\":true/false} — đúng 1 (từ cần điền vào ___), còn lại là từ nhiễu cùng loại từ trong bài (số lượng tùy)";
-            case TRUE_FALSE      -> "array 2 object: [{\"text\":\"Đúng\",\"isCorrect\":X},{\"text\":\"Sai\",\"isCorrect\":Y}]";
-            case SENTENCE_ORDER  -> "array object, mỗi object là 1 token tiếng Nhật, TẤT CẢ isCorrect=false";
-            case MATCHING        -> "[] — dùng trường \"pairs\" thay thế";
-            default              -> "[] (rỗng)";
-        };
-        String pairsNote = itemType == PracticeItemType.MATCHING
-                ? "array {\"left\":\"tiếng Nhật\",\"right\":\"tiếng Việt\"} — 4 cặp"
-                : "bỏ qua hoặc null";
-
-        // Use concatenation — NOT String.format — because contentSummary/ragContext
-        // may contain literal '%' characters (e.g. in vocabulary/grammar text) which
-        // would cause MissingFormatArgumentException and silently drop this type.
-        String level = jlptLevel != null ? jlptLevel : "N5";
-        String typeName = itemType.name();
-        return "Bạn là giáo viên tiếng Nhật chuyên nghiệp. Tạo " + count + " câu hỏi dạng "
-                + typeName + " cấp độ " + level + ".\n\n"
-                + "LOẠI NỘI DUNG: " + describeSessionType(sessionType) + "\n\n"
-                + "NỘI DUNG BÀI HỌC (chỉ dùng từ danh sách này):\n"
-                + contentSummary + "\n"
-                + ragContext + "\n"
-                + "QUY TẮC BẮT BUỘC cho dạng " + typeName + ":\n"
-                + rule + "\n\n"
-                + "CẤU TRÚC JSON mỗi phần tử (itemType PHẢI là \"" + typeName + "\"):\n"
-                + "- \"itemType\"        : \"" + typeName + "\"\n"
-                + "- \"question\"        : câu hỏi / yêu cầu\n"
-                + "- \"questionJapanese\": câu tiếng Nhật (null nếu không cần)\n"
-                + "- \"options\"         : " + optionsNote + "\n"
-                + "- \"pairs\"           : " + pairsNote + "\n"
-                + "- \"correctAnswer\"   : đáp án đúng dạng string (null nếu MATCHING)\n"
-                + "- \"hint\"            : gợi ý ngắn (null nếu không có)\n"
-                + "- \"explanation\"     : giải thích tại sao đúng, bằng tiếng Việt\n"
-                + "- \"refContentId\"    : null\n"
-                + "- \"refContentType\"  : \"VOCABULARY\" hoặc \"GRAMMAR\" hoặc null\n\n"
-                + "Trả về JSON array THUẦN — không markdown, không text thừa, bắt đầu bằng \"[\".\n"
-                + "options PHẢI là array object {text, isCorrect} — KHÔNG dùng array string.\n";
-    }
-
-    private String buildSimplePrompt(int count, PracticeSessionType type, String jlptLevel,
-                                     String contentSummary, List<PracticeItemType> itemTypes) {
-        return promptLoader.render("prompts/exercise-generator-simple.st", Map.of(
-                "count", String.valueOf(count),
-                "jlptLevel", jlptLevel != null ? jlptLevel : "N5",
-                "contentSummary", contentSummary,
-                "itemTypeInstruction", buildItemTypeInstruction(itemTypes),
-                "exampleType", itemTypes.isEmpty() ? "MULTIPLE_CHOICE" : itemTypes.get(0).name()));
-    }
+    // ── Type descriptions ─────────────────────────────────────────────────
 
     private String describeSessionType(PracticeSessionType type) {
         return switch (type) {
-            case VOCAB_DRILL    -> "Từ vựng — nghĩa, cách đọc, cách dùng của từng từ";
-            case GRAMMAR_DRILL  -> "Ngữ pháp — cấu trúc câu, ứng dụng mẫu ngữ pháp";
-            case KANJI_READING  -> "Hán tự — cách đọc on/kun-yomi và nghĩa của Kanji";
-            case MIXED_LESSON   -> "Tổng hợp — kết hợp từ vựng lẫn ngữ pháp của bài học";
+            case VOCAB_DRILL   -> "Từ vựng — nghĩa, cách đọc, cách dùng";
+            case GRAMMAR_DRILL -> "Ngữ pháp — cấu trúc câu, mẫu ngữ pháp";
+            case MIXED_LESSON  -> "Tổng hợp — kết hợp từ vựng và ngữ pháp";
         };
     }
 
-    /**
-     * Tạo instruction cho từng dạng câu hỏi được yêu cầu.
-     */
     private String buildItemTypeInstruction(List<PracticeItemType> types) {
         if (types.size() == 1) {
             PracticeItemType single = types.get(0);
-            return "CHỈ sinh dạng " + single.name() + ". NGHIÊM CẤM sinh bất kỳ dạng nào khác. " +
-                    "Trường itemType của MỌI câu hỏi phải là \"" + single.name() + "\".";
+            return "CHỈ sinh dạng " + single.name() + ". itemType của MỌI câu PHẢI là \""
+                    + single.name() + "\".";
         }
-        StringBuilder sb = new StringBuilder("Phân bổ đều các dạng sau (xen kẽ, không dồn vào 1 dạng):\n");
-        for (PracticeItemType t : types) {
-            sb.append("  - ").append(t.name()).append("\n");
-        }
-        sb.append("NGHIÊM CẤM sinh dạng nào không có trong danh sách trên.");
-        return sb.toString().trim();
-    }
-
-    /**
-     * Chỉ trả về quy tắc cho các dạng được yêu cầu, tránh LLM bị phân tâm bởi dạng khác.
-     */
-    private String buildItemTypeRules(List<PracticeItemType> types) {
-        StringBuilder sb = new StringBuilder();
-        for (PracticeItemType t : types) {
-            sb.append("- ").append(describeTypeRule(t)).append("\n");
-        }
+        StringBuilder sb = new StringBuilder("Phân bổ đều các dạng sau:\n");
+        types.forEach(t -> sb.append("  - ").append(t.name()).append("\n"));
         return sb.toString().trim();
     }
 
     private String describeTypeRule(PracticeItemType type) {
         return switch (type) {
             case MULTIPLE_CHOICE ->
-                    "MULTIPLE_CHOICE: question = câu hỏi. options = 4 object {text,isCorrect}: đúng 1 (isCorrect=true), sai 3 (isCorrect=false). Dùng RAG context làm đáp án sai nhiễu. correctAnswer = text của đáp án đúng.";
+                    "question = câu hỏi. options = 4 object {text,isCorrect}: đúng 1, sai 3. " +
+                    "correctAnswer = text của đáp án đúng.";
             case FILL_BLANK ->
-                    "FILL_BLANK: question = câu tiếng Nhật có ___ cần điền (ví dụ: 「___は学生です」). " +
-                    "options = array {text, isCorrect}: đúng 1 (isCorrect=true) là từ cần điền, còn lại (isCorrect=false) là các từ nhiễu cùng loại từ. " +
-                    "Số lượng options tùy thuộc vào số từ nhiễu phù hợp có trong bài — không cần cố định 4. " +
-                    "Các từ nhiễu phải là từ vựng khác trong bài hoặc từ gần nghĩa — KHÔNG dùng từ vô nghĩa. " +
-                    "correctAnswer = text của đáp án đúng (từ cần điền vào ___). hint = gợi ý về nghĩa hoặc cách dùng của từ cần điền.";
+                    "question = câu tiếng Nhật có ___ cần điền. " +
+                    "options = array {text, isCorrect}: đúng 1, còn lại là từ nhiễu cùng loại. " +
+                    "correctAnswer = từ cần điền.";
             case TRANSLATION ->
-                    "TRANSLATION: question = câu tiếng Nhật cần dịch sang tiếng Việt (hoặc ngược lại). " +
-                    "options = array {text, isCorrect}: đúng 1 (isCorrect=true) là bản dịch đúng, còn lại (isCorrect=false) là 3 bản dịch SAI — " +
-                    "phải sai về nghĩa hoặc ngữ pháp nhưng trông hợp lý (không dùng câu vô nghĩa). " +
-                    "correctAnswer = text của bản dịch đúng. hint = null.";
+                    "question = câu tiếng Nhật cần dịch (hoặc ngược lại). " +
+                    "options = 4 object {text,isCorrect}: đúng 1, sai 3 (sai nhưng trông hợp lý). " +
+                    "correctAnswer = bản dịch đúng.";
             case SENTENCE_ORDER ->
-                    "SENTENCE_ORDER: question = câu tiếng VIỆT tham chiếu để học viên biết nghĩa (ví dụ: \"Tôi là học sinh.\"). " +
-                    "options = từng TOKEN tiếng Nhật riêng lẻ của câu đúng, TẤT CẢ isCorrect=false. " +
-                    "QUAN TRỌNG: options CHỈ chứa các từ của câu ĐÚNG — KHÔNG sinh câu sai hay cụm từ nhiều chữ. " +
-                    "Ví dụ câu \"わたし は 学生 です\" thì options = [{\"text\":\"わたし\",\"isCorrect\":false},{\"text\":\"は\",\"isCorrect\":false},{\"text\":\"学生\",\"isCorrect\":false},{\"text\":\"です\",\"isCorrect\":false}]. " +
-                    "correctAnswer = câu Nhật đúng thứ tự (ví dụ: \"わたし は 学生 です\"). hint = null.";
+                    "question = câu tiếng Việt tham chiếu. " +
+                    "options = từng TOKEN tiếng Nhật, TẤT CẢ isCorrect=false. " +
+                    "correctAnswer = câu Nhật đúng thứ tự.";
             case MATCHING ->
-                    "MATCHING: sinh 1 item chứa TẤT CẢ các cặp. Dùng trường \"pairs\" (KHÔNG dùng options). " +
-                    "pairs = array gồm 4 cặp, mỗi cặp: {\"left\": \"từ tiếng Nhật\", \"right\": \"nghĩa tiếng Việt\"}. " +
-                    "options = []. correctAnswer = null. " +
-                    "Ví dụ: \"pairs\":[{\"left\":\"わたし\",\"right\":\"Tôi\"},{\"left\":\"あなた\",\"right\":\"Bạn\"},{\"left\":\"先生\",\"right\":\"Giáo viên\"},{\"left\":\"何歳\",\"right\":\"Mấy tuổi\"}].";
+                    "Dùng trường \"pairs\" (KHÔNG dùng options). " +
+                    "pairs = 4 cặp {\"left\":\"tiếng Nhật\",\"right\":\"tiếng Việt\"}. " +
+                    "options = []. correctAnswer = null.";
             case TRUE_FALSE ->
-                    "TRUE_FALSE: question = phát biểu về từ hoặc ngữ pháp (có thể đúng hoặc sai). options = [{\"text\":\"Đúng\",\"isCorrect\":X},{\"text\":\"Sai\",\"isCorrect\":Y}] — đúng 1, sai 1. correctAnswer = \"Đúng\" hoặc \"Sai\".";
+                    "question = phát biểu về từ/ngữ pháp. " +
+                    "options = [{\"text\":\"Đúng\",\"isCorrect\":X},{\"text\":\"Sai\",\"isCorrect\":Y}]. " +
+                    "correctAnswer = \"Đúng\" hoặc \"Sai\".";
         };
     }
 
-    /**
-     * OpenAI JSON mode: constrains token sampling so the model can ONLY produce valid JSON.
-     * Eliminates malformed-JSON errors (missing commas, truncated arrays) at the API level.
-     *
-     * json_object mode requires the output to be a JSON object {}, not an array [].
-     * The prompt instructs the model to wrap the array as {"items": [...]}.
-     */
+    // ── LLM call + JSON repair ────────────────────────────────────────────
+
     private static final OpenAiChatOptions JSON_MODE_OPTIONS = OpenAiChatOptions.builder()
-            .responseFormat(ResponseFormat.builder().type(ResponseFormat.Type.JSON_OBJECT).build())
+            .responseFormat(ResponseFormat.builder()
+                    .type(ResponseFormat.Type.JSON_OBJECT).build())
             .build();
 
     private List<GeneratedItem> callLlm(String prompt, int count) {
-        // Append wrapper instruction required by json_object mode
         String wrappedPrompt = prompt
-                + "\nQUAN TRỌNG: Đặt toàn bộ array câu hỏi trong một JSON object: "
-                + "{\"items\": [ ...array câu hỏi... ]}. "
-                + "KHÔNG trả về bare array [].";
-
+                + "\nQUAN TRỌNG: Đặt toàn bộ array câu hỏi trong JSON object: "
+                + "{\"items\": [ ...array câu hỏi... ]}. KHÔNG trả về bare array [].";
         try {
             String raw = chatClient.prompt()
                     .user(wrappedPrompt)
@@ -592,17 +758,13 @@ public class ExerciseGeneratorAgent {
                     .call()
                     .content();
 
-            if (raw == null || raw.isBlank()) {
-                return List.of();
-            }
+            if (raw == null || raw.isBlank()) return List.of();
 
             String cleaned = raw.trim();
             if (cleaned.startsWith("```")) {
                 cleaned = cleaned.replaceAll("^```[a-z]*\\n?", "").replaceAll("```$", "").trim();
             }
 
-            // Extract the "items" array from the wrapper object.
-            // Fall back to direct array parsing in case model ignored the wrapper instruction.
             try {
                 JsonNode root = objectMapper.readTree(cleaned);
                 JsonNode arr = root.isArray() ? root : root.path("items");
@@ -612,20 +774,15 @@ public class ExerciseGeneratorAgent {
                     return items != null ? items : List.of();
                 }
             } catch (Exception firstEx) {
-                // JSON mode guarantees valid JSON, but apply repair as last-resort safety net
                 String repaired = repairJson(cleaned);
                 try {
                     List<GeneratedItem> items = objectMapper.readValue(repaired,
                             new TypeReference<List<GeneratedItem>>() {});
-                    if (items != null && !items.isEmpty()) {
-                        log.debug("ExerciseGeneratorAgent: JSON repair succeeded ({} items)", items.size());
-                        return items;
-                    }
+                    if (items != null && !items.isEmpty()) return items;
                 } catch (Exception ignored) {}
-                log.warn("ExerciseGeneratorAgent: Lỗi parse JSON từ LLM: {}", firstEx.getMessage());
+                log.warn("ExerciseGeneratorAgent: Lỗi parse JSON: {}", firstEx.getMessage());
                 return null;
             }
-
             return List.of();
         } catch (Exception e) {
             log.warn("ExerciseGeneratorAgent: Lỗi gọi LLM: {}", e.getMessage());
@@ -633,74 +790,88 @@ public class ExerciseGeneratorAgent {
         }
     }
 
-    /**
-     * Repairs the most common LLM JSON formatting errors without a second LLM call.
-     *
-     * GPT-4o-mini occasionally omits commas between consecutive fields inside a JSON object,
-     * producing output like:
-     *   "explanation": "some text"          ← no comma here
-     *   "refContentId": null
-     *
-     * This method inserts missing commas by detecting any JSON value token (string, boolean,
-     * null, number) followed by a newline and then the start of the next token (", {, [).
-     * The fix is safe: in valid JSON, a value token immediately followed by a newline and
-     * another token is ALWAYS a missing-comma case.
-     */
     private String repairJson(String json) {
         return json
-            // string value → next field or value
-            .replaceAll("\"([ \\t]*\\r?\\n[ \\t]*)\"", "\",\n\"")
-            // true / false / null → next field
-            .replaceAll("\\b(true|false|null)([ \\t]*\\r?\\n[ \\t]*)\"", "$1,\n\"")
-            // number → next field
-            .replaceAll("(\\d)([ \\t]*\\r?\\n[ \\t]*)\"", "$1,\n\"")
-            // } (end of object) → next object in array
-            .replaceAll("\\}([ \\t]*\\r?\\n[ \\t]*)\\{", "},\n{");
+                .replaceAll("\"([ \\t]*\\r?\\n[ \\t]*)\"", "\",\n\"")
+                .replaceAll("\\b(true|false|null)([ \\t]*\\r?\\n[ \\t]*)\"", "$1,\n\"")
+                .replaceAll("(\\d)([ \\t]*\\r?\\n[ \\t]*)\"", "$1,\n\"")
+                .replaceAll("\\}([ \\t]*\\r?\\n[ \\t]*)\\{", "},\n{");
     }
 
-    // ── Inner record ───────────────────────────────────────────────────────
+    // ── Utility ────────────────────────────────────────────────────────────
 
-    /**
-     * Câu hỏi đã sinh từ LLM trước khi lưu vào DB.
-     * @JsonProperty để Jackson deserialize đúng tên field từ LLM JSON.
-     */
-    public record GeneratedItem(
-            @JsonProperty("itemType") String itemType,
-            @JsonProperty("question") String question,
-            @JsonProperty("questionJapanese") String questionJapanese,
-            @JsonProperty("options") List<OptionItem> options,
-            @JsonProperty("pairs") List<MatchingPair> pairs,
-            @JsonProperty("correctAnswer") String correctAnswer,
-            @JsonProperty("hint") String hint,
-            @JsonProperty("explanation") String explanation,
-            @JsonProperty("refContentId") String refContentId,
-            @JsonProperty("refContentType") String refContentType
-    ) {
+    /** Lấy 8 ký tự cuối của UUID (đủ unique trong scope 1 lesson). */
+    private String shortId(UUID id) {
+        return id.toString().replace("-", "").substring(24);
+    }
+
+    private String nullSafe(String s) {
+        return s != null ? s : "";
+    }
+
+    private String buildSimpleContentSummary(List<Vocabulary> vocab, List<GrammarPoint> grammar) {
+        StringBuilder sb = new StringBuilder();
+        if (vocab != null) vocab.forEach(v -> sb.append(v.getJapaneseText()).append(" "));
+        if (grammar != null) grammar.forEach(g -> sb.append(g.getPattern()).append(" "));
+        return sb.toString().trim();
+    }
+
+    private List<UUID> allIds(List<Vocabulary> vocab, List<GrammarPoint> grammar) {
+        List<UUID> ids = new ArrayList<>();
+        if (vocab != null) vocab.forEach(v -> ids.add(v.getId()));
+        if (grammar != null) grammar.forEach(g -> ids.add(g.getId()));
+        return ids;
+    }
+
+    // ── Inner records ──────────────────────────────────────────────────────
+
+    public static class GeneratedItem {
+        @JsonProperty("itemType")         private String itemType;
+        @JsonProperty("question")         private String question;
+        @JsonProperty("questionJapanese") private String questionJapanese;
+        @JsonProperty("options")          private List<OptionItem> options;
+        @JsonProperty("pairs")            private List<MatchingPair> pairs;
+        @JsonProperty("correctAnswer")    private String correctAnswer;
+        @JsonProperty("hint")             private String hint;
+        @JsonProperty("explanation")      private String explanation;
+        @JsonProperty("refContentId")     private String refContentId;
+        @JsonProperty("refContentType")   private String refContentType;
+
+        public GeneratedItem() {}
+
+        public String getItemType()          { return itemType; }
+        public String getQuestion()          { return question; }
+        public String getQuestionJapanese()  { return questionJapanese; }
+        public List<OptionItem> getOptions() { return options; }
+        public List<MatchingPair> getPairs() { return pairs; }
+        public String getCorrectAnswer()     { return correctAnswer; }
+        public String getHint()              { return hint; }
+        public String getExplanation()       { return explanation; }
+        public String getRefContentId()      { return refContentId; }
+        public String getRefContentType()    { return refContentType; }
+        public void setRefContentId(String v)   { this.refContentId = v; }
+        public void setRefContentType(String v) { this.refContentType = v; }
+
         @JsonDeserialize(using = OptionItemDeserializer.class)
         public record OptionItem(
                 @JsonProperty("text") String text,
-                @JsonProperty("isCorrect") boolean isCorrect
-        ) {}
+                @JsonProperty("isCorrect") boolean isCorrect) {}
 
-        /** Một cặp trong bài MATCHING: left = tiếng Nhật, right = tiếng Việt. */
         public record MatchingPair(
                 @JsonProperty("left") String left,
-                @JsonProperty("right") String right
-        ) {}
+                @JsonProperty("right") String right) {}
     }
 
-    /**
-     * Tolerates both object form {"text":"...","isCorrect":true} and bare string form "..."
-     * (LLM occasionally omits the object wrapper; treat bare strings as incorrect options).
-     */
     private record BatchTask(PracticeItemType itemType, int batchIndex, int batchSize) {}
-    private record BatchResult(PracticeItemType itemType, int batchIndex, List<GeneratedItem> items) {}
+    private record BatchResult(PracticeItemType itemType, int batchIndex,
+                                List<GeneratedItem> items) {}
 
     public static class OptionItemDeserializer extends StdDeserializer<GeneratedItem.OptionItem> {
         public OptionItemDeserializer() { super(GeneratedItem.OptionItem.class); }
 
         @Override
-        public GeneratedItem.OptionItem deserialize(JsonParser p, DeserializationContext ctx) throws IOException {
+        public GeneratedItem.OptionItem deserialize(JsonParser p,
+                                                     DeserializationContext ctx) throws IOException {
             if (p.currentToken() == JsonToken.VALUE_STRING) {
                 return new GeneratedItem.OptionItem(p.getText(), false);
             }
