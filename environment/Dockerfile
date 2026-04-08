@@ -32,8 +32,8 @@ COPY modules/roleplay/pom.xml modules/roleplay/
 COPY modules/user/pom.xml modules/user/
 COPY start/pom.xml start/
 
-# Pre-fetch all dependencies (cached layer — only invalidated when a pom changes)
-RUN mvn dependency:go-offline -B
+# Pre-fetch all dependencies including plugin dependencies
+RUN mvn dependency:go-offline dependency:resolve-plugins -B
 
 # Copy all source code
 COPY common/src common/src
