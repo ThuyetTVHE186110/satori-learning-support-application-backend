@@ -126,7 +126,7 @@ ON CONFLICT (user_id, badge_id) DO NOTHING;
 INSERT INTO gamification.user_stats 
 (id, user_id, total_exp, current_level, coins, current_streak, longest_streak, streak_last_date, created_at, updated_at)
 VALUES
-('f1000000-0000-0000-0000-000000000005', 'a0000000-0000-0000-0000-000000000005', 4205, 14, 300, 21, 21, CURRENT_DATE::DATE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+('f1000000-0000-0000-0000-000000000005', 'a0000000-0000-0000-0000-000000000005', 4205, 14, 300, 21, 21, '2026-04-07', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 ON CONFLICT (user_id) DO NOTHING;
 
 -- ============================================================================

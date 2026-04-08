@@ -13,7 +13,7 @@
 
 -- Badge: First Step (1-day learning streak)
 INSERT INTO gamification.badges (
-    id, name, description, badge_type, requirement_value, 
+    id, name, description, badge_type, requirement_value,
     icon_url, exp_reward, status, created_at, updated_at
 ) VALUES (
     'b0000000-0000-0000-0000-000000000001',
@@ -136,7 +136,7 @@ INSERT INTO gamification.badges (
 
 -- Day 1: 2026-04-01 (Streak count: 1)
 INSERT INTO gamification.streak_history (
-    id, user_id, streak_date, streak_count, activity_type, 
+    id, user_id, streak_date, streak_count, activity_type,
     exp_earned, freeze_used, created_at
 ) VALUES (
     'd0000000-0000-0000-0000-000000000001',
@@ -275,11 +275,11 @@ INSERT INTO gamification.user_badges (
 -- ==================== 4. UPDATE USER STATS (OPTIONAL) ====================
 -- Update learner1 stats to reflect earned badges and progression
 UPDATE gamification.user_stats
-SET 
+SET
     current_level = 7,
     current_streak = 7,
     longest_streak = 7,
-    streak_last_date = CURRENT_DATE::DATE,
+    streak_last_date = '2026-04-07',
     updated_at = CURRENT_TIMESTAMP
 WHERE user_id = 'a0000000-0000-0000-0000-000000000004';
 
@@ -296,7 +296,7 @@ INSERT INTO gamification.user_stats (
     100,  -- Coins
     7,    -- Current streak
     7,    -- Longest streak
-    CURRENT_DATE::DATE,
+    '2026-04-07',  -- Last streak date
     CURRENT_TIMESTAMP,
     CURRENT_TIMESTAMP
 ) ON CONFLICT (user_id) DO NOTHING;
