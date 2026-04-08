@@ -1,6 +1,7 @@
 package com.fu.achievement.service;
 
 import com.fu.achievement.dto.response.BadgeResponse;
+import com.fu.achievement.dto.response.StreakNotificationResponse;
 import com.fu.achievement.entity.UserStats;
 import java.util.List;
 import java.util.UUID;
@@ -19,13 +20,13 @@ public interface StreakService {
      * - Same day: No change to current streak
      * - Consecutive day: Increment streak by 1
      * - Missed 1 day with freeze: Maintain streak + consume 1 freeze token
-     * - Missed >1 day or no freeze: Reset streak to 1
+     * - Missed >1 day or no freeze: Reset streak to 0
      * 
      * @param userId User ID
      * @param activityType Type of activity (PRACTICE, SPEAKING, ASSIGNMENT, etc.)
-     * @return List of newly earned LEARNING_STREAK badges (if any)
+     * @return StreakNotificationResponse with streak details and first-activity-of-day flag
      */
-    List<BadgeResponse> recordDailyActivity(UUID userId, String activityType);
+    StreakNotificationResponse recordDailyActivity(UUID userId, String activityType);
 
     /**
      * Get or create user stats record
@@ -51,6 +52,15 @@ public interface StreakService {
      * Reset user streak to 0 (admin function, e.g., for violation)
      */
     void resetStreak(UUID userId);
+
+    /**
+     * Validate and reset streak if expired (>1 day since last activity).
+     * Called when user views streak endpoints to prevent UX shock.
+     * Respects freeze tokens: if daysBetween == 2 and user has freeze, skips reset.
+     * 
+     * @param userId User ID
+     */
+    void validateAndResetStreakIfExpired(UUID userId);
 
     /**
      * Get user's current level based on total EXP

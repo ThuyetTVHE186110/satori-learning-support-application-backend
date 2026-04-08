@@ -36,6 +36,7 @@ import java.util.UUID;
 public class LearnerAchievementController {
 
     private final AchievementService achievementService;
+    private final com.fu.achievement.service.StreakService streakService;
 
     /**
      * Get all badges earned by the current learner
@@ -149,6 +150,9 @@ public class LearnerAchievementController {
     @GetMapping("/streaks/current")
     public ResponseEntity<ApiResponse<CurrentStreakResponse>> getCurrentStreak(
             @AuthenticationPrincipal UUID userId) {
+        // Validate and reset streak if expired (>1 day since last activity)
+        streakService.validateAndResetStreakIfExpired(userId);
+        
         CurrentStreakResponse streak = achievementService.getCurrentStreakStatus(userId);
         return ResponseEntity.ok(ApiResponse.success(streak));
     }
@@ -164,6 +168,8 @@ public class LearnerAchievementController {
     @GetMapping("/streaks/history")
     public ResponseEntity<ApiResponse<StreakHistoryResponse>> getStreakHistory(
             @AuthenticationPrincipal UUID userId) {
+        // Validate and reset streak if expired (>1 day since last activity)
+        streakService.validateAndResetStreakIfExpired(userId);
 
         StreakHistoryResponse history = achievementService.getStreakHistory(userId);
         return ResponseEntity.ok(ApiResponse.success(history));

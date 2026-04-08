@@ -1232,8 +1232,9 @@ class ClassServiceImplTest {
         @Test
         @DisplayName("Should throw exception when moving startDate later with members")
         void shouldThrowWhenMovingStartDateLaterWithMembers() {
-            // Given
-            testClazz.setStartDate(LocalDate.now().plusDays(10));
+            // Given: Class is ACTIVE, trying to change startDate
+            testClazz.setStatus(ClassStatus.ACTIVE);
+            testClazz.setStartDate(LocalDate.now().minusDays(5));
             UpdateClassRequest req = UpdateClassRequest.builder()
                     .startDate(LocalDate.now().plusDays(15)) // Later
                     .build();
@@ -1243,7 +1244,7 @@ class ClassServiceImplTest {
             // When/Then
             assertThatThrownBy(() -> clazzService.updateClass(classId, req, managerId))
                     .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("Không thể cập nhật ngày bắt đầu sau ngày bắt đầu cũ");
+                    .hasMessageContaining("Không thể cập nhật ngày bắt đầu sau khi lớp học đã hoạt động");
         }
 
         @Test
@@ -1290,6 +1291,49 @@ class ClassServiceImplTest {
             verify(classRepository).save(clazzCaptor.capture());
             verify(classScheduleManager).scheduleActivation(any(Clazz.class));
             assertThat(clazzCaptor.getValue().getStatus()).isEqualTo(ClassStatus.ACTIVE);
+        }
+
+        @Test
+        @DisplayName("Should throw exception when updating startDate on ACTIVE class")
+        void shouldThrowWhenUpdatingStartDateOnActiveClass() {
+            // Given
+            testClazz.setStatus(ClassStatus.ACTIVE);
+            testClazz.setStartDate(LocalDate.now().minusDays(5));
+            UpdateClassRequest req = UpdateClassRequest.builder()
+                    .startDate(LocalDate.now().plusDays(10)) // Try to change startDate
+                    .build();
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.updateClass(classId, req, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Không thể cập nhật ngày bắt đầu sau khi lớp học đã hoạt động");
+        }
+
+        @Test
+        @DisplayName("Should allow updating other fields when class is ACTIVE")
+        void shouldAllowUpdatingOtherFieldsWhenActive() {
+            // Given
+            testClazz.setStatus(ClassStatus.ACTIVE);
+            testClazz.setStartDate(LocalDate.now().minusDays(5));
+            UpdateClassRequest req = UpdateClassRequest.builder()
+                    .name("Updated Class Name")
+                    .maxStudents(50)
+                    // NO startDate change
+                    .build();
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(3L);
+            given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId)).willReturn(Optional.of(teacherId));
+            given(classMapper.toResponse(testClazz)).willReturn(testClassResponse);
+
+            // When
+            clazzService.updateClass(classId, req, managerId);
+
+            // Then
+            verify(classRepository).save(any(Clazz.class));
+            verify(classScheduleManager).scheduleActivation(any(Clazz.class));
         }
     }
 
