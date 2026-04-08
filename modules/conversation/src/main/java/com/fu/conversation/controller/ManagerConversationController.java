@@ -84,22 +84,25 @@ public class ManagerConversationController {
     }
 
     /**
-     * Get all topics (paginated). Supports keyword search.
-     * GET /api/v1/manager/conversation/topics?page=0&size=10&keyword=xxx
+     * Get all topics (paginated). Supports filtering by keyword and/or status.
+     * GET /api/v1/manager/conversation/topics?page=0&size=10&keyword=xxx&status=DRAFT
      */
     @GetMapping("/topics")
     public ResponseEntity<ApiResponse<PageResponse<ConversationTopicSummaryResponse>>> getAllTopics(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
-            @RequestParam(required = false) String keyword) {
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Course.ContentStatus status) {
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 100),
-                Sort.by("orderIndex").ascending());
+                Sort.by("order_index").ascending());
 
         Page<ConversationTopicSummaryResponse> result;
-        if (keyword != null && !keyword.isBlank()) {
-            result = topicService.searchTopics(keyword.trim(), pageable);
+        if ((keyword != null && !keyword.isBlank()) || status != null) {
+            // Either keyword or status (or both) provided
+            result = topicService.searchTopics(keyword, status, pageable);
         } else {
+            // No filters provided - show all
             result = topicService.getAllTopics(pageable);
         }
 
@@ -212,12 +215,15 @@ public class ManagerConversationController {
      */
     @GetMapping("/conversations")
     public ResponseEntity<ApiResponse<PageResponse<ConversationSummaryResponse>>> getAllConversations(
+            @RequestParam(required = false) Course.JlptLevel level,
+            @RequestParam(required = false) Course.ContentStatus status,
+            @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
 
-        Pageable pageable = PageRequest.of(page, Math.min(size, 100),
-                Sort.by("orderIndex").ascending());
-        Page<ConversationSummaryResponse> result = conversationService.getAllConversations(pageable);
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        Page<ConversationSummaryResponse> result = conversationService.getAllConversations(
+                keyword, level, status, pageable);
         return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
                 result.getContent(), result.getNumber(), result.getSize(),
                 result.getTotalElements(), result.getTotalPages())));

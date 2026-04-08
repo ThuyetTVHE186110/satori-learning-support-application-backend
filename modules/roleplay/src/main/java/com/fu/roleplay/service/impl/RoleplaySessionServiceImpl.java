@@ -313,6 +313,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         }
 
         // 1b. Validate audio file and eagerly read bytes (before async dispatch)
+        if (audio.isEmpty()) {
+            throw new BusinessException("AUDIO_REQUIRED", "Audio file is required.");
+        }
         byte[] audioBytes = null;
         String audioContentType = null;
         if (audio != null && !audio.isEmpty()) {
@@ -679,16 +682,16 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // Retrieve level-up information
         try {
             LearningLevelService.LevelProgressInfo progressInfo = learningLevelService.getProgressToNextLevel(userId);
-            
+
             // Calculate previous level from oldTotalExp
             int previousLevel = 0;
             if (oldTotalExp != null && oldTotalExp >= 0) {
                 previousLevel = learningLevelService.calculateLevelFromExp(oldTotalExp);
             }
-            
+
             int currentLevel = progressInfo.currentLevel();
             boolean actuallyLeveledUp = previousLevel < currentLevel;
-            
+
             levelUpInfo = LevelUpNotificationResponse.builder()
                     .previousLevel(previousLevel)
                     .newLevel(currentLevel)

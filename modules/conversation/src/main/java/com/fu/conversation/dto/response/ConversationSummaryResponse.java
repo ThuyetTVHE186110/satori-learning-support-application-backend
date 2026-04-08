@@ -26,6 +26,9 @@ public class ConversationSummaryResponse {
     private String thumbnailUrl;
     private Course.ContentStatus status;
     private Integer orderIndex;
+    private String aiRole;
+    private String learnerRole;
+
 
     // Practice tracking — populated only for learner endpoints
     private boolean isPracticed;
