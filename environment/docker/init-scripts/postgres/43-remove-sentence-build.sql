@@ -27,5 +27,5 @@ ALTER TABLE practice.practice_sessions
         USING session_type::text::practice_session_type_new;
 
 -- ── 4. Drop enum cũ, đổi tên enum mới ────────────────────────────────────
-DROP TYPE practice_session_type;
+DROP TYPE practice_session_type CASCADE;
 ALTER TYPE practice_session_type_new RENAME TO practice_session_type;
