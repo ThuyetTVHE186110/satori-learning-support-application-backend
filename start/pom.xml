@@ -121,7 +121,7 @@
                     </execution>
                 </executions>
                 <configuration>
-                    <mainClass>com.fu.start.StartApplication</mainClass>
+                    <mainClass>com.fu.StartApplication</mainClass>
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>
