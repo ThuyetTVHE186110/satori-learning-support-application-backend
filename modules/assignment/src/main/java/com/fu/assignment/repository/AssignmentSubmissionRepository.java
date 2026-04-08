@@ -100,6 +100,19 @@ public interface AssignmentSubmissionRepository extends JpaRepository<Assignment
     List<Object[]> countSubmissionsByStatusForClass(@Param("classId") UUID classId);
 
     /**
+     * Get average score of all GRADED submissions for a class.
+     * Returns null if no graded submissions exist.
+     */
+    @Query(value = """
+            SELECT AVG(CAST(s.score AS NUMERIC))
+            FROM assignment.assignment_submissions s
+            JOIN assignment.assignments a ON a.id = s.assignment_id
+            JOIN assignment.assignment_targets t ON t.assignment_id = a.id
+            WHERE t.class_id = :classId AND a.deleted_at IS NULL AND s.status = 'GRADED'
+            """, nativeQuery = true)
+    Double getAverageScoreForGradedSubmissions(@Param("classId") UUID classId);
+
+    /**
      * Find the latest submission status and ID for a list of assignments for a specific user.
      * Returns a list of [assignmentId, status, submissionId] arrays.
      */
@@ -120,4 +133,73 @@ public interface AssignmentSubmissionRepository extends JpaRepository<Assignment
               AND s.status = com.fu.assignment.entity.SubmissionStatus.IN_PROGRESS
             """)
     Optional<AssignmentSubmission> findActiveByAssignmentIdAndUserId(@Param("assignmentId") UUID assignmentId, @Param("userId") UUID userId);
+
+    /**
+     * Count distinct students who submitted (SUBMITTED or GRADED) for a specific assignment in a class.
+     * Returns count of distinct user_ids that have submissions with SUBMITTED or GRADED status.
+     */
+    @Query(value = """
+            SELECT COUNT(DISTINCT s.user_id)
+            FROM assignment.assignment_submissions s
+            JOIN assignment.assignments a ON a.id = s.assignment_id
+            JOIN assignment.assignment_targets t ON t.assignment_id = a.id
+            WHERE a.id = :assignmentId
+              AND t.class_id = :classId
+              AND s.status IN ('SUBMITTED', 'GRADED')
+              AND a.deleted_at IS NULL
+            """, nativeQuery = true)
+    long countSubmissionsInClassForAssignment(
+            @Param("assignmentId") UUID assignmentId,
+            @Param("classId") UUID classId);
+
+    /**
+     * Get average score of GRADED submissions for a specific assignment in a class.
+     * Returns null if no graded submissions exist.
+     */
+    @Query(value = """
+            SELECT AVG(CAST(s.score AS NUMERIC))
+            FROM assignment.assignment_submissions s
+            JOIN assignment.assignments a ON a.id = s.assignment_id
+            JOIN assignment.assignment_targets t ON t.assignment_id = a.id
+            WHERE a.id = :assignmentId
+              AND t.class_id = :classId
+              AND s.status = 'GRADED'
+              AND a.deleted_at IS NULL
+            """, nativeQuery = true)
+    Double getAverageScoreForAssignmentInClass(
+            @Param("assignmentId") UUID assignmentId,
+            @Param("classId") UUID classId);
+
+    /**
+     * Find submissions by assignment ID and learner keyword search.
+     * Searches by firstName, lastName, displayName, or email with case-insensitive LIKE matching.
+     */
+    @Query(value = """
+            SELECT s.*
+            FROM assignment.assignment_submissions s
+            JOIN assignment.assignments a ON a.id = s.assignment_id
+            JOIN user_management.users u ON u.id = s.user_id
+            WHERE a.id = :assignmentId
+              AND (LOWER(u.first_name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                   OR LOWER(u.last_name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                   OR LOWER(u.display_name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                   OR LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%')))
+            ORDER BY s.attempt_number DESC, s.created_at DESC
+            """,
+            countQuery = """
+            SELECT COUNT(*)
+            FROM assignment.assignment_submissions s
+            JOIN assignment.assignments a ON a.id = s.assignment_id
+            JOIN "user".users u ON u.id = s.user_id
+            WHERE a.id = :assignmentId
+              AND (LOWER(u.first_name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                   OR LOWER(u.last_name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                   OR LOWER(u.display_name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                   OR LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%')))
+            """,
+            nativeQuery = true)
+    Page<AssignmentSubmission> findByAssignmentIdAndKeyword(
+            @Param("assignmentId") UUID assignmentId,
+            @Param("keyword") String keyword,
+            Pageable pageable);
 }
