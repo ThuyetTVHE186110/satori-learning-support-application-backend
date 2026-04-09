@@ -289,7 +289,7 @@ class ConversationGenerationServiceTest {
 
             List<GeneratedConversationSuggestionResponse> result =
                     generationService.generateConversationsForTopic(topicId, courseId, "Restaurant Ordering", 
-                            "Practice ordering food at a restaurant", 2, null, 1);
+                            "Practice ordering food at a restaurant", 2, Course.JlptLevel.N5, 1);
 
             assertThat(result).hasSize(1);
             assertThat(result.get(0).getTitle()).isEqualTo("Ordering Food");
@@ -301,12 +301,13 @@ class ConversationGenerationServiceTest {
             when(topicRepository.findById(topicId)).thenReturn(Optional.empty());
 
             List<GeneratedConversationSuggestionResponse> result =
-                    generationService.generateConversationsForTopic(topicId, courseId, "Title", "Description", 1, null, 1);
+                    generationService.generateConversationsForTopic(topicId, courseId, "Title", "Description", 1, 
+                            Course.JlptLevel.N5, 1);
         }
 
         @Test
-        @DisplayName("Should use jlptLevel override when provided")
-        void shouldUseJlptLevelOverrideWhenProvided() {
+        @DisplayName("Should use provided jlptLevel from course in prompt")
+        void shouldUseProvidedJlptLevelFromCourseInPrompt() {
             when(topicRepository.findById(topicId)).thenReturn(Optional.of(topic));
             when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
             when(vocabularyRepository.findByCourseId(any(), any())).thenReturn(new PageImpl<>(List.of()));
@@ -320,8 +321,8 @@ class ConversationGenerationServiceTest {
         }
 
         @Test
-        @DisplayName("Should fall back to topic JLPT level when override not provided")
-        void shouldFallbackToTopicJlptLevelWhenOverrideNull() {
+        @DisplayName("Should handle null jlptLevel gracefully")
+        void shouldHandleNullJlptLevelGracefully() {
             when(topicRepository.findById(topicId)).thenReturn(Optional.of(topic));
             when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
             when(vocabularyRepository.findByCourseId(any(), any())).thenReturn(new PageImpl<>(List.of()));
@@ -330,7 +331,8 @@ class ConversationGenerationServiceTest {
 
             generationService.generateConversationsForTopic(topicId, courseId, "Title", "Description", 1, null, 1);
 
-            assertThat(userCaptor.getValue()).contains("N5"); // topic's JLPT
+            String userPrompt = userCaptor.getValue();
+            assertThat(userPrompt).doesNotContain("Target JLPT Level:");
         }
 
         @Test
@@ -350,7 +352,8 @@ class ConversationGenerationServiceTest {
             when(callSpec.content()).thenThrow(new RuntimeException("API error"));
 
             List<GeneratedConversationSuggestionResponse> result =
-                    generationService.generateConversationsForTopic(topicId, courseId, "Title", "Description", 1, null, 1);
+                    generationService.generateConversationsForTopic(topicId, courseId, "Title", "Description", 1, 
+                            Course.JlptLevel.N5, 1);
 
             assertThat(result).isEmpty();
         }

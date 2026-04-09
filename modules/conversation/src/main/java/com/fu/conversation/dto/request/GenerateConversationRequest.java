@@ -57,11 +57,6 @@ public class GenerateConversationRequest {
     @Max(value = 3, message = "difficultyLevel must be between 1 and 3")
     private Integer difficultyLevel;
 
-    /**
-     * Override JLPT level (defaults to topic's JLPT level if omitted).
-     */
-    private Course.JlptLevel jlptLevel;
-
     @Builder.Default
     private Integer count = 1;
 }
