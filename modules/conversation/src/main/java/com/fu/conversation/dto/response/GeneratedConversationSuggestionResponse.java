@@ -26,6 +26,8 @@ public class GeneratedConversationSuggestionResponse {
     private String category;
     private Course.JlptLevel jlptLevel;
     private Integer difficultyScore;
+    private String aiRole;
+    private String learnerRole;
     private List<String> vocabularyHints;
     private List<String> grammarPoints;
     private List<String> usefulExpressions;

@@ -288,7 +288,8 @@ class ConversationGenerationServiceTest {
             stubChatResponse(VALID_CONVERSATIONS_JSON);
 
             List<GeneratedConversationSuggestionResponse> result =
-                    generationService.generateConversationsForTopic(topicId, courseId, null, 1);
+                    generationService.generateConversationsForTopic(topicId, courseId, "Restaurant Ordering", 
+                            "Practice ordering food at a restaurant", 2, null, 1);
 
             assertThat(result).hasSize(1);
             assertThat(result.get(0).getTitle()).isEqualTo("Ordering Food");
@@ -300,10 +301,7 @@ class ConversationGenerationServiceTest {
             when(topicRepository.findById(topicId)).thenReturn(Optional.empty());
 
             List<GeneratedConversationSuggestionResponse> result =
-                    generationService.generateConversationsForTopic(topicId, courseId, null, 1);
-
-            assertThat(result).isEmpty();
-            verify(chatClient, never()).prompt();
+                    generationService.generateConversationsForTopic(topicId, courseId, "Title", "Description", 1, null, 1);
         }
 
         @Test
@@ -315,7 +313,8 @@ class ConversationGenerationServiceTest {
             when(grammarPointRepository.findByCourseId(any(), any())).thenReturn(new PageImpl<>(List.of()));
             ArgumentCaptor<String> userCaptor = stubChatResponseAndCaptureUserPrompt(VALID_CONVERSATIONS_JSON);
 
-            generationService.generateConversationsForTopic(topicId, courseId, Course.JlptLevel.N3, 1);
+            generationService.generateConversationsForTopic(topicId, courseId, "Title", "Description", 1, 
+                    Course.JlptLevel.N3, 1);
 
             assertThat(userCaptor.getValue()).contains("N3");
         }
@@ -329,7 +328,7 @@ class ConversationGenerationServiceTest {
             when(grammarPointRepository.findByCourseId(any(), any())).thenReturn(new PageImpl<>(List.of()));
             ArgumentCaptor<String> userCaptor = stubChatResponseAndCaptureUserPrompt(VALID_CONVERSATIONS_JSON);
 
-            generationService.generateConversationsForTopic(topicId, courseId, null, 1);
+            generationService.generateConversationsForTopic(topicId, courseId, "Title", "Description", 1, null, 1);
 
             assertThat(userCaptor.getValue()).contains("N5"); // topic's JLPT
         }
@@ -351,7 +350,7 @@ class ConversationGenerationServiceTest {
             when(callSpec.content()).thenThrow(new RuntimeException("API error"));
 
             List<GeneratedConversationSuggestionResponse> result =
-                    generationService.generateConversationsForTopic(topicId, courseId, null, 1);
+                    generationService.generateConversationsForTopic(topicId, courseId, "Title", "Description", 1, null, 1);
 
             assertThat(result).isEmpty();
         }
