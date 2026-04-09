@@ -22,4 +22,7 @@ public class ClassAssignmentStatisticsResponse {
     private long gradedSubmissions;
     private long inProgressSubmissions;
     private long overdueSubmissions;
+    private Double averageGradedScore;
+    private long dueSoon24hCount;
+    private Double completionRate;
 }

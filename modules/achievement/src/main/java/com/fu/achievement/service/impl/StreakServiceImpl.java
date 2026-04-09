@@ -124,7 +124,7 @@ public class StreakServiceImpl implements StreakService {
 
         // Streak broken: reset to 0
         log.info("User {} streak broken after {} days, resetting to 0", userStats.getUserId(), daysBetween);
-        return 0;
+        return 1; // Start new streak with today's activity
     }
 
     @Override

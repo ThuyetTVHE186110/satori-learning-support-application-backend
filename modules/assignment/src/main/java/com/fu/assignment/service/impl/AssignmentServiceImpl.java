@@ -392,7 +392,76 @@ public class AssignmentServiceImpl implements AssignmentService {
         builder.inProgressSubmissions(inProgress);
         builder.overdueSubmissions(overdue);
 
+        // Get average score of graded submissions
+        Double averageScore = submissionRepository.getAverageScoreForGradedSubmissions(classId);
+        builder.averageGradedScore(averageScore != null ? averageScore : 0.0);
+
+        // Get count of assignments due within 24 hours
+        List<Assignment> dueSoon = assignmentRepository.findPublishedByClassAndDueWithin24h(classId);
+        builder.dueSoon24hCount((long) dueSoon.size());
+
+        // Get count of active class members
+        long activeStudents = classMemberRepository.countActiveByClassId(classId);
+
+        // Calculate completion rate: (SUBMITTED + GRADED) / (total assignments * active students) * 100
+        double completionRate = 0.0;
+        if (totalA > 0 && activeStudents > 0) {
+            long submittedAndGraded = ungraded + graded;
+            completionRate = ((double) submittedAndGraded / (totalA * activeStudents)) * 100.0;
+            // Cap at 100% as a defensive measure
+            completionRate = Math.round(Math.min(completionRate, 100.0) * 100.0) / 100.0; // Round to 2 decimal places
+        }
+        builder.completionRate(completionRate);
+
         return builder.build();
+    }
+
+    @Override
+    public AssignmentClassStatisticsResponse getAssignmentStatisticsForClass(
+            UUID assignmentId, UUID classId, UUID teacherId) {
+        
+        // Verify assignment exists and is not deleted
+        Assignment assignment = assignmentRepository.findByIdAndNotDeleted(assignmentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy bài tập"));
+        
+        // Verify assignment belongs to the specified class
+        if (!classId.equals(assignment.getClassId())) {
+            throw new BusinessException("ASSIGNMENT_NOT_IN_CLASS", "Bài tập không thuộc về lớp học này");
+        }
+        
+        // Verify teacher access
+        Clazz clazz = classRepository.findByIdAndNotDeleted(classId)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy lớp học"));
+        verifyTeacherAccess(clazz, teacherId);
+        
+        // Get total active students in class
+        long totalStudents = classMemberRepository.countActiveByClassId(classId);
+        
+        // Get count of submitted/graded submissions
+        long submittedCount = submissionRepository.countSubmissionsInClassForAssignment(assignmentId, classId);
+        
+        // Calculate not submitted count
+        long notSubmittedCount = totalStudents - submittedCount;
+        
+        // Get average score of graded submissions (default to 0 if null)
+        Double averageScore = submissionRepository.getAverageScoreForAssignmentInClass(assignmentId, classId);
+        if (averageScore == null) {
+            averageScore = 0.0;
+        }
+        
+        // Get assignment title
+        String title = assignmentRepository.getAssignmentTitleById(assignmentId)
+                .orElse("");
+        
+        return AssignmentClassStatisticsResponse.builder()
+                .assignmentId(assignmentId)
+                .classId(classId)
+                .assignmentTitle(title)
+                .totalStudents(totalStudents)
+                .submittedCount(submittedCount)
+                .notSubmittedCount(notSubmittedCount)
+                .averageScore(averageScore)
+                .build();
     }
 
     @Override
@@ -537,6 +606,25 @@ public class AssignmentServiceImpl implements AssignmentService {
         Assignment assignment = findAssignmentOrThrow(assignmentId);
         verifyAssignmentAccess(assignment, teacherId);
         return submissionRepository.findByAssignmentId(assignmentId, pageable).map(s -> enrichSummaryResponse(s));
+    }
+
+    @Override
+    public Page<SubmissionSummaryResponse> getSubmissionsByAssignment(
+            UUID assignmentId,
+            String keyword,
+            Pageable pageable,
+            UUID teacherId) {
+        Assignment assignment = findAssignmentOrThrow(assignmentId);
+        verifyAssignmentAccess(assignment, teacherId);
+        
+        // If keyword is null or blank, use the non-keyword path
+        if (keyword == null || keyword.isBlank()) {
+            return getSubmissionsByAssignment(assignmentId, pageable, teacherId);
+        }
+        
+        // Search by keyword
+        return submissionRepository.findByAssignmentIdAndKeyword(assignmentId, keyword, pageable)
+                .map(s -> enrichSummaryResponse(s));
     }
 
     @Override
@@ -1157,16 +1245,16 @@ public class AssignmentServiceImpl implements AssignmentService {
         // Add level-up information (only for submit operations)
         try {
             LearningLevelService.LevelProgressInfo progressInfo = learningLevelService.getProgressToNextLevel(s.getUserId());
-            
+
             // Calculate previous level from oldTotalExp
             int previousLevel = 0;
             if (oldTotalExp != null && oldTotalExp >= 0) {
                 previousLevel = learningLevelService.calculateLevelFromExp(oldTotalExp);
             }
-            
+
             int currentLevel = progressInfo.currentLevel();
             boolean actuallyLeveledUp = previousLevel < currentLevel;
-            
+
             LevelUpNotificationResponse levelUpInfo = LevelUpNotificationResponse.builder()
                     .previousLevel(previousLevel)
                     .newLevel(currentLevel)
@@ -1183,6 +1271,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         }
         return response;
     }
+
     private List<QuizSubmissionDetailResponse> enrichQuizDetails(String answersJson) {
         List<QuizSubmissionDetailResponse> details = new ArrayList<>();
         if (answersJson == null || answersJson.isBlank()) return details;
@@ -1243,7 +1332,10 @@ public class AssignmentServiceImpl implements AssignmentService {
         assignmentRepository.findByIdAndNotDeleted(s.getAssignmentId()).ifPresent(a -> {
             r.setAssignmentTitle(a.getTitle());
         });
-        userRepository.findById(s.getUserId()).ifPresent(u -> r.setUserFullName(u.getFullName()));
+        userRepository.findById(s.getUserId()).ifPresent(u -> {
+            r.setUserFullName(u.getFullName());
+            r.setUserEmail(u.getEmail());
+        });
         return r;
     }
 

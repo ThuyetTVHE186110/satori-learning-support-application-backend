@@ -242,7 +242,140 @@ class StreakHistoryServiceTest {
         // Assert
         assertNotNull(response);
         assertEquals(0, response.getSummary().getCurrentStreak());
-        assertNull(response.getPeriod().getStreakStartDate());
-        assertTrue(response.getDailyRecords().isEmpty());
+        assertTrue(response.getDailyRecords().size() == 7, "Should have 7 daily records for zero-streak week");
+        assertEquals(today, response.getPeriod().getStartDate());
+        assertEquals(today.plusDays(6), response.getPeriod().getEndDate());
+        assertEquals(1L, response.getPeriod().getCycleNumber());
+        assertEquals(7, response.getPeriod().getDaysRequested());
+    }
+
+    /**
+     * Test: Zero streak returns 7-day weekly view starting from today
+     * Expected: dailyRecords contain 7 consecutive days (today through today+6)
+     * All records have hadActivity=false, streakCount=0
+     */
+    @Test
+    void testZeroStreakReturns7DayWeeklyView() {
+        // Setup
+        UserStats userStats = UserStats.builder()
+                .currentStreak(0)
+                .build();
+        when(userStatsRepository.findByUserId(userId)).thenReturn(Optional.of(userStats));
+
+        // Execute
+        StreakHistoryResponse response = achievementService.getStreakHistory(userId);
+
+        // Assert
+        assertNotNull(response);
+        assertEquals(0, response.getSummary().getCurrentStreak());
+        
+        // Verify period info
+        assertEquals(today, response.getPeriod().getStartDate());
+        assertEquals(today.plusDays(6), response.getPeriod().getEndDate());
+        assertEquals(1L, response.getPeriod().getCycleNumber());
+        assertEquals(7, response.getPeriod().getDaysRequested());
+        assertEquals(today, response.getPeriod().getStreakStartDate());
+        
+        // Verify 7 daily records
+        assertEquals(7, response.getDailyRecords().size());
+        
+        // Verify records are ordered newest-first (today to today+6)
+        assertEquals(today.plusDays(6), response.getDailyRecords().get(0).getDate());
+        assertEquals(today, response.getDailyRecords().get(6).getDate());
+    }
+
+    @Test
+    void testZeroStreakWeeklyViewAllRecordsHaveNoActivity() {
+        // Setup
+        UserStats userStats = UserStats.builder()
+                .currentStreak(0)
+                .build();
+        when(userStatsRepository.findByUserId(userId)).thenReturn(Optional.of(userStats));
+
+        // Execute
+        StreakHistoryResponse response = achievementService.getStreakHistory(userId);
+
+        // Assert - all records should have hadActivity=false
+        for (int i = 0; i < response.getDailyRecords().size(); i++) {
+            assertFalse(response.getDailyRecords().get(i).getHadActivity(), 
+                    "Record " + i + " should have hadActivity=false");
+            assertEquals(0, response.getDailyRecords().get(i).getStreakCount(), 
+                    "Record " + i + " should have streakCount=0");
+            assertNull(response.getDailyRecords().get(i).getActivityType(), 
+                    "Record " + i + " should have activityType=null");
+            assertEquals(0, response.getDailyRecords().get(i).getExpEarned(), 
+                    "Record " + i + " should have expEarned=0");
+            assertFalse(response.getDailyRecords().get(i).getFreezeUsed(), 
+                    "Record " + i + " should have freezeUsed=false");
+        }
+    }
+
+    @Test
+    void testZeroStreakWeeklyViewIsTodayFlagSet() {
+        // Setup
+        UserStats userStats = UserStats.builder()
+                .currentStreak(0)
+                .build();
+        when(userStatsRepository.findByUserId(userId)).thenReturn(Optional.of(userStats));
+
+        // Execute
+        StreakHistoryResponse response = achievementService.getStreakHistory(userId);
+
+        // Assert - only today should have isToday=true
+        int foundToday = 0;
+        for (var record : response.getDailyRecords()) {
+            if (record.getDate().equals(today)) {
+                assertTrue(record.getIsToday(), "Today's record should have isToday=true");
+                foundToday++;
+            } else {
+                assertFalse(record.getIsToday(), "Non-today record should have isToday=false");
+            }
+        }
+        assertEquals(1, foundToday, "Should find exactly one 'today' record");
+    }
+
+    @Test
+    void testZeroStreakWeeklyViewDayOfWeekPopulated() {
+        // Setup
+        UserStats userStats = UserStats.builder()
+                .currentStreak(0)
+                .build();
+        when(userStatsRepository.findByUserId(userId)).thenReturn(Optional.of(userStats));
+
+        // Execute
+        StreakHistoryResponse response = achievementService.getStreakHistory(userId);
+
+        // Assert - all records should have valid 3-letter day-of-week abbreviations
+        for (var record : response.getDailyRecords()) {
+            assertNotNull(record.getDayOfWeek(), "dayOfWeek should not be null");
+            assertEquals(3, record.getDayOfWeek().length(), 
+                    "dayOfWeek should be 3 letters (e.g., MON, TUE)");
+            assertTrue(record.getDayOfWeek().matches("^[A-Z]{3}$"), 
+                    "dayOfWeek should be uppercase 3-letter abbreviation");
+        }
+    }
+
+    @Test
+    void testZeroStreakWeeklyViewCoversConsecutiveDays() {
+        // Setup
+        UserStats userStats = UserStats.builder()
+                .currentStreak(0)
+                .build();
+        when(userStatsRepository.findByUserId(userId)).thenReturn(Optional.of(userStats));
+
+        // Execute
+        StreakHistoryResponse response = achievementService.getStreakHistory(userId);
+
+        // Assert - records should cover 7 consecutive days (today+6 down to today)
+        Set<LocalDate> datesSet = new HashSet<>();
+        for (var record : response.getDailyRecords()) {
+            datesSet.add(record.getDate());
+        }
+        
+        // Verify all dates from today to today+6 are present
+        for (int i = 0; i < 7; i++) {
+            assertTrue(datesSet.contains(today.plusDays(i)), 
+                    "Date " + today.plusDays(i) + " should be in records");
+        }
     }
 }

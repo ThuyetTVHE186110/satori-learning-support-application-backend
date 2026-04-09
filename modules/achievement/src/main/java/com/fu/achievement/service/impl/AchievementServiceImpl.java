@@ -559,21 +559,54 @@ public class AchievementServiceImpl implements AchievementService {
         int currentStreak = userStats.getCurrentStreak() != null ? userStats.getCurrentStreak() : 0;
         LocalDate today = LocalDate.now();
 
-        // If no streak, return empty response
+        // If no streak, return a 7-day weekly view starting from today
         if (currentStreak == 0) {
-            log.debug("User {} has no streak, returning empty response", userId);
+            log.debug("User {} has no streak, returning 7-day weekly view starting from today", userId);
+            
+            LocalDate weekStartDate = today;
+            LocalDate weekEndDate = today.plusDays(6);
+            
+            // Build 7-day weekly records (newest first: today to today-6)
+            List<StreakHistoryItem> weeklyRecords = new ArrayList<>();
+            LocalDate current = weekEndDate;
+            
+            while (!current.isBefore(weekStartDate)) {
+                DayOfWeek dow = current.getDayOfWeek();
+                String dayOfWeekStr = dow.toString().substring(0, 3).toUpperCase();
+                Boolean isToday = current.equals(today);
+                
+                // No activity records for zero-streak week
+                weeklyRecords.add(StreakHistoryItem.builder()
+                        .date(current)
+                        .dayOfWeek(dayOfWeekStr)
+                        .isToday(isToday)
+                        .streakCount(0)
+                        .hadActivity(false)
+                        .activityType(null)
+                        .expEarned(0)
+                        .freezeUsed(false)
+                        .build());
+                
+                current = current.minusDays(1);
+            }
+            
+            // Build response with 7-day weekly view
+            StreakPeriodInfo period = StreakPeriodInfo.builder()
+                    .startDate(weekStartDate)
+                    .endDate(weekEndDate)
+                    .daysRequested(7)
+                    .streakStartDate(today)
+                    .cycleNumber(1L)
+                    .build();
+            
+            StreakSummary summary = StreakSummary.builder()
+                    .currentStreak(0)
+                    .build();
+            
             return StreakHistoryResponse.builder()
-                    .period(StreakPeriodInfo.builder()
-                            .startDate(null)
-                            .endDate(null)
-                            .daysRequested(0)
-                            .streakStartDate(null)
-                            .cycleNumber(0L)
-                            .build())
-                    .summary(StreakSummary.builder()
-                            .currentStreak(0)
-                            .build())
-                    .dailyRecords(new ArrayList<>())
+                    .period(period)
+                    .summary(summary)
+                    .dailyRecords(weeklyRecords)
                     .build();
         }
 
