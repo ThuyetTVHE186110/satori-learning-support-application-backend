@@ -151,11 +151,11 @@ app:
             max-batch-size: ${NOTIFICATION_BATCH_SIZE:500}
             batch-delay-ms: ${NOTIFICATION_BATCH_DELAY_MS:100}
 
-    # Email Configuration
+    # Email Configuration (Resend HTTP API — no SMTP needed)
     email:
         enabled: ${EMAIL_ENABLED:true}
-        from: ${EMAIL_FROM:noreply@satori-learning.com}
-        from-name: ${EMAIL_FROM_NAME:Satori Learning}
+        resend-api-key: ${RESEND_API_KEY:}
+        from: ${EMAIL_FROM:Satori Learning <noreply@satorinihongo.id.vn>}
         base-url: ${APP_BASE_URL:http://localhost:3000}
 
     # Cloudinary Configuration
@@ -165,27 +165,10 @@ app:
         api-key: ${CLOUDINARY_API_KEY:}
         api-secret: ${CLOUDINARY_API_SECRET:}
 
-# ==================== Spring Mail Configuration ====================
-spring.mail:
-    host: ${MAIL_HOST:smtp.gmail.com}
-    port: ${MAIL_PORT:587}
-    username: ${MAIL_USERNAME:nihongosatori@gmail.com}
-    password: ${MAIL_PASSWORD:}
-    properties:
-        mail:
-            smtp:
-                auth: true
-                starttls:
-                    enable: true
-                    required: true
-                connectiontimeout: 5000
-                timeout: 5000
-                writetimeout: 5000
-
 # ==================== Logging Configuration ====================
 logging:
     level:
-        root: INFO
+        root: INF
         com.fu: DEBUG
         org.springframework.data.redis: DEBUG
         # Suppress Hibernate SQL noise (scheduler polls, retry queries, etc.)
@@ -325,6 +308,14 @@ conversation:
         grounding-threshold: ${CHAT_RAG_GROUNDING_THRESHOLD:0.6}
         # Min cosine similarity for best retrieved item to be considered meaningful context
         min-meaningful-similarity: ${CHAT_RAG_MIN_SIMILARITY:0.50}
+        # Per-intent overrides for the quality gate threshold (lower = more lenient retrieval)
+        # LOOKUP: exact term match needs tighter control to avoid unrelated words
+        # EXPLAIN: grammar explanations are verbose — cross-lingual score naturally lower
+        # EXAMPLE: example/dialog queries use meta-language ("ví dụ") not Japanese text
+        intent-thresholds:
+            LOOKUP: ${CHAT_RAG_THRESHOLD_LOOKUP:0.55}
+            EXPLAIN: ${CHAT_RAG_THRESHOLD_EXPLAIN:0.42}
+            EXAMPLE: ${CHAT_RAG_THRESHOLD_EXAMPLE:0.35}
         # Model for lightweight advisor LLM calls (relevance + grounding checks)
         check-model: ${CHAT_RAG_CHECK_MODEL:gpt-4o-mini}
         # Max tokens for advisor check calls
@@ -333,6 +324,12 @@ conversation:
         query-analysis-enabled: ${CHAT_RAG_QUERY_ANALYSIS:true}
         # Fallback bilingual query expansion when query-analysis-enabled=false
         bilingual-query-enabled: ${CHAT_RAG_BILINGUAL:true}
+        # Enable hybrid retrieval (dense HNSW + sparse pg_trgm) with RRF fusion
+        # Requires migration 49-bm25-hybrid-index.sql; disable if pg_trgm is not installed
+        hybrid-enabled: ${CHAT_RAG_HYBRID_ENABLED:true}
+        # Enable HyDE (Hypothetical Document Embeddings) for LOOKUP/EXPLAIN intents
+        # Generates a short hypothetical curriculum entry before embedding → +5-15% cosine similarity
+        hyde-enabled: ${CHAT_RAG_HYDE_ENABLED:true}
 
 # ==================== Pronunciation Assessment ====================
 # Provider priority: Azure > SpeechSuper (auto-selected by CompositePronunciationProvider)

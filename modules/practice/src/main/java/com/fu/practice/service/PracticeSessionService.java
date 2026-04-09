@@ -28,7 +28,6 @@ import com.fu.practice.dto.request.StartPracticeRequest;
 import com.fu.practice.dto.request.SubmitAnswerRequest;
 import com.fu.practice.dto.response.*;
 import com.fu.practice.entity.*;
-import com.fu.practice.repository.ItemMasteryRepository;
 import com.fu.practice.repository.LessonProgressRepository;
 import com.fu.practice.repository.PracticeItemRepository;
 import com.fu.practice.repository.PracticeSessionRepository;
@@ -66,7 +65,6 @@ public class PracticeSessionService {
     private final LessonRepository lessonRepository;
     private final VocabularyRepository vocabularyRepository;
     private final GrammarPointRepository grammarPointRepository;
-    private final ItemMasteryRepository itemMasteryRepository;
     private final ItemMasteryService itemMasteryService;
     private final UserLearningPreferencesRepository userPreferencesRepository;
     private final ExerciseGeneratorAgent exerciseGeneratorAgent;
@@ -107,6 +105,7 @@ public class PracticeSessionService {
 
         List<Vocabulary>   selectedVocab;
         List<GrammarPoint> selectedGrammar;
+        Map<UUID, ItemMastery> masteryMap = null; // reused from auto mode when possible
 
         if (hasPool) {
             // Frontend đã pick đúng số lượng → dùng hết
@@ -149,6 +148,7 @@ public class PracticeSessionService {
 
             selectedVocab   = pickByMastery(vocabPool,   poolMastery, vSlots);
             selectedGrammar = pickByMastery(grammarPool, poolMastery, gSlots);
+            masteryMap = poolMastery; // reuse — selected items are a subset of poolIds
         }
 
         if (selectedVocab.isEmpty() && selectedGrammar.isEmpty()) {
@@ -161,7 +161,9 @@ public class PracticeSessionService {
         selectedVocab.forEach(v -> selectedIds.add(v.getId()));
         selectedGrammar.forEach(g -> selectedIds.add(g.getId()));
 
-        Map<UUID, ItemMastery> masteryMap = itemMasteryService.buildMasteryMap(userId, selectedIds);
+        if (masteryMap == null) {
+            masteryMap = itemMasteryService.buildMasteryMap(userId, selectedIds);
+        }
 
         int resolvedCount = selectedIds.size();
 
@@ -543,10 +545,10 @@ public class PracticeSessionService {
 
     /**
      * Generate AI feedback for a completed session and persist it — async version.
-     * Trả về ngay lập tức, không block HTTP response. Dùng importTaskExecutor
-     * vì đây là LLM call tốn thời gian tương tự các agent khác.
+     * Trả về ngay lập tức, không block HTTP response. Dùng practiceTaskExecutor
+     * (virtual threads) để tránh chiếm thread pool của curriculum-import pipeline.
      */
-    @Async("importTaskExecutor")
+    @Async("practiceTaskExecutor")
     public void generateAndSaveFeedbackAsync(UUID sessionId) {
         generateAndSaveFeedback(sessionId);
     }
@@ -613,14 +615,20 @@ public class PracticeSessionService {
             try {
                 // Get current total EXP
                 int currentTotalExp = learningLevelService.getTotalExp(userId);
-                int currentLevel = learningLevelService.getCurrentLevel(userId);
                 Integer sessionScore = session.getScore() != null ? session.getScore().intValue() : null;
 
-                // Calculate EXP that was awarded
-                expEarned = ActivityExpConfig.ActivityType.PRACTICE_AI.getExpReward(currentLevel, sessionScore);
-
-                // Calculate what it was before
+                // Re-derive the EXP awarded at completion time.
+                // At completion, level was read BEFORE awarding → try decreasing levels
+                // until getExpReward matches a consistent oldTotalExp.
+                int trialLevel = learningLevelService.getCurrentLevel(userId);
+                expEarned = ActivityExpConfig.ActivityType.PRACTICE_AI.getExpReward(trialLevel, sessionScore);
                 oldTotalExp = currentTotalExp - expEarned;
+                // If level changed due to this EXP, the pre-award level was lower — recalculate
+                int priorLevel = learningLevelService.calculateLevelFromExp(Math.max(0, oldTotalExp));
+                if (priorLevel < trialLevel) {
+                    expEarned = ActivityExpConfig.ActivityType.PRACTICE_AI.getExpReward(priorLevel, sessionScore);
+                    oldTotalExp = currentTotalExp - expEarned;
+                }
 
             } catch (Exception e) {
                 log.debug("Error calculating EXP details for session summary", e);
@@ -664,11 +672,17 @@ public class PracticeSessionService {
             }
         }
 
-        // Fetch streak notification if session is completed
+        // Fetch streak info (read-only) if session is completed
         com.fu.achievement.dto.response.StreakNotificationResponse streakNotification = null;
         if (session.getStatus() == PracticeStatus.COMPLETED) {
             try {
-                streakNotification = streakService.recordDailyActivity(userId, "PRACTICE");
+                streakNotification = streakService.getUserStatsInfo(userId)
+                        .map(stats -> com.fu.achievement.dto.response.StreakNotificationResponse.builder()
+                                .isFirstActivityToday(false) // read-only — cannot determine from snapshot
+                                .currentStreak(stats.getCurrentStreak())
+                                .longestStreak(stats.getLongestStreak())
+                                .build())
+                        .orElse(null);
             } catch (Exception e) {
                 log.debug("Error retrieving streak info for session summary", e);
             }
@@ -710,6 +724,15 @@ public class PracticeSessionService {
         // Batch load mastery records
         Map<UUID, ItemMastery> masteryMap = itemMasteryService.buildMasteryMap(userId, entityTypeMap.keySet());
 
+        // Determine per-entity correctness from items (for levelBefore approximation)
+        Map<UUID, Boolean> entityCorrectMap = new LinkedHashMap<>();
+        for (PracticeItem item : items) {
+            if (item.getRefContentId() != null && item.getIsCorrect() != null) {
+                // If multiple items reference same entity, any incorrect answer → false
+                entityCorrectMap.merge(item.getRefContentId(), item.getIsCorrect(), (a, b) -> a && b);
+            }
+        }
+
         List<SessionSummaryResponse.MasteryChangeDto> changes = new ArrayList<>();
         for (Map.Entry<UUID, String> entry : entityTypeMap.entrySet()) {
             UUID entityId   = entry.getKey();
@@ -718,6 +741,16 @@ public class PracticeSessionService {
             if (mastery == null) continue; // item never answered
 
             int levelAfter = mastery.getMasteryLevel();
+            // Infer levelBefore: correct answers can only raise/keep level; incorrect can only lower/keep
+            Boolean allCorrect = entityCorrectMap.get(entityId);
+            int levelBefore;
+            if (allCorrect != null && allCorrect) {
+                levelBefore = Math.max(0, levelAfter - 1); // went up or stayed
+            } else if (allCorrect != null) {
+                levelBefore = Math.min(3, levelAfter + 1); // went down or stayed
+            } else {
+                levelBefore = levelAfter; // no answer data — assume no change
+            }
 
             String japaneseText = null;
             try {
@@ -736,9 +769,9 @@ public class PracticeSessionService {
                     .entityId(entityId)
                     .entityType(entityType)
                     .japaneseText(japaneseText)
-                    .levelBefore(Math.max(0, levelAfter - 1)) // approximation
+                    .levelBefore(levelBefore)
                     .levelAfter(levelAfter)
-                    .newlyMastered(levelAfter == 3)
+                    .newlyMastered(levelAfter == 3 && levelBefore < 3)
                     .build());
         }
         return changes;

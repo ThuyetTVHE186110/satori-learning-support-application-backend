@@ -1,6 +1,7 @@
 package com.fu.conversation.ai.tools;
 
 import com.fu.curriculumimport.service.CurriculumStatsService;
+import com.fu.curriculumimport.service.StructuredCurriculumQueryService;
 import com.fu.curriculumimport.service.embedding.ChatbotFilter;
 import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import com.fu.curriculumimport.service.embedding.RagContext;
@@ -44,6 +45,7 @@ public class CurriculumQueryTools {
 
     private final EmbeddingService embeddingService;
     private final CurriculumStatsService statsService;
+    private final StructuredCurriculumQueryService structuredQueryService;
 
     /** Translates a Japanese query → Vietnamese for bilingual vector search expansion. */
     private final TranslationQueryTransformer jaToViTransformer;
@@ -53,9 +55,11 @@ public class CurriculumQueryTools {
 
     public CurriculumQueryTools(EmbeddingService embeddingService,
                                   CurriculumStatsService statsService,
+                                  StructuredCurriculumQueryService structuredQueryService,
                                   OpenAiChatModel chatModel) {
         this.embeddingService = embeddingService;
         this.statsService = statsService;
+        this.structuredQueryService = structuredQueryService;
 
         // Build a shared ChatClient.Builder for the TranslationQueryTransformers.
         // TranslationQueryTransformer makes a cheap single LLM call per translation.
@@ -164,6 +168,84 @@ public class CurriculumQueryTools {
         return "scope=" + scope
                 + " | vocabulary=" + count.vocabularyCount()
                 + " | grammar_points=" + count.grammarCount();
+    }
+
+    /**
+     * Structured (SQL-backed) query against curriculum entity tables.
+     *
+     * Use this tool when:
+     * - User asks to list ALL vocabulary or grammar in a lesson ("liệt kê từ vựng bài 1")
+     * - User searches by a specific keyword across vocabulary or grammar
+     *   ("tìm từ có nghĩa 'ăn'", "ngữ pháp nào có 〜て?")
+     * - Results must be complete and ordered (vector search can miss items or return
+     *   results out of curriculum order)
+     *
+     * Prefer {@link #searchCurriculum} for conceptual/semantic questions about HOW to use
+     * a grammar point or WHAT a word means in context. Use THIS tool for listing and searching.
+     */
+    @Tool(description =
+            "Truy vấn danh sách từ vựng hoặc điểm ngữ pháp từ cơ sở dữ liệu giáo trình. "
+            + "Dùng khi user muốn liệt kê TẤT CẢ từ vựng/ngữ pháp của một bài học, "
+            + "hoặc tìm kiếm theo từ khóa cụ thể trong danh sách (ví dụ: 'tìm từ có nghĩa ăn', "
+            + "'ngữ pháp nào chứa て form'). "
+            + "KHÔNG dùng cho câu hỏi về cách dùng hay giải thích — dùng searchCurriculum cho đó.")
+    public String queryStructuredData(
+            @ToolParam(description =
+                    "Loại dữ liệu cần truy vấn: VOCABULARY (từ vựng) hoặc GRAMMAR (ngữ pháp)")
+            String dataType,
+            @ToolParam(description =
+                    "Từ khóa tìm kiếm trong danh sách (tên từ, nghĩa, pattern). "
+                    + "Null hoặc để trống để lấy toàn bộ danh sách.")
+            String keyword,
+            @ToolParam(description =
+                    "Số thứ tự bài học (ví dụ: 1 cho 'Bài 1'). "
+                    + "Null để truy vấn toàn khóa học hoặc khi session đã gắn với bài cụ thể.")
+            Integer lessonNumber,
+            @ToolParam(description = "Số lượng kết quả tối đa cần trả về (mặc định 20, tối đa 50)")
+            Integer limit,
+            ToolContext toolContext) {
+
+        UUID courseId = getUuid(toolContext, CTX_COURSE_ID);
+        UUID lessonId = resolveLesson(toolContext, courseId, lessonNumber);
+        int cap = (limit != null && limit > 0) ? limit : 20;
+
+        boolean isVocab = !"GRAMMAR".equalsIgnoreCase(dataType);
+        StructuredCurriculumQueryService.StructuredResult result = isVocab
+                ? structuredQueryService.queryVocabulary(courseId, lessonId, keyword, cap)
+                : structuredQueryService.queryGrammar(courseId, lessonId, keyword, cap);
+
+        log.debug("queryStructuredData: type={} keyword='{}' lessonId={} → {} rows (total={})",
+                dataType, keyword, lessonId, result.rows().size(), result.totalCount());
+
+        if (result.isEmpty()) {
+            String scope = lessonNumber != null ? "Bài " + lessonNumber : "khóa học hiện tại";
+            String typeName = isVocab ? "từ vựng" : "điểm ngữ pháp";
+            return "Không tìm thấy " + typeName + " nào"
+                    + (keyword != null && !keyword.isBlank() ? " khớp với \"" + keyword + "\"" : "")
+                    + " trong " + scope + ".";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        String typeName = isVocab ? "Từ vựng" : "Ngữ pháp";
+        String scope = lessonId != null ? " (bài học)" : " (khóa học)";
+        sb.append(typeName).append(scope).append(" — ").append(result.rows().size());
+        if (result.totalCount() > result.rows().size()) {
+            sb.append('/').append(result.totalCount()).append(" (đã giới hạn)");
+        }
+        sb.append(" mục:\n\n");
+
+        int i = 1;
+        for (String row : result.rows()) {
+            sb.append(i++).append(". ").append(row).append('\n');
+        }
+
+        if (result.totalCount() > result.rows().size()) {
+            sb.append("\n[Chỉ hiển thị ").append(result.rows().size())
+              .append(" / ").append(result.totalCount())
+              .append(" mục. Hỏi cụ thể hơn để thu hẹp kết quả.]");
+        }
+
+        return sb.toString();
     }
 
     // ── Lesson resolution ─────────────────────────────────────────────────────

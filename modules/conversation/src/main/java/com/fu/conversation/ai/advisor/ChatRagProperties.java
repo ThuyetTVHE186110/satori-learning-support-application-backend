@@ -5,6 +5,9 @@ import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * Configuration for the Agentic RAG advisor chain (Self-RAG + CRAG).
  *
@@ -41,6 +44,36 @@ public class ChatRagProperties {
     // noise sits at 0.35–0.49.  With text-embedding-3-small use 0.45 instead.
     private double minMeaningfulSimilarity = 0.50;
 
+    /**
+     * Per-intent cosine similarity thresholds that override {@link #minMeaningfulSimilarity}.
+     *
+     * Rationale for asymmetric values:
+     *   LOOKUP  — single term lookup against stored vocabulary entries → high bar (0.55) to
+     *             avoid returning unrelated words that happen to be near the embedding.
+     *   EXPLAIN — grammar explanation text is verbose; a 0.42 cosine still captures
+     *             structurally similar patterns across cross-lingual VI↔JA embeddings.
+     *   EXAMPLE — example/dialog chunks have different surface forms; lower bar (0.35) is
+     *             needed to retrieve relevant dialogue when the query uses meta-language
+     *             ("ví dụ", "hội thoại") instead of the actual Japanese content.
+     *
+     * Configurable via {@code conversation.rag.intent-thresholds.*} in application.yml.
+     * Falls back to {@link #minMeaningfulSimilarity} for intents not present in the map.
+     */
+    private Map<String, Double> intentThresholds = new HashMap<>(Map.of(
+            "LOOKUP",  0.55,
+            "EXPLAIN", 0.42,
+            "EXAMPLE", 0.35
+    ));
+
+    /**
+     * Returns the similarity threshold for the given intent, falling back to
+     * {@link #minMeaningfulSimilarity} when no per-intent override is configured.
+     */
+    public double getThresholdForIntent(String intent) {
+        if (intent == null) return minMeaningfulSimilarity;
+        return intentThresholds.getOrDefault(intent, minMeaningfulSimilarity);
+    }
+
     /** Model for lightweight advisor LLM calls (relevance + grounding checks). */
     private String checkModel = "gpt-4o-mini";
 
@@ -73,4 +106,35 @@ public class ChatRagProperties {
      * Ignored when queryAnalysisEnabled=true (translation is part of the analysis call).
      */
     private boolean bilingualQueryEnabled = true;
+
+    /**
+     * Enable hybrid retrieval (dense + sparse BM25-like via pg_trgm) with RRF fusion.
+     *
+     * When enabled, retrieval runs two channels:
+     *   1. Dense HNSW cosine similarity (semantic meaning)
+     *   2. Sparse pg_trgm word_similarity (lexical / exact-term match)
+     *
+     * Results are fused via Reciprocal Rank Fusion (RRF, k=60).
+     * Items that appear in BOTH channels are strongly promoted.
+     *
+     * When combined with HyDE, the dense channel uses the hypothetical document
+     * embedding while the sparse channel uses the original clean search keyword —
+     * giving the best of both worlds (semantic reach + lexical precision).
+     *
+     * Requires migration 49-bm25-hybrid-index.sql (pg_trgm + GIN index).
+     */
+    private boolean hybridEnabled = true;
+
+    /**
+     * Enable HyDE (Hypothetical Document Embeddings) for LOOKUP and EXPLAIN intents.
+     *
+     * Instead of embedding the raw search keyword (a question/term), the advisor first asks
+     * the LLM to write a short hypothetical curriculum entry that would answer the question,
+     * then embeds THAT text. Hypothetical answers live in the same semantic space as stored
+     * curriculum documents, yielding +5–15% cosine similarity vs. embedding raw questions.
+     *
+     * Cost: one extra gpt-4o-mini call per LOOKUP/EXPLAIN query (~$0.0001).
+     * Only applies when queryAnalysisEnabled=true and searchKeyword is non-null.
+     */
+    private boolean hydeEnabled = true;
 }

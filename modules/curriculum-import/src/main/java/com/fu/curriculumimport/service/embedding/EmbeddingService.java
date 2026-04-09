@@ -113,8 +113,11 @@ public class EmbeddingService {
             // Raise HNSW ef_search for this query to improve recall.
             // Default ef_search=40 trades recall for speed; 100 gives ~99% recall
             // with negligible latency increase at thousands-of-rows scale.
-            // Scoped to this transaction/connection — does not affect other queries.
-            jdbcTemplate.execute("SET LOCAL hnsw.ef_search = 100");
+            // Using SET (session-scoped) instead of SET LOCAL because retrieveContext()
+            // runs outside an explicit transaction — SET LOCAL has no effect in autocommit.
+            // HikariCP returns connections to the pool with reset state, so this does
+            // not leak across unrelated queries on other threads.
+            jdbcTemplate.execute("SET hnsw.ef_search = 100");
 
             // Build WHERE clause động theo filter
             StringBuilder where = new StringBuilder(
@@ -354,6 +357,262 @@ public class EmbeddingService {
                 r1.getSimilarItems().size(), r2.getSimilarItems().size(), sorted.size());
 
         return RagContext.builder().similarItems(sorted).build();
+    }
+
+    /**
+     * Hybrid retrieval: dense HNSW cosine search + sparse pg_trgm word_similarity,
+     * fused via Reciprocal Rank Fusion (RRF, k=60).
+     *
+     * Use case: exact-term lookups where the user asks for a specific word/pattern
+     * (e.g. "食べる nghĩa là gì?") and the dense embedding may rank the target document
+     * lower than semantically-adjacent items. The sparse channel surfaces the document
+     * via lexical match, and RRF promotes it to the top of the merged result.
+     *
+     * When HyDE is active, {@code denseQuery} is the hypothetical answer (richer embedding)
+     * while {@code sparseKeyword} is the original clean term (exact-match precision).
+     *
+     * Quality gate note: sparse-only items receive similarity = word_similarity score
+     * so the caller's quality gate can treat them consistently with dense items.
+     * A strong trigram match (word_similarity ≥ 0.7) reliably passes a LOOKUP gate (0.55).
+     *
+     * @param denseQuery    text to embed for the dense HNSW search (may be HyDE text)
+     * @param sparseKeyword term to use for pg_trgm word_similarity (original search keyword)
+     * @param filter        scope and type filters
+     */
+    public RagContext retrieveHybridContext(String denseQuery, String sparseKeyword,
+                                             ChatbotFilter filter) {
+        if (denseQuery == null || denseQuery.isBlank()) return RagContext.empty();
+        if (filter == null) return retrieveContext(denseQuery);
+
+        // Sparse retrieval requires at least 2 non-whitespace characters for meaningful trigrams
+        boolean sparseFeasible = sparseKeyword != null
+                && sparseKeyword.codePoints().filter(cp -> !Character.isWhitespace(cp)).count() >= 2;
+
+        // Dense retrieval with expanded candidate pool (2× topK for RRF re-ranking)
+        ChatbotFilter expandedFilter = ChatbotFilter.builder()
+                .courseId(filter.getCourseId())
+                .lessonId(filter.getLessonId())
+                .contentTypes(filter.getContentTypes())
+                .jlptLevel(filter.getJlptLevel())
+                .similarityThreshold(filter.getSimilarityThreshold())
+                .topK(filter.getTopK() * 2)
+                .build();
+        List<RagContext.SimilarItem> denseItems =
+                retrieveContext(denseQuery, expandedFilter).getSimilarItems();
+
+        if (!sparseFeasible) {
+            // No sparse possible — just truncate dense results
+            List<RagContext.SimilarItem> truncated = denseItems.stream()
+                    .limit(filter.getTopK()).toList();
+            return RagContext.builder().similarItems(truncated).build();
+        }
+
+        // Sparse retrieval via pg_trgm word_similarity
+        List<SparseHit> sparseHits = querySparse(sparseKeyword, filter);
+
+        if (sparseHits.isEmpty()) {
+            List<RagContext.SimilarItem> truncated = denseItems.stream()
+                    .limit(filter.getTopK()).toList();
+            return RagContext.builder().similarItems(truncated).build();
+        }
+
+        // RRF score: 1/(k + rank) where k=60 (Cormack et al. 2009 standard constant)
+        final int K = 60;
+        Map<UUID, Double> rrfScores = new LinkedHashMap<>();
+        for (int i = 0; i < denseItems.size(); i++) {
+            rrfScores.put(denseItems.get(i).getContentId(), 1.0 / (K + i));
+        }
+        for (int i = 0; i < sparseHits.size(); i++) {
+            rrfScores.merge(sparseHits.get(i).contentId(), 1.0 / (K + i), Double::sum);
+        }
+
+        // Build item pool: dense results already have full content
+        Map<UUID, RagContext.SimilarItem> itemPool = new LinkedHashMap<>();
+        denseItems.forEach(item -> itemPool.put(item.getContentId(), item));
+
+        // Sparse-only items (in sparse but not dense): fetch their full content
+        Map<UUID, Double> sparseOnlyScores = sparseHits.stream()
+                .filter(hit -> !itemPool.containsKey(hit.contentId()))
+                .collect(Collectors.toMap(SparseHit::contentId, SparseHit::score,
+                        (a, b) -> a, LinkedHashMap::new));
+
+        if (!sparseOnlyScores.isEmpty()) {
+            fetchFullItems(sparseOnlyScores).forEach(item -> itemPool.put(item.getContentId(), item));
+        }
+
+        // Sort by RRF score descending and take top-K
+        List<RagContext.SimilarItem> merged = rrfScores.entrySet().stream()
+                .sorted(Map.Entry.<UUID, Double>comparingByValue().reversed())
+                .limit(filter.getTopK())
+                .map(e -> itemPool.get(e.getKey()))
+                .filter(Objects::nonNull)
+                .toList();
+
+        log.debug("HybridRAG: dense={} sparse={} sparseOnly={} merged={}",
+                denseItems.size(), sparseHits.size(), sparseOnlyScores.size(), merged.size());
+
+        return RagContext.builder().similarItems(merged).build();
+    }
+
+    /** Sparse retrieval result: content UUID + word_similarity score from pg_trgm. */
+    private record SparseHit(UUID contentId, double score) {}
+
+    /**
+     * Run pg_trgm word_similarity search against {@code text_content}.
+     * Uses ILIKE for GIN index acceleration; word_similarity for ranking.
+     *
+     * Parameter order in SQL matches JDBC positional binding:
+     *   ?#1 → word_similarity(keyword, text_content)  — SELECT list
+     *   ?#2 → text_content ILIKE pattern              — WHERE clause
+     *   ?#3.. → scope / type filters
+     *   ?#last → LIMIT
+     */
+    private List<SparseHit> querySparse(String keyword, ChatbotFilter filter) {
+        try {
+            String escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+            String pattern = "%" + escaped + "%";
+            StringBuilder where = new StringBuilder("WHERE text_content ILIKE ?");
+            List<Object> params = new ArrayList<>();
+            params.add(keyword);  // ?#1 — word_similarity(?, text_content) in SELECT
+            params.add(pattern);  // ?#2 — ILIKE ?
+
+            if (filter.getLessonId() != null) {
+                where.append(" AND metadata->>'lesson_id' = ?");
+                params.add(filter.getLessonId().toString());
+            } else if (filter.getCourseId() != null) {
+                where.append(" AND metadata->>'course_id' = ?");
+                params.add(filter.getCourseId().toString());
+            }
+
+            if (filter.getContentTypes() != null && !filter.getContentTypes().isEmpty()) {
+                String placeholders = filter.getContentTypes().stream()
+                        .map(t -> "?").collect(Collectors.joining(", "));
+                where.append(" AND content_type IN (").append(placeholders).append(")");
+                params.addAll(filter.getContentTypes());
+            }
+
+            params.add(filter.getTopK());  // LIMIT
+
+            String sql = "SELECT content_id, word_similarity(?, text_content) AS sparse_score "
+                    + "FROM progress.content_embeddings "
+                    + where
+                    + " ORDER BY sparse_score DESC LIMIT ?";
+
+            return jdbcTemplate.query(sql,
+                    (rs, rowNum) -> new SparseHit(
+                            UUID.fromString(rs.getString("content_id")),
+                            rs.getDouble("sparse_score")),
+                    params.toArray());
+        } catch (Exception e) {
+            log.debug("Sparse retrieval failed for '{}': {}", keyword, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * Fetch full item content for sparse-only hits (items that appear in sparse results
+     * but were not returned by dense retrieval).
+     *
+     * Similarity is set to the word_similarity score so the caller's quality gate
+     * can evaluate lexical matches on the same 0.0–1.0 scale as cosine similarity.
+     *
+     * @param sparseOnlyScores map of contentId → word_similarity score
+     */
+    private List<RagContext.SimilarItem> fetchFullItems(Map<UUID, Double> sparseOnlyScores) {
+        if (sparseOnlyScores.isEmpty()) return List.of();
+        try {
+            // Build IN clause using content_id::text cast for safe JDBC string binding
+            String placeholders = sparseOnlyScores.keySet().stream()
+                    .map(id -> "?") .collect(Collectors.joining(", "));
+            String sql = "SELECT content_id, content_type, text_content, metadata "
+                    + "FROM progress.content_embeddings "
+                    + "WHERE content_id::text IN (" + placeholders + ")";
+
+            List<Object> params = new ArrayList<>(
+                    sparseOnlyScores.keySet().stream().map(UUID::toString).toList());
+
+            return jdbcTemplate.query(sql,
+                    (rs, rowNum) -> {
+                        UUID id = UUID.fromString(rs.getString("content_id"));
+                        double sparseScore = sparseOnlyScores.getOrDefault(id, 0.0);
+                        return RagContext.SimilarItem.builder()
+                                .contentId(id)
+                                .contentType(rs.getString("content_type"))
+                                .textContent(rs.getString("text_content"))
+                                .similarity(sparseScore)  // word_similarity as quality proxy
+                                .metadata(parseMetadata(rs.getString("metadata")))
+                                .build();
+                    },
+                    params.toArray());
+        } catch (Exception e) {
+            log.debug("fetchFullItems failed: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * Browse retrieval — returns embeddings matching the filter's content types WITHOUT
+     * a cosine similarity gate. Used for discovery queries where the user asks by category
+     * ("ví dụ hội thoại", "cho tôi xem ngữ pháp") rather than searching for a specific term.
+     *
+     * Items are ordered by {@code metadata->>'order_index'} (ascending) when the field is
+     * present, falling back to insertion order. This preserves curriculum sequence.
+     *
+     * @param filter  chatbot filter — must have courseId set; contentTypes narrows the type;
+     *                topK limits the result count. similarityThreshold is ignored.
+     * @return RAG context with up to {@code filter.topK()} items, or empty on error
+     */
+    public RagContext browseByType(ChatbotFilter filter) {
+        if (filter == null || filter.getCourseId() == null) return RagContext.empty();
+        try {
+            StringBuilder where = new StringBuilder("WHERE 1=1");
+            List<Object> params = new ArrayList<>();
+
+            if (filter.getLessonId() != null) {
+                where.append(" AND metadata->>'lesson_id' = ?");
+                params.add(filter.getLessonId().toString());
+            } else {
+                where.append(" AND metadata->>'course_id' = ?");
+                params.add(filter.getCourseId().toString());
+            }
+
+            if (filter.getContentTypes() != null && !filter.getContentTypes().isEmpty()) {
+                String placeholders = filter.getContentTypes().stream()
+                        .map(t -> "?").collect(Collectors.joining(", "));
+                where.append(" AND content_type IN (").append(placeholders).append(")");
+                params.addAll(filter.getContentTypes());
+            }
+
+            // Order by curriculum sequence when available, else insertion order (id)
+            params.add(filter.getTopK());
+
+            String sql = "SELECT content_id, content_type, text_content, metadata, 1.0 AS similarity "
+                    + "FROM progress.content_embeddings "
+                    + where
+                    + " ORDER BY (CASE WHEN metadata->>'order_index' ~ '^[0-9]+$' THEN (metadata->>'order_index')::int ELSE 2147483647 END) ASC, id "
+                    + "LIMIT ?";
+
+            List<RagContext.SimilarItem> items = jdbcTemplate.query(
+                    sql,
+                    (rs, rowNum) -> RagContext.SimilarItem.builder()
+                            .contentId(UUID.fromString(rs.getString("content_id")))
+                            .contentType(rs.getString("content_type"))
+                            .textContent(rs.getString("text_content"))
+                            .similarity(rs.getDouble("similarity"))
+                            .metadata(parseMetadata(rs.getString("metadata")))
+                            .build(),
+                    params.toArray()
+            );
+
+            log.debug("BrowseByType: {} items | lessonId={} courseId={} types={}",
+                    items.size(), filter.getLessonId(), filter.getCourseId(),
+                    filter.getContentTypes());
+
+            return RagContext.builder().similarItems(items).build();
+        } catch (Exception e) {
+            log.error("BrowseByType failed: {}", e.getMessage(), e);
+            return RagContext.empty();
+        }
     }
 
     /**
