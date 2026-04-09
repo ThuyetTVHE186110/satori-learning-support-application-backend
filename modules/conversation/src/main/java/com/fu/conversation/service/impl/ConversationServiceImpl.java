@@ -251,9 +251,13 @@ public class ConversationServiceImpl implements ConversationService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "ConversationTopic", "id", request.getTopicId().toString()));
 
+        Course course = courseRepository.findById(request.getCourseId())
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Course", "id", request.getCourseId().toString()));
+
         return generationService.generateConversationsForTopic(
                 request.getTopicId(), request.getCourseId(), request.getTitle(), request.getDescription(),
-                request.getDifficultyLevel(), request.getJlptLevel(), request.getCount());
+                request.getDifficultyLevel(), course.getJlptLevel(), request.getCount());
     }
 
     private ConversationResponse buildConversationResponse(Conversation conversation) {
