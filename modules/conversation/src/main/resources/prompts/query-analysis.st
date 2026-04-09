@@ -18,6 +18,8 @@ Analyze the user's question and return JSON only (no markdown fences).
     "Sự khác biệt giữa は và が?" → "は vs が"
     "bao nhiêu từ vựng?" → null (COUNT intent, no keyword needed)
     "Xin chào!" → null (GENERAL intent)
+    "cho tôi xem ví dụ hội thoại" → null (EXAMPLE browse — no specific term, user wants a list)
+    "có ví dụ nào không?" → null (EXAMPLE browse)
 - If the question itself IS the keyword (no question phrasing to strip) → use question as-is
 - For COUNT or GENERAL intent → null
 

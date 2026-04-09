@@ -55,6 +55,9 @@ public class AnswerEvaluatorAgent {
     // ── Rule-based evaluation ─────────────────────────────────────────────
 
     private EvaluationResult evaluateByRule(PracticeItem item, String userAnswer) {
+        if (userAnswer == null || item.getCorrectAnswer() == null) {
+            return new EvaluationResult(false, 0, "Không thể đánh giá câu trả lời.", item.getCorrectAnswer());
+        }
         boolean correct = userAnswer.trim().equalsIgnoreCase(item.getCorrectAnswer().trim());
         String feedback = correct
                 ? "Chính xác!"
@@ -242,6 +245,9 @@ public class AnswerEvaluatorAgent {
     }
 
     private EvaluationResult fallbackExactMatch(PracticeItem item, String userAnswer) {
+        if (userAnswer == null || item.getCorrectAnswer() == null) {
+            return new EvaluationResult(false, 0, "Không thể đánh giá câu trả lời.", item.getCorrectAnswer());
+        }
         boolean correct = userAnswer.trim().equalsIgnoreCase(item.getCorrectAnswer().trim());
         String feedback = correct
                 ? "Chính xác!"
