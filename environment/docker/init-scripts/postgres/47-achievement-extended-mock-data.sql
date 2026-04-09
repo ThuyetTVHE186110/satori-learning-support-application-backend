@@ -31,13 +31,13 @@ INSERT INTO gamification.badges
 VALUES
 -- Month Milestone: 14-day streak
 ('c0000000-0000-0000-0000-000000000008', 'Month Milestone', 'LEARNING_STREAK'::badge_type, 14, 100, 'ACTIVE'::badge_status, 
- 'https://api.satori.local/assets/badges/month-milestone.png',
+ 'https://res.cloudinary.com/dtn0i6fvs/image/upload/v1775665475/achievements/badges/glytfiktkqsn1mhickrf.png',
  'Achieve a 14-day learning streak | 14日間の学習ストリークを達成',
  CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
 
 -- Dedication: 21-day streak (maximum milestone)
 ('c0000000-0000-0000-0000-000000000009', 'Dedication', 'LEARNING_STREAK'::badge_type, 21, 150, 'ACTIVE'::badge_status,
- 'https://api.satori.local/assets/badges/dedication.png',
+ 'https://res.cloudinary.com/dtn0i6fvs/image/upload/v1775665475/achievements/badges/glytfiktkqsn1mhickrf.png',
  'Complete 21 consecutive days of learning | 21日間連続学習を完了',
  CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 ON CONFLICT (id) DO NOTHING;
