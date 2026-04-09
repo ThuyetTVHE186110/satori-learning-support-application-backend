@@ -1,6 +1,7 @@
 package com.fu.clazz.controller;
 
 import com.fu.clazz.dto.request.AddMemberRequest;
+import com.fu.clazz.dto.request.AddMembersRequest;
 import com.fu.clazz.dto.request.CreateClassRequest;
 import com.fu.clazz.dto.request.UpdateClassRequest;
 import com.fu.clazz.dto.response.ClassMemberResponse;
@@ -26,6 +27,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
+import java.util.List;
 
 /**
  * Unified REST Controller for Class operations.
@@ -245,20 +247,21 @@ public class ClassController {
     }
 
     /**
-     * Add a member to a class.
+     * Add member(s) to a class.
+     * Supports both single member add (legacy) and batch operations.
      * POST /api/v1/classes/{classId}/members
      */
     @PostMapping("/{classId}/members")
     @PreAuthorize("hasRole('OPERATION_MANAGER')")
-    public ResponseEntity<ApiResponse<ClassMemberResponse>> addMember(
+    public ResponseEntity<ApiResponse<?>> addMembers(
             @PathVariable UUID classId,
-            @Valid @RequestBody AddMemberRequest request,
+            @Valid @RequestBody AddMembersRequest request,
             @AuthenticationPrincipal UUID managerId) {
 
-        log.info("Manager {} adding member {} to class: {}", managerId, request.getUserId(), classId);
-        ClassMemberResponse response = clazzService.addMember(classId, request, managerId);
+        log.info("Manager {} adding {} members to class: {}", managerId, request.getLearnerIds().size(), classId);
+        List<ClassMemberResponse> responses = clazzService.addMembers(classId, request, managerId);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success("Thêm học viên vào lớp thành công.", response));
+                .body(ApiResponse.success("Thêm học viên vào lớp thành công.", responses));
     }
 
     /**

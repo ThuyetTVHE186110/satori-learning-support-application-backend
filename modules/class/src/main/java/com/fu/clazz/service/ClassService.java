@@ -53,6 +53,24 @@ public interface ClassService {
     ClassMemberResponse addMember(UUID classId, AddMemberRequest request, UUID managerId);
 
     /**
+     * Add multiple members to a class in a batch operation (MANAGER only).
+     * All-or-nothing transaction: if any validation fails, no members are added.
+     * 
+     * Validation:
+     * - Each learner must have status = INACTIVE
+     * - Each learner must not have an active ClassMember record (removedAt must be null or not exist)
+     * - Total members after adding must not exceed maxStudents
+     * 
+     * @param classId the class to add members to
+     * @param request contains list of learnerIds to add
+     * @param managerId the manager performing the operation
+     * @return list of ClassMemberResponse for all added members
+     * @throws com.fu.common.exception.ResourceNotFoundException if class or any learner not found
+     * @throws com.fu.common.exception.BusinessException if learner is not INACTIVE, already active member, or would exceed capacity
+     */
+    List<ClassMemberResponse> addMembers(UUID classId, com.fu.clazz.dto.request.AddMembersRequest request, UUID managerId);
+
+    /**
      * Remove a member from a class (MANAGER only)
      */
     void removeMember(UUID classId, UUID userId, UUID managerId);
