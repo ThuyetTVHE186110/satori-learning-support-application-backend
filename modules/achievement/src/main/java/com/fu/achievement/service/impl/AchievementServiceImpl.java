@@ -250,6 +250,7 @@ public class AchievementServiceImpl implements AchievementService {
                     .requirementValue(badge.getRequirementValue())
                     .currentValue(currentValue)
                     .earned(earned)
+                    .iconUrl(badge.getIconUrl())
                     .build());
         }
 

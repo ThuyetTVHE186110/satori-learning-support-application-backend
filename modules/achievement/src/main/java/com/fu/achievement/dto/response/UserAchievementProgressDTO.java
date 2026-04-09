@@ -41,6 +41,7 @@ public class UserAchievementProgressDTO {
         Integer requirementValue;
         Integer currentValue;
         Boolean earned;
+        String iconUrl;
         
         public Integer getProgress() {
             if (requirementValue == null || requirementValue == 0) return 0;
