@@ -313,7 +313,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         }
 
         // 1b. Validate audio file and eagerly read bytes (before async dispatch)
-        if (audio.isEmpty()) {
+        if (audio == null || audio.isEmpty()) {
             throw new BusinessException("AUDIO_REQUIRED", "Audio file is required.");
         }
         byte[] audioBytes = null;
