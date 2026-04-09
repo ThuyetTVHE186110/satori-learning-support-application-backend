@@ -335,25 +335,29 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
     }
 
     @Override
-    public ImportStatisticsResponse getStatistics() {
-        log.debug("Fetching import statistics");
+    public ImportStatisticsResponse getStatistics(UUID courseId) {
+        log.debug("Fetching import statistics for course: {}", courseId);
 
-        long totalImports = importRepository.count();
-        long completedImports = importRepository.countByStatus(ImportStatus.COMPLETED);
-        long failedImports = importRepository.countByStatus(ImportStatus.FAILED);
-        long queuedImports = importRepository.countByStatus(ImportStatus.QUEUED);
-        long rollbackImports = importRepository.countByStatus(ImportStatus.ROLLED_BACK);
-        long pendingApprovalImports = importRepository.countByStatus(ImportStatus.PENDING_APPROVAL);
+        // Validate course exists
+        courseRepository.findById(courseId)
+                .orElseThrow(() -> new CourseNotFoundException(courseId));
 
-        // Count in-progress (any status between QUEUED and COMPLETED/FAILED/CANCELLED)
+        long totalImports = importRepository.countByCourseId(courseId);
+        long completedImports = importRepository.countByCourseIdAndStatus(courseId, ImportStatus.COMPLETED);
+        long failedImports = importRepository.countByCourseIdAndStatus(courseId, ImportStatus.FAILED);
+        long queuedImports = importRepository.countByCourseIdAndStatus(courseId, ImportStatus.QUEUED);
+        long rollbackImports = importRepository.countByCourseIdAndStatus(courseId, ImportStatus.ROLLED_BACK);
+        long pendingApprovalImports = importRepository.countByCourseIdAndStatus(courseId, ImportStatus.PENDING_APPROVAL);
+
+        // Calculate in-progress
         long inProgressImports = totalImports - completedImports - failedImports - queuedImports
-                - importRepository.countByStatus(ImportStatus.CANCELLED);
+                - importRepository.countByCourseIdAndStatus(courseId, ImportStatus.CANCELLED);
 
-        long totalLessons = importRepository.sumLessonsCreated();
-        long totalVocab = importRepository.sumVocabularyCreated();
-        long totalGrammar = importRepository.sumGrammarPointsCreated();
-        long totalTokens = importRepository.sumTokensUsed();
-        BigDecimal totalCost = importRepository.sumActualCostUsd();
+        long totalLessons = importRepository.sumLessonsCreatedByCourseId(courseId);
+        long totalVocab = importRepository.sumVocabularyCreatedByCourseId(courseId);
+        long totalGrammar = importRepository.sumGrammarPointsCreatedByCourseId(courseId);
+        long totalTokens = importRepository.sumTokensUsedByCourseId(courseId);
+        BigDecimal totalCost = importRepository.sumActualCostUsdByCourseId(courseId);
 
         return ImportStatisticsResponse.builder()
                 .totalImports(totalImports)
@@ -368,11 +372,11 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
                 .totalGrammarPointsCreated(totalGrammar)
                 .totalTokensUsed(totalTokens)
                 .totalCostUsd(totalCost != null ? totalCost : BigDecimal.ZERO)
-                .totalValidationPassed(importRepository.sumValidationPassed())
-                .totalValidationFailed(importRepository.sumValidationFailed())
-                .totalReExtractions(importRepository.sumReExtractions())
-                .totalEmbeddingsCreated(importRepository.sumEmbeddingsCreated())
-                .totalHallucinatedItems(importRepository.sumHallucinatedItems())
+                .totalValidationPassed(importRepository.sumValidationPassedByCourseId(courseId))
+                .totalValidationFailed(importRepository.sumValidationFailedByCourseId(courseId))
+                .totalReExtractions(importRepository.sumReExtractionsByCourseId(courseId))
+                .totalEmbeddingsCreated(importRepository.sumEmbeddingsCreatedByCourseId(courseId))
+                .totalHallucinatedItems(importRepository.sumHallucinatedItemsByCourseId(courseId))
                 .build();
     }
 

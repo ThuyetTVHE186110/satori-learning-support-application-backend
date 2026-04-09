@@ -241,12 +241,17 @@ public class ManagerCurriculumImportController {
     }
 
     /**
-     * Get import statistics for dashboard.
-     * GET /api/v1/manager/curriculum-imports/statistics
+     * Get import statistics for a specific course.
+     * GET /api/v1/manager/curriculum-imports/statistics?courseId=...
+     *
+     * @param courseId required - course ID to get statistics for
+     * @return statistics summary for the specified course
      */
     @GetMapping("/statistics")
-    public ResponseEntity<ApiResponse<ImportStatisticsResponse>> getStatistics() {
-        ImportStatisticsResponse statistics = importService.getStatistics();
+    public ResponseEntity<ApiResponse<ImportStatisticsResponse>> getStatistics(
+            @RequestParam UUID courseId) {
+        log.debug("Fetching statistics for courseId: {}", courseId);
+        ImportStatisticsResponse statistics = importService.getStatistics(courseId);
         return ResponseEntity.ok(ApiResponse.success(statistics));
     }
 }
