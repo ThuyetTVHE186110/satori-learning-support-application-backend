@@ -147,6 +147,14 @@ public class RetrievalAdvisor implements BaseAdvisor {
             return handleCountIntent(request, courseId, lessonId);
         }
 
+        // GENERAL intent = greeting, meta-question, chitchat — retrieval not needed.
+        // Skip vector search entirely: the AI will answer from system prompt + tools.
+        if ("GENERAL".equals(analysis.intent())) {
+            log.debug("RetrievalAdvisor: GENERAL intent — skipping retrieval for '{}'", question);
+            request.context().put(RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT, List.of());
+            return request;
+        }
+
         // ── Step 3: Build typed filter + bilingual retrieval ─────────────────
         // Use extracted searchKeyword as embedding query when available.
         // searchKeyword has question phrasing stripped (e.g. "〜ている" not "〜ている nghĩa là gì?")
@@ -179,10 +187,14 @@ public class RetrievalAdvisor implements BaseAdvisor {
         if (!rag.hasContext()) {
             log.debug("RetrievalAdvisor: no context for '{}' (intent={})", question, analysis.intent());
             request.context().put(RAG_DOCUMENTS_TEXT_KEY, "");
+            // Soft hint — let the AI decide: call searchCurriculum tool for another attempt,
+            // or inform the user if the topic is genuinely outside the curriculum.
+            // Do NOT mandate a specific phrase — that would block tool calls.
             return request.mutate()
                     .prompt(request.prompt().augmentSystemMessage(
-                            "\n**Lưu ý:** Không tìm thấy nội dung liên quan trong giáo trình. " +
-                            "Hãy trả lời: \"Nội dung này chưa có trong giáo trình của bạn.\""))
+                            "\n**Lưu ý:** Vector search không tìm thấy nội dung liên quan trong giáo trình " +
+                            "cho câu hỏi này. Hãy thử gọi công cụ `searchCurriculum` với từ khóa cụ thể hơn " +
+                            "nếu cần, hoặc thông báo lịch sự nếu chủ đề thực sự nằm ngoài giáo trình."))
                     .build();
         }
 
