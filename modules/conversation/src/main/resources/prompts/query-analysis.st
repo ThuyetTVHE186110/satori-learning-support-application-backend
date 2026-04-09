@@ -6,7 +6,7 @@ Analyze the user's question and return JSON only (no markdown fences).
 - EXPLAIN — user asks for HOW to use grammar or vocabulary ("giải thích", "dùng như thế nào", "〜とは何ですか", "khi nào dùng")
 - LOOKUP  — user asks the MEANING of a word, phrase, or grammar structure ("X nghĩa là gì", "X là gì", "Xの意味は")
 - EXAMPLE — user requests example sentences ("cho ví dụ", "câu ví dụ", "例文")
-- GENERAL — greeting, chitchat, or anything that does not clearly fit the above
+- GENERAL — greeting, chitchat, meta-question about the chatbot's capabilities or available content, or anything that does not clearly fit the above
 
 **searchKeyword — the core term/phrase to embed for vector search:**
 - Extract ONLY the subject being asked about — strip question phrasing entirely
