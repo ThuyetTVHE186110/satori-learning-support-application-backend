@@ -1,6 +1,7 @@
 package com.fu.clazz.service.impl;
 
 import com.fu.clazz.dto.request.AddMemberRequest;
+import com.fu.clazz.dto.request.AddMembersRequest;
 import com.fu.clazz.dto.request.CreateClassRequest;
 import com.fu.clazz.dto.request.UpdateClassRequest;
 import com.fu.clazz.dto.response.ClassMemberResponse;
@@ -37,6 +38,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -321,6 +327,117 @@ public class ClassServiceImpl implements ClassService {
             throw new BusinessException("INVALID_MEMBER_STATUS", "Chỉ có học viên hiện tại không học lớp nào mới được thêm vào lớp học.");
         }
         return addMemberToClass(clazz, request.getUserId());
+    }
+
+    @Override
+    @Transactional
+    public List<ClassMemberResponse> addMembers(UUID classId, AddMembersRequest request, UUID managerId) {
+        log.info("Thêm {} thành viên vào lớp học: {} bởi quản lý: {}", request.getLearnerIds().size(), classId, managerId);
+
+        // 1. Find and validate class
+        Clazz clazz = findClassOrThrow(classId);
+        validateClassAcceptingMembers(clazz);
+
+        // 2. Get current active member count
+        long currentMemberCount = classMemberRepository.countActiveByClassId(classId);
+
+        // 3. Validate learnerIds not empty
+        List<UUID> learnerIds = request.getLearnerIds();
+        if (learnerIds == null || learnerIds.isEmpty()) {
+            throw new BusinessException("INVALID_REQUEST", "Cần phải cung cấp ít nhất một ID học viên.");
+        }
+
+        // 4. Validate each learner before any database changes
+        List<User> learnersToAdd = new ArrayList<>();
+        Map<UUID, ClassMember> existingMembers = new HashMap<>();
+
+        for (UUID learnerId : learnerIds) {
+            // Find user
+            User user = userRepository.findById(learnerId)
+                    .filter(u -> u.getDeletedAt() == null)
+                    .orElseThrow(() -> new ResourceNotFoundException("User", "id", learnerId.toString()));
+
+            // Check status = INACTIVE
+            if (user.getStatus() != UserStatus.INACTIVE) {
+                throw new BusinessException("INVALID_MEMBER_STATUS", 
+                        "Học viên " + learnerId + " phải có trạng thái KHÔNG HOẠT ĐỘNG.");
+            }
+
+            // Validate user has LEARNER role
+            if (user.getRole() != UserRole.LEARNER) {
+                throw new BusinessException("INVALID_MEMBER_ROLE", 
+                        "Chỉ người dùng có vai trò HỌC VIÊN mới được thêm vào lớp học.");
+            }
+
+            // Check existing ClassMember
+            Optional<ClassMember> existing = classMemberRepository.findByClassIdAndUserId(classId, learnerId);
+            if (existing.isPresent()) {
+                ClassMember member = existing.get();
+                if (member.isActive()) {
+                    // Already an active member
+                    throw new BusinessException("MEMBER_ALREADY_EXISTS", 
+                            "Học viên " + learnerId + " đã là thành viên của lớp này.");
+                }
+                // Store for restoration
+                existingMembers.put(learnerId, member);
+            }
+
+            learnersToAdd.add(user);
+        }
+
+        // 5. Check capacity: currentCount + new learners > maxStudents?
+        if (currentMemberCount + learnerIds.size() > clazz.getMaxStudents()) {
+            throw new BusinessException("CLASS_FULL", 
+                    "Vượt quá sức chứa: lớp có " + currentMemberCount + " học viên, tối đa là " 
+                    + clazz.getMaxStudents() + ", không thể thêm " + learnerIds.size() + ".");
+        }
+
+        // 6. Add/restore all members (transactional)
+        List<ClassMember> addedMembers = new ArrayList<>();
+        for (UUID learnerId : learnerIds) {
+            ClassMember member;
+            if (existingMembers.containsKey(learnerId)) {
+                // Restore removed member
+                member = existingMembers.get(learnerId);
+                member.restore();  // Sets removedAt = null, joinedAt = now
+            } else {
+                // Create new member
+                member = ClassMember.builder()
+                        .classId(classId)
+                        .userId(learnerId)
+                        .build();
+            }
+            addedMembers.add(classMemberRepository.save(member));
+        }
+
+        // 7. Update learner status to ACTIVE
+        for (User learner : learnersToAdd) {
+            if (learner.getStatus() == UserStatus.INACTIVE) {
+                learner.setStatus(UserStatus.ACTIVE);
+                userRepository.save(learner);
+            }
+        }
+
+        // 8. Build and return responses
+        Map<UUID, User> userMap = learnersToAdd.stream()
+                .collect(Collectors.toMap(User::getId, user -> user));
+
+        log.info("Thêm {} thành viên vào lớp học: {} thành công", learnerIds.size(), classId);
+
+        return addedMembers.stream()
+                .map(member -> {
+                    ClassMemberResponse response = classMapper.toMemberResponse(member);
+                    User user = userMap.get(member.getUserId());
+                    if (user != null) {
+                        response.setFullName(user.getFullName());
+                        response.setEmail(user.getEmail());
+                        response.setAvatarUrl(user.getAvatarUrl());
+                        response.setRole(user.getRole().name());
+                        response.setPhoneNumber(user.getPhoneNumber());
+                    }
+                    return response;
+                })
+                .collect(Collectors.toList());
     }
 
     @Override
