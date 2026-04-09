@@ -554,9 +554,10 @@ class ManagerCurriculumImportControllerTest {
     class GetStatisticsTests {
 
         @Test
-        @DisplayName("GET /statistics → 200 OK, success = true")
+        @DisplayName("GET /statistics?courseId=... → 200 OK, success = true")
         void getStatistics_returns200() throws Exception {
             // Arrange
+            UUID courseId = UUID.randomUUID();
             ImportStatisticsResponse stats = ImportStatisticsResponse.builder()
                     .totalImports(42)
                     .completedImports(35)
@@ -567,10 +568,11 @@ class ManagerCurriculumImportControllerTest {
                     .totalVocabularyCreated(1500)
                     .totalGrammarPointsCreated(300)
                     .build();
-            given(importService.getStatistics()).willReturn(stats);
+            given(importService.getStatistics(courseId)).willReturn(stats);
 
             // Act
-            ResultActions result = mockMvc.perform(get(BASE_URL + "/statistics"));
+            ResultActions result = mockMvc.perform(get(BASE_URL + "/statistics")
+                    .param("courseId", courseId.toString()));
 
             // Assert
             result.andDo(print())

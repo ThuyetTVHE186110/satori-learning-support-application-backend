@@ -76,7 +76,7 @@ public interface CurriculumImportService {
     /**
      * Get import statistics for dashboard.
      */
-    ImportStatisticsResponse getStatistics();
+    ImportStatisticsResponse getStatistics(UUID courseId);
 
     /**
      * Link a completed import (and its lessons) to a course.
