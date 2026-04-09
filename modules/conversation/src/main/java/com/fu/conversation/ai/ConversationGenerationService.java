@@ -42,6 +42,8 @@ public class ConversationGenerationService {
             - description (String): 2-3 sentence description
             - descriptionVi (String): Vietnamese description
             - scenario (String): Detailed roleplay scenario in English (who learner plays, who AI plays, context)
+            - aiRole (String): The role/character the AI will play in this conversation (e.g., "Café staff member", "Doctor", "Shopkeeper")
+            - learnerRole (String): The role/character the learner will play in this conversation (e.g., "Customer", "Patient", "Client")
             - category (String): One of: daily_life, travel, business, school, shopping, restaurant, health, culture
             - jlptLevel (String): N5/N4/N3/N2/N1
             - difficultyScore (Integer): 1-10
@@ -163,15 +165,20 @@ public class ConversationGenerationService {
      * Generate conversation suggestions for a topic.
      * Conversations are course-specific: the given course's vocabulary and grammar provide context.
      *
-     * @param topicId    UUID of the topic (course-agnostic parent)
-     * @param courseId   UUID of the course whose vocab/grammar is used as context
-     * @param jlptLevel  optional JLPT level override (falls back to topic level if omitted)
-     * @param count      number of conversations to suggest (1-5)
+     * @param topicId      UUID of the topic (course-agnostic parent)
+     * @param courseId     UUID of the course whose vocab/grammar is used as context
+     * @param title        conversation title to guide AI generation
+     * @param description  conversation description to guide AI generation
+     * @param difficultyLevel difficulty level (1-3) to guide AI generation
+     * @param jlptLevel    optional JLPT level override (falls back to topic level if omitted)
+     * @param count        number of conversations to suggest (1-5)
      * @return list of conversation suggestions (not persisted yet)
      */
-    public List<GeneratedConversationSuggestionResponse> generateConversationsForTopic(
-            UUID topicId, UUID courseId, Course.JlptLevel jlptLevel, int count) {
-        log.info("Generating {} conversations for topic: {}, course: {}", count, topicId, courseId);
+    public List<GeneratedConversationSuggestionResponse>  generateConversationsForTopic(
+            UUID topicId, UUID courseId, String title, String description, Integer difficultyLevel,
+            Course.JlptLevel jlptLevel, int count) {
+        log.info("Generating {} conversations for topic: {}, course: {}, title: {}, difficulty: {}",
+                count, topicId, courseId, title, difficultyLevel);
 
         ConversationTopic topic = topicRepository.findById(topicId).orElse(null);
         if (topic == null) {
@@ -190,6 +197,18 @@ public class ConversationGenerationService {
         if (topic.getCategory() != null) {
             contextBuilder.append("Category: ").append(topic.getCategory()).append("\n");
         }
+        
+        contextBuilder.append("\nConversation Guidelines:\n");
+        contextBuilder.append("- Title: ").append(title).append("\n");
+        contextBuilder.append("- Description: ").append(description).append("\n");
+        String difficultyName = switch (difficultyLevel) {
+            case 1 -> "Easy (Dễ)";
+            case 2 -> "Medium (Trung bình)";
+            case 3 -> "Difficult (Khó)";
+            default -> "Medium";
+        };
+        contextBuilder.append("- Difficulty Level: ").append(difficultyName).append(" (").append(difficultyLevel).append(")\n");
+        
         Course.JlptLevel effectiveLevel = jlptLevel != null ? jlptLevel : topic.getJlptLevel();
         if (effectiveLevel != null) {
             contextBuilder.append("Target JLPT Level: ").append(effectiveLevel.name()).append("\n");
