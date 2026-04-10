@@ -170,15 +170,15 @@ public class ConversationGenerationService {
      * @param title        conversation title to guide AI generation
      * @param description  conversation description to guide AI generation
      * @param difficultyLevel difficulty level (1-3) to guide AI generation
-     * @param jlptLevel    optional JLPT level override (falls back to topic level if omitted)
+     * @param jlptLevel    JLPT level from the course
      * @param count        number of conversations to suggest (1-5)
      * @return list of conversation suggestions (not persisted yet)
      */
     public List<GeneratedConversationSuggestionResponse>  generateConversationsForTopic(
             UUID topicId, UUID courseId, String title, String description, Integer difficultyLevel,
             Course.JlptLevel jlptLevel, int count) {
-        log.info("Generating {} conversations for topic: {}, course: {}, title: {}, difficulty: {}",
-                count, topicId, courseId, title, difficultyLevel);
+        log.info("Generating {} conversations for topic: {}, course: {}, title: {}, difficulty: {}, jlptLevel: {}",
+                count, topicId, courseId, title, difficultyLevel, jlptLevel != null ? jlptLevel.name() : "null");
 
         ConversationTopic topic = topicRepository.findById(topicId).orElse(null);
         if (topic == null) {
@@ -209,9 +209,8 @@ public class ConversationGenerationService {
         };
         contextBuilder.append("- Difficulty Level: ").append(difficultyName).append(" (").append(difficultyLevel).append(")\n");
         
-        Course.JlptLevel effectiveLevel = jlptLevel != null ? jlptLevel : topic.getJlptLevel();
-        if (effectiveLevel != null) {
-            contextBuilder.append("Target JLPT Level: ").append(effectiveLevel.name()).append("\n");
+        if (jlptLevel != null) {
+            contextBuilder.append("Target JLPT Level: ").append(jlptLevel.name()).append("\n");
         }
 
         String courseName = courseRepository.findById(courseId)
