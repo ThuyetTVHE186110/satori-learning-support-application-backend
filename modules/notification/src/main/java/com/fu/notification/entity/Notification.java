@@ -4,6 +4,7 @@ import com.fu.infrastructure.persistence.BaseEntity;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
+import org.hibernate.annotations.ColumnTransformer;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -31,11 +32,13 @@ public class Notification extends BaseEntity {
     private UUID userId;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "type", nullable = false, length = 50)
+    @Column(name = "type", nullable = false, columnDefinition = "notification_type")
+    @ColumnTransformer(write = "?::notification_type")
     private NotificationType type;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "priority", nullable = false, length = 20)
+    @Column(name = "priority", nullable = false, columnDefinition = "notification_priority")
+    @ColumnTransformer(write = "?::notification_priority")
     @Builder.Default
     private NotificationPriority priority = NotificationPriority.NORMAL;
 
