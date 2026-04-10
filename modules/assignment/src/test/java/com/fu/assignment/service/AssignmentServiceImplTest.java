@@ -1416,38 +1416,36 @@ class AssignmentServiceImplTest {
     @DisplayName("GetSubmissionsByAssignment with Keyword Tests")
     class GetSubmissionsByAssignmentKeywordTests {
 
-        private SubmissionSummaryResponse mockSummaryResponse;
-
-        @BeforeEach
-        void setUp() {
-            mockSummaryResponse = SubmissionSummaryResponse.builder()
-                    .id(UUID.randomUUID())
-                    .assignmentId(assignmentId)
-                    .assignmentTitle("Test Assignment")
-                    .userId(learnerId)
-                    .userFullName("Test User")
-                    .userEmail("test@example.com")
-                    .status(SubmissionStatus.SUBMITTED)
-                    .build();
-        }
-
         @Test
-        @DisplayName("Should return all submissions when keyword is null")
-        void shouldReturnAllSubmissionsWhenKeywordIsNull() {
+        @DisplayName("Should return all students (with and without submissions)")
+        void shouldReturnAllStudentsIncludingNotStarted() {
             Pageable pageable = PageRequest.of(0, 10);
+            UUID student1Id = UUID.randomUUID();
+            UUID student2Id = UUID.randomUUID();
+            UUID student3Id = UUID.randomUUID();
+            
+            User user1 = User.builder()
+                    .firstName("John").lastName("Doe").displayName("John Doe")
+                    .email("john@example.com").build();
+            ReflectionTestUtils.setField(user1, "id", student1Id);
+            
+            User user2 = User.builder()
+                    .firstName("Jane").lastName("Smith").displayName("Jane Smith")
+                    .email("jane@example.com").build();
+            ReflectionTestUtils.setField(user2, "id", student2Id);
+            
+            User user3 = User.builder()
+                    .firstName("Bob").lastName("Johnson").displayName("Charlie Brown")
+                    .email("bob@example.com").build();
+            ReflectionTestUtils.setField(user3, "id", student3Id);
+
             AssignmentSubmission submission1 = AssignmentSubmission.builder()
                     .id(UUID.randomUUID())
                     .assignmentId(assignmentId)
-                    .userId(learnerId)
+                    .userId(student1Id)
                     .status(SubmissionStatus.SUBMITTED)
+                    .attemptNumber(1)
                     .build();
-            AssignmentSubmission submission2 = AssignmentSubmission.builder()
-                    .id(UUID.randomUUID())
-                    .assignmentId(assignmentId)
-                    .userId(UUID.randomUUID())
-                    .status(SubmissionStatus.GRADED)
-                    .build();
-            Page<AssignmentSubmission> page = new PageImpl<>(List.of(submission1, submission2), pageable, 2);
 
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
                     .willReturn(Optional.of(testQuizAssignment));
@@ -1455,35 +1453,119 @@ class AssignmentServiceImplTest {
                     .willReturn(Optional.of(testClazz));
             given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
                     .willReturn(Optional.of(teacherId));
-            given(submissionRepository.findByAssignmentId(assignmentId, pageable))
-                    .willReturn(page);
-            given(mapper.toSummaryResponse(any(AssignmentSubmission.class)))
-                    .willReturn(mockSummaryResponse);
-            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
-                    .willReturn(Optional.of(testQuizAssignment));
-            given(userRepository.findById(any(UUID.class)))
-                    .willReturn(Optional.empty());
+            given(classMemberRepository.findActiveUserIdsByClassId(classId))
+                    .willReturn(List.of(student1Id, student2Id, student3Id));
+            given(submissionRepository.findByAssignmentId(assignmentId))
+                    .willReturn(List.of(submission1));
+            given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
+                    .willReturn(List.of(user1, user2, user3));
+            given(mapper.toSummaryResponse(submission1))
+                    .willReturn(SubmissionSummaryResponse.builder()
+                            .id(submission1.getId())
+                            .userFullName(user1.getDisplayName())
+                            .status(SubmissionStatus.SUBMITTED)
+                            .build());
 
             Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
-                    assignmentId, null, pageable, teacherId);
+                    assignmentId, null, null, pageable, teacherId);
+
+            assertThat(result).isNotNull();
+            assertThat(result.getTotalElements()).isEqualTo(3);
+            assertThat(result.getContent())
+                    .extracting(SubmissionSummaryResponse::getStatus)
+                    .contains(SubmissionStatus.SUBMITTED, SubmissionStatus.NOT_STARTED, SubmissionStatus.NOT_STARTED);
+        }
+
+        @Test
+        @DisplayName("Should filter by status (NOT_STARTED)")
+        void shouldFilterByStatusNotStarted() {
+            Pageable pageable = PageRequest.of(0, 10);
+            UUID student1Id = UUID.randomUUID();
+            UUID student2Id = UUID.randomUUID();
+            UUID student3Id = UUID.randomUUID();
+            
+            User user1 = User.builder()
+                    .firstName("John").lastName("Doe").displayName("John Doe")
+                    .email("john@example.com").build();
+            ReflectionTestUtils.setField(user1, "id", student1Id);
+            
+            User user2 = User.builder()
+                    .firstName("Jane").lastName("Smith").displayName("Jane Smith")
+                    .email("jane@example.com").build();
+            ReflectionTestUtils.setField(user2, "id", student2Id);
+            
+            User user3 = User.builder()
+                    .firstName("Bob").lastName("Johnson").displayName("Charlie Brown")
+                    .email("bob@example.com").build();
+            ReflectionTestUtils.setField(user3, "id", student3Id);
+
+            AssignmentSubmission submission1 = AssignmentSubmission.builder()
+                    .id(UUID.randomUUID())
+                    .assignmentId(assignmentId)
+                    .userId(student1Id)
+                    .status(SubmissionStatus.SUBMITTED)
+                    .attemptNumber(1)
+                    .build();
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            given(classMemberRepository.findActiveUserIdsByClassId(classId))
+                    .willReturn(List.of(student1Id, student2Id, student3Id));
+            given(submissionRepository.findByAssignmentId(assignmentId))
+                    .willReturn(List.of(submission1));
+            given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
+                    .willReturn(List.of(user1, user2, user3));
+            given(mapper.toSummaryResponse(submission1))
+                    .willReturn(SubmissionSummaryResponse.builder()
+                            .id(submission1.getId())
+                            .userFullName(user1.getDisplayName())
+                            .status(SubmissionStatus.SUBMITTED)
+                            .build());
+
+            Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
+                    assignmentId, null, SubmissionStatus.NOT_STARTED, pageable, teacherId);
 
             assertThat(result).isNotNull();
             assertThat(result.getTotalElements()).isEqualTo(2);
-            verify(submissionRepository).findByAssignmentId(assignmentId, pageable);
-            verify(submissionRepository, never()).findByAssignmentIdAndKeyword(any(), any(), any());
+            assertThat(result.getContent())
+                    .extracting(SubmissionSummaryResponse::getStatus)
+                    .allMatch(status -> status == SubmissionStatus.NOT_STARTED);
         }
 
         @Test
-        @DisplayName("Should return all submissions when keyword is blank")
-        void shouldReturnAllSubmissionsWhenKeywordIsBlank() {
+        @DisplayName("Should filter by keyword (student name)")
+        void shouldFilterByKeyword() {
             Pageable pageable = PageRequest.of(0, 10);
-            AssignmentSubmission submission = AssignmentSubmission.builder()
+            UUID student1Id = UUID.randomUUID();
+            UUID student2Id = UUID.randomUUID();
+            UUID student3Id = UUID.randomUUID();
+
+            User user1 = User.builder()
+                    .firstName("John").lastName("Doe").displayName("John Doe")
+                    .email("john@example.com").build();
+            ReflectionTestUtils.setField(user1, "id", student1Id);
+
+            User user2 = User.builder()
+                    .firstName("Jane").lastName("Smith").displayName("Jane Smith")
+                    .email("jane@example.com").build();
+            ReflectionTestUtils.setField(user2, "id", student2Id);
+
+            User user3 = User.builder()
+                    .firstName("Bob").lastName("Johnson").displayName("Charlie Brown")
+                    .email("bob@example.com").build();
+            ReflectionTestUtils.setField(user3, "id", student3Id);
+
+            AssignmentSubmission submission1 = AssignmentSubmission.builder()
                     .id(UUID.randomUUID())
                     .assignmentId(assignmentId)
-                    .userId(learnerId)
+                    .userId(student1Id)
                     .status(SubmissionStatus.SUBMITTED)
+                    .attemptNumber(1)
                     .build();
-            Page<AssignmentSubmission> page = new PageImpl<>(List.of(submission), pageable, 1);
 
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
                     .willReturn(Optional.of(testQuizAssignment));
@@ -1491,91 +1573,108 @@ class AssignmentServiceImplTest {
                     .willReturn(Optional.of(testClazz));
             given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
                     .willReturn(Optional.of(teacherId));
-            given(submissionRepository.findByAssignmentId(assignmentId, pageable))
-                    .willReturn(page);
-            given(mapper.toSummaryResponse(any(AssignmentSubmission.class)))
-                    .willReturn(mockSummaryResponse);
-            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
-                    .willReturn(Optional.of(testQuizAssignment));
-            given(userRepository.findById(learnerId))
-                    .willReturn(Optional.empty());
+            given(classMemberRepository.findActiveUserIdsByClassId(classId))
+                    .willReturn(List.of(student1Id, student2Id, student3Id));
+            given(submissionRepository.findByAssignmentId(assignmentId))
+                    .willReturn(List.of(submission1));
+            given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
+                    .willReturn(List.of(user1, user2, user3));
+            given(mapper.toSummaryResponse(submission1))
+                    .willReturn(SubmissionSummaryResponse.builder()
+                            .id(submission1.getId())
+                            .userFullName(user1.getDisplayName())
+                            .status(SubmissionStatus.SUBMITTED)
+                            .build());
 
             Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
-                    assignmentId, "   ", pageable, teacherId);
+                    assignmentId, "Jane", null, pageable, teacherId);
 
             assertThat(result).isNotNull();
             assertThat(result.getTotalElements()).isEqualTo(1);
-            verify(submissionRepository).findByAssignmentId(assignmentId, pageable);
-            verify(submissionRepository, never()).findByAssignmentIdAndKeyword(any(), any(), any());
+            assertThat(result.getContent().get(0).getUserFullName()).contains("Jane");
         }
 
         @Test
-        @DisplayName("Should search submissions by keyword")
-        void shouldSearchSubmissionsByKeyword() {
-            String keyword = "John";
+        @DisplayName("Should filter by keyword AND status")
+        void shouldFilterByKeywordAndStatus() {
             Pageable pageable = PageRequest.of(0, 10);
-            AssignmentSubmission submission = AssignmentSubmission.builder()
+            UUID student1Id = UUID.randomUUID();
+            UUID student2Id = UUID.randomUUID();
+            UUID student3Id = UUID.randomUUID();
+
+            User user1 = User.builder()
+                    .firstName("John").lastName("Doe").displayName("John Doe")
+                    .email("john@example.com").build();
+            ReflectionTestUtils.setField(user1, "id", student1Id);
+
+            User user2 = User.builder()
+                    .firstName("Jane").lastName("Smith").displayName("Jane Smith")
+                    .email("jane@example.com").build();
+            ReflectionTestUtils.setField(user2, "id", student2Id);
+
+            User user3 = User.builder()
+                    .firstName("Bob").lastName("Johnson").displayName("Charlie Brown")
+                    .email("bob@example.com").build();
+            ReflectionTestUtils.setField(user3, "id", student3Id);
+
+            AssignmentSubmission submission1 = AssignmentSubmission.builder()
                     .id(UUID.randomUUID())
                     .assignmentId(assignmentId)
-                    .userId(learnerId)
+                    .userId(student1Id)
                     .status(SubmissionStatus.SUBMITTED)
+                    .attemptNumber(1)
                     .build();
-            Page<AssignmentSubmission> page = new PageImpl<>(List.of(submission), pageable, 1);
-
+ 
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
                     .willReturn(Optional.of(testQuizAssignment));
             given(classRepository.findByIdAndNotDeleted(classId))
                     .willReturn(Optional.of(testClazz));
             given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
                     .willReturn(Optional.of(teacherId));
-            given(submissionRepository.findByAssignmentIdAndKeyword(assignmentId, keyword, pageable))
-                    .willReturn(page);
-            given(mapper.toSummaryResponse(any(AssignmentSubmission.class)))
-                    .willReturn(mockSummaryResponse);
-            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
-                    .willReturn(Optional.of(testQuizAssignment));
-            given(userRepository.findById(learnerId))
-                    .willReturn(Optional.empty());
+            given(classMemberRepository.findActiveUserIdsByClassId(classId))
+                    .willReturn(List.of(student1Id, student2Id, student3Id));
+            given(submissionRepository.findByAssignmentId(assignmentId))
+                    .willReturn(List.of(submission1));
+            given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
+                    .willReturn(List.of(user1, user2, user3));
+            given(mapper.toSummaryResponse(submission1))
+                    .willReturn(SubmissionSummaryResponse.builder()
+                            .id(submission1.getId())
+                            .userFullName(user1.getDisplayName())
+                            .status(SubmissionStatus.SUBMITTED)
+                            .build());
 
             Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
-                    assignmentId, keyword, pageable, teacherId);
+                    assignmentId, "Jane", SubmissionStatus.NOT_STARTED, pageable, teacherId);
 
             assertThat(result).isNotNull();
             assertThat(result.getTotalElements()).isEqualTo(1);
-            verify(submissionRepository).findByAssignmentIdAndKeyword(assignmentId, keyword, pageable);
-            verify(submissionRepository, never()).findByAssignmentId(assignmentId, pageable);
+            assertThat(result.getContent().get(0).getUserFullName()).isEqualTo("Jane Smith");
+            assertThat(result.getContent().get(0).getStatus()).isEqualTo(SubmissionStatus.NOT_STARTED);
         }
 
         @Test
-        @DisplayName("Should populate email field in submission response")
-        void shouldPopulateEmailInResponse() {
-            String keyword = "test";
+        @DisplayName("Should return empty when keyword matches no students")
+        void shouldReturnEmptyWhenKeywordNoMatch() {
             Pageable pageable = PageRequest.of(0, 10);
-            UUID userId = UUID.randomUUID();
-            AssignmentSubmission submission = AssignmentSubmission.builder()
-                    .id(UUID.randomUUID())
-                    .assignmentId(assignmentId)
-                    .userId(userId)
-                    .status(SubmissionStatus.SUBMITTED)
-                    .build();
-            Page<AssignmentSubmission> page = new PageImpl<>(List.of(submission), pageable, 1);
-
-            User user = User.builder()
-                    .id(userId)
-                    .email("john@example.com")
-                    .firstName("John")
-                    .lastName("Doe")
-                    .build();
-
-            SubmissionSummaryResponse emailResponse = SubmissionSummaryResponse.builder()
-                    .id(submission.getId())
-                    .assignmentId(assignmentId)
-                    .assignmentTitle("Test Assignment")
-                    .userId(userId)
-                    .userFullName("John Doe")
-                    .userEmail("john@example.com")
-                    .status(SubmissionStatus.SUBMITTED)
-                    .build();
+            UUID student1Id = UUID.randomUUID();
+            UUID student2Id = UUID.randomUUID();
+            UUID student3Id = UUID.randomUUID();
+            
+            User user1 = User.builder()
+                    .firstName("John").lastName("Doe").displayName("John Doe")
+                    .email("john@example.com").build();
+            ReflectionTestUtils.setField(user1, "id", student1Id);
+            
+            User user2 = User.builder()
+                    .firstName("Jane").lastName("Smith").displayName("Jane Smith")
+                    .email("jane@example.com").build();
+            ReflectionTestUtils.setField(user2, "id", student2Id);
+            
+            User user3 = User.builder()
+                    .firstName("Bob").lastName("Johnson").displayName("Charlie Brown")
+                    .email("bob@example.com").build();
+            ReflectionTestUtils.setField(user3, "id", student3Id);
 
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
                     .willReturn(Optional.of(testQuizAssignment));
@@ -1583,61 +1682,42 @@ class AssignmentServiceImplTest {
                     .willReturn(Optional.of(testClazz));
             given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
                     .willReturn(Optional.of(teacherId));
-            given(submissionRepository.findByAssignmentIdAndKeyword(assignmentId, keyword, pageable))
-                    .willReturn(page);
-            given(mapper.toSummaryResponse(submission))
-                    .willReturn(emailResponse);
-            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
-                    .willReturn(Optional.of(testQuizAssignment));
-            given(userRepository.findById(userId))
-                    .willReturn(Optional.of(user));
+            given(classMemberRepository.findActiveUserIdsByClassId(classId))
+                    .willReturn(List.of(student1Id, student2Id, student3Id));
+            given(submissionRepository.findByAssignmentId(assignmentId))
+                    .willReturn(List.of());
+            given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
+                    .willReturn(List.of(user1, user2, user3));
 
             Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
-                    assignmentId, keyword, pageable, teacherId);
-
-            assertThat(result).isNotNull();
-            assertThat(result.getTotalElements()).isEqualTo(1);
-            SubmissionSummaryResponse response = result.getContent().get(0);
-            assertThat(response.getUserEmail()).isEqualTo("john@example.com");
-            assertThat(response.getUserFullName()).isEqualTo("John Doe");
-        }
-
-        @Test
-        @DisplayName("Should return empty page when keyword matches no submissions")
-        void shouldReturnEmptyPageWhenNoMatch() {
-            String keyword = "nonexistent";
-            Pageable pageable = PageRequest.of(0, 10);
-            Page<AssignmentSubmission> emptyPage = new PageImpl<>(Collections.emptyList(), pageable, 0);
-
-            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
-                    .willReturn(Optional.of(testQuizAssignment));
-            given(classRepository.findByIdAndNotDeleted(classId))
-                    .willReturn(Optional.of(testClazz));
-            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
-                    .willReturn(Optional.of(teacherId));
-            given(submissionRepository.findByAssignmentIdAndKeyword(assignmentId, keyword, pageable))
-                    .willReturn(emptyPage);
-
-            Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
-                    assignmentId, keyword, pageable, teacherId);
+                    assignmentId, "NonExistent", null, pageable, teacherId);
 
             assertThat(result).isNotNull();
             assertThat(result.getTotalElements()).isEqualTo(0);
-            assertThat(result.getContent()).isEmpty();
         }
 
         @Test
-        @DisplayName("Should trim keyword before searching")
-        void shouldTrimKeywordBeforeSearching() {
-            String trimmedKeyword = "John Doe";
-            Pageable pageable = PageRequest.of(0, 10);
-            AssignmentSubmission submission = AssignmentSubmission.builder()
-                    .id(UUID.randomUUID())
-                    .assignmentId(assignmentId)
-                    .userId(learnerId)
-                    .status(SubmissionStatus.SUBMITTED)
-                    .build();
-            Page<AssignmentSubmission> page = new PageImpl<>(List.of(submission), pageable, 1);
+        @DisplayName("Should paginate results correctly")
+        void shouldPaginateResultsCorrectly() {
+            Pageable pageable = PageRequest.of(1, 1); // page 2, size 1
+            UUID student1Id = UUID.randomUUID();
+            UUID student2Id = UUID.randomUUID();
+            UUID student3Id = UUID.randomUUID();
+            
+            User user1 = User.builder()
+                    .firstName("Alice").lastName("Anderson").displayName("Alice Anderson")
+                    .email("alice@example.com").build();
+            ReflectionTestUtils.setField(user1, "id", student1Id);
+            
+            User user2 = User.builder()
+                    .firstName("Bob").lastName("Brown").displayName("Bob Brown")
+                    .email("bob@example.com").build();
+            ReflectionTestUtils.setField(user2, "id", student2Id);
+            
+            User user3 = User.builder()
+                    .firstName("Charlie").lastName("Charles").displayName("Charlie Charles")
+                    .email("charlie@example.com").build();
+            ReflectionTestUtils.setField(user3, "id", student3Id);
 
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
                     .willReturn(Optional.of(testQuizAssignment));
@@ -1645,21 +1725,81 @@ class AssignmentServiceImplTest {
                     .willReturn(Optional.of(testClazz));
             given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
                     .willReturn(Optional.of(teacherId));
-            given(submissionRepository.findByAssignmentIdAndKeyword(assignmentId, trimmedKeyword, pageable))
-                    .willReturn(page);
-            given(mapper.toSummaryResponse(any(AssignmentSubmission.class)))
-                    .willReturn(mockSummaryResponse);
-            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
-                    .willReturn(Optional.of(testQuizAssignment));
-            given(userRepository.findById(learnerId))
-                    .willReturn(Optional.empty());
+            given(classMemberRepository.findActiveUserIdsByClassId(classId))
+                    .willReturn(List.of(student1Id, student2Id, student3Id));
+            given(submissionRepository.findByAssignmentId(assignmentId))
+                    .willReturn(List.of());
+            given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
+                    .willReturn(List.of(user1, user2, user3));
 
             Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
-                    assignmentId, trimmedKeyword, pageable, teacherId);
+                    assignmentId, null, null, pageable, teacherId);
 
             assertThat(result).isNotNull();
-            verify(submissionRepository).findByAssignmentIdAndKeyword(assignmentId, trimmedKeyword, pageable);
+            assertThat(result.getNumber()).isEqualTo(1);
+            assertThat(result.getSize()).isEqualTo(1);
+            assertThat(result.getTotalElements()).isEqualTo(3);
+            assertThat(result.getTotalPages()).isEqualTo(3);
+            assertThat(result.getContent()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("Should use latest attempt when student has multiple submissions")
+        void shouldUseLatestAttempt() {
+            Pageable pageable = PageRequest.of(0, 10);
+            UUID student1Id = UUID.randomUUID();
+            
+            User user1 = User.builder()
+                    .firstName("John").lastName("Doe").displayName("John Doe")
+                    .email("john@example.com").build();
+            ReflectionTestUtils.setField(user1, "id", student1Id);
+
+            AssignmentSubmission submission1 = AssignmentSubmission.builder()
+                    .id(UUID.randomUUID())
+                    .assignmentId(assignmentId)
+                    .userId(student1Id)
+                    .status(SubmissionStatus.SUBMITTED)
+                    .attemptNumber(1)
+                    .build();
+            
+            AssignmentSubmission submission2 = AssignmentSubmission.builder()
+                    .id(UUID.randomUUID())
+                    .assignmentId(assignmentId)
+                    .userId(student1Id)
+                    .status(SubmissionStatus.GRADED)
+                    .attemptNumber(2)
+                    .score(BigDecimal.valueOf(85.5))
+                    .build();
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            given(classMemberRepository.findActiveUserIdsByClassId(classId))
+                    .willReturn(List.of(student1Id));
+            given(submissionRepository.findByAssignmentId(assignmentId))
+                    .willReturn(List.of(submission1, submission2));
+            given(userRepository.findAllById(List.of(student1Id)))
+                    .willReturn(List.of(user1));
+            given(mapper.toSummaryResponse(submission2))
+                    .willReturn(SubmissionSummaryResponse.builder()
+                            .id(submission2.getId())
+                            .userFullName(user1.getDisplayName())
+                            .status(SubmissionStatus.GRADED)
+                            .score(BigDecimal.valueOf(85.5))
+                            .build());
+
+            Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
+                    assignmentId, null, null, pageable, teacherId);
+
+            assertThat(result).isNotNull();
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            assertThat(result.getContent().get(0).getStatus()).isEqualTo(SubmissionStatus.GRADED);
+            assertThat(result.getContent().get(0).getScore()).isEqualTo(BigDecimal.valueOf(85.5));
         }
     }
 
 }
+

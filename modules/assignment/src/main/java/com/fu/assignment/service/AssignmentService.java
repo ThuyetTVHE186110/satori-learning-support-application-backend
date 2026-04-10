@@ -91,16 +91,20 @@ public interface AssignmentService {
     Page<SubmissionSummaryResponse> getSubmissionsByAssignment(UUID assignmentId, Pageable pageable, UUID teacherId);
 
     /**
-     * Get submissions for an assignment with optional keyword search by learner name/email.
+     * Get submissions for an assignment with optional keyword search by learner name/email and status filter.
+     * Returns ALL students in the class, even those without submissions (status = NOT_STARTED).
+     *
      * @param assignmentId Assignment UUID
      * @param keyword Optional search term (firstName, lastName, displayName, email)
+     * @param status Optional submission status filter (NOT_STARTED, IN_PROGRESS, SUBMITTED, GRADED, OVERDUE)
      * @param pageable Pagination parameters
      * @param teacherId Teacher UUID for access verification
-     * @return Paginated list of submission summaries with learner email
+     * @return Paginated list of submission summaries (all class students + their submission status)
      */
     Page<SubmissionSummaryResponse> getSubmissionsByAssignment(
             UUID assignmentId,
             String keyword,
+            SubmissionStatus status,
             Pageable pageable,
             UUID teacherId);
 

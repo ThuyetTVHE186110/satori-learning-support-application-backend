@@ -42,6 +42,12 @@ public interface AssignmentSubmissionRepository extends JpaRepository<Assignment
     Page<AssignmentSubmission> findByAssignmentId(UUID assignmentId, Pageable pageable);
 
     /**
+     * Find all submissions for an assignment without pagination.
+     * Used to fetch all submissions for manual filtering/pagination in service layer.
+     */
+    List<AssignmentSubmission> findByAssignmentId(UUID assignmentId);
+
+    /**
      * Find all submissions of a specific user (learner view).
      */
     Page<AssignmentSubmission> findByUserId(UUID userId, Pageable pageable);
