@@ -8,6 +8,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * AI-generated conversation suggestion (not persisted yet — manager reviews and saves).
@@ -45,7 +46,7 @@ public class GeneratedConversationSuggestionResponse {
         private String description;
         private String descriptionVi;
         private ConversationMission.MissionType missionType;
-        private String successCriteria;
+        private Map<String, Object> successCriteria;
         private List<String> requiredVocabulary;
         private List<String> requiredGrammar;
         private Integer orderIndex;
