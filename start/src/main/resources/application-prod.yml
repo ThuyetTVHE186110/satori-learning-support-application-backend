@@ -101,7 +101,7 @@ app:
 
     email:
         enabled: ${EMAIL_ENABLED:true}
-        resend-api-key: ${RESEND_API_KEY}
+        resend-api-key: ${RESEND_API_KEY:}
         from: ${EMAIL_FROM:Satori Learning <noreply@satorinihongo.id.vn>}
         base-url: ${APP_BASE_URL}
 
