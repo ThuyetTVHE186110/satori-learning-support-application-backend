@@ -195,18 +195,19 @@ public class ConversationTopicServiceImpl implements ConversationTopicService {
             courseRepository.findById(topic.getCourseId())
                     .ifPresent(c -> response.setCourseName(c.getName()));
         }
-        long conversationCount = conversationRepository.countByTopicIdAndDeletedAtIsNull(topic.getId());
+        long conversationCount = conversationRepository.countByTopicIdAndStatusAndDeletedAtIsNull(
+                topic.getId(), Course.ContentStatus.PUBLISHED.name());
         response.setConversationCount(conversationCount);
-        long n5Count = conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(
-                topic.getId(), Course.JlptLevel.N5.name());
-        long n4Count = conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(
-                topic.getId(), Course.JlptLevel.N4.name());
-        long n3Count = conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(
-                topic.getId(), Course.JlptLevel.N3.name());
-        long n2Count = conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(
-                topic.getId(), Course.JlptLevel.N2.name());
-        long n1Count = conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(
-                topic.getId(), Course.JlptLevel.N1.name());
+        long n5Count = conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(
+                topic.getId(), Course.JlptLevel.N5.name(), Course.ContentStatus.PUBLISHED.name());
+        long n4Count = conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(
+                topic.getId(), Course.JlptLevel.N4.name(), Course.ContentStatus.PUBLISHED.name());
+        long n3Count = conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(
+                topic.getId(), Course.JlptLevel.N3.name(), Course.ContentStatus.PUBLISHED.name());
+        long n2Count = conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(
+                topic.getId(), Course.JlptLevel.N2.name(), Course.ContentStatus.PUBLISHED.name());
+        long n1Count = conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(
+                topic.getId(), Course.JlptLevel.N1.name(), Course.ContentStatus.PUBLISHED.name());
         response.setN5ConversationCount(n5Count);
         response.setN4ConversationCount(n4Count);
         response.setN3ConversationCount(n3Count);
@@ -217,7 +218,8 @@ public class ConversationTopicServiceImpl implements ConversationTopicService {
 
     private ConversationTopicSummaryResponse buildTopicSummaryResponse(ConversationTopic topic) {
         ConversationTopicSummaryResponse response = topicMapper.toSummaryResponse(topic);
-        long conversationCount = conversationRepository.countByTopicIdAndDeletedAtIsNull(topic.getId());
+        long conversationCount = conversationRepository.countByTopicIdAndStatusAndDeletedAtIsNull(
+                topic.getId(), Course.ContentStatus.PUBLISHED.name());
         response.setConversationCount(conversationCount);
         return response;
     }
