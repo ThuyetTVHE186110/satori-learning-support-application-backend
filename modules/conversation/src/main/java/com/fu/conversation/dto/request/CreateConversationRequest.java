@@ -47,8 +47,6 @@ public class CreateConversationRequest {
     @Size(max = 100)
     private String category;
 
-    private Course.JlptLevel jlptLevel;
-
     @Min(1) @Max(10)
     @Builder.Default
     private Integer difficultyScore = 1;
