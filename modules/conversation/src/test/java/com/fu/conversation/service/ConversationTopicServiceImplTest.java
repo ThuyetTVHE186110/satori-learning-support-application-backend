@@ -138,7 +138,12 @@ class ConversationTopicServiceImplTest {
             when(topicRepository.save(activeTopic)).thenReturn(activeTopic);
             when(topicMapper.toResponse(activeTopic)).thenReturn(topicResponse);
             when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndStatusAndDeletedAtIsNull(topicId, Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N5.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N4.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N3.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N2.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N1.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
 
             ConversationTopicResponse result = topicService.createTopic(request, managerId);
 
@@ -157,7 +162,12 @@ class ConversationTopicServiceImplTest {
             when(topicRepository.save(any())).thenReturn(activeTopic);
             when(topicMapper.toResponse(activeTopic)).thenReturn(topicResponse);
             when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
-            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndStatusAndDeletedAtIsNull(topicId, Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N5.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N4.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N3.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N2.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N1.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
 
             topicService.createTopic(request, managerId);
 
@@ -175,7 +185,12 @@ class ConversationTopicServiceImplTest {
             when(topicMapper.toEntity(request)).thenReturn(topicNoCourse);
             when(topicRepository.save(any())).thenReturn(topicNoCourse);
             when(topicMapper.toResponse(topicNoCourse)).thenReturn(topicResponse);
-            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndStatusAndDeletedAtIsNull(topicId, Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N5.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N4.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N3.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N2.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N1.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
 
             topicService.createTopic(request, managerId);
 
@@ -196,7 +211,12 @@ class ConversationTopicServiceImplTest {
             when(topicRepository.findById(topicId)).thenReturn(Optional.of(activeTopic));
             when(topicRepository.save(activeTopic)).thenReturn(activeTopic);
             when(topicMapper.toResponse(activeTopic)).thenReturn(topicResponse);
-            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(2L);
+            when(conversationRepository.countByTopicIdAndStatusAndDeletedAtIsNull(topicId, Course.ContentStatus.PUBLISHED.name())).thenReturn(2L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N5.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(1L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N4.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(1L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N3.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N2.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N1.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
 
             ConversationTopicResponse result = topicService.updateTopic(topicId, request, managerId);
 
@@ -296,7 +316,12 @@ class ConversationTopicServiceImplTest {
             when(topicRepository.findById(topicId)).thenReturn(Optional.of(activeTopic));
             when(topicRepository.save(activeTopic)).thenReturn(activeTopic);
             when(topicMapper.toResponse(activeTopic)).thenReturn(topicResponse);
-            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndStatusAndDeletedAtIsNull(topicId, Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N5.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N4.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N3.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N2.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, Course.JlptLevel.N1.name(), Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
 
             topicService.updateStatus(topicId, Course.ContentStatus.PUBLISHED, managerId);
 
@@ -315,12 +340,12 @@ class ConversationTopicServiceImplTest {
         void shouldReturnTopicWhenActive() {
             when(topicRepository.findById(topicId)).thenReturn(Optional.of(activeTopic));
             when(topicMapper.toResponse(activeTopic)).thenReturn(topicResponse);
-            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(3L);
-            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N5")).thenReturn(1L);
-            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N4")).thenReturn(1L);
-            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N3")).thenReturn(1L);
-            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N2")).thenReturn(0L);
-            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N1")).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndStatusAndDeletedAtIsNull(topicId, Course.ContentStatus.PUBLISHED.name())).thenReturn(3L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, "N5", Course.ContentStatus.PUBLISHED.name())).thenReturn(1L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, "N4", Course.ContentStatus.PUBLISHED.name())).thenReturn(1L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, "N3", Course.ContentStatus.PUBLISHED.name())).thenReturn(1L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, "N2", Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, "N1", Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
 
             ConversationTopicResponse result = topicService.getTopic(topicId);
 
@@ -359,7 +384,7 @@ class ConversationTopicServiceImplTest {
             Page<ConversationTopic> page = new PageImpl<>(List.of(activeTopic), sortedPageable, 1);
             when(topicRepository.findByDeletedAtIsNull(sortedPageable)).thenReturn(page);
             when(topicMapper.toSummaryResponse(activeTopic)).thenReturn(summaryResponse);
-            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(2L);
+            when(conversationRepository.countByTopicIdAndStatusAndDeletedAtIsNull(topicId, Course.ContentStatus.PUBLISHED.name())).thenReturn(2L);
 
             Page<ConversationTopicSummaryResponse> result = topicService.getAllTopics(pageable);
 
@@ -374,7 +399,7 @@ class ConversationTopicServiceImplTest {
             Page<ConversationTopic> page = new PageImpl<>(List.of(activeTopic), pageable, 1);
             when(topicRepository.searchByKeyword("shop", pageable)).thenReturn(page);
             when(topicMapper.toSummaryResponse(activeTopic)).thenReturn(summaryResponse);
-            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndStatusAndDeletedAtIsNull(topicId, Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
 
             Page<ConversationTopicSummaryResponse> result = topicService.searchTopics("shop", pageable);
 
@@ -388,12 +413,12 @@ class ConversationTopicServiceImplTest {
             // Mock the getTopic method which already has count mocking
             when(topicRepository.findById(topicId)).thenReturn(Optional.of(activeTopic));
             when(topicMapper.toResponse(activeTopic)).thenReturn(topicResponse);
-            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(5L);
-            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N5")).thenReturn(2L);
-            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N4")).thenReturn(2L);
-            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N3")).thenReturn(1L);
-            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N2")).thenReturn(0L);
-            when(conversationRepository.countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N1")).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndStatusAndDeletedAtIsNull(topicId, Course.ContentStatus.PUBLISHED.name())).thenReturn(5L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, "N5", Course.ContentStatus.PUBLISHED.name())).thenReturn(2L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, "N4", Course.ContentStatus.PUBLISHED.name())).thenReturn(2L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, "N3", Course.ContentStatus.PUBLISHED.name())).thenReturn(1L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, "N2", Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, "N1", Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
 
             ConversationTopicResponse result = topicService.getTopic(topicId);
 
@@ -405,12 +430,12 @@ class ConversationTopicServiceImplTest {
             assertThat(result.getN1ConversationCount()).isEqualTo(0L);
 
             // Verify all count methods were called
-            verify(conversationRepository).countByTopicIdAndDeletedAtIsNull(topicId);
-            verify(conversationRepository).countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N5");
-            verify(conversationRepository).countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N4");
-            verify(conversationRepository).countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N3");
-            verify(conversationRepository).countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N2");
-            verify(conversationRepository).countByTopicIdAndJlptLevelAndDeletedAtIsNull(topicId, "N1");
+            verify(conversationRepository).countByTopicIdAndStatusAndDeletedAtIsNull(topicId, Course.ContentStatus.PUBLISHED.name());
+            verify(conversationRepository).countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, "N5", Course.ContentStatus.PUBLISHED.name());
+            verify(conversationRepository).countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, "N4", Course.ContentStatus.PUBLISHED.name());
+            verify(conversationRepository).countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, "N3", Course.ContentStatus.PUBLISHED.name());
+            verify(conversationRepository).countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, "N2", Course.ContentStatus.PUBLISHED.name());
+            verify(conversationRepository).countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(topicId, "N1", Course.ContentStatus.PUBLISHED.name());
         }
 
         @Test
@@ -420,7 +445,7 @@ class ConversationTopicServiceImplTest {
             Page<ConversationTopic> page = new PageImpl<>(List.of(activeTopic), pageable, 1);
             when(topicRepository.searchByKeywordAndStatus("shop", Course.ContentStatus.DRAFT.name(), pageable)).thenReturn(page);
             when(topicMapper.toSummaryResponse(activeTopic)).thenReturn(summaryResponse);
-            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndStatusAndDeletedAtIsNull(topicId, Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
 
             Page<ConversationTopicSummaryResponse> result = topicService.searchTopics("shop", Course.ContentStatus.DRAFT, pageable);
 
@@ -435,7 +460,7 @@ class ConversationTopicServiceImplTest {
             Page<ConversationTopic> page = new PageImpl<>(List.of(activeTopic), pageable, 1);
             when(topicRepository.findByStatusAndDeletedAtIsNull(Course.ContentStatus.PUBLISHED.name(), pageable)).thenReturn(page);
             when(topicMapper.toSummaryResponse(activeTopic)).thenReturn(summaryResponse);
-            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndStatusAndDeletedAtIsNull(topicId, Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
 
             Page<ConversationTopicSummaryResponse> result = topicService.searchTopics(null, Course.ContentStatus.PUBLISHED, pageable);
 
@@ -450,7 +475,7 @@ class ConversationTopicServiceImplTest {
             Page<ConversationTopic> page = new PageImpl<>(List.of(activeTopic), pageable, 1);
             when(topicRepository.findByDeletedAtIsNull(pageable)).thenReturn(page);
             when(topicMapper.toSummaryResponse(activeTopic)).thenReturn(summaryResponse);
-            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndStatusAndDeletedAtIsNull(topicId, Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
 
             Page<ConversationTopicSummaryResponse> result = topicService.searchTopics(null, null, pageable);
 
@@ -465,7 +490,7 @@ class ConversationTopicServiceImplTest {
             Page<ConversationTopic> page = new PageImpl<>(List.of(activeTopic), pageable, 1);
             when(topicRepository.searchByKeyword("shop", pageable)).thenReturn(page);
             when(topicMapper.toSummaryResponse(activeTopic)).thenReturn(summaryResponse);
-            when(conversationRepository.countByTopicIdAndDeletedAtIsNull(topicId)).thenReturn(0L);
+            when(conversationRepository.countByTopicIdAndStatusAndDeletedAtIsNull(topicId, Course.ContentStatus.PUBLISHED.name())).thenReturn(0L);
 
             Page<ConversationTopicSummaryResponse> result = topicService.searchTopics("shop", null, pageable);
 

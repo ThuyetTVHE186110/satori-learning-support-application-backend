@@ -21,6 +21,18 @@ public interface ConversationRepository extends JpaRepository<Conversation, UUID
     )
     long countByTopicIdAndJlptLevelAndDeletedAtIsNull(@Param("topicId") UUID topicId, @Param("jlptLevel") String jlptLevel);
 
+    @Query(
+            value = "SELECT COUNT(*) FROM speaking.conversations WHERE topic_id = :topicId AND status = CAST(:status AS content_status) AND deleted_at IS NULL",
+            nativeQuery = true
+    )
+    long countByTopicIdAndStatusAndDeletedAtIsNull(@Param("topicId") UUID topicId, @Param("status") String status);
+
+    @Query(
+            value = "SELECT COUNT(*) FROM speaking.conversations WHERE topic_id = :topicId AND jlpt_level = CAST(:jlptLevel AS jlpt_level) AND status = CAST(:status AS content_status) AND deleted_at IS NULL",
+            nativeQuery = true
+    )
+    long countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(@Param("topicId") UUID topicId, @Param("jlptLevel") String jlptLevel, @Param("status") String status);
+
     /**
      * Projection for practice statistics per conversation.
      * Used to enrich ConversationSummaryResponse with learner progress data.
