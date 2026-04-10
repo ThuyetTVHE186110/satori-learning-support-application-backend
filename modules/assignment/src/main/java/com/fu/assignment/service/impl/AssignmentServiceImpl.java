@@ -602,29 +602,93 @@ public class AssignmentServiceImpl implements AssignmentService {
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Override
-    public Page<SubmissionSummaryResponse> getSubmissionsByAssignment(UUID assignmentId, Pageable pageable, UUID teacherId) {
-        Assignment assignment = findAssignmentOrThrow(assignmentId);
-        verifyAssignmentAccess(assignment, teacherId);
-        return submissionRepository.findByAssignmentId(assignmentId, pageable).map(s -> enrichSummaryResponse(s));
+    public Page<SubmissionSummaryResponse> getSubmissionsByAssignment(
+            UUID assignmentId,
+            Pageable pageable,
+            UUID teacherId) {
+        return getSubmissionsByAssignment(assignmentId, null, null, pageable, teacherId);
     }
 
     @Override
     public Page<SubmissionSummaryResponse> getSubmissionsByAssignment(
             UUID assignmentId,
             String keyword,
+            SubmissionStatus status,
             Pageable pageable,
             UUID teacherId) {
         Assignment assignment = findAssignmentOrThrow(assignmentId);
         verifyAssignmentAccess(assignment, teacherId);
         
-        // If keyword is null or blank, use the non-keyword path
-        if (keyword == null || keyword.isBlank()) {
-            return getSubmissionsByAssignment(assignmentId, pageable, teacherId);
-        }
+        // Get assignment's class
+        UUID classId = assignment.getClassId();
         
-        // Search by keyword
-        return submissionRepository.findByAssignmentIdAndKeyword(assignmentId, keyword, pageable)
-                .map(s -> enrichSummaryResponse(s));
+        // Fetch all active student IDs in the class
+        List<UUID> allStudentIds = classMemberRepository.findActiveUserIdsByClassId(classId);
+        
+        // Fetch user information for all students
+        Map<UUID, com.fu.user.entity.User> userMap = userRepository.findAllById(allStudentIds).stream()
+                .collect(Collectors.toMap(com.fu.user.entity.User::getId, u -> u));
+        
+        // Fetch all submissions for this assignment
+        List<AssignmentSubmission> submissions = submissionRepository.findByAssignmentId(assignmentId);
+        
+        // Create a map of userId -> latest submission
+        Map<UUID, AssignmentSubmission> submissionMap = submissions.stream()
+                .collect(Collectors.toMap(
+                        AssignmentSubmission::getUserId,
+                        s -> s,
+                        (existing, newer) -> newer.getAttemptNumber() > existing.getAttemptNumber() ? newer : existing
+                ));
+        
+        // Combine all students with their submission status
+        List<SubmissionSummaryResponse> allResponses = allStudentIds.stream()
+                .map(studentId -> {
+                    AssignmentSubmission submission = submissionMap.get(studentId);
+                    SubmissionSummaryResponse response;
+                    
+                    if (submission != null) {
+                        response = enrichSummaryResponse(submission);
+                    } else {
+                        // Create NOT_STARTED response for student without submission
+                        com.fu.user.entity.User user = userMap.get(studentId);
+                        if (user == null) {
+                            return null;
+                        }
+                        response = SubmissionSummaryResponse.builder()
+                                .id(null)
+                                .userFullName(user.getFullName())
+                                .status(SubmissionStatus.NOT_STARTED)
+                                .score(null)
+                                .submittedAt(null)
+                                .build();
+                    }
+                    
+                    return response;
+                })
+                .filter(Objects::nonNull)
+                .filter(r -> {
+                    // Apply keyword filter if provided
+                    if (keyword != null && !keyword.isBlank()) {
+                        String lowerKeyword = keyword.toLowerCase();
+                        return r.getUserFullName() != null && r.getUserFullName().toLowerCase().contains(lowerKeyword);
+                    }
+                    return true;
+                })
+                .filter(r -> {
+                    // Apply status filter if provided
+                    if (status != null) {
+                        return r.getStatus() == status;
+                    }
+                    return true;
+                })
+                .toList();
+        
+        // Apply manual pagination
+        int start = (int) pageable.getOffset();
+        int end = Math.min(start + pageable.getPageSize(), allResponses.size());
+        List<SubmissionSummaryResponse> pageContent = allResponses.subList(start, end);
+        
+        return new org.springframework.data.domain.PageImpl<>(pageContent, pageable, allResponses.size());
     }
 
     @Override
@@ -1329,14 +1393,25 @@ public class AssignmentServiceImpl implements AssignmentService {
 
     private SubmissionSummaryResponse enrichSummaryResponse(AssignmentSubmission s) {
         SubmissionSummaryResponse r = mapper.toSummaryResponse(s);
-        assignmentRepository.findByIdAndNotDeleted(s.getAssignmentId()).ifPresent(a -> {
-            r.setAssignmentTitle(a.getTitle());
-        });
         userRepository.findById(s.getUserId()).ifPresent(u -> {
             r.setUserFullName(u.getFullName());
-            r.setUserEmail(u.getEmail());
         });
         return r;
+    }
+
+    /**
+     * Build a NOT_STARTED response for a student without a submission.
+     */
+    private SubmissionSummaryResponse getUserAndBuildNotStartedResponse(UUID userId) {
+        return userRepository.findById(userId).map(u -> 
+            SubmissionSummaryResponse.builder()
+                    .id(null)
+                    .userFullName(u.getFullName())
+                    .status(SubmissionStatus.NOT_STARTED)
+                    .score(null)
+                    .submittedAt(null)
+                    .build()
+        ).orElse(null);
     }
 
     // ── Auto-Score for Quiz ───────────────────────────────────────────────────
