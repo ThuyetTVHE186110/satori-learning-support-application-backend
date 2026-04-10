@@ -28,7 +28,7 @@ public class NotificationPreferencesServiceImpl implements NotificationPreferenc
     private final UserNotificationPreferencesRepository preferencesRepository;
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public NotificationPreferencesResponse getPreferences(UUID userId) {
         UserNotificationPreferences prefs = getOrCreatePreferences(userId);
         return mapToResponse(prefs);
