@@ -741,7 +741,8 @@ public class PracticeSessionService {
             if (mastery == null) continue; // item never answered
 
             int levelAfter = mastery.getMasteryLevel();
-            // Infer levelBefore: correct answers can only raise/keep level; incorrect can only lower/keep
+            // Infer levelBefore from answer correctness — approximation only.
+            // The exact value per-item is in AnswerFeedbackResponse.masteryLevelBefore.
             Boolean allCorrect = entityCorrectMap.get(entityId);
             int levelBefore;
             if (allCorrect != null && allCorrect) {
@@ -749,7 +750,7 @@ public class PracticeSessionService {
             } else if (allCorrect != null) {
                 levelBefore = Math.min(3, levelAfter + 1); // went down or stayed
             } else {
-                levelBefore = levelAfter; // no answer data — assume no change
+                levelBefore = levelAfter;
             }
 
             String japaneseText = null;
@@ -1020,13 +1021,24 @@ public class PracticeSessionService {
                     "Chỉ có thể làm lại phiên đã hoàn thành.");
         }
 
-        StartPracticeRequest request = StartPracticeRequest.builder()
+        // Preserve explicit selection from original session if applicable
+        StartPracticeRequest.StartPracticeRequestBuilder requestBuilder = StartPracticeRequest.builder()
                 .lessonId(session.getLessonId())
-                .sessionType(session.getSessionType())
-                .preset(PracticePreset.STANDARD)
-                .build();
+                .sessionType(session.getSessionType());
 
-        return startSession(userId, request);
+        if (session.isExplicitMode()
+                && (session.getSelectedVocabIds() != null && session.getSelectedVocabIds().length > 0
+                    || session.getSelectedGrammarIds() != null && session.getSelectedGrammarIds().length > 0)) {
+            List<UUID> vocabIds = session.getSelectedVocabIds() != null
+                    ? Arrays.asList(session.getSelectedVocabIds()) : null;
+            List<UUID> grammarIds = session.getSelectedGrammarIds() != null
+                    ? Arrays.asList(session.getSelectedGrammarIds()) : null;
+            requestBuilder.selectedVocabIds(vocabIds).selectedGrammarIds(grammarIds);
+        } else {
+            requestBuilder.preset(PracticePreset.STANDARD);
+        }
+
+        return startSession(userId, requestBuilder.build());
     }
 
     // ── Private helpers ────────────────────────────────────────────────────

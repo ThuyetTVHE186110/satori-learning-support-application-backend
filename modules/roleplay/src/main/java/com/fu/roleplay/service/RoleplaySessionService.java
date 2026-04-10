@@ -28,4 +28,6 @@ public interface RoleplaySessionService {
     SessionResponse getSession(UUID sessionId, UUID userId);
 
     Page<SessionSummaryResponse> getSessionHistory(UUID userId, Pageable pageable);
+
+    SessionEvaluationResponse getConversationFeedback(UUID conversationId, UUID userId);
 }

@@ -78,7 +78,7 @@ public class NotificationServiceImpl implements NotificationService {
             // Deduplication: skip if identical type was already sent recently
             LocalDateTime deduplicationSince = LocalDateTime.now().minusMinutes(DEDUP_WINDOW_MINUTES);
             List<Notification> recent = notificationRepository.findRecentByUserAndType(
-                    userId, request.getType(), deduplicationSince);
+                    userId, request.getType().name(), deduplicationSince);
             if (!recent.isEmpty()) {
                 log.debug("Dedup: skipping {} for user {} (sent {} min ago)",
                         request.getType(), userId, DEDUP_WINDOW_MINUTES);

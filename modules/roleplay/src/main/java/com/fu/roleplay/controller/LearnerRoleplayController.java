@@ -112,4 +112,19 @@ public class LearnerRoleplayController {
         SessionResponse response = sessionService.getSession(sessionId, userId);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
+
+    /**
+     * Get the feedback from the latest completed session for a conversation.
+     * Used when a learner clicks on a COMPLETED conversation to view their previous results.
+     * Returns 404 if no completed session exists for this conversation.
+     * GET /api/v1/learner/roleplay/conversations/{conversationId}/latest-feedback
+     */
+    @GetMapping("/conversations/{conversationId}/latest-feedback")
+    public ResponseEntity<ApiResponse<SessionEvaluationResponse>> getConversationFeedback(
+            @PathVariable UUID conversationId,
+            @AuthenticationPrincipal(expression = "id") UUID userId) {
+
+        SessionEvaluationResponse response = sessionService.getConversationFeedback(conversationId, userId);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
 }
