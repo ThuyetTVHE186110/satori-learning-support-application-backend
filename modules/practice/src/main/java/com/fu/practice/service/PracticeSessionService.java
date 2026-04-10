@@ -9,7 +9,7 @@ import com.fu.achievement.dto.response.LevelUpNotificationResponse;
 import com.fu.achievement.dto.response.StreakNotificationResponse;
 import com.fu.achievement.enums.BadgeType;
 import com.fu.achievement.service.StreakService;
-import com.fu.common.event.PracticeFeedbackReadyEvent;
+import com.fu.infrastructure.event.PracticeFeedbackReadyEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.course.entity.Course;
 import com.fu.course.entity.GrammarPoint;

@@ -13,6 +13,9 @@ import com.fu.achievement.dto.response.UserAchievementResponse;
 import com.fu.achievement.dto.response.StreakNotificationResponse;
 import com.fu.achievement.enums.BadgeType;
 import com.fu.achievement.service.impl.StreakServiceImpl;
+import com.fu.infrastructure.learner.LearnerProfile;
+import com.fu.infrastructure.learner.LearnerProfileProvider;
+import com.fu.infrastructure.event.RoleplaySessionCompletedEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.conversation.entity.Conversation;
@@ -43,6 +46,7 @@ import com.fu.roleplay.repository.*;
 import com.fu.roleplay.service.RoleplaySessionService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -89,8 +93,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     private final Executor roleplayTaskExecutor;
     private final AchievementService achievementService;
     private final StreakServiceImpl streakService;
-
     private final LearningLevelService learningLevelService;
+    private final ApplicationEventPublisher eventPublisher;
+    private final LearnerProfileProvider learnerProfileProvider;
 
     public RoleplaySessionServiceImpl(
             ConversationSessionRepository sessionRepository,
@@ -112,7 +117,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             @Qualifier("roleplayTaskExecutor") Executor roleplayTaskExecutor,
             AchievementService achievementService,
             LearningLevelService learningLevelService,
-            StreakServiceImpl streakService
+            StreakServiceImpl streakService,
+            ApplicationEventPublisher eventPublisher,
+            LearnerProfileProvider learnerProfileProvider
     ) {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
@@ -134,6 +141,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         this.achievementService = achievementService;
         this.learningLevelService = learningLevelService;
         this.streakService = streakService;
+        this.eventPublisher = eventPublisher;
+        this.learnerProfileProvider = learnerProfileProvider;
     }
 
     @Override
@@ -192,11 +201,20 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             sessionMissions.add(sessionMissionRepository.save(sm));
         }
 
-        // 6. Build and cache system prompt
+        // 6. Build and cache system prompt (with learner insights for personalization)
         String jlptLevel = conversation.getJlptLevel() != null ? conversation.getJlptLevel().name() : "N5";
-        String systemPrompt = roleplayAIService.buildSystemPrompt(session,
-                conversation.getAiRole(), conversation.getLearnerRole(), conversation.getScenario(),
-                jlptLevel, sessionMissions);
+        LearnerProfile profile = learnerProfileProvider.getLearnerProfile(userId).orElse(null);
+        String systemPrompt;
+        if (profile != null && profile.skillScores() != null && !profile.skillScores().isEmpty()) {
+            systemPrompt = roleplayAIService.buildSystemPrompt(session,
+                    conversation.getAiRole(), conversation.getLearnerRole(), conversation.getScenario(),
+                    jlptLevel, sessionMissions,
+                    profile.skillScores(), profile.weakPoints(), profile.strongPoints());
+        } else {
+            systemPrompt = roleplayAIService.buildSystemPrompt(session,
+                    conversation.getAiRole(), conversation.getLearnerRole(), conversation.getScenario(),
+                    jlptLevel, sessionMissions);
+        }
         roleplayAIService.cacheSystemPrompt(session.getId(), systemPrompt);
 
         // 7. Generate AI opening (returns JSON array: MISSION_INTRO + SCENE_INTRO + DIALOGUE)
@@ -618,6 +636,21 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         }
 
         sessionRepository.save(session);
+
+        // Publish event for learning insights aggregation
+        try {
+            eventPublisher.publishEvent(new RoleplaySessionCompletedEvent(
+                    this, sessionId, userId,
+                    overallScore.doubleValue(), languageScore.doubleValue(),
+                    pronunciationScore.doubleValue(),
+                    languageEval.getFluencyScore().doubleValue(),
+                    languageEval.getAccuracyScore().doubleValue(),
+                    languageEval.getVocabularyScore().doubleValue(),
+                    languageEval.getGrammarScore().doubleValue(),
+                    languageEval.getStrengths(), languageEval.getImprovements()));
+        } catch (Exception e) {
+            log.warn("Failed to publish RoleplaySessionCompletedEvent for session {}: {}", sessionId, e.getMessage());
+        }
 
         // Update user_conversation_progress if this was a topic-based session
         if (session.getConversationId() != null) {

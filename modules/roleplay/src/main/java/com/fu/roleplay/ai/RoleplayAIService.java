@@ -1,6 +1,8 @@
 package com.fu.roleplay.ai;
 
 import com.fu.common.ai.PromptUtils;
+import com.fu.infrastructure.learner.LearningInsightPoint;
+import com.fu.infrastructure.learner.SkillScore;
 import com.fu.roleplay.entity.ConversationMessage;
 import com.fu.roleplay.entity.ConversationSession;
 import com.fu.roleplay.entity.SessionMission;
@@ -53,6 +55,18 @@ public class RoleplayAIService {
     public String buildSystemPrompt(ConversationSession session, String aiRole, String learnerRole,
                                     String scenario, String jlptLevel, List<SessionMission> missions) {
         return promptBuilder.buildSystemPrompt(aiRole, learnerRole, scenario, jlptLevel, missions);
+    }
+
+    /**
+     * Overload that includes learner insights for personalized roleplay.
+     */
+    public String buildSystemPrompt(ConversationSession session, String aiRole, String learnerRole,
+                                    String scenario, String jlptLevel, List<SessionMission> missions,
+                                    List<SkillScore> skillScores,
+                                    List<LearningInsightPoint> weakPoints,
+                                    List<LearningInsightPoint> strongPoints) {
+        return promptBuilder.buildSystemPrompt(aiRole, learnerRole, scenario, jlptLevel, missions,
+                skillScores, weakPoints, strongPoints);
     }
 
     /**

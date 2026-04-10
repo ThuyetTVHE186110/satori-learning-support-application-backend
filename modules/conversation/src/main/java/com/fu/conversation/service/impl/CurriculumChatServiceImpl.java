@@ -2,6 +2,7 @@ package com.fu.conversation.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.common.ai.PromptTemplateLoader;
+import com.fu.infrastructure.event.ConversationSessionCompletedEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.conversation.ai.advisor.GroundingAdvisor;
@@ -21,6 +22,9 @@ import com.fu.conversation.repository.ChatSessionRepository;
 import com.fu.conversation.service.ChatHistoryManager;
 import com.fu.conversation.service.CurriculumChatService;
 import com.fu.conversation.service.RagEvaluator;
+import com.fu.infrastructure.learner.LearnerProfile;
+import com.fu.infrastructure.learner.LearnerProfileProvider;
+import com.fu.infrastructure.learner.SkillScore;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClientResponse;
@@ -31,6 +35,7 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -60,6 +65,8 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
     private final ObjectMapper objectMapper;
     private final RagEvaluator ragEvaluator;
     private final java.util.concurrent.Executor conversationExecutor;
+    private final ApplicationEventPublisher eventPublisher;
+    private final LearnerProfileProvider learnerProfileProvider;
 
     public CurriculumChatServiceImpl(OpenAiChatModel chatModel,
                                       ChatProperties chatProperties,
@@ -75,7 +82,9 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
                                       PromptTemplateLoader promptLoader,
                                       CurriculumQueryTools curriculumQueryTools,
                                       RagEvaluator ragEvaluator,
-                                      @org.springframework.beans.factory.annotation.Qualifier("conversationExecutor") java.util.concurrent.Executor conversationExecutor) {
+                                      @org.springframework.beans.factory.annotation.Qualifier("conversationExecutor") java.util.concurrent.Executor conversationExecutor,
+                                      ApplicationEventPublisher eventPublisher,
+                                      LearnerProfileProvider learnerProfileProvider) {
         this.chatProperties = chatProperties;
         this.chatRateLimiter = chatRateLimiter;
         this.curriculumQueryTools = curriculumQueryTools;
@@ -86,6 +95,8 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
         this.promptLoader = promptLoader;
         this.ragEvaluator = ragEvaluator;
         this.conversationExecutor = conversationExecutor;
+        this.eventPublisher = eventPublisher;
+        this.learnerProfileProvider = learnerProfileProvider;
 
         // ── Memory advisor (order=10): injects sliding-window history into every prompt ──
         ChatMemory chatMemory = MessageWindowChatMemory.builder()
@@ -322,6 +333,19 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
         verifyOwnership(sessionId, userId);
         chatSessionRepository.updateStatus(sessionId, "COMPLETED");
         log.info("Đóng phiên chat: sessionId={}, userId={}", sessionId, userId);
+
+        // Publish event for learning insights aggregation
+        try {
+            ChatSession session = chatSessionRepository.findById(sessionId).orElse(null);
+            if (session != null) {
+                eventPublisher.publishEvent(new ConversationSessionCompletedEvent(
+                        this, sessionId, userId,
+                        session.getMessageCount(), session.getUserMessageCount(),
+                        session.getHintsUsed(), session.getCorrectionsCount()));
+            }
+        } catch (Exception e) {
+            log.warn("Failed to publish ConversationSessionCompletedEvent for session {}: {}", sessionId, e.getMessage());
+        }
     }
 
     @Override
@@ -425,10 +449,55 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
         String lessonCtx = session.lessonTitle() != null
                 ? "- Bài học: " + session.lessonTitle()
                 : "";
-        return promptLoader.render("prompts/curriculum-chat-system.st", Map.of(
+        String basePrompt = promptLoader.render("prompts/curriculum-chat-system.st", Map.of(
                 "jlptLevel",    session.jlptLevel() != null ? session.jlptLevel() : "N5",
                 "courseName",   session.courseName(),
                 "lessonContext", lessonCtx));
+
+        // Append personalized learning insights if available
+        String insightsBlock = buildLearnerInsightsBlock(session.userId());
+        return insightsBlock.isEmpty() ? basePrompt : basePrompt + "\n\n" + insightsBlock;
+    }
+
+    /**
+     * Builds a prompt block with the learner's weak/strong points and skill scores
+     * so the chatbot can adapt explanations to their known weaknesses.
+     */
+    private String buildLearnerInsightsBlock(UUID userId) {
+        try {
+            LearnerProfile profile = learnerProfileProvider.getLearnerProfile(userId).orElse(null);
+            if (profile == null) return "";
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("## Hồ sơ học tập của người dùng\n");
+
+            if (profile.skillScores() != null && !profile.skillScores().isEmpty()) {
+                sb.append("Trình độ kỹ năng hiện tại:\n");
+                for (SkillScore s : profile.skillScores()) {
+                    sb.append("- ").append(s.skill()).append(": ").append(s.score()).append("/100");
+                    if (s.score() < 50) sb.append(" ⚠ yếu");
+                    sb.append("\n");
+                }
+            }
+
+            if (profile.weakPoints() != null && !profile.weakPoints().isEmpty()) {
+                sb.append("Điểm yếu cần hỗ trợ thêm:\n");
+                profile.weakPoints().stream().limit(5).forEach(wp ->
+                        sb.append("- [").append(wp.category()).append("] ").append(wp.description()).append("\n"));
+                sb.append("→ Hãy giải thích kỹ hơn khi người dùng hỏi về các chủ đề liên quan đến điểm yếu.\n");
+            }
+
+            if (profile.strongPoints() != null && !profile.strongPoints().isEmpty()) {
+                sb.append("Điểm mạnh:\n");
+                profile.strongPoints().stream().limit(3).forEach(sp ->
+                        sb.append("- [").append(sp.category()).append("] ").append(sp.description()).append("\n"));
+            }
+
+            return sb.length() > "## Hồ sơ học tập của người dùng\n".length() ? sb.toString() : "";
+        } catch (Exception e) {
+            log.debug("Could not load learning insights for chatbot: {}", e.getMessage());
+            return "";
+        }
     }
 
     /**

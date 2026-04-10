@@ -3,7 +3,7 @@ package com.fu.curriculumimport.service.orchestrator;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.course.repository.CourseRepository;
-import com.fu.common.event.CurriculumImportStatusEvent;
+import com.fu.infrastructure.event.CurriculumImportStatusEvent;
 import com.fu.curriculumimport.config.AgenticRagProperties;
 import com.fu.curriculumimport.entity.CurriculumImport;
 import com.fu.curriculumimport.entity.ImportChunk;

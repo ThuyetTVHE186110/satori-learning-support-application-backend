@@ -1,7 +1,7 @@
 package com.fu.curriculumimport.event;
 
-import com.fu.common.event.ContentEmbeddingEvent;
-import com.fu.common.event.ContentEmbeddingEvent.Action;
+import com.fu.infrastructure.event.ContentEmbeddingEvent;
+import com.fu.infrastructure.event.ContentEmbeddingEvent.Action;
 import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

@@ -24,6 +24,7 @@
         <module>modules/monitoring</module>
         <module>modules/achievement</module>
         <module>modules/notification</module>
+        <module>modules/analytics</module>
         <module>start</module>
     </modules>
 
@@ -142,6 +143,11 @@
             <dependency>
                 <groupId>com.fu</groupId>
                 <artifactId>monitoring</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fu</groupId>
+                <artifactId>analytics</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <!-- MapStruct -->

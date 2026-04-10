@@ -338,9 +338,17 @@ public class ExerciseGeneratorAgent {
             sb.append("Văn phong ví dụ: ").append(hint).append("\n");
         }
 
-        if (prefs.getWeakPoints() != null && !prefs.getWeakPoints().isEmpty())
-            sb.append("Điểm yếu: ").append(prefs.getWeakPoints())
-              .append(" → nhấn mạnh trong explanation và dùng làm bẫy trong đáp án sai\n");
+        if (prefs.getWeakPoints() != null && !prefs.getWeakPoints().isEmpty()) {
+            sb.append("Điểm yếu cần tập trung:\n");
+            prefs.getWeakPoints().stream().limit(5).forEach(wp ->
+                    sb.append("- [").append(wp.category()).append("] ").append(wp.description())
+                      .append(" → nhấn mạnh trong explanation và dùng làm bẫy trong đáp án sai\n"));
+        }
+        if (prefs.getStrongPoints() != null && !prefs.getStrongPoints().isEmpty()) {
+            sb.append("Điểm mạnh (ít ưu tiên hơn):\n");
+            prefs.getStrongPoints().stream().limit(3).forEach(sp ->
+                    sb.append("- [").append(sp.category()).append("] ").append(sp.description()).append("\n"));
+        }
 
         return sb.toString();
     }

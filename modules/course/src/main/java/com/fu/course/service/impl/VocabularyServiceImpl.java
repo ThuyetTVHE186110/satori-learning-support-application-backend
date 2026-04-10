@@ -1,6 +1,6 @@
 package com.fu.course.service.impl;
 
-import com.fu.common.event.ContentEmbeddingEvent;
+import com.fu.infrastructure.event.ContentEmbeddingEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.course.dto.request.CreateVocabularyRequest;
