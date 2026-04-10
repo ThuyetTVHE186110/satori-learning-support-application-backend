@@ -5,6 +5,7 @@ import com.fu.user.dto.UpdateLearningPreferencesRequest;
 import com.fu.user.dto.UpdateProfileRequest;
 import com.fu.user.dto.UserProfileResponse;
 import com.fu.user.dto.UserResponse;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.UUID;
 
@@ -35,4 +36,17 @@ public interface ProfileService {
      * Only provided (non-null) fields are applied.
      */
     LearningPreferencesResponse updateLearningPreferences(UUID userId, UpdateLearningPreferencesRequest request);
+
+    /**
+     * Upload or replace the user's avatar image.
+     * Old avatar is deleted from Cloudinary before uploading the new one.
+     *
+     * @return updated UserResponse with new avatarUrl
+     */
+    UserResponse uploadAvatar(UUID userId, MultipartFile file);
+
+    /**
+     * Delete the user's avatar and reset avatarUrl to null.
+     */
+    void deleteAvatar(UUID userId);
 }

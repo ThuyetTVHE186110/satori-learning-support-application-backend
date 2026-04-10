@@ -42,6 +42,9 @@ class NotificationServiceImplTest {
     @InjectMocks
     private NotificationServiceImpl notificationService;
 
+    @org.mockito.Captor
+    private ArgumentCaptor<List<Notification>> notificationsCaptor;
+
     private UUID userId;
     private SendNotificationRequest baseRequest;
 
@@ -71,7 +74,7 @@ class NotificationServiceImplTest {
             when(preferencesService.isNotificationEnabled(userId, baseRequest.getType())).thenReturn(true);
             when(preferencesService.isInQuietHours(userId)).thenReturn(false);
             // No recent duplicate
-            when(notificationRepository.findRecentByUserAndType(eq(userId), eq(baseRequest.getType()), any()))
+            when(notificationRepository.findRecentByUserAndType(eq(userId), eq(baseRequest.getType().name()), any()))
                     .thenReturn(Collections.emptyList());
 
             // Notification saved
@@ -149,7 +152,7 @@ class NotificationServiceImplTest {
 
             // Recent duplicate exists
             Notification recent = Notification.builder().id(UUID.randomUUID()).userId(userId).build();
-            when(notificationRepository.findRecentByUserAndType(eq(userId), eq(baseRequest.getType()), any()))
+            when(notificationRepository.findRecentByUserAndType(eq(userId), eq(baseRequest.getType().name()), any()))
                     .thenReturn(List.of(recent));
 
             boolean result = notificationService.sendToUser(userId, baseRequest);
@@ -239,7 +242,7 @@ class NotificationServiceImplTest {
 
             when(preferencesService.getPreferencesByUserIds(userIds))
                     .thenReturn(Map.of(u1, prefs1, u2, prefs2));
-            when(notificationRepository.saveAll(anyList())).thenAnswer(i -> i.getArgument(0));
+            doAnswer(i -> i.getArgument(0)).when(notificationRepository).saveAll(anyList());
             when(deviceTokenRepository.findActiveTokensByUserIds(anyList())).thenReturn(Collections.emptyList());
 
             int result = notificationService.sendToUsers(userIds, req);
@@ -274,16 +277,15 @@ class NotificationServiceImplTest {
             when(preferencesService.getPreferencesByUserIds(userIds))
                     .thenReturn(Map.of(u1, prefs1, u2, prefs2));
 
-            ArgumentCaptor<List<Notification>> captor = ArgumentCaptor.forClass(List.class);
-            when(notificationRepository.saveAll(captor.capture())).thenAnswer(i -> i.getArgument(0));
+            doAnswer(i -> i.getArgument(0)).when(notificationRepository).saveAll(notificationsCaptor.capture());
             when(deviceTokenRepository.findActiveTokensByUserIds(anyList())).thenReturn(Collections.emptyList());
 
             int result = notificationService.sendToUsers(userIds, req);
 
             // Only u1 should receive notification
             assertThat(result).isEqualTo(1);
-            assertThat(captor.getValue()).hasSize(1);
-            assertThat(captor.getValue().get(0).getUserId()).isEqualTo(u1);
+            assertThat(notificationsCaptor.getValue()).hasSize(1);
+            assertThat(notificationsCaptor.getValue().get(0).getUserId()).isEqualTo(u1);
         }
     }
 

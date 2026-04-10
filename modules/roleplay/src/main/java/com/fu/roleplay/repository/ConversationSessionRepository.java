@@ -41,4 +41,9 @@ public interface ConversationSessionRepository extends JpaRepository<Conversatio
            nativeQuery = true)
     Page<ConversationSession> findByUserIdAndStatusOrderByCreatedAtDesc(
             @Param("userId") UUID userId, @Param("status") String status, Pageable pageable);
+
+    @Query(value = "SELECT * FROM ai_conversation.conversation_sessions WHERE user_id = :userId AND conversation_id = :conversationId AND session_type = CAST('ROLEPLAY' AS session_type) AND status = CAST('COMPLETED' AS session_status) ORDER BY completed_at DESC LIMIT 1",
+           nativeQuery = true)
+    Optional<ConversationSession> findLatestCompletedByUserIdAndConversationId(
+            @Param("userId") UUID userId, @Param("conversationId") UUID conversationId);
 }
