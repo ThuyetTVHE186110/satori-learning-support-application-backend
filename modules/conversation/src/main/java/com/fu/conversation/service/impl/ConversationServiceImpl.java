@@ -18,6 +18,7 @@ import com.fu.conversation.repository.ConversationTopicRepository;
 import com.fu.conversation.ai.ConversationGenerationService;
 import com.fu.conversation.service.ConversationService;
 import com.fu.course.entity.Course;
+import com.fu.course.exception.CourseNotFoundException;
 import com.fu.course.repository.CourseRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -59,6 +60,10 @@ public class ConversationServiceImpl implements ConversationService {
         Conversation conversation = conversationMapper.toEntity(request);
         conversation.setCreatedBy(managerId);
         conversation.setUpdatedBy(managerId);
+        if (request.getCourseId() != null) {
+            Course course = courseRepository.findByIdAndNotDeleted(request.getCourseId()).orElseThrow(() -> new CourseNotFoundException(request.getCourseId()));
+            conversation.setJlptLevel(course.getJlptLevel());
+        }
         Conversation saved = conversationRepository.save(conversation);
 
         // Persist inline missions atomically
@@ -192,7 +197,7 @@ public class ConversationServiceImpl implements ConversationService {
     @Override
     public Page<ConversationSummaryResponse> getAllConversations(String keyword, Course.JlptLevel jlptLevel, Course.ContentStatus status, Pageable pageable) {
         Pageable unsorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
-        
+
         Page<Conversation> page;
         if (keyword != null && !keyword.isBlank() && jlptLevel != null && status != null) {
             // All three filters
@@ -223,7 +228,7 @@ public class ConversationServiceImpl implements ConversationService {
             // No filters - all conversations
             page = conversationRepository.findByDeletedAtIsNull(unsorted);
         }
-        
+
         return page.map(conversationMapper::toSummaryResponse);
     }
 
