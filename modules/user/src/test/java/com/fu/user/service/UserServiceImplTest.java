@@ -424,6 +424,151 @@ class UserServiceImplTest {
 
                 verify(userRepository, never()).save(any(User.class));
             }
+
+            @Test
+            @DisplayName("Should update user with valid new email")
+            void shouldUpdateUserWithValidNewEmail() {
+                UUID learnerId = (UUID) ReflectionTestUtils.getField(testLearner, "id");
+                String newEmail = "newemail@example.com";
+                UpdateUserRequest request = UpdateUserRequest.builder()
+                        .firstName("Updated")
+                        .email(newEmail)
+                        .build();
+
+                given(userRepository.findById(learnerId)).willReturn(Optional.of(testLearner));
+                given(userRepository.findByEmail(newEmail)).willReturn(Optional.empty());
+                given(userRepository.save(any(User.class))).willReturn(testLearner);
+                given(userMapper.toResponse(testLearner)).willReturn(learnerResponse);
+
+                // When
+                UserResponse result = userService.updateUser(learnerId, request, adminId, UserRole.ADMIN);
+
+                // Then
+                assertThat(result).isNotNull();
+                verify(userRepository).save(userCaptor.capture());
+                User updated = userCaptor.getValue();
+                assertThat(updated.getEmail()).isEqualTo(newEmail);
+            }
+
+            @Test
+            @DisplayName("Should skip email validation when email is not changed")
+            void shouldSkipEmailValidationWhenEmailNotChanged() {
+                UUID learnerId = (UUID) ReflectionTestUtils.getField(testLearner, "id");
+                UpdateUserRequest request = UpdateUserRequest.builder()
+                        .firstName("Updated")
+                        .lastName("Name")
+                        .build(); // No email in request
+
+                given(userRepository.findById(learnerId)).willReturn(Optional.of(testLearner));
+                given(userRepository.save(any(User.class))).willReturn(testLearner);
+                given(userMapper.toResponse(testLearner)).willReturn(learnerResponse);
+
+                // When
+                UserResponse result = userService.updateUser(learnerId, request, adminId, UserRole.ADMIN);
+
+                // Then
+                assertThat(result).isNotNull();
+                verify(userRepository, never()).findByEmail(any(String.class));
+                verify(userRepository).save(userCaptor.capture());
+                User updated = userCaptor.getValue();
+                assertThat(updated.getFirstName()).isEqualTo("Updated");
+            }
+
+            @Test
+            @DisplayName("Should reject duplicate email when updating user email")
+            void shouldRejectDuplicateEmailWhenUpdating() {
+                UUID learnerId = (UUID) ReflectionTestUtils.getField(testLearner, "id");
+                String duplicateEmail = "teacher@example.com";
+                UpdateUserRequest request = UpdateUserRequest.builder()
+                        .email(duplicateEmail)
+                        .build();
+
+                User existingUserWithEmail = testTeacher; // Different user with same email
+
+                given(userRepository.findById(learnerId)).willReturn(Optional.of(testLearner));
+                given(userRepository.findByEmail(duplicateEmail)).willReturn(Optional.of(existingUserWithEmail));
+
+                // When/Then
+                assertThatThrownBy(() ->
+                        userService.updateUser(learnerId, request, adminId, UserRole.ADMIN)
+                ).isInstanceOf(BusinessException.class)
+                        .hasMessageContaining("Email này đã được sử dụng");
+
+                verify(userRepository, never()).save(any(User.class));
+            }
+
+            @Test
+            @DisplayName("Should handle email with whitespace and case-insensitive comparison")
+            void shouldTrimAndCompareEmailCaseInsensitive() {
+                UUID learnerId = (UUID) ReflectionTestUtils.getField(testLearner, "id");
+                // testLearner has "learner@example.com" (from setUp)
+                // Request has same email with different case and whitespace
+                UpdateUserRequest request = UpdateUserRequest.builder()
+                        .email("  LEARNER@EXAMPLE.COM  ")
+                        .build();
+
+                given(userRepository.findById(learnerId)).willReturn(Optional.of(testLearner));
+                given(userRepository.save(any(User.class))).willReturn(testLearner);
+                given(userMapper.toResponse(testLearner)).willReturn(learnerResponse);
+
+                // When - should NOT call findByEmail because email is same (case-insensitive)
+                UserResponse result = userService.updateUser(learnerId, request, adminId, UserRole.ADMIN);
+
+                // Then - email validation should be skipped
+                assertThat(result).isNotNull();
+                verify(userRepository, never()).findByEmail(any(String.class));
+                verify(userRepository).save(userCaptor.capture());
+            }
+
+            @Test
+            @DisplayName("Should not update email when email is null in request")
+            void shouldNotUpdateEmailWhenNull() {
+                UUID learnerId = (UUID) ReflectionTestUtils.getField(testLearner, "id");
+                UpdateUserRequest request = UpdateUserRequest.builder()
+                        .firstName("Updated")
+                        .email(null)
+                        .build();
+
+                given(userRepository.findById(learnerId)).willReturn(Optional.of(testLearner));
+                given(userRepository.save(any(User.class))).willReturn(testLearner);
+                given(userMapper.toResponse(testLearner)).willReturn(learnerResponse);
+
+                // When
+                UserResponse result = userService.updateUser(learnerId, request, adminId, UserRole.ADMIN);
+
+                // Then
+                assertThat(result).isNotNull();
+                verify(userRepository, never()).findByEmail(any(String.class));
+                verify(userRepository).save(userCaptor.capture());
+                User updated = userCaptor.getValue();
+                // Email should remain unchanged
+                assertThat(updated.getEmail()).isEqualTo(testLearner.getEmail());
+            }
+
+            @Test
+            @DisplayName("Should not update email when email is blank (only whitespace)")
+            void shouldNotUpdateEmailWhenBlank() {
+                UUID learnerId = (UUID) ReflectionTestUtils.getField(testLearner, "id");
+                UpdateUserRequest request = UpdateUserRequest.builder()
+                        .firstName("Updated")
+                        .email("     ") // Only whitespace
+                        .build();
+
+                given(userRepository.findById(learnerId)).willReturn(Optional.of(testLearner));
+                given(userRepository.save(any(User.class))).willReturn(testLearner);
+                given(userMapper.toResponse(testLearner)).willReturn(learnerResponse);
+
+                // When
+                UserResponse result = userService.updateUser(learnerId, request, adminId, UserRole.ADMIN);
+
+                // Then - blank email should be treated like null, no email check/update
+                assertThat(result).isNotNull();
+                verify(userRepository, never()).findByEmail(any(String.class));
+                verify(userRepository).save(userCaptor.capture());
+                User updated = userCaptor.getValue();
+                // Email should remain unchanged
+                assertThat(updated.getEmail()).isEqualTo(testLearner.getEmail());
+            }
         }
 
         @Nested
