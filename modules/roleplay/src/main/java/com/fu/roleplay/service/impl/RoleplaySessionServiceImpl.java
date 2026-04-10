@@ -604,6 +604,19 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         session.setStatus(ConversationSession.SessionStatus.COMPLETED);
         LocalDateTime completedAt = LocalDateTime.now();
         session.setCompletedAt(completedAt);
+
+        // Persist evaluation details so feedback can be retrieved later without re-calling AI
+        try {
+            ObjectNode feedbackNode = objectMapper.createObjectNode();
+            feedbackNode.set("languageEvaluation", objectMapper.valueToTree(languageEval));
+            if (pronunciationSummary != null) {
+                feedbackNode.set("pronunciationSummary", objectMapper.valueToTree(pronunciationSummary));
+            }
+            session.setFeedback(objectMapper.writeValueAsString(feedbackNode));
+        } catch (Exception e) {
+            log.warn("Failed to serialize evaluation feedback for session {}: {}", sessionId, e.getMessage());
+        }
+
         sessionRepository.save(session);
 
         // Update user_conversation_progress if this was a topic-based session
@@ -788,6 +801,62 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         return sessionRepository.findByUserIdAndSessionTypeOrderByCreatedAtDesc(
                         userId, ConversationSession.SessionType.ROLEPLAY.name(), pageable)
                 .map(sessionMapper::toSummaryResponse);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SessionEvaluationResponse getConversationFeedback(UUID conversationId, UUID userId) {
+        ConversationSession session = sessionRepository
+                .findLatestCompletedByUserIdAndConversationId(userId, conversationId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "ConversationSession", "conversationId", conversationId.toString()));
+
+        // Reconstruct mission details from stored SessionMission records
+        List<SessionMission> sessionMissions = sessionMissionRepository
+                .findBySessionIdOrderByCreatedAtAsc(session.getId());
+        List<SessionEvaluationResponse.MissionEvaluationDetail> missionDetails = sessionMissions.stream()
+                .map(sm -> SessionEvaluationResponse.MissionEvaluationDetail.builder()
+                        .title(sm.getTitle())
+                        .titleVi(sm.getTitleVi())
+                        .titleJapanese(sm.getTitleJapanese())
+                        .status(sm.getStatus().name())
+                        .progressPct(sm.getProgressPct())
+                        .reasoning(sm.getAiReasoning())
+                        .build())
+                .collect(Collectors.toList());
+
+        // Parse persisted evaluation details from session.feedback JSONB
+        SessionEvaluationResponse.LanguageEvaluationDetail languageEval = null;
+        SessionEvaluationResponse.PronunciationSummary pronunciationSummary = null;
+        String feedbackJson = session.getFeedback();
+        if (feedbackJson != null && !feedbackJson.equals("{}")) {
+            try {
+                JsonNode feedbackNode = objectMapper.readTree(feedbackJson);
+                if (feedbackNode.has("languageEvaluation")) {
+                    languageEval = objectMapper.treeToValue(
+                            feedbackNode.get("languageEvaluation"),
+                            SessionEvaluationResponse.LanguageEvaluationDetail.class);
+                }
+                if (feedbackNode.has("pronunciationSummary")) {
+                    pronunciationSummary = objectMapper.treeToValue(
+                            feedbackNode.get("pronunciationSummary"),
+                            SessionEvaluationResponse.PronunciationSummary.class);
+                }
+            } catch (Exception e) {
+                log.warn("Failed to parse feedback JSON for session {}: {}", session.getId(), e.getMessage());
+            }
+        }
+
+        return SessionEvaluationResponse.builder()
+                .sessionId(session.getId())
+                .missionScore(session.getMissionScore())
+                .pronunciationScore(session.getPronunciationScore())
+                .languageScore(session.getLanguageScore())
+                .overallScore(session.getOverallScore())
+                .missionDetails(missionDetails)
+                .pronunciationSummary(pronunciationSummary)
+                .languageEvaluation(languageEval)
+                .build();
     }
 
     // ==================== Private Helpers ====================
