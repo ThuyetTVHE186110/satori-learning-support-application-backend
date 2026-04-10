@@ -223,6 +223,14 @@ public class UserServiceImpl implements UserService {
         }
         // Validate permission to update this user
         validateUpdatePermission(user, updaterRole);
+        // validate email
+        if (request.getEmail() != null && !request.getEmail().trim().isBlank() && !user.getEmail().trim().equalsIgnoreCase(request.getEmail().trim())) {
+            User existingUser = userRepository.findByEmail(request.getEmail().trim()).orElse(null);
+            if (existingUser != null) {
+                throw new BusinessException("EXISTED_EMAIL", "Email này đã được sử dụng. Vui lòng sử dụng email khác.");
+            }
+            user.setEmail(request.getEmail().trim());
+        }
         // Update fields if provided
         if (request.getFirstName() != null) {
             user.setFirstName(request.getFirstName());
