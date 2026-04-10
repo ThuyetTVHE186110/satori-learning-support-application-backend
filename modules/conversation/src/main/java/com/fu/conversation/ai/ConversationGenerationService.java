@@ -37,24 +37,22 @@ public class ConversationGenerationService {
 
             Always respond with a valid JSON array. Do not include markdown code fences.
             Each conversation object must have:
-            - title (String): Conversation title in English/Vietnamese
+            - title (String): Conversation title in Vietnamese
             - titleJapanese (String): Conversation title in Japanese
-            - description (String): 2-3 sentence description
+            - description (String): 2-3 sentence Vietnamese description
             - descriptionVi (String): Vietnamese description
-            - scenario (String): Detailed roleplay scenario in English (who learner plays, who AI plays, context)
-            - aiRole (String): The role/character the AI will play in this conversation (e.g., "Café staff member", "Doctor", "Shopkeeper")
-            - learnerRole (String): The role/character the learner will play in this conversation (e.g., "Customer", "Patient", "Client")
+            - scenario (String): Detailed roleplay scenario in Vietnamese (who learner plays, who AI plays, context)
+            - aiRole (String): The role/character in Vietnamese the AI will play in this conversation (e.g., "Café staff member", "Doctor", "Shopkeeper")
+            - learnerRole (String): The role/character in Vietnamese the learner will play in this conversation (e.g., "Customer", "Patient", "Client")
             - category (String): One of: daily_life, travel, business, school, shopping, restaurant, health, culture
-            - jlptLevel (String): N5/N4/N3/N2/N1
-            - difficultyScore (Integer): 1-10
             - vocabularyHints (Array<String>): 5-8 key vocabulary
             - grammarPoints (Array<String>): 3-5 grammar patterns
             - usefulExpressions (Array<String>): 4-6 useful expressions
             - missions (Array): 2-4 missions, each with:
-              - title (String): Mission title
+              - title (String): Mission title in Vietnamese
               - titleJapanese (String): Japanese title
               - titleVi (String): Vietnamese title
-              - description (String): What learner must do
+              - description (String): What learner must do in this mission, in Vietnamese
               - descriptionVi (String): Vietnamese description
               - missionType (String): INFORMATION_GATHERING | TRANSACTIONAL | SOCIAL | PROBLEM_SOLVING | DESCRIPTIVE | CUSTOM
               - successCriteria (Object): {"requiredActions": [...], "requiredVocabulary": [...], "completionConditions": "..."}
@@ -171,13 +169,13 @@ public class ConversationGenerationService {
      * @param description  conversation description to guide AI generation
      * @param difficultyLevel difficulty level (1-3) to guide AI generation
      * @param jlptLevel    JLPT level from the course
-     * @param count        number of conversations to suggest (1-5)
-     * @return list of conversation suggestions (not persisted yet)
+     * @return list of conversation suggestions (not persisted yet, always 1 suggestion)
      */
     public List<GeneratedConversationSuggestionResponse>  generateConversationsForTopic(
             UUID topicId, UUID courseId, String title, String description, Integer difficultyLevel,
-            Course.JlptLevel jlptLevel, int count) {
-        log.info("Generating {} conversations for topic: {}, course: {}, title: {}, difficulty: {}, jlptLevel: {}",
+            Course.JlptLevel jlptLevel) {
+        int count = 1;
+        log.info("Generating {} conversation for topic: {}, course: {}, title: {}, difficulty: {}, jlptLevel: {}",
                 count, topicId, courseId, title, difficultyLevel, jlptLevel != null ? jlptLevel.name() : "null");
 
         ConversationTopic topic = topicRepository.findById(topicId).orElse(null);

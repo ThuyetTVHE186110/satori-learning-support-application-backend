@@ -257,7 +257,7 @@ public class ConversationServiceImpl implements ConversationService {
 
         return generationService.generateConversationsForTopic(
                 request.getTopicId(), request.getCourseId(), request.getTitle(), request.getDescription(),
-                request.getDifficultyLevel(), course.getJlptLevel(), request.getCount());
+                request.getDifficultyLevel(), course.getJlptLevel());
     }
 
     private ConversationResponse buildConversationResponse(Conversation conversation) {

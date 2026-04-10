@@ -56,7 +56,4 @@ public class GenerateConversationRequest {
     @Min(value = 1, message = "difficultyLevel must be between 1 and 3")
     @Max(value = 3, message = "difficultyLevel must be between 1 and 3")
     private Integer difficultyLevel;
-
-    @Builder.Default
-    private Integer count = 1;
 }

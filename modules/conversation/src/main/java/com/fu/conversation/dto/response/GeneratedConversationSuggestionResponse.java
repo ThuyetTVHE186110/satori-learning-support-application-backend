@@ -1,7 +1,6 @@
 package com.fu.conversation.dto.response;
 
 import com.fu.conversation.entity.ConversationMission;
-import com.fu.course.entity.Course;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -25,8 +24,6 @@ public class GeneratedConversationSuggestionResponse {
     private String descriptionVi;
     private String scenario;
     private String category;
-    private Course.JlptLevel jlptLevel;
-    private Integer difficultyScore;
     private String aiRole;
     private String learnerRole;
     private List<String> vocabularyHints;
