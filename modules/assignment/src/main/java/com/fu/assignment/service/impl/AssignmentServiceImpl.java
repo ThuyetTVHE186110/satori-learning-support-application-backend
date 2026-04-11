@@ -334,8 +334,25 @@ public class AssignmentServiceImpl implements AssignmentService {
     @Override
     public AssignmentResponse getAssignment(UUID assignmentId, UUID teacherId) {
         Assignment assignment = findAssignmentOrThrow(assignmentId);
-        verifyAssignmentAccess(assignment, teacherId);
-        return enrichAssignmentResponse(assignment, null);
+        boolean isClassTeacher = false;
+        boolean isCreator = false;
+        if (assignment.getClassId() != null) {
+            Clazz clazz = classRepository.findByIdAndNotDeleted(assignment.getClassId()).orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy lớp học"));
+            UUID currentTeacherId = classTeacherHistoryRepository.findCurrentTeacherIdByClassId(clazz.getId())
+                    .orElse(null);
+            if (currentTeacherId != null && currentTeacherId.equals(teacherId)) {
+                isClassTeacher = true;
+            }
+        }
+        if (assignment.getCreatedBy().equals(teacherId)) {
+            isCreator = true;
+        }
+        if (isClassTeacher || isCreator) {
+
+            return enrichAssignmentResponse(assignment, null);
+        } else {
+            throw new BusinessException("ACCESS_DENIED", "Bạn không có quyền truy cập bài tập này.");
+        }
     }
 
     @Override
@@ -419,40 +436,40 @@ public class AssignmentServiceImpl implements AssignmentService {
     @Override
     public AssignmentClassStatisticsResponse getAssignmentStatisticsForClass(
             UUID assignmentId, UUID classId, UUID teacherId) {
-        
+
         // Verify assignment exists and is not deleted
         Assignment assignment = assignmentRepository.findByIdAndNotDeleted(assignmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy bài tập"));
-        
+
         // Verify assignment belongs to the specified class
         if (!classId.equals(assignment.getClassId())) {
             throw new BusinessException("ASSIGNMENT_NOT_IN_CLASS", "Bài tập không thuộc về lớp học này");
         }
-        
+
         // Verify teacher access
         Clazz clazz = classRepository.findByIdAndNotDeleted(classId)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy lớp học"));
         verifyTeacherAccess(clazz, teacherId);
-        
+
         // Get total active students in class
         long totalStudents = classMemberRepository.countActiveByClassId(classId);
-        
+
         // Get count of submitted/graded submissions
         long submittedCount = submissionRepository.countSubmissionsInClassForAssignment(assignmentId, classId);
-        
+
         // Calculate not submitted count
         long notSubmittedCount = totalStudents - submittedCount;
-        
+
         // Get average score of graded submissions (default to 0 if null)
         Double averageScore = submissionRepository.getAverageScoreForAssignmentInClass(assignmentId, classId);
         if (averageScore == null) {
             averageScore = 0.0;
         }
-        
+
         // Get assignment title
         String title = assignmentRepository.getAssignmentTitleById(assignmentId)
                 .orElse("");
-        
+
         return AssignmentClassStatisticsResponse.builder()
                 .assignmentId(assignmentId)
                 .classId(classId)
@@ -618,20 +635,20 @@ public class AssignmentServiceImpl implements AssignmentService {
             UUID teacherId) {
         Assignment assignment = findAssignmentOrThrow(assignmentId);
         verifyAssignmentAccess(assignment, teacherId);
-        
+
         // Get assignment's class
         UUID classId = assignment.getClassId();
-        
+
         // Fetch all active student IDs in the class
         List<UUID> allStudentIds = classMemberRepository.findActiveUserIdsByClassId(classId);
-        
+
         // Fetch user information for all students
         Map<UUID, com.fu.user.entity.User> userMap = userRepository.findAllById(allStudentIds).stream()
                 .collect(Collectors.toMap(com.fu.user.entity.User::getId, u -> u));
-        
+
         // Fetch all submissions for this assignment
         List<AssignmentSubmission> submissions = submissionRepository.findByAssignmentId(assignmentId);
-        
+
         // Create a map of userId -> latest submission
         Map<UUID, AssignmentSubmission> submissionMap = submissions.stream()
                 .collect(Collectors.toMap(
@@ -639,13 +656,13 @@ public class AssignmentServiceImpl implements AssignmentService {
                         s -> s,
                         (existing, newer) -> newer.getAttemptNumber() > existing.getAttemptNumber() ? newer : existing
                 ));
-        
+
         // Combine all students with their submission status
         List<SubmissionSummaryResponse> allResponses = allStudentIds.stream()
                 .map(studentId -> {
                     AssignmentSubmission submission = submissionMap.get(studentId);
                     SubmissionSummaryResponse response;
-                    
+
                     if (submission != null) {
                         response = enrichSummaryResponse(submission);
                     } else {
@@ -662,7 +679,7 @@ public class AssignmentServiceImpl implements AssignmentService {
                                 .submittedAt(null)
                                 .build();
                     }
-                    
+
                     return response;
                 })
                 .filter(Objects::nonNull)
@@ -682,12 +699,12 @@ public class AssignmentServiceImpl implements AssignmentService {
                     return true;
                 })
                 .toList();
-        
+
         // Apply manual pagination
         int start = (int) pageable.getOffset();
         int end = Math.min(start + pageable.getPageSize(), allResponses.size());
         List<SubmissionSummaryResponse> pageContent = allResponses.subList(start, end);
-        
+
         return new org.springframework.data.domain.PageImpl<>(pageContent, pageable, allResponses.size());
     }
 
@@ -1403,14 +1420,14 @@ public class AssignmentServiceImpl implements AssignmentService {
      * Build a NOT_STARTED response for a student without a submission.
      */
     private SubmissionSummaryResponse getUserAndBuildNotStartedResponse(UUID userId) {
-        return userRepository.findById(userId).map(u -> 
-            SubmissionSummaryResponse.builder()
-                    .id(null)
-                    .userFullName(u.getFullName())
-                    .status(SubmissionStatus.NOT_STARTED)
-                    .score(null)
-                    .submittedAt(null)
-                    .build()
+        return userRepository.findById(userId).map(u ->
+                SubmissionSummaryResponse.builder()
+                        .id(null)
+                        .userFullName(u.getFullName())
+                        .status(SubmissionStatus.NOT_STARTED)
+                        .score(null)
+                        .submittedAt(null)
+                        .build()
         ).orElse(null);
     }
 

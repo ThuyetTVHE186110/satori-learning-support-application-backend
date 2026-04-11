@@ -8,6 +8,7 @@ import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
 import com.fu.clazz.dto.response.LearnerClassResponse;
+import com.fu.clazz.dto.response.TeacherClassHistoryResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -92,12 +93,29 @@ public interface ClassService {
 
     /**
      * Get eligible learners to add to a class (Active or Inactive, and not currently an active member)
+     * Optional filtering by a closed class to show members from that specific class
+     * 
+     * @param classId the target class ID to add members to
+     * @param keyword optional search term
+     * @param filterByClassId optional closed class ID to filter eligible learners by
+     * @param pageable pagination parameters
+     * @return paginated list of eligible learners
      */
-    Page<com.fu.user.dto.UserResponse> getEligibleLearners(UUID classId, String keyword, Pageable pageable);
+    Page<com.fu.user.dto.UserResponse> getEligibleLearners(UUID classId, String keyword, UUID filterByClassId, Pageable pageable);
 
     /**
      * Get learner's enrolled classes (ACTIVE or CLOSED status, active membership only)
      * Returns classes where ClassMember.removedAt IS NULL
      */
     List<LearnerClassResponse> getLearnerClasses(UUID learnerId);
+
+    /**
+     * Get all classes a teacher has taught or is currently teaching
+     * Returns paginated list sorted by assignment date (descending)
+     * 
+     * @param teacherId the teacher UUID
+     * @param pageable pagination parameters
+     * @return paginated list of class information
+     */
+    Page<TeacherClassHistoryResponse> getTeacherClassHistory(UUID teacherId, Pageable pageable);
 }

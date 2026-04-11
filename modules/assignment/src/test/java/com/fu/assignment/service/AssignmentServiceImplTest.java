@@ -538,7 +538,6 @@ class AssignmentServiceImplTest {
                     .build();
 
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
-            stubTeacherAccess();
             given(classRepository.findByIdAndNotDeleted(targetClassId)).willReturn(Optional.of(targetClazz));
             given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(targetClassId)).willReturn(Optional.of(teacherId));
 

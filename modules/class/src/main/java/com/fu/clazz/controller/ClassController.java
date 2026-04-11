@@ -7,6 +7,7 @@ import com.fu.clazz.dto.request.UpdateClassRequest;
 import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
+import com.fu.clazz.dto.response.TeacherClassHistoryResponse;
 import com.fu.clazz.service.ClassService;
 import com.fu.common.response.ApiResponse;
 import com.fu.common.response.PageResponse;
@@ -158,7 +159,7 @@ public class ClassController {
      * Eligible learners are those with role LEARNER, status ACTIVE/INACTIVE, and not currently an active member.
      * - OPERATION_MANAGER: can view eligible learners for any class
      * <p>
-     * GET /api/v1/classes/{classId}/eligible-learners?page=0&size=10&keyword=...
+     * GET /api/v1/classes/{classId}/eligible-learners?page=0&size=10&keyword=...&filterByClassId=...
      */
     @GetMapping("/{classId}/eligible-learners")
     @PreAuthorize("hasRole('OPERATION_MANAGER')")
@@ -166,11 +167,12 @@ public class ClassController {
             @PathVariable UUID classId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
-            @RequestParam(required = false) String keyword) {
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) UUID filterByClassId) {
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("email").ascending());
 
-        Page<com.fu.user.dto.UserResponse> userPage = clazzService.getEligibleLearners(classId, keyword, pageable);
+        Page<com.fu.user.dto.UserResponse> userPage = clazzService.getEligibleLearners(classId, keyword, filterByClassId, pageable);
 
         PageResponse<com.fu.user.dto.UserResponse> pageResponse = PageResponse.of(
                 userPage.getContent(),
@@ -278,6 +280,39 @@ public class ClassController {
         log.info("Manager {} removing member {} from class: {}", managerId, userId, classId);
         clazzService.removeMember(classId, userId, managerId);
         return ResponseEntity.ok(ApiResponse.success("Xóa học viên ra khỏi lớp học thành công.", null));
+    }
+
+    /**
+     * Get all classes a teacher has taught or is currently teaching.
+     * Returns paginated list sorted by assignment date (most recent first).
+     * 
+     * Access Control:
+     * - TEACHER: Can only view own class history
+     * 
+     * GET /api/v1/classes/teacher/{teacherId}?page=0&size=10
+     */
+    @GetMapping("/teacher")
+    @PreAuthorize("hasRole('TEACHER')")
+    public ResponseEntity<ApiResponse<PageResponse<TeacherClassHistoryResponse>>> getTeacherClassHistory(
+            @AuthenticationPrincipal UUID userId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+
+
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        Page<TeacherClassHistoryResponse> classHistoryPage = clazzService.getTeacherClassHistory(userId, pageable);
+
+        PageResponse<TeacherClassHistoryResponse> pageResponse = PageResponse.of(
+                classHistoryPage.getContent(),
+                classHistoryPage.getNumber(),
+                classHistoryPage.getSize(),
+                classHistoryPage.getTotalElements(),
+                classHistoryPage.getTotalPages());
+
+        String message = classHistoryPage.getTotalElements() == 0
+                ? "Giáo viên chưa dạy lớp nào."
+                : "Lấy lịch sử lớp học thành công.";
+        return ResponseEntity.ok(ApiResponse.success(message, pageResponse));
     }
 
     // =====================================================
