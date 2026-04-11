@@ -244,6 +244,34 @@ public class MnNTableParser {
     }
 
     /**
+     * Probe whether a majority of word-column cells carry inline parenthetical
+     * meanings — e.g. "インドネシア人 (người Indonesia)". When true, the parser
+     * can still produce vocabulary items even without a dedicated meaning column.
+     *
+     * <p>Threshold: ≥50% of non-blank word cells must yield a non-empty inline
+     * meaning. Below that, the table is likely a pure reference table (country
+     * names, surname rankings) where LLM fallback is correct.
+     */
+    private boolean hasInlineMeaningMajority(List<String> rows, int wordCol) {
+        if (wordCol < 0) return false;
+        int nonBlank = 0;
+        int withInline = 0;
+        for (String row : rows) {
+            if (row == null || row.isBlank()) continue;
+            String[] cells = row.split("\t", -1);
+            if (wordCol >= cells.length) continue;
+            String cell = cells[wordCol].trim();
+            if (cell.isBlank()) continue;
+            nonBlank++;
+            FuriganaNormalizer.InlineMeaning inline = FuriganaNormalizer.extractInlineMeaning(cell);
+            if (inline.found() && inline.meaning() != null && !inline.meaning().isBlank()) {
+                withInline++;
+            }
+        }
+        return nonBlank > 0 && withInline * 2 >= nonBlank;
+    }
+
+    /**
      * Returns true if the string contains at least one Unicode letter character.
      */
     private boolean hasAnyLetter(String text) {
@@ -281,10 +309,18 @@ public class MnNTableParser {
             return List.of();
         }
 
+        // When no separate meaning column is detected, the table may still carry
+        // inline parenthetical meanings on the word cell — e.g. 3-column reference
+        // tables in MnN Vietnamese companion editions: "インドネシア人 (người Indonesia) | ..."
+        // Probe inline-meaning density before falling back to LLM.
         if (mapping.meaningCol < 0) {
-            log.info("MnNTableParser: no Vietnamese meaning column detected ({} rows) — using LLM fallback",
-                    rows.size());
-            return List.of();
+            if (!hasInlineMeaningMajority(rows, mapping.wordCol)) {
+                log.info("MnNTableParser: no Vietnamese meaning column and no inline meanings ({} rows) — using LLM fallback",
+                        rows.size());
+                return List.of();
+            }
+            log.debug("MnNTableParser: no meaning column — using inline parenthetical meanings from word col {}",
+                    mapping.wordCol);
         }
 
         // ── Parse each row using detected column positions ──────────────────
@@ -482,7 +518,10 @@ public class MnNTableParser {
         }
 
         // ── Meaning column ──────────────────────────────────────────────────
-        String meaningRaw   = mapping.meaningCol < cells.length ? cells[mapping.meaningCol].trim() : "";
+        // meaningCol = -1 → no dedicated meaning column; rely solely on inline
+        // parentheticals extracted from the word cell (see col1InlineMeaning above).
+        String meaningRaw   = (mapping.meaningCol >= 0 && mapping.meaningCol < cells.length)
+                ? cells[mapping.meaningCol].trim() : "";
         String partOfSpeech = "";
         String meaningVi    = meaningRaw;
 

@@ -93,7 +93,7 @@ public class EmailServiceImpl implements EmailService {
     @Override
     @Async("mailExecutor")
     public void sendWelcomeEmailWithCredentials(String to, String userName, String email, String password) {
-        String subject = "Chao mung den voi Satori Learning - Thong tin dang nhap";
+        String subject = "Chào mừng đến với Satori Learning - Thông tin đăng nhập";
 
         Map<String, Object> variables = Map.of(
                 "userName", userName != null ? userName : "ban",
@@ -110,7 +110,7 @@ public class EmailServiceImpl implements EmailService {
     @Override
     @Async
     public void sendPasswordResetOtp(String to, String userName, String otp, int expirationMinutes) {
-        String subject = "Ma OTP dat lai mat khau - Satori Learning";
+        String subject = "Mã OTP đặt lại mật khẩu - Satori Learning";
 
         Map<String, Object> variables = Map.of(
                 "userName", userName != null ? userName : "ban",
@@ -125,7 +125,7 @@ public class EmailServiceImpl implements EmailService {
     @Override
     @Async
     public void sendPasswordChangedNotification(String to, String userName) {
-        String subject = "Mat khau da duoc thay doi - Satori Learning";
+        String subject = "Mật khẩu đã được thay đổi - Satori Learning";
 
         Map<String, Object> variables = Map.of(
                 "userName", userName != null ? userName : "ban",

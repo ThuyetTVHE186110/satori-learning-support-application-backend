@@ -193,7 +193,7 @@ class ContentValidationAgentTest {
         }
 
         @Test
-        @DisplayName("Vocab missing reading, meaningVi, meaningEn — WARNING issues")
+        @DisplayName("Vocab missing reading + meaningVi → WARNINGs; missing meaningEn → INFO")
         void validate_vocabMissingOptionalFields_warningIssues() {
             ExtractionResult.ExtractedVocabulary incomplete = ExtractionResult.ExtractedVocabulary.builder()
                     .japaneseText("食べる")
@@ -205,11 +205,16 @@ class ContentValidationAgentTest {
             ExtractionResult result = resultWith(List.of(incomplete), List.of(), 0.9);
             ValidationResult vr = agent.validateRuleBased(result, CONFIDENCE_THRESHOLD);
 
-            // 3 warnings → reading, meaningVi, meaningEn
             long warningCount = vr.getIssues().stream()
                     .filter(i -> i.getSeverity() == ValidationResult.ValidationIssue.IssueSeverity.WARNING)
                     .count();
-            assertThat(warningCount).isGreaterThanOrEqualTo(3);
+            long infoCount = vr.getIssues().stream()
+                    .filter(i -> i.getSeverity() == ValidationResult.ValidationIssue.IssueSeverity.INFO)
+                    .count();
+            // reading missing → WARNING, meaningVi missing → WARNING
+            assertThat(warningCount).isGreaterThanOrEqualTo(2);
+            // meaningEn missing → INFO (advisory only, not a quality blocker)
+            assertThat(infoCount).isGreaterThanOrEqualTo(1);
         }
 
         @Test
@@ -384,13 +389,14 @@ class ContentValidationAgentTest {
                     .build();
             given(groundingVerifier.verify(any(), any())).willReturn(groundResult);
 
-            // Vocab with warning to trigger reflection (ruleBasedScore < 0.85)
+            // Vocab with WARNING to trigger reflection (ruleBasedScore < 0.85).
+            // Missing meaningVi is a real quality issue (not just missing English).
             ExtractionResult.ExtractedVocabulary vocabWithWarning = ExtractionResult.ExtractedVocabulary.builder()
                     .japaneseText("食べる")
                     .reading("たべる")
                     .romaji("taberu")
-                    .meaningVi("ăn")
-                    .meaningEn("") // Missing meaningEn → WARNING
+                    .meaningVi("") // Missing meaningVi → WARNING
+                    .meaningEn("to eat")
                     .jlptLevel("N5")
                     .build();
 
@@ -576,9 +582,8 @@ class ContentValidationAgentTest {
         void validateFull_excellentVerdict_statusValid() {
             given(ragProperties.isSelfReflectionEnabled()).willReturn(true);
             given(ragProperties.isGroundingEnabled()).willReturn(true);
-
-            ReflectionResult reflResult = ReflectionResult.passed();
-            given(selfReflectionAgent.reflect(any(), any(), any())).willReturn(reflResult);
+            // No self-reflection stub — ruleScore will be 1.0 and reflection is skipped
+            // via the ruleScore < 0.85 fast-return guard in validateFull().
 
             GroundingVerifier.GroundingResult groundResult = GroundingVerifier.GroundingResult.builder()
                     .groundingScore(1.0)
@@ -589,21 +594,14 @@ class ContentValidationAgentTest {
                     .build();
             given(groundingVerifier.verify(any(), any())).willReturn(groundResult);
 
-            // Use vocab with minor warning to ensure reflection is triggered (score < 0.85)
-            // but still high enough for EXCELLENT verdict
+            // Two fully-valid vocab → ruleScore = 1.0 → reflection is skipped
+            // (the fast-return path at line ~106 uses ruleScore as proxy).
+            // Rule=1.0, reflection=1.0(proxy), grounding=1.0 → combined=1.0 → EXCELLENT
             ExtractionResult.ExtractedVocabulary vocab1 = validVocab();
-            ExtractionResult.ExtractedVocabulary vocab2 = ExtractionResult.ExtractedVocabulary.builder()
-                    .japaneseText("飲む")
-                    .reading("のむ")
-                    .romaji("nomu")
-                    .meaningVi("uống")
-                    .meaningEn("") // Small warning to keep ruleScore around 0.8-0.9
-                    .jlptLevel("N5")
-                    .build();
+            ExtractionResult.ExtractedVocabulary vocab2 = validVocab();
 
             ExtractionResult result = resultWith(List.of(vocab1, vocab2), List.of(), 0.9);
 
-            // Rule ≈0.8-0.9, reflection=1.0, grounding=1.0 → combined ≈ 0.9+ → EXCELLENT
             ValidationResult vr = agent.validateFull(result, CONFIDENCE_THRESHOLD, chunk, "N5");
 
             assertThat(vr.getStatus()).isEqualTo(ValidationStatus.VALID);
@@ -663,9 +661,8 @@ class ContentValidationAgentTest {
         void validateFull_hallucinatedItems_countPropagated() {
             given(ragProperties.isSelfReflectionEnabled()).willReturn(true);
             given(ragProperties.isGroundingEnabled()).willReturn(true);
-
-            ReflectionResult reflResult = ReflectionResult.passed();
-            given(selfReflectionAgent.reflect(any(), any(), any())).willReturn(reflResult);
+            // No reflection stub — ruleScore will be 1.0 and reflection is skipped.
+            // The grounding layer still runs and propagates hallucinatedCount.
 
             GroundingVerifier.GroundingResult groundResult = GroundingVerifier.GroundingResult.builder()
                     .groundingScore(0.5)
@@ -676,17 +673,7 @@ class ContentValidationAgentTest {
                     .build();
             given(groundingVerifier.verify(any(), any())).willReturn(groundResult);
 
-            // Vocab with warning to trigger reflection
-            ExtractionResult.ExtractedVocabulary vocabWithWarning = ExtractionResult.ExtractedVocabulary.builder()
-                    .japaneseText("食べる")
-                    .reading("たべる")
-                    .romaji("taberu")
-                    .meaningVi("ăn")
-                    .meaningEn("") // Missing meaningEn → WARNING
-                    .jlptLevel("N5")
-                    .build();
-
-            ExtractionResult result = resultWith(List.of(vocabWithWarning), List.of(), 0.9);
+            ExtractionResult result = resultWith(List.of(validVocab()), List.of(), 0.9);
 
             ValidationResult vr = agent.validateFull(result, CONFIDENCE_THRESHOLD, chunk, "N5");
 

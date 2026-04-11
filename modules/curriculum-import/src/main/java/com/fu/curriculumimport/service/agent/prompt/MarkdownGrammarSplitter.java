@@ -22,8 +22,13 @@ import java.util.regex.Pattern;
  * </pre>
  *
  * <p>Both numbered ({@code ## 1. Title}) and unnumbered ({@code ## Title}) headings
- * are detected. Unnumbered headings continue the sequence number from the last
- * numbered heading.
+ * are detected. Unnumbered headings are accepted only when they contain Japanese
+ * characters (hiragana, katakana, kanji, or {@code 〜}) — this distinguishes real
+ * grammar points ({@code ## 〜か、〜か}) from Vietnamese-only sub-notes
+ * ({@code ## Chú ý}) regardless of heading level.
+ *
+ * <p>Heading level ({@code #} count) is intentionally ignored because Document AI
+ * produces inconsistent levels between runs for the same PDF.
  */
 public final class MarkdownGrammarSplitter {
 
@@ -66,7 +71,32 @@ public final class MarkdownGrammarSplitter {
             "Bài\\s*tập|練習|会話|例文|文型");
 
     /**
+     * Detects Japanese script (hiragana, katakana, kanji) or the grammar-notation
+     * wave dash {@code 〜} (U+301C).  Used to distinguish real grammar headings
+     * ({@code ## 〜か、〜か}) from Vietnamese-only sub-notes ({@code ## Chú ý}).
+     */
+    private static final Pattern JAPANESE_CHARS = Pattern.compile(
+            "[\\u3040-\\u309F\\u30A0-\\u30FF\\u4E00-\\u9FFF\\u3005\\u301C〜]");
+
+    /**
      * Split markdown content into individual grammar sections.
+     *
+     * <h3>Design principle</h3>
+     * <p>Grammar section identity is determined by <b>content</b> (what the heading says),
+     * not by <b>formatting</b> (how many {@code #} characters it has).  Document AI and
+     * Layout Parser produce inconsistent heading levels between runs for the same PDF —
+     * {@code ## 〜か、〜か} in one run becomes {@code ### 〜か、〜か} in the next.
+     * Level-based filtering caused grammar counts to vary by 30–40 % across identical
+     * imports (e.g. 14 vs 9).
+     *
+     * <p>A heading is treated as a grammar section boundary when:
+     * <ol>
+     *   <li>It passes {@link #SKIP_HEADING} (not a chapter/part header), AND</li>
+     *   <li>It is <b>numbered</b> ({@code ## 1. Title}), OR it contains
+     *       <b>Japanese characters</b> (hiragana, katakana, kanji, {@code 〜}).</li>
+     * </ol>
+     * Unnumbered, Vietnamese-only headings ({@code ## Chú ý}) are excluded because
+     * they are sub-notes, not grammar points.
      *
      * @param content markdown text from a GRAMMAR_EXPLANATION chunk
      * @return list of sections in order; empty list if no headings found
@@ -76,70 +106,25 @@ public final class MarkdownGrammarSplitter {
 
         Matcher matcher = SECTION_HEADING.matcher(content);
 
-        // Collect all heading positions and metadata
+        // Collect all heading positions and metadata — heading level is intentionally
+        // ignored for filtering.  SKIP_HEADING is the only filter.
         List<int[]> positions = new ArrayList<>();   // [start, end]
         List<Integer> numbers = new ArrayList<>();   // -1 for unnumbered
         List<String> titles = new ArrayList<>();
-        List<Integer> levels = new ArrayList<>();    // heading depth (# count)
 
         while (matcher.find()) {
             String title = matcher.group(3).trim();
-
-            // Skip chapter/part headers like "# IV. Giải thích ngữ pháp"
             if (SKIP_HEADING.matcher(title).find()) continue;
 
+            boolean isNumbered = matcher.group(2) != null;
+            // Unnumbered headings must contain Japanese to qualify as grammar points.
+            // Pure-Vietnamese headings like "Chú ý" or "Ghi chú" are sub-notes.
+            if (!isNumbered && !JAPANESE_CHARS.matcher(title).find()) continue;
+
             positions.add(new int[]{matcher.start(), matcher.end()});
-            numbers.add(matcher.group(2) != null ? Integer.parseInt(matcher.group(2)) : -1);
+            numbers.add(isNumbered ? Integer.parseInt(matcher.group(2)) : -1);
             titles.add(title);
-            levels.add(matcher.group(1).length());
         }
-
-        if (positions.isEmpty()) return List.of();
-
-        // --- Grammar section boundary detection ---
-        //
-        // PDF parsers sometimes produce inconsistent heading levels for the same content type:
-        //   ## IV. Giải thích ngữ pháp   ← chapter header (skipped above)
-        //   ### 1. Danh từ₁ は...          ← grammar point at level 3
-        //   ### 2. ...
-        //   ## 4. Danh từ も              ← grammar point at level 2 (!)
-        //
-        // Using minimum-level filtering would miss the "###" grammar points.
-        //
-        // Key insight: numbered headings use "N." format (period), while subsection
-        // explanations use "N)" format (parenthesis). The SECTION_HEADING regex only
-        // captures group(2) when the format is "N." — so:
-        //   ### 1. Danh từ₁ は ...  → group(2)="1"  → numbered → grammar point ✓
-        //   ### 1) Trợ từ は        → group(2)=null → unnumbered → subsection body ✗
-        //
-        // Strategy:
-        //   1. All numbered headings (N. format, any level) are grammar section boundaries.
-        //   2. Unnumbered headings are included only when at the same level as the
-        //      shallowest numbered heading (to handle documents that use unnumbered
-        //      headings for grammar points like "## ～さん").
-        int minNumberedLevel = 999;
-        for (int i = 0; i < levels.size(); i++) {
-            if (numbers.get(i) >= 0 && levels.get(i) < minNumberedLevel) {
-                minNumberedLevel = levels.get(i);
-            }
-        }
-        if (minNumberedLevel == 999) minNumberedLevel = 2; // no numbered headings found
-
-        List<int[]> filteredPositions = new ArrayList<>();
-        List<Integer> filteredNumbers = new ArrayList<>();
-        List<String> filteredTitles = new ArrayList<>();
-        for (int i = 0; i < positions.size(); i++) {
-            boolean isNumbered = numbers.get(i) >= 0;                              // N. format
-            boolean isUnnumberedAtPrimary = !isNumbered && levels.get(i) == minNumberedLevel;
-            if (isNumbered || isUnnumberedAtPrimary) {
-                filteredPositions.add(positions.get(i));
-                filteredNumbers.add(numbers.get(i));
-                filteredTitles.add(titles.get(i));
-            }
-        }
-        positions = filteredPositions;
-        numbers = filteredNumbers;
-        titles = filteredTitles;
 
         if (positions.isEmpty()) return List.of();
 
@@ -154,14 +139,7 @@ public final class MarkdownGrammarSplitter {
                     : content.length();
 
             String fullSection = content.substring(sectionStart, sectionEnd).trim();
-
-            // Determine STT: use explicit number if present, otherwise auto-increment
-            int stt;
-            if (numbers.get(i) >= 0) {
-                stt = numbers.get(i);
-            } else {
-                stt = lastStt + 1;
-            }
+            int stt = numbers.get(i) >= 0 ? numbers.get(i) : lastStt + 1;
             lastStt = stt;
 
             sections.add(new GrammarSection(stt, titles.get(i), fullSection));

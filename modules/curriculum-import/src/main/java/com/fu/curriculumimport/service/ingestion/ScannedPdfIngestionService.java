@@ -119,7 +119,9 @@ public class ScannedPdfIngestionService {
             // ── Step 2: OCR all pages in one call ─────────────────────────────
             // Document AI receives the full PDF (one API call); Vision handles
             // fallback pages internally in batches.
-            List<OcrTextResult> ocrResults = ocrClient.extractTextBatch(allJpegs, pdfBytes);
+            OcrBatchResult ocrBatch = ocrClient.extractTextBatch(allJpegs, pdfBytes);
+            List<OcrTextResult> ocrResults = ocrBatch.pages();
+            List<LayoutChunk> documentAiChunks = ocrBatch.documentChunks();
 
             // ── Step 3: Collect results ────────────────────────────────────────
             String[] pageTextArray = new String[totalPages];
@@ -167,6 +169,7 @@ public class ScannedPdfIngestionService {
                     .fullText(fullText.toString())
                     .pageTexts(pageTexts)
                     .chunks(chunks)
+                    .documentAiChunks(documentAiChunks)
                     .build();
 
         } catch (InvalidImportFileException e) {

@@ -17,10 +17,8 @@ public class PronunciationScoreResponse {
     private BigDecimal overallScore;
     private BigDecimal accuracyScore;
     private BigDecimal fluencyScore;
-    private BigDecimal prosodyScore;
+    private BigDecimal completenessScore;
     private String transcribedText;
-    private BigDecimal pitchAccentScore;
-    private BigDecimal moraTimingScore;
 
     private List<CriteriaEvaluation> criteriaEvaluations;
 

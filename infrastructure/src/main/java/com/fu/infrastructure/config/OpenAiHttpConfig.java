@@ -21,8 +21,10 @@ public class OpenAiHttpConfig {
     /** Connection-request timeout: how long to wait to borrow a connection from the pool. */
     private static final int CONNECTION_REQUEST_TIMEOUT_SECONDS = 30;
 
-    /** Response timeout (read timeout): how long to wait for the server to return data. */
-    private static final int RESPONSE_TIMEOUT_SECONDS = 120;
+    /** Response timeout (read timeout): how long to wait for the server to return data.
+     *  Extraction agents request up to 8 192 output tokens from gpt-4o; under API load
+     *  those calls can take 3–4 minutes. 300 s gives a comfortable margin. */
+    private static final int RESPONSE_TIMEOUT_SECONDS = 300;
 
     @Bean
     public RestClientCustomizer openAiTimeoutCustomizer() {

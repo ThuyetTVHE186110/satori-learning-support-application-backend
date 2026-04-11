@@ -77,9 +77,7 @@ public class SessionEvaluationResponse {
         private BigDecimal averageOverall;
         private BigDecimal averageAccuracy;
         private BigDecimal averageFluency;
-        private BigDecimal averageProsody;
-        private BigDecimal averagePitchAccent;
-        private BigDecimal averageMoraTiming;
+        private BigDecimal averageCompleteness;
         private int totalAssessed;
     }
 

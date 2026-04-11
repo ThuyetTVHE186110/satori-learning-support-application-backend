@@ -104,19 +104,19 @@ class ScannedPdfIngestionServiceTest {
     /**
      * Helper: create batch OCR result with same OcrTextResult for all pages.
      */
-    private List<OcrTextResult> batchResults(int pageCount, OcrTextResult result) {
+    private OcrBatchResult batchResults(int pageCount, OcrTextResult result) {
         List<OcrTextResult> results = new java.util.ArrayList<>();
         for (int i = 0; i < pageCount; i++) {
             results.add(result);
         }
-        return results;
+        return OcrBatchResult.of(results);
     }
 
     /**
      * Helper: create batch OCR result with specific results per page.
      */
-    private List<OcrTextResult> batchResults(OcrTextResult... results) {
-        return java.util.Arrays.asList(results);
+    private OcrBatchResult batchResults(OcrTextResult... results) {
+        return OcrBatchResult.of(java.util.Arrays.asList(results));
     }
 
     // ── Default mock setup ──────────────────────────────────────────────────

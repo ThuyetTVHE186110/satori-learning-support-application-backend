@@ -395,6 +395,16 @@ public class ImportOrchestrator {
                 // lesson titles won't be in lessonTitleToId but their lessonNumber is stored on ImportChunk.
                 Map<Integer, UUID> lessonNumberToId = persistenceService.getLessonIdsByNumber(courseId);
                 embeddingsCreated += embedChatbotChunks(dbChunks, importEntity, jlptLevel, lessonTitleToId, lessonNumberToId);
+
+                // Document AI Layout Parser semantic chunks (only present when
+                // ocr.document-ai-chunking-enabled=true). These are heading-aware,
+                // page-spanning blocks of full document content — embedded under
+                // content_type=DOC_AI_CHUNK so the chatbot retrieves them alongside
+                // the per-section lesson chunks.
+                if (parseResult.getDocumentAiChunks() != null && !parseResult.getDocumentAiChunks().isEmpty()) {
+                    embeddingsCreated += embeddingService.embedDocumentAiChunks(
+                            parseResult.getDocumentAiChunks(), importId, courseId, jlptLevel);
+                }
             }
             importEntity.setEmbeddingsCreated(embeddingsCreated);
 

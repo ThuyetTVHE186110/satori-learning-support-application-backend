@@ -11,7 +11,7 @@
 
 -- 1a. Xử lý các row còn sót KANJI_READING (update sang VOCAB_DRILL trước khi drop)
 UPDATE practice.practice_sessions
-    SET session_type = 'VOCAB_DRILL'::text
+    SET session_type = 'VOCAB_DRILL'::practice_session_type
     WHERE session_type::text = 'KANJI_READING';
 
 -- 1b. Đổi tên enum cũ

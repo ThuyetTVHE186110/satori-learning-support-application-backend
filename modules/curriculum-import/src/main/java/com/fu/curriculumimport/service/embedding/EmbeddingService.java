@@ -6,6 +6,7 @@ import com.fu.course.repository.LessonRepository;
 import com.fu.curriculumimport.config.AgenticRagProperties;
 import com.fu.curriculumimport.entity.ImportChunk;
 import com.fu.curriculumimport.service.agent.ExtractionResult;
+import com.fu.curriculumimport.service.ingestion.LayoutChunk;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
@@ -672,6 +673,82 @@ public class EmbeddingService {
             // Non-fatal: chatbot hoạt động bình thường dù thiếu chunk này
             log.warn("Không thể embed lesson chunk {} ({}): {}", chunk.getId(), sectionType, e.getMessage());
         }
+    }
+
+    /**
+     * Content type used for Document AI Layout Parser semantic chunks. Stored in
+     * {@code content_embeddings.content_type} so the chatbot retriever can opt
+     * into them via {@link ChatbotFilter#forChatbot(java.util.UUID, java.util.UUID)}.
+     */
+    public static final String DOC_AI_CHUNK_TYPE = "DOC_AI_CHUNK";
+
+    /**
+     * Embed and store Document AI Layout Parser semantic chunks in
+     * {@code progress.content_embeddings} so the chatbot can retrieve heading-aware,
+     * page-spanning blocks of curriculum content alongside the per-section lesson
+     * chunks. Embedding happens in batches of {@link #EMBEDDING_BATCH_SIZE}.
+     *
+     * <p>Non-fatal: failures are logged but don't break the import — the chatbot
+     * still has the per-section lesson chunks (GRAMMAR_EXPLANATION/DIALOG/EXAMPLE)
+     * to fall back on.
+     *
+     * @param chunks    semantic chunks (typically from {@code DocumentParseResult.documentAiChunks})
+     * @param importId  current curriculum import ID (used for rollback purging)
+     * @param courseId  course this import belongs to
+     * @param jlptLevel course JLPT level (e.g. {@code "N5"})
+     * @return number of chunks successfully embedded
+     */
+    public int embedDocumentAiChunks(List<LayoutChunk> chunks, UUID importId,
+                                      UUID courseId, String jlptLevel) {
+        if (chunks == null || chunks.isEmpty()) return 0;
+
+        // Filter out blank-content chunks up front
+        List<LayoutChunk> valid = new ArrayList<>(chunks.size());
+        for (LayoutChunk c : chunks) {
+            if (c.hasContent()) valid.add(c);
+        }
+        if (valid.isEmpty()) return 0;
+
+        int embedded = 0;
+        for (int batchStart = 0; batchStart < valid.size(); batchStart += EMBEDDING_BATCH_SIZE) {
+            int batchEnd = Math.min(batchStart + EMBEDDING_BATCH_SIZE, valid.size());
+            List<LayoutChunk> batch = valid.subList(batchStart, batchEnd);
+
+            List<String> texts = batch.stream().map(LayoutChunk::content).toList();
+            List<float[]> vectors = generateEmbeddingsBatch(texts);
+
+            for (int i = 0; i < batch.size(); i++) {
+                LayoutChunk c = batch.get(i);
+                float[] vec = vectors != null && i < vectors.size() ? vectors.get(i) : null;
+                if (vec == null) {
+                    log.warn("Document AI chunk {} embedding failed — skipping", c.chunkId());
+                    continue;
+                }
+
+                try {
+                    // Deterministic content_id keyed on import + chunk id so retries upsert.
+                    UUID contentId = UUID.nameUUIDFromBytes(
+                            ("DOC_AI_CHUNK:" + importId + ":" + c.chunkId()).getBytes(StandardCharsets.UTF_8));
+
+                    Map<String, String> metadata = new HashMap<>();
+                    if (courseId != null) metadata.put("course_id", courseId.toString());
+                    if (jlptLevel != null) metadata.put("jlpt_level", jlptLevel);
+                    metadata.put("page_start", Integer.toString(c.pageStart()));
+                    metadata.put("page_end",   Integer.toString(c.pageEnd()));
+                    metadata.put("source", "document_ai_layout_parser");
+
+                    storeEmbedding(contentId, DOC_AI_CHUNK_TYPE, c.content(), vec,
+                            batchStart + i, importId, metadata);
+                    embedded++;
+                } catch (Exception e) {
+                    log.warn("Failed to store Document AI chunk {} embedding: {}",
+                            c.chunkId(), e.getMessage());
+                }
+            }
+        }
+
+        log.info("Embedded {} of {} Document AI chunks for import {}", embedded, valid.size(), importId);
+        return embedded;
     }
 
     /**

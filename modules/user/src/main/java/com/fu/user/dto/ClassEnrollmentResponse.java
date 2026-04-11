@@ -22,6 +22,7 @@ public class ClassEnrollmentResponse {
     private String className;
     private UUID courseId;
     private String courseName;
+    private String jlptLevel;
     private LocalDateTime startDate;
     private LocalDateTime endDate;
     private String status; // ACTIVE, COMPLETED, CANCELLED

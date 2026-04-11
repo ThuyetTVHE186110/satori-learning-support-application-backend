@@ -136,9 +136,12 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
             double prosodyScore = pronResult.getProsodyScore();
             double completenessScore = pronResult.getCompletenessScore();
 
-            // Overall = weighted average (Azure's default weighting)
-            double overallScore = (accuracyScore * 0.4 + fluencyScore * 0.2
-                    + completenessScore * 0.2 + prosodyScore * 0.2);
+            // Overall = weighted average for ja-JP (prosody is always 0 for non-en-US locales)
+            // Accuracy 50%: correct mora/phoneme production is foundational for Japanese
+            // Fluency 30%: natural pacing with minimal hesitation
+            // Completeness 20%: all expected words/morae were spoken
+            double overallScore = (accuracyScore * 0.5 + fluencyScore * 0.3
+                    + completenessScore * 0.2);
 
             // Parse word-level and phoneme-level details from the JSON response
             String jsonResponse = result.getProperties().getProperty(
