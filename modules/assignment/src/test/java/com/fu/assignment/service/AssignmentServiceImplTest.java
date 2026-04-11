@@ -14,6 +14,7 @@ import com.fu.assignment.repository.*;
 import com.fu.assignment.scheduler.AssignmentScheduleManager;
 import com.fu.assignment.service.impl.AssignmentServiceImpl;
 import com.fu.clazz.entity.Clazz;
+import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.repository.ClassMemberRepository;
 import com.fu.clazz.repository.ClassRepository;
 import com.fu.clazz.repository.ClassTeacherHistoryRepository;
@@ -1409,6 +1410,43 @@ class AssignmentServiceImplTest {
                     assignmentId, classId, teacherId))
                     .isInstanceOf(ResourceNotFoundException.class);
         }
+
+        @Test
+        @DisplayName("Should exclude removed members from submission count")
+        void shouldExcludeRemovedMembersFromSubmissionCount() {
+            testQuizAssignment.setId(assignmentId);
+            testQuizAssignment.setTitle("Test Quiz");
+            testQuizAssignment.setClassId(classId);
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            // 30 total class members, but only active ones are counted
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(30L);
+            // Only 20 students from active members submitted
+            given(submissionRepository.countSubmissionsInClassForAssignment(assignmentId, classId))
+                    .willReturn(20L);
+            given(submissionRepository.getAverageScoreForAssignmentInClass(assignmentId, classId))
+                    .willReturn(80.0);
+            given(assignmentRepository.getAssignmentTitleById(assignmentId))
+                    .willReturn(Optional.of("Test Quiz"));
+
+            AssignmentClassStatisticsResponse result = assignmentService.getAssignmentStatisticsForClass(
+                    assignmentId, classId, teacherId);
+
+            // Verify statistics only include active members
+            assertThat(result.getTotalStudents()).isEqualTo(30L); // Active members only
+            assertThat(result.getSubmittedCount()).isEqualTo(20L); // From active members only
+            assertThat(result.getNotSubmittedCount()).isEqualTo(10L); // 30 - 20
+            assertThat(result.getAverageScore()).isEqualTo(80.0);
+            
+            // Verify repository methods were called (these ensure removed members are filtered)
+            verify(submissionRepository).countSubmissionsInClassForAssignment(assignmentId, classId);
+            verify(submissionRepository).getAverageScoreForAssignmentInClass(assignmentId, classId);
+        }
     }
 
     @Nested
@@ -1452,8 +1490,26 @@ class AssignmentServiceImplTest {
                     .willReturn(Optional.of(testClazz));
             given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
                     .willReturn(Optional.of(teacherId));
-            given(classMemberRepository.findActiveUserIdsByClassId(classId))
-                    .willReturn(List.of(student1Id, student2Id, student3Id));
+            
+            // Create ClassMember objects (all active, no removed)
+            ClassMember member1 = ClassMember.builder()
+                    .userId(student1Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member2 = ClassMember.builder()
+                    .userId(student2Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member3 = ClassMember.builder()
+                    .userId(student3Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            
+            given(classMemberRepository.findAllByClassId(classId))
+                    .willReturn(List.of(member1, member2, member3));
             given(submissionRepository.findByAssignmentId(assignmentId))
                     .willReturn(List.of(submission1));
             given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
@@ -1463,6 +1519,7 @@ class AssignmentServiceImplTest {
                             .id(submission1.getId())
                             .userFullName(user1.getDisplayName())
                             .status(SubmissionStatus.SUBMITTED)
+                            .isRemovedLearner(false)
                             .build());
 
             Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
@@ -1473,6 +1530,9 @@ class AssignmentServiceImplTest {
             assertThat(result.getContent())
                     .extracting(SubmissionSummaryResponse::getStatus)
                     .contains(SubmissionStatus.SUBMITTED, SubmissionStatus.NOT_STARTED, SubmissionStatus.NOT_STARTED);
+            // Verify all responses have isRemovedLearner flag set to false (all active members)
+            assertThat(result.getContent())
+                    .allMatch(r -> r.getIsRemovedLearner() == false);
         }
 
         @Test
@@ -1512,8 +1572,26 @@ class AssignmentServiceImplTest {
                     .willReturn(Optional.of(testClazz));
             given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
                     .willReturn(Optional.of(teacherId));
-            given(classMemberRepository.findActiveUserIdsByClassId(classId))
-                    .willReturn(List.of(student1Id, student2Id, student3Id));
+            
+            // Create ClassMember objects (all active, no removed)
+            ClassMember member1 = ClassMember.builder()
+                    .userId(student1Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member2 = ClassMember.builder()
+                    .userId(student2Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member3 = ClassMember.builder()
+                    .userId(student3Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            
+            given(classMemberRepository.findAllByClassId(classId))
+                    .willReturn(List.of(member1, member2, member3));
             given(submissionRepository.findByAssignmentId(assignmentId))
                     .willReturn(List.of(submission1));
             given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
@@ -1523,6 +1601,7 @@ class AssignmentServiceImplTest {
                             .id(submission1.getId())
                             .userFullName(user1.getDisplayName())
                             .status(SubmissionStatus.SUBMITTED)
+                            .isRemovedLearner(false)
                             .build());
 
             Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
@@ -1572,8 +1651,26 @@ class AssignmentServiceImplTest {
                     .willReturn(Optional.of(testClazz));
             given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
                     .willReturn(Optional.of(teacherId));
-            given(classMemberRepository.findActiveUserIdsByClassId(classId))
-                    .willReturn(List.of(student1Id, student2Id, student3Id));
+            
+            // Create ClassMember objects (all active, no removed)
+            ClassMember member1 = ClassMember.builder()
+                    .userId(student1Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member2 = ClassMember.builder()
+                    .userId(student2Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member3 = ClassMember.builder()
+                    .userId(student3Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            
+            given(classMemberRepository.findAllByClassId(classId))
+                    .willReturn(List.of(member1, member2, member3));
             given(submissionRepository.findByAssignmentId(assignmentId))
                     .willReturn(List.of(submission1));
             given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
@@ -1583,6 +1680,7 @@ class AssignmentServiceImplTest {
                             .id(submission1.getId())
                             .userFullName(user1.getDisplayName())
                             .status(SubmissionStatus.SUBMITTED)
+                            .isRemovedLearner(false)
                             .build());
 
             Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
@@ -1591,6 +1689,112 @@ class AssignmentServiceImplTest {
             assertThat(result).isNotNull();
             assertThat(result.getTotalElements()).isEqualTo(1);
             assertThat(result.getContent().get(0).getUserFullName()).contains("Jane");
+        }
+
+        @Test
+        @DisplayName("Should include removed members with isRemovedLearner flag")
+        void shouldIncludeRemovedMembersWithFlag() {
+            Pageable pageable = PageRequest.of(0, 10);
+            UUID activeStudentId = UUID.randomUUID();
+            UUID removedStudentId = UUID.randomUUID();
+            
+            // Active member
+            ClassMember activeMember = ClassMember.builder()
+                    .userId(activeStudentId)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            
+            // Removed member (removed 5 days ago)
+            ClassMember removedMember = ClassMember.builder()
+                    .userId(removedStudentId)
+                    .classId(classId)
+                    .removedAt(LocalDateTime.now().minusDays(5))
+                    .build();
+            
+            // Users
+            User activeUser = User.builder()
+                    .firstName("Active").lastName("Student")
+                    .displayName("Active Student").email("active@example.com").build();
+            ReflectionTestUtils.setField(activeUser, "id", activeStudentId);
+            
+            User removedUser = User.builder()
+                    .firstName("Removed").lastName("Student")
+                    .displayName("Removed Student").email("removed@example.com").build();
+            ReflectionTestUtils.setField(removedUser, "id", removedStudentId);
+            
+            // Submission from active student
+            AssignmentSubmission activeSubmission = AssignmentSubmission.builder()
+                    .id(UUID.randomUUID())
+                    .assignmentId(assignmentId)
+                    .userId(activeStudentId)
+                    .status(SubmissionStatus.SUBMITTED)
+                    .attemptNumber(1)
+                    .build();
+            
+            // Submission from removed student (historical)
+            AssignmentSubmission removedSubmission = AssignmentSubmission.builder()
+                    .id(UUID.randomUUID())
+                    .assignmentId(assignmentId)
+                    .userId(removedStudentId)
+                    .status(SubmissionStatus.GRADED)
+                    .score(BigDecimal.valueOf(8.5))
+                    .attemptNumber(1)
+                    .build();
+            
+            // Setup mocks
+            testQuizAssignment.setClassId(classId);
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            given(classMemberRepository.findAllByClassId(classId))
+                    .willReturn(List.of(activeMember, removedMember));
+            given(submissionRepository.findByAssignmentId(assignmentId))
+                    .willReturn(List.of(activeSubmission, removedSubmission));
+            given(userRepository.findAllById(List.of(activeStudentId, removedStudentId)))
+                    .willReturn(List.of(activeUser, removedUser));
+            given(mapper.toSummaryResponse(activeSubmission))
+                    .willReturn(SubmissionSummaryResponse.builder()
+                            .id(activeSubmission.getId())
+                            .userFullName(activeUser.getDisplayName())
+                            .status(SubmissionStatus.SUBMITTED)
+                            .isRemovedLearner(false)
+                            .build());
+            given(mapper.toSummaryResponse(removedSubmission))
+                    .willReturn(SubmissionSummaryResponse.builder()
+                            .id(removedSubmission.getId())
+                            .userFullName(removedUser.getDisplayName())
+                            .status(SubmissionStatus.GRADED)
+                            .score(BigDecimal.valueOf(8.5))
+                            .isRemovedLearner(true)
+                            .build());
+            
+            // Execute
+            Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
+                    assignmentId, null, null, pageable, teacherId);
+            
+            // Verify both active and removed members are included
+            assertThat(result.getTotalElements()).isEqualTo(2);
+            
+            // Verify active member has correct flag
+            SubmissionSummaryResponse activeResponse = result.getContent().stream()
+                    .filter(r -> r.getUserFullName().contains("Active"))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(activeResponse.getIsRemovedLearner()).isFalse();
+            assertThat(activeResponse.getStatus()).isEqualTo(SubmissionStatus.SUBMITTED);
+            
+            // Verify removed member has correct flag
+            SubmissionSummaryResponse removedResponse = result.getContent().stream()
+                    .filter(r -> r.getUserFullName().contains("Removed"))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(removedResponse.getIsRemovedLearner()).isTrue();
+            assertThat(removedResponse.getStatus()).isEqualTo(SubmissionStatus.GRADED);
+            assertThat(removedResponse.getScore()).isEqualTo(BigDecimal.valueOf(8.5));
         }
 
         @Test
@@ -1630,8 +1834,26 @@ class AssignmentServiceImplTest {
                     .willReturn(Optional.of(testClazz));
             given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
                     .willReturn(Optional.of(teacherId));
-            given(classMemberRepository.findActiveUserIdsByClassId(classId))
-                    .willReturn(List.of(student1Id, student2Id, student3Id));
+            
+            // Create ClassMember objects (all active, no removed)
+            ClassMember member1 = ClassMember.builder()
+                    .userId(student1Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member2 = ClassMember.builder()
+                    .userId(student2Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member3 = ClassMember.builder()
+                    .userId(student3Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            
+            given(classMemberRepository.findAllByClassId(classId))
+                    .willReturn(List.of(member1, member2, member3));
             given(submissionRepository.findByAssignmentId(assignmentId))
                     .willReturn(List.of(submission1));
             given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
@@ -1681,8 +1903,26 @@ class AssignmentServiceImplTest {
                     .willReturn(Optional.of(testClazz));
             given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
                     .willReturn(Optional.of(teacherId));
-            given(classMemberRepository.findActiveUserIdsByClassId(classId))
-                    .willReturn(List.of(student1Id, student2Id, student3Id));
+            
+            // Create ClassMember objects (all active, no removed)
+            ClassMember member1 = ClassMember.builder()
+                    .userId(student1Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member2 = ClassMember.builder()
+                    .userId(student2Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member3 = ClassMember.builder()
+                    .userId(student3Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            
+            given(classMemberRepository.findAllByClassId(classId))
+                    .willReturn(List.of(member1, member2, member3));
             given(submissionRepository.findByAssignmentId(assignmentId))
                     .willReturn(List.of());
             given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
@@ -1724,8 +1964,26 @@ class AssignmentServiceImplTest {
                     .willReturn(Optional.of(testClazz));
             given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
                     .willReturn(Optional.of(teacherId));
-            given(classMemberRepository.findActiveUserIdsByClassId(classId))
-                    .willReturn(List.of(student1Id, student2Id, student3Id));
+            
+            // Create ClassMember objects (all active, no removed)
+            ClassMember member1 = ClassMember.builder()
+                    .userId(student1Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member2 = ClassMember.builder()
+                    .userId(student2Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member3 = ClassMember.builder()
+                    .userId(student3Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            
+            given(classMemberRepository.findAllByClassId(classId))
+                    .willReturn(List.of(member1, member2, member3));
             given(submissionRepository.findByAssignmentId(assignmentId))
                     .willReturn(List.of());
             given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
@@ -1776,8 +2034,16 @@ class AssignmentServiceImplTest {
                     .willReturn(Optional.of(testClazz));
             given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
                     .willReturn(Optional.of(teacherId));
-            given(classMemberRepository.findActiveUserIdsByClassId(classId))
-                    .willReturn(List.of(student1Id));
+            
+            // Create ClassMember object (active member)
+            ClassMember member1 = ClassMember.builder()
+                    .userId(student1Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            
+            given(classMemberRepository.findAllByClassId(classId))
+                    .willReturn(List.of(member1));
             given(submissionRepository.findByAssignmentId(assignmentId))
                     .willReturn(List.of(submission1, submission2));
             given(userRepository.findAllById(List.of(student1Id)))
