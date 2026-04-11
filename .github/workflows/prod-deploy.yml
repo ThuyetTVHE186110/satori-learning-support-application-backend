@@ -67,9 +67,11 @@ jobs:
                   username: ${{ secrets.PROD_SERVER_USER }}
                   key: ${{ secrets.PROD_SSH_KEY }}
                   source: "environment/docker-compose.prod.yml,environment/docker/init-scripts/,environment/apply-migrations.sh"
-                  target: /opt/satori/prod/
+                  target: /opt/satori-backend/
 
             # ── Run pending DB migrations ──────────────────────────────────
+            # Uses --container mode: psql runs inside the postgres container
+            # via docker exec — no password needed from the outside.
             - name: Run DB migrations
               uses: appleboy/ssh-action@v1.0.3
               with:
@@ -77,8 +79,8 @@ jobs:
                   username: ${{ secrets.PROD_SERVER_USER }}
                   key: ${{ secrets.PROD_SSH_KEY }}
                   script: |
-                      chmod +x /opt/satori/prod/environment/apply-migrations.sh
-                      cd /opt/satori/prod/environment
+                      chmod +x /opt/satori-backend/environment/apply-migrations.sh
+                      cd /opt/satori-backend/environment
                       ./apply-migrations.sh --container satori-postgres
 
             # ── Pull new image and restart app container ───────────────────
@@ -99,27 +101,14 @@ jobs:
                       # Pull new image
                       docker pull "$IMAGE"
 
-                      cd /opt/satori/prod/environment
+                      cd /opt/satori-backend/environment
 
-                      # Restart only the app container (postgres + redis stay up)
+                      # Restart only the app container (postgres + redis stay up).
+                      # ../.env resolves to /opt/satori-backend/.env — same level as environment/
                       APP_IMAGE="$IMAGE" \
-                      POSTGRES_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}" \
-                      REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
-                      OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
-                      JWT_ACCESS_SECRET="${{ secrets.JWT_ACCESS_SECRET }}" \
-                      JWT_REFRESH_SECRET="${{ secrets.JWT_REFRESH_SECRET }}" \
-                      APP_ALLOWED_ORIGINS="${{ secrets.APP_ALLOWED_ORIGINS }}" \
-                      APP_BASE_URL="${{ secrets.APP_BASE_URL }}" \
-                      EMAIL_ENABLED="${{ secrets.EMAIL_ENABLED }}" \
-                      MAIL_USERNAME="${{ secrets.MAIL_USERNAME }}" \
-                      MAIL_PASSWORD="${{ secrets.MAIL_PASSWORD }}" \
-                      CLOUDINARY_ENABLED="${{ secrets.CLOUDINARY_ENABLED }}" \
-                      CLOUDINARY_CLOUD_NAME="${{ secrets.CLOUDINARY_CLOUD_NAME }}" \
-                      CLOUDINARY_API_KEY="${{ secrets.CLOUDINARY_API_KEY }}" \
-                      CLOUDINARY_API_SECRET="${{ secrets.CLOUDINARY_API_SECRET }}" \
-                      AZURE_SPEECH_ENABLED="${{ secrets.AZURE_SPEECH_ENABLED }}" \
-                      AZURE_SPEECH_KEY="${{ secrets.AZURE_SPEECH_KEY }}" \
-                          docker compose -f docker-compose.prod.yml up -d --no-deps --pull never app
+                          docker compose -f docker-compose.prod.yml \
+                                         --env-file ../.env \
+                                         up -d --no-deps --pull never app
 
                       echo "Container restarted with image: $IMAGE"
 
