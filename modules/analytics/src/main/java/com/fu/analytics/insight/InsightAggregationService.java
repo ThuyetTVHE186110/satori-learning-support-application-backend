@@ -245,8 +245,8 @@ public class InsightAggregationService {
         List<LearningInsightPoint> result = new ArrayList<>();
         boolean merged = false;
         for (LearningInsightPoint e : existing) {
-            if (e.category().equals(incoming.category())
-                    && e.skill().equals(incoming.skill())
+            if (Objects.equals(e.category(), incoming.category())
+                    && Objects.equals(e.skill(), incoming.skill())
                     && Objects.equals(e.relatedEntityIds(), incoming.relatedEntityIds())) {
                 result.add(incoming);
                 merged = true;
