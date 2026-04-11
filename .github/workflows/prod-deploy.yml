@@ -1,0 +1,137 @@
+name: Prod Deploy
+
+on:
+    push:
+        branches: [ master ]
+
+jobs:
+    # ══════════════════════════════════════════════════════════════
+    # Job 1 — Build Docker image and push to GitHub Container Registry
+    # ══════════════════════════════════════════════════════════════
+    build:
+        name: Build & Push Image
+        runs-on: ubuntu-latest
+        outputs:
+            image: ${{ steps.meta.outputs.tags && format('ghcr.io/{0}:{1}', github.repository, steps.sha.outputs.short) }}
+            image_tag: ${{ steps.sha.outputs.short }}
+
+        steps:
+            - name: Checkout source
+              uses: actions/checkout@v4
+
+            - name: Short SHA
+              id: sha
+              run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+            - name: Log in to GHCR
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Build and push
+              uses: docker/build-push-action@v5
+              with:
+                  context: .
+                  file: environment/Dockerfile
+                  push: true
+                  tags: |
+                      ghcr.io/${{ github.repository }}:${{ steps.sha.outputs.short }}
+                      ghcr.io/${{ github.repository }}:latest
+                  # Layer cache — speeds up subsequent builds significantly
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+
+    # ══════════════════════════════════════════════════════════════
+    # Job 2 — Deploy to production server
+    # ══════════════════════════════════════════════════════════════
+    deploy:
+        name: Deploy to Production
+        runs-on: ubuntu-latest
+        needs: build
+        environment: production
+
+        steps:
+            - name: Checkout source
+              uses: actions/checkout@v4
+
+            # ── Copy compose file + migration scripts to server ────────────
+            - name: Copy deployment files to server
+              uses: appleboy/scp-action@v0.1.7
+              with:
+                  host: ${{ secrets.PROD_SERVER_HOST }}
+                  username: ${{ secrets.PROD_SERVER_USER }}
+                  key: ${{ secrets.PROD_SSH_KEY }}
+                  source: "environment/docker-compose.prod.yml,environment/docker/init-scripts/,environment/apply-migrations.sh"
+                  target: /opt/satori-backend/
+
+            # ── Run pending DB migrations ──────────────────────────────────
+            # Uses --container mode: psql runs inside the postgres container
+            # via docker exec — no password needed from the outside.
+            - name: Run DB migrations
+              uses: appleboy/ssh-action@v1.0.3
+              with:
+                  host: ${{ secrets.PROD_SERVER_HOST }}
+                  username: ${{ secrets.PROD_SERVER_USER }}
+                  key: ${{ secrets.PROD_SSH_KEY }}
+                  script: |
+                      chmod +x /opt/satori-backend/environment/apply-migrations.sh
+                      cd /opt/satori-backend/environment
+                      ./apply-migrations.sh --container satori-postgres
+
+            # ── Pull new image and restart app container ───────────────────
+            - name: Deploy new image
+              uses: appleboy/ssh-action@v1.0.3
+              with:
+                  host: ${{ secrets.PROD_SERVER_HOST }}
+                  username: ${{ secrets.PROD_SERVER_USER }}
+                  key: ${{ secrets.PROD_SSH_KEY }}
+                  script: |
+                      IMAGE="ghcr.io/${{ github.repository }}:${{ needs.build.outputs.image_tag }}"
+                      echo "Deploying image: $IMAGE"
+
+                      # Authenticate to GHCR
+                      echo "${{ secrets.GITHUB_TOKEN }}" | \
+                          docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+                      # Pull new image
+                      docker pull "$IMAGE"
+
+                      cd /opt/satori-backend/environment
+
+                      # Restart only the app container (postgres + redis stay up).
+                      # ../.env resolves to /opt/satori-backend/.env — same level as environment/
+                      APP_IMAGE="$IMAGE" \
+                          docker compose -f docker-compose.prod.yml \
+                                         --env-file ../.env \
+                                         up -d --no-deps --pull never app
+
+                      echo "Container restarted with image: $IMAGE"
+
+            # ── Health check ───────────────────────────────────────────────
+            - name: Health check
+              uses: appleboy/ssh-action@v1.0.3
+              with:
+                  host: ${{ secrets.PROD_SERVER_HOST }}
+                  username: ${{ secrets.PROD_SERVER_USER }}
+                  key: ${{ secrets.PROD_SSH_KEY }}
+                  script: |
+                      echo "Waiting for application to become healthy..."
+                      for i in $(seq 1 30); do
+                          STATUS=$(curl -sf http://localhost:8080/actuator/health \
+                                   -H "Accept: application/json" \
+                                   | grep -o '"status":"[A-Z]*"' | head -1 || true)
+                          if [ "$STATUS" = '"status":"UP"' ]; then
+                              echo "Application is UP after $((i * 5))s"
+                              exit 0
+                          fi
+                          echo "  attempt $i/30 — not ready (${STATUS:-no response})"
+                          sleep 5
+                      done
+                      echo "Health check TIMED OUT after 150s"
+                      docker logs satori-app --tail 50
+                      exit 1

@@ -8,9 +8,14 @@ import com.fu.achievement.config.ActivityExpConfig;
 import com.fu.achievement.dto.response.LevelUpNotificationResponse;
 import com.fu.achievement.service.AchievementService;
 import com.fu.achievement.service.LearningLevelService;
+import com.fu.achievement.service.StreakService;
 import com.fu.achievement.dto.response.UserAchievementResponse;
+import com.fu.achievement.dto.response.StreakNotificationResponse;
 import com.fu.achievement.enums.BadgeType;
 import com.fu.achievement.service.impl.StreakServiceImpl;
+import com.fu.infrastructure.learner.LearnerProfile;
+import com.fu.infrastructure.learner.LearnerProfileProvider;
+import com.fu.infrastructure.event.RoleplaySessionCompletedEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.conversation.entity.Conversation;
@@ -41,7 +46,9 @@ import com.fu.roleplay.repository.*;
 import com.fu.roleplay.service.RoleplaySessionService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -86,8 +93,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     private final Executor roleplayTaskExecutor;
     private final AchievementService achievementService;
     private final StreakServiceImpl streakService;
-
     private final LearningLevelService learningLevelService;
+    private final ApplicationEventPublisher eventPublisher;
+    private final LearnerProfileProvider learnerProfileProvider;
 
     public RoleplaySessionServiceImpl(
             ConversationSessionRepository sessionRepository,
@@ -109,7 +117,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             @Qualifier("roleplayTaskExecutor") Executor roleplayTaskExecutor,
             AchievementService achievementService,
             LearningLevelService learningLevelService,
-            StreakServiceImpl streakService
+            StreakServiceImpl streakService,
+            ApplicationEventPublisher eventPublisher,
+            LearnerProfileProvider learnerProfileProvider
     ) {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
@@ -131,6 +141,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         this.achievementService = achievementService;
         this.learningLevelService = learningLevelService;
         this.streakService = streakService;
+        this.eventPublisher = eventPublisher;
+        this.learnerProfileProvider = learnerProfileProvider;
     }
 
     @Override
@@ -189,11 +201,20 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             sessionMissions.add(sessionMissionRepository.save(sm));
         }
 
-        // 6. Build and cache system prompt
+        // 6. Build and cache system prompt (with learner insights for personalization)
         String jlptLevel = conversation.getJlptLevel() != null ? conversation.getJlptLevel().name() : "N5";
-        String systemPrompt = roleplayAIService.buildSystemPrompt(session,
-                conversation.getAiRole(), conversation.getLearnerRole(), conversation.getScenario(),
-                jlptLevel, sessionMissions);
+        LearnerProfile profile = learnerProfileProvider.getLearnerProfile(userId).orElse(null);
+        String systemPrompt;
+        if (profile != null && profile.skillScores() != null && !profile.skillScores().isEmpty()) {
+            systemPrompt = roleplayAIService.buildSystemPrompt(session,
+                    conversation.getAiRole(), conversation.getLearnerRole(), conversation.getScenario(),
+                    jlptLevel, sessionMissions,
+                    profile.skillScores(), profile.weakPoints(), profile.strongPoints());
+        } else {
+            systemPrompt = roleplayAIService.buildSystemPrompt(session,
+                    conversation.getAiRole(), conversation.getLearnerRole(), conversation.getScenario(),
+                    jlptLevel, sessionMissions);
+        }
         roleplayAIService.cacheSystemPrompt(session.getId(), systemPrompt);
 
         // 7. Generate AI opening (returns JSON array: MISSION_INTRO + SCENE_INTRO + DIALOGUE)
@@ -310,6 +331,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         }
 
         // 1b. Validate audio file and eagerly read bytes (before async dispatch)
+        if (audio == null || audio.isEmpty()) {
+            throw new BusinessException("AUDIO_REQUIRED", "Audio file is required.");
+        }
         byte[] audioBytes = null;
         String audioContentType = null;
         if (audio != null && !audio.isEmpty()) {
@@ -495,61 +519,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         List<MessagePronunciation> pronunciations = pronunciationRepository.findBySessionId(sessionId);
         List<SessionMission> sessionMissions = sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
 
-        // 2. Pronunciation score = AVG
-        BigDecimal pronunciationScore = BigDecimal.ZERO;
-        SessionEvaluationResponse.PronunciationSummary pronunciationSummary = null;
-        if (!pronunciations.isEmpty()) {
-            BigDecimal totalOverall = BigDecimal.ZERO;
-            BigDecimal totalAccuracy = BigDecimal.ZERO;
-            BigDecimal totalFluency = BigDecimal.ZERO;
-            BigDecimal totalProsody = BigDecimal.ZERO;
-            BigDecimal totalPitchAccent = BigDecimal.ZERO;
-            BigDecimal totalMoraTiming = BigDecimal.ZERO;
-            int pitchAccentCount = 0;
-            int moraTimingCount = 0;
-            for (MessagePronunciation p : pronunciations) {
-                if (p.getOverallScore() != null) totalOverall = totalOverall.add(p.getOverallScore());
-                if (p.getAccuracyScore() != null) totalAccuracy = totalAccuracy.add(p.getAccuracyScore());
-                if (p.getFluencyScore() != null) totalFluency = totalFluency.add(p.getFluencyScore());
-                if (p.getProsodyScore() != null) totalProsody = totalProsody.add(p.getProsodyScore());
-                if (p.getPitchAccentScore() != null) {
-                    totalPitchAccent = totalPitchAccent.add(p.getPitchAccentScore());
-                    pitchAccentCount++;
-                }
-                if (p.getMoraTimingScore() != null) {
-                    totalMoraTiming = totalMoraTiming.add(p.getMoraTimingScore());
-                    moraTimingCount++;
-                }
-            }
-            BigDecimal count = BigDecimal.valueOf(pronunciations.size());
-            BigDecimal avgOverall = totalOverall.divide(count, 2, RoundingMode.HALF_UP);
-            BigDecimal avgPitchAccent = pitchAccentCount > 0
-                    ? totalPitchAccent.divide(BigDecimal.valueOf(pitchAccentCount), 2, RoundingMode.HALF_UP)
-                    : null;
-            BigDecimal avgMoraTiming = moraTimingCount > 0
-                    ? totalMoraTiming.divide(BigDecimal.valueOf(moraTimingCount), 2, RoundingMode.HALF_UP)
-                    : null;
-
-            if (avgPitchAccent != null && avgMoraTiming != null) {
-                BigDecimal jpAvg = avgPitchAccent.add(avgMoraTiming)
-                        .divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
-                pronunciationScore = avgOverall.multiply(BigDecimal.valueOf(0.6))
-                        .add(jpAvg.multiply(BigDecimal.valueOf(0.4)))
-                        .setScale(2, RoundingMode.HALF_UP);
-            } else {
-                pronunciationScore = avgOverall;
-            }
-
-            pronunciationSummary = SessionEvaluationResponse.PronunciationSummary.builder()
-                    .averageOverall(avgOverall)
-                    .averageAccuracy(totalAccuracy.divide(count, 2, RoundingMode.HALF_UP))
-                    .averageFluency(totalFluency.divide(count, 2, RoundingMode.HALF_UP))
-                    .averageProsody(totalProsody.divide(count, 2, RoundingMode.HALF_UP))
-                    .averagePitchAccent(avgPitchAccent)
-                    .averageMoraTiming(avgMoraTiming)
-                    .totalAssessed(pronunciations.size())
-                    .build();
-        }
+        // 2. Pronunciation score = AVG (delegate to shared helper)
+        SessionEvaluationResponse.PronunciationSummary pronunciationSummary = buildPronunciationSummary(pronunciations);
+        BigDecimal pronunciationScore = pronunciationSummary != null
+                ? pronunciationSummary.getAverageOverall()
+                : BigDecimal.ZERO;
 
         // 3. Mission score = AVG progress
         BigDecimal missionScore = BigDecimal.ZERO;
@@ -579,12 +553,20 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     .add(languageScore.multiply(BigDecimal.valueOf(properties.getScoring().getLanguageWeight())))
                     .setScale(2, RoundingMode.HALF_UP);
         } else if (hasMissions) {
-            overallScore = missionScore.multiply(BigDecimal.valueOf(0.50))
-                    .add(languageScore.multiply(BigDecimal.valueOf(0.50)))
+            // No pronunciation: normalize mission + language weights
+            double mw = properties.getScoring().getMissionWeight();
+            double lw = properties.getScoring().getLanguageWeight();
+            double sum = mw + lw;
+            overallScore = missionScore.multiply(BigDecimal.valueOf(mw / sum))
+                    .add(languageScore.multiply(BigDecimal.valueOf(lw / sum)))
                     .setScale(2, RoundingMode.HALF_UP);
         } else if (hasPronunciation) {
-            overallScore = pronunciationScore.multiply(BigDecimal.valueOf(0.50))
-                    .add(languageScore.multiply(BigDecimal.valueOf(0.50)))
+            // No missions: normalize pronunciation + language weights
+            double pw = properties.getScoring().getPronunciationWeight();
+            double lw = properties.getScoring().getLanguageWeight();
+            double sum = pw + lw;
+            overallScore = pronunciationScore.multiply(BigDecimal.valueOf(pw / sum))
+                    .add(languageScore.multiply(BigDecimal.valueOf(lw / sum)))
                     .setScale(2, RoundingMode.HALF_UP);
         } else {
             overallScore = languageScore.setScale(2, RoundingMode.HALF_UP);
@@ -598,7 +580,35 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         session.setStatus(ConversationSession.SessionStatus.COMPLETED);
         LocalDateTime completedAt = LocalDateTime.now();
         session.setCompletedAt(completedAt);
+
+        // Persist evaluation details so feedback can be retrieved later without re-calling AI
+        try {
+            ObjectNode feedbackNode = objectMapper.createObjectNode();
+            feedbackNode.set("languageEvaluation", objectMapper.valueToTree(languageEval));
+            if (pronunciationSummary != null) {
+                feedbackNode.set("pronunciationSummary", objectMapper.valueToTree(pronunciationSummary));
+            }
+            session.setFeedback(objectMapper.writeValueAsString(feedbackNode));
+        } catch (Exception e) {
+            log.warn("Failed to serialize evaluation feedback for session {}: {}", sessionId, e.getMessage());
+        }
+
         sessionRepository.save(session);
+
+        // Publish event for learning insights aggregation
+        try {
+            eventPublisher.publishEvent(new RoleplaySessionCompletedEvent(
+                    this, sessionId, userId,
+                    overallScore.doubleValue(), languageScore.doubleValue(),
+                    pronunciationScore.doubleValue(),
+                    languageEval.getFluencyScore().doubleValue(),
+                    languageEval.getAccuracyScore().doubleValue(),
+                    languageEval.getVocabularyScore().doubleValue(),
+                    languageEval.getGrammarScore().doubleValue(),
+                    languageEval.getStrengths(), languageEval.getImprovements()));
+        } catch (Exception e) {
+            log.warn("Failed to publish RoleplaySessionCompletedEvent for session {}: {}", sessionId, e.getMessage());
+        }
 
         // Update user_conversation_progress if this was a topic-based session
         if (session.getConversationId() != null) {
@@ -612,8 +622,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     languageEval.getVocabularyScore());
         }
         // Record daily activity for streak tracking
+        StreakNotificationResponse streakNotification = null;
         try {
-            streakService.recordDailyActivity(userId, "SPEAKING");
+            streakNotification = streakService.recordDailyActivity(userId, "ROLEPLAY");
         } catch (Exception e) {
             log.error("Error recording daily activity for learner: {}", userId, e);
         }
@@ -675,16 +686,16 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // Retrieve level-up information
         try {
             LearningLevelService.LevelProgressInfo progressInfo = learningLevelService.getProgressToNextLevel(userId);
-            
+
             // Calculate previous level from oldTotalExp
             int previousLevel = 0;
             if (oldTotalExp != null && oldTotalExp >= 0) {
                 previousLevel = learningLevelService.calculateLevelFromExp(oldTotalExp);
             }
-            
+
             int currentLevel = progressInfo.currentLevel();
             boolean actuallyLeveledUp = previousLevel < currentLevel;
-            
+
             levelUpInfo = LevelUpNotificationResponse.builder()
                     .previousLevel(previousLevel)
                     .newLevel(currentLevel)
@@ -709,6 +720,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 .languageEvaluation(languageEval)
                 .earnedBadges(earnedBadges)
                 .levelUpInfo(levelUpInfo)
+                .streakNotification(streakNotification)
                 .build();
     }
 
@@ -780,6 +792,61 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         return sessionRepository.findByUserIdAndSessionTypeOrderByCreatedAtDesc(
                         userId, ConversationSession.SessionType.ROLEPLAY.name(), pageable)
                 .map(sessionMapper::toSummaryResponse);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SessionEvaluationResponse getConversationFeedback(UUID conversationId, UUID userId) {
+        ConversationSession session = sessionRepository
+                .findLatestCompletedByUserIdAndConversationId(userId, conversationId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "ConversationSession", "conversationId", conversationId.toString()));
+
+        // Reconstruct mission details from stored SessionMission records
+        List<SessionMission> sessionMissions = sessionMissionRepository
+                .findBySessionIdOrderByCreatedAtAsc(session.getId());
+        List<SessionEvaluationResponse.MissionEvaluationDetail> missionDetails = sessionMissions.stream()
+                .map(sm -> SessionEvaluationResponse.MissionEvaluationDetail.builder()
+                        .title(sm.getTitle())
+                        .titleVi(sm.getTitleVi())
+                        .titleJapanese(sm.getTitleJapanese())
+                        .status(sm.getStatus().name())
+                        .progressPct(sm.getProgressPct())
+                        .reasoning(sm.getAiReasoning())
+                        .build())
+                .collect(Collectors.toList());
+
+        // Parse languageEvaluation from persisted JSONB — avoids re-calling AI
+        SessionEvaluationResponse.LanguageEvaluationDetail languageEval = null;
+        String feedbackJson = session.getFeedback();
+        if (feedbackJson != null && !feedbackJson.equals("{}")) {
+            try {
+                JsonNode feedbackNode = objectMapper.readTree(feedbackJson);
+                if (feedbackNode.has("languageEvaluation")) {
+                    languageEval = objectMapper.treeToValue(
+                            feedbackNode.get("languageEvaluation"),
+                            SessionEvaluationResponse.LanguageEvaluationDetail.class);
+                }
+            } catch (Exception e) {
+                log.warn("Failed to parse feedback JSON for session {}: {}", session.getId(), e.getMessage());
+            }
+        }
+
+        // pronunciationSummary: always recompute from DB records — JSONB copy is unreliable
+        // (MessagePronunciation rows are the source of truth, cheap to aggregate)
+        List<MessagePronunciation> pronunciations = pronunciationRepository.findBySessionId(session.getId());
+        SessionEvaluationResponse.PronunciationSummary pronunciationSummary = buildPronunciationSummary(pronunciations);
+
+        return SessionEvaluationResponse.builder()
+                .sessionId(session.getId())
+                .missionScore(session.getMissionScore())
+                .pronunciationScore(session.getPronunciationScore())
+                .languageScore(session.getLanguageScore())
+                .overallScore(session.getOverallScore())
+                .missionDetails(missionDetails)
+                .pronunciationSummary(pronunciationSummary)
+                .languageEvaluation(languageEval)
+                .build();
     }
 
     // ==================== Private Helpers ====================
@@ -944,30 +1011,21 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 .overallScore(mp.getOverallScore())
                 .accuracyScore(mp.getAccuracyScore())
                 .fluencyScore(mp.getFluencyScore())
-                .prosodyScore(mp.getProsodyScore())
-                .pitchAccentScore(mp.getPitchAccentScore())
-                .moraTimingScore(mp.getMoraTimingScore())
+                .completenessScore(mp.getCompletenessScore())
                 .transcribedText(mp.getTranscribedText())
                 .criteriaEvaluations(criteria)
                 .build();
     }
 
     /**
-     * Maps each pronunciation score to a named Vietnamese label + qualitative grade.
-     * Names: "Tổng quan", "Phát âm", "Mạch lạc", "Nhịp điệu", "Cao độ âm", "Nhịp mora"
+     * Maps each Azure Speech pronunciation score to a named Vietnamese label + qualitative grade.
      */
     private List<PronunciationScoreResponse.CriteriaEvaluation> buildCriteriaEvaluations(MessagePronunciation mp) {
         List<PronunciationScoreResponse.CriteriaEvaluation> list = new ArrayList<>();
         list.add(criteria("Tổng quan", mp.getOverallScore()));
         list.add(criteria("Phát âm", mp.getAccuracyScore()));
         list.add(criteria("Mạch lạc", mp.getFluencyScore()));
-        list.add(criteria("Nhịp điệu", mp.getProsodyScore()));
-        if (mp.getPitchAccentScore() != null) {
-            list.add(criteria("Cao độ âm", mp.getPitchAccentScore()));
-        }
-        if (mp.getMoraTimingScore() != null) {
-            list.add(criteria("Nhịp mora", mp.getMoraTimingScore()));
-        }
+        list.add(criteria("Hoàn thiện", mp.getCompletenessScore()));
         return list;
     }
 
@@ -988,6 +1046,37 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         return "Cần cải thiện";
     }
 
+    /**
+     * Aggregates a list of per-message pronunciation records into a session-level summary.
+     * Returns null when the list is empty (no audio messages were assessed).
+     * Used by both completeSession (fresh) and getConversationFeedback (fallback from DB).
+     */
+    private SessionEvaluationResponse.PronunciationSummary buildPronunciationSummary(
+            List<MessagePronunciation> pronunciations) {
+        if (pronunciations.isEmpty()) return null;
+
+        BigDecimal totalOverall      = BigDecimal.ZERO;
+        BigDecimal totalAccuracy     = BigDecimal.ZERO;
+        BigDecimal totalFluency      = BigDecimal.ZERO;
+        BigDecimal totalCompleteness = BigDecimal.ZERO;
+
+        for (MessagePronunciation p : pronunciations) {
+            if (p.getOverallScore()       != null) totalOverall      = totalOverall.add(p.getOverallScore());
+            if (p.getAccuracyScore()      != null) totalAccuracy     = totalAccuracy.add(p.getAccuracyScore());
+            if (p.getFluencyScore()       != null) totalFluency      = totalFluency.add(p.getFluencyScore());
+            if (p.getCompletenessScore()  != null) totalCompleteness = totalCompleteness.add(p.getCompletenessScore());
+        }
+
+        BigDecimal count = BigDecimal.valueOf(pronunciations.size());
+        return SessionEvaluationResponse.PronunciationSummary.builder()
+                .averageOverall(totalOverall.divide(count, 2, RoundingMode.HALF_UP))
+                .averageAccuracy(totalAccuracy.divide(count, 2, RoundingMode.HALF_UP))
+                .averageFluency(totalFluency.divide(count, 2, RoundingMode.HALF_UP))
+                .averageCompleteness(totalCompleteness.divide(count, 2, RoundingMode.HALF_UP))
+                .totalAssessed(pronunciations.size())
+                .build();
+    }
+
     private BigDecimal toBigDecimal(double value) {
         return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP);
     }
@@ -1001,9 +1090,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     .overallScore(toBigDecimal(result.getOverallScore()))
                     .accuracyScore(toBigDecimal(result.getAccuracyScore()))
                     .fluencyScore(toBigDecimal(result.getFluencyScore()))
-                    .prosodyScore(toBigDecimal(result.getProsodyScore()))
-                    .pitchAccentScore(result.getPitchAccentScore() > 0 ? toBigDecimal(result.getPitchAccentScore()) : null)
-                    .moraTimingScore(result.getMoraTimingScore() > 0 ? toBigDecimal(result.getMoraTimingScore()) : null)
+                    .completenessScore(toBigDecimal(result.getCompletenessScore()))
                     .transcribedText(result.getTranscribedText())
                     .rawResponse(result.getRawResponse() != null ? result.getRawResponse() : "{}")
                     .build();

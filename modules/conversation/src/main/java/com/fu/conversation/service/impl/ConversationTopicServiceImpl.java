@@ -22,6 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -108,7 +109,8 @@ public class ConversationTopicServiceImpl implements ConversationTopicService {
 
     @Override
     public Page<ConversationTopicSummaryResponse> getAllTopics(Pageable pageable) {
-        return topicRepository.findByDeletedAtIsNull(pageable)
+        Pageable sorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), Sort.by("orderIndex").ascending());
+        return topicRepository.findByDeletedAtIsNull(sorted)
                 .map(this::buildTopicSummaryResponse);
     }
 
@@ -119,13 +121,34 @@ public class ConversationTopicServiceImpl implements ConversationTopicService {
     }
 
     @Override
+    public Page<ConversationTopicSummaryResponse> searchTopics(String keyword, Course.ContentStatus status, Pageable pageable) {
+        if (keyword != null && !keyword.isBlank() && status != null) {
+            // Both keyword and status provided
+            return topicRepository.searchByKeywordAndStatus(keyword.trim(), status.name(), pageable)
+                    .map(this::buildTopicSummaryResponse);
+        } else if (keyword != null && !keyword.isBlank()) {
+            // Only keyword provided
+            return topicRepository.searchByKeyword(keyword.trim(), pageable)
+                    .map(this::buildTopicSummaryResponse);
+        } else if (status != null) {
+            // Only status provided
+            return topicRepository.findByStatusAndDeletedAtIsNull(status.name(), pageable)
+                    .map(this::buildTopicSummaryResponse);
+        } else {
+            // No filters provided - show all topics
+            return topicRepository.findByDeletedAtIsNull(pageable)
+                    .map(this::buildTopicSummaryResponse);
+        }
+    }
+
+    @Override
     public Page<ConversationTopicSummaryResponse> getPublishedTopics(Course.JlptLevel jlptLevel, Pageable pageable) {
         Pageable unsorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
         Page<ConversationTopic> page = jlptLevel != null
                 ? topicRepository.findByJlptLevelAndStatusAndDeletedAtIsNull(
-                        jlptLevel.name(), Course.ContentStatus.PUBLISHED.name(), unsorted)
+                jlptLevel.name(), Course.ContentStatus.PUBLISHED.name(), unsorted)
                 : topicRepository.findByStatusAndDeletedAtIsNull(
-                        Course.ContentStatus.PUBLISHED.name(), unsorted);
+                Course.ContentStatus.PUBLISHED.name(), unsorted);
         return page.map(this::buildTopicSummaryResponse);
     }
 
@@ -133,6 +156,30 @@ public class ConversationTopicServiceImpl implements ConversationTopicService {
     public Page<ConversationTopicSummaryResponse> searchPublishedTopics(String keyword, Pageable pageable) {
         return topicRepository.searchPublishedByKeyword(keyword, pageable)
                 .map(this::buildTopicSummaryResponse);
+    }
+
+    @Override
+    public Page<ConversationTopicSummaryResponse> searchPublishedTopics(String keyword, Course.JlptLevel jlptLevel, Pageable pageable) {
+
+        Page<ConversationTopic> page;
+        if (keyword != null && !keyword.isBlank() && jlptLevel != null) {
+            // Both keyword and level provided
+            page = topicRepository.searchPublishedByKeywordAndJlptLevel(
+                    keyword.trim(), jlptLevel.name(), pageable);
+        } else if (keyword != null && !keyword.isBlank()) {
+            // Only keyword provided
+            page = topicRepository.searchPublishedByKeyword(keyword.trim(), pageable);
+        } else if (jlptLevel != null) {
+            // Only level provided
+            page = topicRepository.findByJlptLevelAndStatusAndDeletedAtIsNull(
+                    jlptLevel.name(), Course.ContentStatus.PUBLISHED.name(), pageable);
+        } else {
+            // No filters provided
+            page = topicRepository.findByStatusAndDeletedAtIsNull(
+                    Course.ContentStatus.PUBLISHED.name(), pageable);
+        }
+
+        return page.map(this::buildTopicSummaryResponse);
     }
 
     private ConversationTopic findActiveTopic(UUID id) {
@@ -148,14 +195,31 @@ public class ConversationTopicServiceImpl implements ConversationTopicService {
             courseRepository.findById(topic.getCourseId())
                     .ifPresent(c -> response.setCourseName(c.getName()));
         }
-        long conversationCount = conversationRepository.countByTopicIdAndDeletedAtIsNull(topic.getId());
+        long conversationCount = conversationRepository.countByTopicIdAndStatusAndDeletedAtIsNull(
+                topic.getId(), Course.ContentStatus.PUBLISHED.name());
         response.setConversationCount(conversationCount);
+        long n5Count = conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(
+                topic.getId(), Course.JlptLevel.N5.name(), Course.ContentStatus.PUBLISHED.name());
+        long n4Count = conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(
+                topic.getId(), Course.JlptLevel.N4.name(), Course.ContentStatus.PUBLISHED.name());
+        long n3Count = conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(
+                topic.getId(), Course.JlptLevel.N3.name(), Course.ContentStatus.PUBLISHED.name());
+        long n2Count = conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(
+                topic.getId(), Course.JlptLevel.N2.name(), Course.ContentStatus.PUBLISHED.name());
+        long n1Count = conversationRepository.countByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(
+                topic.getId(), Course.JlptLevel.N1.name(), Course.ContentStatus.PUBLISHED.name());
+        response.setN5ConversationCount(n5Count);
+        response.setN4ConversationCount(n4Count);
+        response.setN3ConversationCount(n3Count);
+        response.setN2ConversationCount(n2Count);
+        response.setN1ConversationCount(n1Count);
         return response;
     }
 
     private ConversationTopicSummaryResponse buildTopicSummaryResponse(ConversationTopic topic) {
         ConversationTopicSummaryResponse response = topicMapper.toSummaryResponse(topic);
-        long conversationCount = conversationRepository.countByTopicIdAndDeletedAtIsNull(topic.getId());
+        long conversationCount = conversationRepository.countByTopicIdAndStatusAndDeletedAtIsNull(
+                topic.getId(), Course.ContentStatus.PUBLISHED.name());
         response.setConversationCount(conversationCount);
         return response;
     }

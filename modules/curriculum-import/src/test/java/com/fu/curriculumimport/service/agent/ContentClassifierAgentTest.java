@@ -3,6 +3,7 @@ package com.fu.curriculumimport.service.agent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
+import com.fu.curriculumimport.service.ingestion.MnNSectionSplitter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -15,6 +16,7 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.openai.OpenAiChatModel;
+import reactor.core.publisher.Flux;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -78,7 +80,7 @@ class ContentClassifierAgentTest {
         ChatResponse resp = mock(ChatResponse.class);
         given(resp.getResult()).willReturn(gen);
 
-        given(chatModel.call(any(Prompt.class))).willReturn(resp);
+        given(chatModel.stream(any(Prompt.class))).willReturn(Flux.just(resp));
     }
 
     private DocumentChunk chunk(String content) {
@@ -282,8 +284,8 @@ class ContentClassifierAgentTest {
         @Test
         @DisplayName("AI call throws exception → returns ClassificationResult.fallback")
         void classify_chatModelThrows_returnsFallback() {
-            given(chatModel.call(any(Prompt.class)))
-                    .willThrow(new RuntimeException("OpenAI API unavailable"));
+            given(chatModel.stream(any(Prompt.class)))
+                    .willReturn(Flux.error(new RuntimeException("OpenAI API unavailable")));
 
             ClassificationResult result = agent.classify(chunk("some content"));
 
@@ -373,6 +375,94 @@ class ContentClassifierAgentTest {
 
             assertThat(result.getContentType())
                     .isEqualTo(ClassificationResult.ContentType.VOCABULARY);
+        }
+    }
+
+    // =========================================================================
+    // heuristicClassify() — DIALOG with no extractable Japanese should not route to
+    // VocabularyExtractionAgent. Vietnamese-companion MnN editions translate dialog
+    // lines fully (no Japanese), so extraction wastes ~100s of LLM time per chunk.
+    // =========================================================================
+
+    @Nested
+    @DisplayName("heuristicClassify() — DIALOG Japanese density guard")
+    class DialogJapaneseDensityTests {
+
+        private DocumentChunk dialogChunk(String content) {
+            return DocumentChunk.builder()
+                    .chunkIndex(0)
+                    .content(content)
+                    .pageStart(1)
+                    .pageEnd(3)
+                    .sectionType(MnNSectionSplitter.DIALOG)
+                    .build();
+        }
+
+        @Test
+        @DisplayName("DIALOG with Vietnamese-only content → OTHER, no LLM call")
+        void heuristic_dialogVietnameseOnly_returnsOther() {
+            String content = """
+                    Sato: Chào anh, anh có khoẻ không?
+                    Yamada: Chào chị, tôi khoẻ. Còn chị?
+                    Sato: Tôi cũng khoẻ, cảm ơn anh.
+                    """;
+
+            ClassificationResult result = agent.heuristicClassify(dialogChunk(content));
+
+            assertThat(result.getContentType())
+                    .isEqualTo(ClassificationResult.ContentType.OTHER);
+            assertThat(result.getReasoning()).contains("no extractable Japanese");
+        }
+
+        @Test
+        @DisplayName("DIALOG with Japanese text above threshold → VOCABULARY as usual")
+        void heuristic_dialogJapaneseDense_returnsVocabulary() {
+            String content = """
+                    佐藤：おはようございます。
+                    山田：おはようございます。お元気ですか。
+                    佐藤：はい、元気です。ありがとうございます。
+                    """;
+
+            ClassificationResult result = agent.heuristicClassify(dialogChunk(content));
+
+            assertThat(result.getContentType())
+                    .isEqualTo(ClassificationResult.ContentType.VOCABULARY);
+        }
+
+        @Test
+        @DisplayName("DIALOG with only a handful of Japanese chars → OTHER (below threshold)")
+        void heuristic_dialogSparseJapanese_returnsOther() {
+            // Only 3 Japanese chars — well below the 20-char extractability threshold
+            String content = "Sato chào mọi người はい ok.";
+
+            ClassificationResult result = agent.heuristicClassify(dialogChunk(content));
+
+            assertThat(result.getContentType())
+                    .isEqualTo(ClassificationResult.ContentType.OTHER);
+        }
+
+        @Test
+        @DisplayName("hasExtractableJapanese: null/blank → false")
+        void hasExtractableJapanese_nullOrBlank_false() {
+            assertThat(ContentClassifierAgent.hasExtractableJapanese(null)).isFalse();
+            assertThat(ContentClassifierAgent.hasExtractableJapanese("")).isFalse();
+            assertThat(ContentClassifierAgent.hasExtractableJapanese("   ")).isFalse();
+        }
+
+        @Test
+        @DisplayName("hasExtractableJapanese: pure Vietnamese → false")
+        void hasExtractableJapanese_pureVietnamese_false() {
+            assertThat(ContentClassifierAgent.hasExtractableJapanese(
+                    "Chào anh, tôi là người Việt Nam. Rất vui được gặp anh."))
+                    .isFalse();
+        }
+
+        @Test
+        @DisplayName("hasExtractableJapanese: 20+ kana/kanji → true")
+        void hasExtractableJapanese_denseJapanese_true() {
+            assertThat(ContentClassifierAgent.hasExtractableJapanese(
+                    "おはようございます。今日もよろしくお願いします。"))
+                    .isTrue();
         }
     }
 

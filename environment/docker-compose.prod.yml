@@ -33,10 +33,7 @@ services:
 
     # ==================== Application ====================
     app:
-        build:
-            context: ..
-            dockerfile: environment/Dockerfile
-        image: satori-backend:prod
+        image: ${APP_IMAGE:-satori-backend:prod}
         container_name: satori-app
         restart: unless-stopped
         ports:
@@ -78,6 +75,7 @@ services:
             EMAIL_FROM: ${EMAIL_FROM:-noreply@satori-learning.com}
             MAIL_USERNAME: ${MAIL_USERNAME:-}
             MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+            RESEND_API_KEY: ${RESEND_API_KEY:-}
 
             # Cloudinary
             CLOUDINARY_ENABLED: ${CLOUDINARY_ENABLED:-true}

@@ -1,13 +1,13 @@
 package com.fu.conversation.dto.response;
 
 import com.fu.conversation.entity.ConversationMission;
-import com.fu.course.entity.Course;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * AI-generated conversation suggestion (not persisted yet — manager reviews and saves).
@@ -24,8 +24,8 @@ public class GeneratedConversationSuggestionResponse {
     private String descriptionVi;
     private String scenario;
     private String category;
-    private Course.JlptLevel jlptLevel;
-    private Integer difficultyScore;
+    private String aiRole;
+    private String learnerRole;
     private List<String> vocabularyHints;
     private List<String> grammarPoints;
     private List<String> usefulExpressions;
@@ -43,7 +43,7 @@ public class GeneratedConversationSuggestionResponse {
         private String description;
         private String descriptionVi;
         private ConversationMission.MissionType missionType;
-        private String successCriteria;
+        private Map<String, Object> successCriteria;
         private List<String> requiredVocabulary;
         private List<String> requiredGrammar;
         private Integer orderIndex;

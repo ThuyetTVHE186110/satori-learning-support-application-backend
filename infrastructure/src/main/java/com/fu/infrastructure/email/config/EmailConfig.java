@@ -1,5 +1,7 @@
 package com.fu.infrastructure.email.config;
 
+import com.resend.Resend;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
@@ -10,17 +12,17 @@ import org.thymeleaf.templatemode.TemplateMode;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Email configuration for the application.
- * Sets up Thymeleaf template engine for HTML emails.
+ * Email configuration using Resend HTTP API + Thymeleaf templates.
  */
 @Configuration
 @EnableAsync
 public class EmailConfig {
 
-    /**
-     * Template resolver for email templates.
-     * Templates are stored in classpath:/templates/email/
-     */
+    @Bean
+    public Resend resend(@Value("${app.email.resend-api-key:}") String apiKey) {
+        return new Resend(apiKey);
+    }
+
     @Bean
     public SpringResourceTemplateResolver emailTemplateResolver() {
         SpringResourceTemplateResolver resolver = new SpringResourceTemplateResolver();
@@ -34,9 +36,6 @@ public class EmailConfig {
         return resolver;
     }
 
-    /**
-     * Template engine for processing email templates.
-     */
     @Bean
     public SpringTemplateEngine emailTemplateEngine(SpringResourceTemplateResolver emailTemplateResolver) {
         SpringTemplateEngine engine = new SpringTemplateEngine();

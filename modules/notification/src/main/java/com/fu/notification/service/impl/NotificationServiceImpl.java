@@ -18,7 +18,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -79,7 +78,7 @@ public class NotificationServiceImpl implements NotificationService {
             // Deduplication: skip if identical type was already sent recently
             LocalDateTime deduplicationSince = LocalDateTime.now().minusMinutes(DEDUP_WINDOW_MINUTES);
             List<Notification> recent = notificationRepository.findRecentByUserAndType(
-                    userId, request.getType(), deduplicationSince);
+                    userId, request.getType().name(), deduplicationSince);
             if (!recent.isEmpty()) {
                 log.debug("Dedup: skipping {} for user {} (sent {} min ago)",
                         request.getType(), userId, DEDUP_WINDOW_MINUTES);
@@ -275,7 +274,7 @@ public class NotificationServiceImpl implements NotificationService {
             
             if (!invalidTokens.isEmpty()) {
                 // Deactivate invalid tokens asynchronously
-                handleInvalidTokensAsync(invalidTokens);
+                handleInvalidTokens(invalidTokens);
             }
             
             return response.getSuccessCount() > 0;
@@ -284,8 +283,7 @@ public class NotificationServiceImpl implements NotificationService {
         return false;
     }
 
-    @Async
-    protected void handleInvalidTokensAsync(List<String> invalidTokens) {
+    private void handleInvalidTokens(List<String> invalidTokens) {
         deviceTokenService.handleInvalidTokens(invalidTokens);
     }
 

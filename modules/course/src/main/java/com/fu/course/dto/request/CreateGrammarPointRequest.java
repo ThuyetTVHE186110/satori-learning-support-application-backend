@@ -24,13 +24,13 @@ import java.util.UUID;
 public class CreateGrammarPointRequest {
 
     /** Optional: link grammar point to a lesson on creation. */
+    @NotNull
     private UUID lessonId;
 
     @NotBlank(message = "Pattern is required")
     @Size(max = 255, message = "Pattern must not exceed 255 characters")
     private String pattern;
 
-    @NotNull(message = "JLPT level is required")
     private JlptLevel jlptLevel;
 
     @Size(max = 255, message = "Pattern reading must not exceed 255 characters")
@@ -42,6 +42,8 @@ public class CreateGrammarPointRequest {
     private String meaningVi;
     private String meaningEn;
     private String shortExplanation;
+    @NotBlank
+    @Size(max = 5000, message = "Detailed explanation must not exceed 5000 characters")
     private String detailedExplanation;
 
     private GrammarCategory category;

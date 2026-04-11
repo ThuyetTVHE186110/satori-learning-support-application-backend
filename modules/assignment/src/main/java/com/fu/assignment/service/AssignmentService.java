@@ -63,6 +63,15 @@ public interface AssignmentService {
 
     ClassAssignmentStatisticsResponse getClassAssignmentStatistics(UUID classId, UUID teacherId);
 
+    /**
+     * Get statistics for a specific assignment in a class.
+     * Returns submitted count, not submitted count, and average graded score.
+     */
+    AssignmentClassStatisticsResponse getAssignmentStatisticsForClass(
+            UUID assignmentId,
+            UUID classId,
+            UUID teacherId);
+
     Page<AssignmentSummaryResponse> getMyAssignments(UUID teacherId, String title, com.fu.assignment.entity.AssignmentStatus status, AssignmentType type, Pageable pageable);
 
 
@@ -80,6 +89,24 @@ public interface AssignmentService {
     // ── Submissions — Teacher View ────────────────────────────────────────────
 
     Page<SubmissionSummaryResponse> getSubmissionsByAssignment(UUID assignmentId, Pageable pageable, UUID teacherId);
+
+    /**
+     * Get submissions for an assignment with optional keyword search by learner name/email and status filter.
+     * Returns ALL students in the class, even those without submissions (status = NOT_STARTED).
+     *
+     * @param assignmentId Assignment UUID
+     * @param keyword Optional search term (firstName, lastName, displayName, email)
+     * @param status Optional submission status filter (NOT_STARTED, IN_PROGRESS, SUBMITTED, GRADED, OVERDUE)
+     * @param pageable Pagination parameters
+     * @param teacherId Teacher UUID for access verification
+     * @return Paginated list of submission summaries (all class students + their submission status)
+     */
+    Page<SubmissionSummaryResponse> getSubmissionsByAssignment(
+            UUID assignmentId,
+            String keyword,
+            SubmissionStatus status,
+            Pageable pageable,
+            UUID teacherId);
 
     SubmissionResponse getSubmission(UUID submissionId, UUID teacherId);
 

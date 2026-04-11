@@ -1147,23 +1147,24 @@ class ClassServiceImplTest {
     class GetEligibleLearnersTests {
 
         @Test
-        @DisplayName("Should get eligible learners successfully")
+        @DisplayName("Should get eligible learners successfully without filter")
         void shouldGetEligibleLearnersSuccessfully() {
             // Given
             given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classMemberRepository.findUserIdsInActiveClasses()).willReturn(List.of());
             Pageable pageable = PageRequest.of(0, 10);
             Page<User> usersPage = new PageImpl<>(List.of(testStudent), pageable, 1);
-            given(userRepository.findEligibleLearnersForClass(anyString(), anyList(), any(Pageable.class))).willReturn(usersPage);
+            given(userRepository.findEligibleLearnersForClass(any(), any(), any(Pageable.class))).willReturn(usersPage);
 
             // When
-            Page<com.fu.user.dto.UserResponse> result = clazzService.getEligibleLearners(classId, "Test", pageable);
+            Page<com.fu.user.dto.UserResponse> result = clazzService.getEligibleLearners(classId, "Test", null, pageable);
 
             // Then
             assertThat(result).isNotNull();
             assertThat(result.getTotalElements()).isEqualTo(1);
             assertThat(result.getContent().get(0).getId()).isEqualTo(studentId);
             assertThat(result.getContent().get(0).getEmail()).isEqualTo("student@example.com");
-            verify(userRepository).findEligibleLearnersForClass(anyString(), anyList(), any(Pageable.class));
+            verify(userRepository).findEligibleLearnersForClass(any(), any(), any(Pageable.class));
         }
 
         @Test
@@ -1174,9 +1175,166 @@ class ClassServiceImplTest {
             Pageable pageable = PageRequest.of(0, 10);
 
             // When/Then
-            assertThatThrownBy(() -> clazzService.getEligibleLearners(classId, null, pageable))
+            assertThatThrownBy(() -> clazzService.getEligibleLearners(classId, null, null, pageable))
                     .isInstanceOf(ClassNotFoundException.class);
             verify(userRepository, never()).findEligibleLearnersForClass(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Should filter eligible learners by closed class")
+        void shouldFilterEligibleLearnersByClosedClass() {
+            // Given
+            UUID closedClassId = UUID.randomUUID();
+            Clazz closedClass = Clazz.builder()
+                    .id(closedClassId)
+                    .status(ClassStatus.CLOSED)
+                    .build();
+            
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.findByIdAndNotDeleted(closedClassId)).willReturn(Optional.of(closedClass));
+            given(classMemberRepository.findUserIdsInActiveClasses()).willReturn(List.of());
+            
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<User> usersPage = new PageImpl<>(List.of(testStudent), pageable, 1);
+            given(userRepository.findEligibleLearnersForClass(any(), any(), any(Pageable.class))).willReturn(usersPage);
+            given(classMemberRepository.findUserIdsByClosedClass(closedClassId)).willReturn(List.of(studentId));
+
+            // When
+            Page<com.fu.user.dto.UserResponse> result = clazzService.getEligibleLearners(classId, null, closedClassId, pageable);
+
+            // Then
+            assertThat(result).isNotNull();
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            assertThat(result.getContent().get(0).getId()).isEqualTo(studentId);
+            verify(classMemberRepository).findUserIdsByClosedClass(closedClassId);
+        }
+
+        @Test
+        @DisplayName("Should exclude students not in the filter class")
+        void shouldExcludeStudentsNotInFilterClass() {
+            // Given
+            UUID closedClassId = UUID.randomUUID();
+            UUID otherStudentId = UUID.randomUUID();
+            User otherStudent = User.builder()
+                    .id(otherStudentId)
+                    .firstName("Other")
+                    .lastName("Student")
+                    .email("other@example.com")
+                    .build();
+            
+            Clazz closedClass = Clazz.builder()
+                    .id(closedClassId)
+                    .status(ClassStatus.CLOSED)
+                    .build();
+            
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.findByIdAndNotDeleted(closedClassId)).willReturn(Optional.of(closedClass));
+            given(classMemberRepository.findUserIdsInActiveClasses()).willReturn(List.of());
+            
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<User> usersPage = new PageImpl<>(List.of(testStudent, otherStudent), pageable, 2);
+            given(userRepository.findEligibleLearnersForClass(any(), any(), any(Pageable.class))).willReturn(usersPage);
+            // Only testStudent was in the closed class
+            given(classMemberRepository.findUserIdsByClosedClass(closedClassId)).willReturn(List.of(studentId));
+
+            // When
+            Page<com.fu.user.dto.UserResponse> result = clazzService.getEligibleLearners(classId, null, closedClassId, pageable);
+
+            // Then
+            assertThat(result).isNotNull();
+            assertThat(result.getContent()).hasSize(1);
+            assertThat(result.getContent().get(0).getId()).isEqualTo(studentId);
+        }
+
+        @Test
+        @DisplayName("Should throw exception when filter class not found")
+        void shouldThrowExceptionWhenFilterClassNotFound() {
+            // Given
+            UUID closedClassId = UUID.randomUUID();
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.findByIdAndNotDeleted(closedClassId)).willReturn(Optional.empty());
+            Pageable pageable = PageRequest.of(0, 10);
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.getEligibleLearners(classId, null, closedClassId, pageable))
+                    .isInstanceOf(ClassNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("Should throw exception when filter class is not CLOSED")
+        void shouldThrowExceptionWhenFilterClassIsNotClosed() {
+            // Given
+            UUID activeClassId = UUID.randomUUID();
+            Clazz activeClass = Clazz.builder()
+                    .id(activeClassId)
+                    .status(ClassStatus.ACTIVE)
+                    .build();
+            
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.findByIdAndNotDeleted(activeClassId)).willReturn(Optional.of(activeClass));
+            Pageable pageable = PageRequest.of(0, 10);
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.getEligibleLearners(classId, null, activeClassId, pageable))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessage("Lớp lọc phải có trạng thái CLOSED.");
+        }
+
+        @Test
+        @DisplayName("Should return empty page when no students match filter")
+        void shouldReturnEmptyPageWhenNoStudentsMatchFilter() {
+            // Given
+            UUID closedClassId = UUID.randomUUID();
+            Clazz closedClass = Clazz.builder()
+                    .id(closedClassId)
+                    .status(ClassStatus.CLOSED)
+                    .build();
+            
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.findByIdAndNotDeleted(closedClassId)).willReturn(Optional.of(closedClass));
+            given(classMemberRepository.findUserIdsInActiveClasses()).willReturn(List.of());
+            
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<User> usersPage = new PageImpl<>(List.of(testStudent), pageable, 1);
+            given(userRepository.findEligibleLearnersForClass(any(), any(), any(Pageable.class))).willReturn(usersPage);
+            // No one from the closed class
+            given(classMemberRepository.findUserIdsByClosedClass(closedClassId)).willReturn(List.of());
+
+            // When
+            Page<com.fu.user.dto.UserResponse> result = clazzService.getEligibleLearners(classId, null, closedClassId, pageable);
+
+            // Then
+            assertThat(result).isNotNull();
+            assertThat(result.getContent()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Should support keyword search with filter")
+        void shouldSupportKeywordSearchWithFilter() {
+            // Given
+            UUID closedClassId = UUID.randomUUID();
+            Clazz closedClass = Clazz.builder()
+                    .id(closedClassId)
+                    .status(ClassStatus.CLOSED)
+                    .build();
+            
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classRepository.findByIdAndNotDeleted(closedClassId)).willReturn(Optional.of(closedClass));
+            given(classMemberRepository.findUserIdsInActiveClasses()).willReturn(List.of());
+            
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<User> usersPage = new PageImpl<>(List.of(testStudent), pageable, 1);
+            String keyword = "John";
+            given(userRepository.findEligibleLearnersForClass(eq(keyword), anyList(), any(Pageable.class))).willReturn(usersPage);
+            given(classMemberRepository.findUserIdsByClosedClass(closedClassId)).willReturn(List.of(studentId));
+
+            // When
+            Page<com.fu.user.dto.UserResponse> result = clazzService.getEligibleLearners(classId, keyword, closedClassId, pageable);
+
+            // Then
+            assertThat(result).isNotNull();
+            assertThat(result.getContent()).hasSize(1);
+            verify(userRepository).findEligibleLearnersForClass(eq(keyword), anyList(), any(Pageable.class));
         }
     }
 
@@ -1232,8 +1390,9 @@ class ClassServiceImplTest {
         @Test
         @DisplayName("Should throw exception when moving startDate later with members")
         void shouldThrowWhenMovingStartDateLaterWithMembers() {
-            // Given
-            testClazz.setStartDate(LocalDate.now().plusDays(10));
+            // Given: Class is ACTIVE, trying to change startDate
+            testClazz.setStatus(ClassStatus.ACTIVE);
+            testClazz.setStartDate(LocalDate.now().minusDays(5));
             UpdateClassRequest req = UpdateClassRequest.builder()
                     .startDate(LocalDate.now().plusDays(15)) // Later
                     .build();
@@ -1243,7 +1402,7 @@ class ClassServiceImplTest {
             // When/Then
             assertThatThrownBy(() -> clazzService.updateClass(classId, req, managerId))
                     .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("Không thể cập nhật ngày bắt đầu sau ngày bắt đầu cũ");
+                    .hasMessageContaining("Không thể cập nhật ngày bắt đầu sau khi lớp học đã hoạt động");
         }
 
         @Test
@@ -1290,6 +1449,49 @@ class ClassServiceImplTest {
             verify(classRepository).save(clazzCaptor.capture());
             verify(classScheduleManager).scheduleActivation(any(Clazz.class));
             assertThat(clazzCaptor.getValue().getStatus()).isEqualTo(ClassStatus.ACTIVE);
+        }
+
+        @Test
+        @DisplayName("Should throw exception when updating startDate on ACTIVE class")
+        void shouldThrowWhenUpdatingStartDateOnActiveClass() {
+            // Given
+            testClazz.setStatus(ClassStatus.ACTIVE);
+            testClazz.setStartDate(LocalDate.now().minusDays(5));
+            UpdateClassRequest req = UpdateClassRequest.builder()
+                    .startDate(LocalDate.now().plusDays(10)) // Try to change startDate
+                    .build();
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.updateClass(classId, req, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Không thể cập nhật ngày bắt đầu sau khi lớp học đã hoạt động");
+        }
+
+        @Test
+        @DisplayName("Should allow updating other fields when class is ACTIVE")
+        void shouldAllowUpdatingOtherFieldsWhenActive() {
+            // Given
+            testClazz.setStatus(ClassStatus.ACTIVE);
+            testClazz.setStartDate(LocalDate.now().minusDays(5));
+            UpdateClassRequest req = UpdateClassRequest.builder()
+                    .name("Updated Class Name")
+                    .maxStudents(50)
+                    // NO startDate change
+                    .build();
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(3L);
+            given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId)).willReturn(Optional.of(teacherId));
+            given(classMapper.toResponse(testClazz)).willReturn(testClassResponse);
+
+            // When
+            clazzService.updateClass(classId, req, managerId);
+
+            // Then
+            verify(classRepository).save(any(Clazz.class));
+            verify(classScheduleManager).scheduleActivation(any(Clazz.class));
         }
     }
 
@@ -1421,6 +1623,201 @@ class ClassServiceImplTest {
                     .hasSize(1)
                     .containsExactly(closedResponse);
             assertThat(result.get(0).getStatus()).isEqualTo(ClassStatus.CLOSED);
+        }
+    }
+
+    // =====================================================
+    // GET TEACHER CLASS HISTORY
+    // =====================================================
+
+    @Nested
+    @DisplayName("Get Teacher Class History Tests")
+    class GetTeacherClassHistoryTests {
+
+        private com.fu.clazz.dto.response.TeacherClassHistoryResponse testHistoryResponse;
+
+        @BeforeEach
+        void setUp() {
+            testHistoryResponse = com.fu.clazz.dto.response.TeacherClassHistoryResponse.builder()
+                    .id(classId)
+                    .name("N5 Morning Class")
+                    .description("Beginner level")
+                    .courseId(courseId)
+                    .courseName("N5 Course")
+                    .courseLevel("N5")
+                    .status(ClassStatus.ACTIVE)
+                    .maxStudents(8)
+                    .startDate(LocalDate.now())
+                    .endDate(LocalDate.now().plusMonths(3))
+                    .build();
+        }
+
+        @Test
+        @DisplayName("Should return all teacher classes sorted by assignment date DESC")
+        void shouldReturnAllTeacherClassesSortedByAssignedDate() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            ClassTeacherHistory history = ClassTeacherHistory.builder()
+                    .teacherId(teacherId)
+                    .classId(classId)
+                    .assignedAt(LocalDate.now().minusMonths(2))
+                    .releasedAt(null)
+                    .build();
+            Page<ClassTeacherHistory> historyPage = new PageImpl<>(List.of(history), pageable, 1);
+            
+            given(classTeacherHistoryRepository.findTeacherClassHistory(teacherId, pageable)).willReturn(historyPage);
+            given(classRepository.findById(classId)).willReturn(Optional.of(testClazz));
+            given(courseRepository.findById(courseId)).willReturn(Optional.of(testCourse));
+            given(classMapper.toTeacherClassHistoryResponse(any(Clazz.class))).willReturn(testHistoryResponse);
+
+            // When
+            Page<com.fu.clazz.dto.response.TeacherClassHistoryResponse> result = clazzService.getTeacherClassHistory(teacherId, pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            assertThat(result.getContent()).hasSize(1);
+            com.fu.clazz.dto.response.TeacherClassHistoryResponse response = result.getContent().get(0);
+            assertThat(response.getName()).isEqualTo("N5 Morning Class");
+            assertThat(response.getId()).isEqualTo(classId);
+        }
+
+        @Test
+        @DisplayName("Should include course information in response")
+        void shouldIncludeCourseInformation() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            ClassTeacherHistory history = ClassTeacherHistory.builder()
+                    .teacherId(teacherId)
+                    .classId(classId)
+                    .assignedAt(LocalDate.now().minusMonths(1))
+                    .releasedAt(null)
+                    .build();
+            Page<ClassTeacherHistory> historyPage = new PageImpl<>(List.of(history), pageable, 1);
+            
+            given(classTeacherHistoryRepository.findTeacherClassHistory(teacherId, pageable)).willReturn(historyPage);
+            given(classRepository.findById(classId)).willReturn(Optional.of(testClazz));
+            given(courseRepository.findById(courseId)).willReturn(Optional.of(testCourse));
+            given(classMapper.toTeacherClassHistoryResponse(any(Clazz.class))).willReturn(testHistoryResponse);
+
+            // When
+            Page<com.fu.clazz.dto.response.TeacherClassHistoryResponse> result = clazzService.getTeacherClassHistory(teacherId, pageable);
+
+            // Then
+            com.fu.clazz.dto.response.TeacherClassHistoryResponse response = result.getContent().get(0);
+            assertThat(response.getCourseName()).isNotNull();
+            verify(courseRepository).findById(courseId);
+        }
+
+        @Test
+        @DisplayName("Should return paginated results")
+        void shouldReturnPaginatedResults() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 5);
+            List<ClassTeacherHistory> histories = List.of(
+                    ClassTeacherHistory.builder()
+                            .teacherId(teacherId)
+                            .classId(UUID.randomUUID())
+                            .assignedAt(LocalDate.now().minusMonths(1))
+                            .releasedAt(null)
+                            .build()
+            );
+            Page<ClassTeacherHistory> historyPage = new PageImpl<>(histories, pageable, 15);
+            
+            given(classTeacherHistoryRepository.findTeacherClassHistory(teacherId, pageable)).willReturn(historyPage);
+            given(classRepository.findById(any())).willReturn(Optional.of(testClazz));
+            given(courseRepository.findById(courseId)).willReturn(Optional.of(testCourse));
+            given(classMapper.toTeacherClassHistoryResponse(testClazz)).willReturn(testHistoryResponse);
+
+            // When
+            Page<com.fu.clazz.dto.response.TeacherClassHistoryResponse> result = clazzService.getTeacherClassHistory(teacherId, pageable);
+
+            // Then
+            assertThat(result.getNumber()).isEqualTo(0);
+            assertThat(result.getSize()).isEqualTo(5);
+            assertThat(result.getTotalElements()).isEqualTo(15);
+            assertThat(result.getTotalPages()).isEqualTo(3);
+        }
+
+        @Test
+        @DisplayName("Should handle missing class gracefully")
+        void shouldHandleMissingClassGracefully() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            ClassTeacherHistory history = ClassTeacherHistory.builder()
+                    .teacherId(teacherId)
+                    .classId(classId)
+                    .assignedAt(LocalDate.now().minusMonths(1))
+                    .releasedAt(null)
+                    .build();
+            Page<ClassTeacherHistory> historyPage = new PageImpl<>(List.of(history), pageable, 1);
+            
+            given(classTeacherHistoryRepository.findTeacherClassHistory(teacherId, pageable)).willReturn(historyPage);
+            given(classRepository.findById(classId)).willReturn(Optional.empty());
+
+            // When
+            Page<com.fu.clazz.dto.response.TeacherClassHistoryResponse> result = clazzService.getTeacherClassHistory(teacherId, pageable);
+
+            // Then - null responses are filtered out, so we expect empty content but total count decremented
+            assertThat(result.getContent()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Should return empty page when teacher has no class history")
+        void shouldReturnEmptyPageWhenNoClassHistory() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            Page<ClassTeacherHistory> emptyPage = new PageImpl<>(List.of(), pageable, 0);
+            
+            given(classTeacherHistoryRepository.findTeacherClassHistory(teacherId, pageable)).willReturn(emptyPage);
+
+            // When
+            Page<com.fu.clazz.dto.response.TeacherClassHistoryResponse> result = clazzService.getTeacherClassHistory(teacherId, pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(0);
+            assertThat(result.getContent()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Should handle missing course information gracefully")
+        void shouldHandleMissingCourseInformation() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 10);
+            ClassTeacherHistory history = ClassTeacherHistory.builder()
+                    .teacherId(teacherId)
+                    .classId(classId)
+                    .assignedAt(LocalDate.now().minusMonths(1))
+                    .releasedAt(null)
+                    .build();
+            Page<ClassTeacherHistory> historyPage = new PageImpl<>(List.of(history), pageable, 1);
+            
+            com.fu.clazz.dto.response.TeacherClassHistoryResponse responseWithoutCourse = 
+                com.fu.clazz.dto.response.TeacherClassHistoryResponse.builder()
+                    .id(classId)
+                    .name("N5 Morning Class")
+                    .description("Beginner level")
+                    .courseId(courseId)
+                    .courseName(null)  // Missing course info
+                    .courseLevel(null)
+                    .status(ClassStatus.ACTIVE)
+                    .maxStudents(8)
+                    .startDate(LocalDate.now())
+                    .endDate(LocalDate.now().plusMonths(3))
+                    .build();
+            
+            given(classTeacherHistoryRepository.findTeacherClassHistory(teacherId, pageable)).willReturn(historyPage);
+            given(classRepository.findById(classId)).willReturn(Optional.of(testClazz));
+            given(courseRepository.findById(courseId)).willReturn(Optional.empty());
+            given(classMapper.toTeacherClassHistoryResponse(any(Clazz.class))).willReturn(responseWithoutCourse);
+
+            // When
+            Page<com.fu.clazz.dto.response.TeacherClassHistoryResponse> result = clazzService.getTeacherClassHistory(teacherId, pageable);
+
+            // Then
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            com.fu.clazz.dto.response.TeacherClassHistoryResponse response = result.getContent().get(0);
+            assertThat(response.getCourseName()).isNull();
+            assertThat(response.getCourseLevel()).isNull();
         }
     }
 }

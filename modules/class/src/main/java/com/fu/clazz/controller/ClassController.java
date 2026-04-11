@@ -1,11 +1,13 @@
 package com.fu.clazz.controller;
 
 import com.fu.clazz.dto.request.AddMemberRequest;
+import com.fu.clazz.dto.request.AddMembersRequest;
 import com.fu.clazz.dto.request.CreateClassRequest;
 import com.fu.clazz.dto.request.UpdateClassRequest;
 import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
+import com.fu.clazz.dto.response.TeacherClassHistoryResponse;
 import com.fu.clazz.service.ClassService;
 import com.fu.common.response.ApiResponse;
 import com.fu.common.response.PageResponse;
@@ -26,6 +28,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
+import java.util.List;
 
 /**
  * Unified REST Controller for Class operations.
@@ -52,10 +55,10 @@ public class ClassController {
     /**
      * Get all classes with pagination and optional filters.
      * - OPERATION_MANAGER: sees all non-deleted classes with full filter support
-     * - TEACHER: sees only their own active classes (filtered by teacher ID auto)
+     * - TEACHER: sees only their own non-deleted classes (any status: ACTIVE, CLOSED, NOT_STARTED, etc.)
      * <p>
      * GET
-     * /api/v1/classes?page=0&size=10&isActive=true&courseId=xxx&teacherId=xxx&keyword=xxx
+     * /api/v1/classes?page=0&size=10&status=ACTIVE&courseId=xxx&teacherId=xxx&keyword=xxx
      */
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<ClassSummaryResponse>>> getAllClasses(
@@ -67,15 +70,25 @@ public class ClassController {
             @RequestParam(required = false) UUID teacherId,
             @RequestParam(required = false) String keyword) {
 
-        Pageable pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("createdAt").descending());
+        Pageable pageable;
+        
+        // For teacher without status filter: sort by status priority (ACTIVE > NOT_STARTED > CLOSED), then by createdAt
+        // For others or with status filter: sort by createdAt only
+        if (!isManager() && status == null) {
+            // Teacher without status filter: use custom status priority sorting
+            // Note: JPA doesn't support CASE expressions in Order, so we'll apply this on service side
+            pageable = PageRequest.of(page, Math.min(size, 100));
+        } else {
+            pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("createdAt").descending());
+        }
         Page<ClassSummaryResponse> classPage;
 
         if (isManager()) {
             // OPERATION_MANAGER: full access with dynamic filters combined by AND
             classPage = clazzService.getClasses(keyword, teacherId, courseId, status, pageable);
         } else {
-            // TEACHER: only their own active classes (force filter)
-            classPage = clazzService.getClasses(keyword, userId, courseId, com.fu.clazz.entity.ClassStatus.ACTIVE, pageable);
+            // TEACHER: see all non-deleted classes, can optionally filter by status if provided
+            classPage = clazzService.getClasses(keyword, userId, courseId, status, pageable);
         }
 
         PageResponse<ClassSummaryResponse> pageResponse = PageResponse.of(
@@ -146,7 +159,7 @@ public class ClassController {
      * Eligible learners are those with role LEARNER, status ACTIVE/INACTIVE, and not currently an active member.
      * - OPERATION_MANAGER: can view eligible learners for any class
      * <p>
-     * GET /api/v1/classes/{classId}/eligible-learners?page=0&size=10&keyword=...
+     * GET /api/v1/classes/{classId}/eligible-learners?page=0&size=10&keyword=...&filterByClassId=...
      */
     @GetMapping("/{classId}/eligible-learners")
     @PreAuthorize("hasRole('OPERATION_MANAGER')")
@@ -154,11 +167,12 @@ public class ClassController {
             @PathVariable UUID classId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
-            @RequestParam(required = false) String keyword) {
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) UUID filterByClassId) {
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("email").ascending());
 
-        Page<com.fu.user.dto.UserResponse> userPage = clazzService.getEligibleLearners(classId, keyword, pageable);
+        Page<com.fu.user.dto.UserResponse> userPage = clazzService.getEligibleLearners(classId, keyword, filterByClassId, pageable);
 
         PageResponse<com.fu.user.dto.UserResponse> pageResponse = PageResponse.of(
                 userPage.getContent(),
@@ -235,20 +249,21 @@ public class ClassController {
     }
 
     /**
-     * Add a member to a class.
+     * Add member(s) to a class.
+     * Supports both single member add (legacy) and batch operations.
      * POST /api/v1/classes/{classId}/members
      */
     @PostMapping("/{classId}/members")
     @PreAuthorize("hasRole('OPERATION_MANAGER')")
-    public ResponseEntity<ApiResponse<ClassMemberResponse>> addMember(
+    public ResponseEntity<ApiResponse<?>> addMembers(
             @PathVariable UUID classId,
-            @Valid @RequestBody AddMemberRequest request,
+            @Valid @RequestBody AddMembersRequest request,
             @AuthenticationPrincipal UUID managerId) {
 
-        log.info("Manager {} adding member {} to class: {}", managerId, request.getUserId(), classId);
-        ClassMemberResponse response = clazzService.addMember(classId, request, managerId);
+        log.info("Manager {} adding {} members to class: {}", managerId, request.getLearnerIds().size(), classId);
+        List<ClassMemberResponse> responses = clazzService.addMembers(classId, request, managerId);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success("Thêm học viên vào lớp thành công.", response));
+                .body(ApiResponse.success("Thêm học viên vào lớp thành công.", responses));
     }
 
     /**
@@ -265,6 +280,39 @@ public class ClassController {
         log.info("Manager {} removing member {} from class: {}", managerId, userId, classId);
         clazzService.removeMember(classId, userId, managerId);
         return ResponseEntity.ok(ApiResponse.success("Xóa học viên ra khỏi lớp học thành công.", null));
+    }
+
+    /**
+     * Get all classes a teacher has taught or is currently teaching.
+     * Returns paginated list sorted by assignment date (most recent first).
+     * 
+     * Access Control:
+     * - TEACHER: Can only view own class history
+     * 
+     * GET /api/v1/classes/teacher/{teacherId}?page=0&size=10
+     */
+    @GetMapping("/teacher")
+    @PreAuthorize("hasRole('TEACHER')")
+    public ResponseEntity<ApiResponse<PageResponse<TeacherClassHistoryResponse>>> getTeacherClassHistory(
+            @AuthenticationPrincipal UUID userId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+
+
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        Page<TeacherClassHistoryResponse> classHistoryPage = clazzService.getTeacherClassHistory(userId, pageable);
+
+        PageResponse<TeacherClassHistoryResponse> pageResponse = PageResponse.of(
+                classHistoryPage.getContent(),
+                classHistoryPage.getNumber(),
+                classHistoryPage.getSize(),
+                classHistoryPage.getTotalElements(),
+                classHistoryPage.getTotalPages());
+
+        String message = classHistoryPage.getTotalElements() == 0
+                ? "Giáo viên chưa dạy lớp nào."
+                : "Lấy lịch sử lớp học thành công.";
+        return ResponseEntity.ok(ApiResponse.success(message, pageResponse));
     }
 
     // =====================================================

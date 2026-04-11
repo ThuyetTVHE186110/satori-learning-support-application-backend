@@ -10,7 +10,7 @@
 # Required env vars (set in CI secrets or .env file):
 #   OPENAI_API_KEY, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET
 #   POSTGRES_UAT_PASSWORD, REDIS_UAT_PASSWORD
-#   MAIL_USERNAME, MAIL_PASSWORD (if email enabled)
+#   RESEND_API_KEY (if email enabled)
 # =============================================================================
 
 server:
@@ -76,8 +76,8 @@ app:
 
     email:
         enabled: ${EMAIL_ENABLED:true}
-        from: ${EMAIL_FROM:noreply@satori-learning.com}
-        from-name: Satori Learning UAT
+        resend-api-key: ${RESEND_API_KEY:}
+        from: ${EMAIL_FROM:Satori Learning UAT <noreply@satorinihongo.id.vn>}
         base-url: ${APP_BASE_URL:http://localhost:3000}
 
     cloudinary:
@@ -85,19 +85,6 @@ app:
         cloud-name: ${CLOUDINARY_CLOUD_NAME:}
         api-key: ${CLOUDINARY_API_KEY:}
         api-secret: ${CLOUDINARY_API_SECRET:}
-
-# ==================== Mail ====================
-spring.mail:
-    host: ${MAIL_HOST:smtp.gmail.com}
-    port: ${MAIL_PORT:587}
-    username: ${MAIL_USERNAME:}
-    password: ${MAIL_PASSWORD:}
-    properties:
-        mail:
-            smtp:
-                auth: true
-                starttls:
-                    enable: true
 
 # ==================== Curriculum Import ====================
 curriculum-import:

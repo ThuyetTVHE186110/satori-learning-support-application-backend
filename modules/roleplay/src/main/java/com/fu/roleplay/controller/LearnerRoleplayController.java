@@ -17,7 +17,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -97,7 +96,8 @@ public class LearnerRoleplayController {
             @RequestParam(defaultValue = "10") @Min(1) int size,
             @AuthenticationPrincipal(expression = "id") UUID userId) {
 
-        Pageable pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("createdAt").descending());
+        // Keep Pageable unsorted because repository native SQL already orders by created_at DESC.
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
         Page<SessionSummaryResponse> result = sessionService.getSessionHistory(userId, pageable);
         return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
                 result.getContent(), result.getNumber(), result.getSize(),
@@ -110,6 +110,21 @@ public class LearnerRoleplayController {
             @AuthenticationPrincipal(expression = "id") UUID userId) {
 
         SessionResponse response = sessionService.getSession(sessionId, userId);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    /**
+     * Get the feedback from the latest completed session for a conversation.
+     * Used when a learner clicks on a COMPLETED conversation to view their previous results.
+     * Returns 404 if no completed session exists for this conversation.
+     * GET /api/v1/learner/roleplay/conversations/{conversationId}/latest-feedback
+     */
+    @GetMapping("/conversations/{conversationId}/latest-feedback")
+    public ResponseEntity<ApiResponse<SessionEvaluationResponse>> getConversationFeedback(
+            @PathVariable UUID conversationId,
+            @AuthenticationPrincipal(expression = "id") UUID userId) {
+
+        SessionEvaluationResponse response = sessionService.getConversationFeedback(conversationId, userId);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 }

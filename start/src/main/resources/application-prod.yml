@@ -13,7 +13,7 @@
 #   OPENAI_API_KEY
 #   JWT_ACCESS_SECRET, JWT_REFRESH_SECRET
 #   APP_ALLOWED_ORIGINS  (comma-separated, e.g. "https://satori-learning.com")
-#   MAIL_USERNAME, MAIL_PASSWORD
+#   RESEND_API_KEY
 #   FIREBASE_CREDENTIALS_FILE, FIREBASE_PROJECT_ID  (if FCM_ENABLED=true)
 #   CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
 # =============================================================================
@@ -101,8 +101,8 @@ app:
 
     email:
         enabled: ${EMAIL_ENABLED:true}
-        from: ${EMAIL_FROM:noreply@satori-learning.com}
-        from-name: ${EMAIL_FROM_NAME:Satori Learning}
+        resend-api-key: ${RESEND_API_KEY:}
+        from: ${EMAIL_FROM:Satori Learning <noreply@satorinihongo.id.vn>}
         base-url: ${APP_BASE_URL}
 
     cloudinary:
@@ -110,23 +110,6 @@ app:
         cloud-name: ${CLOUDINARY_CLOUD_NAME}
         api-key: ${CLOUDINARY_API_KEY}
         api-secret: ${CLOUDINARY_API_SECRET}
-
-# ==================== Mail ====================
-spring.mail:
-    host: ${MAIL_HOST:smtp.gmail.com}
-    port: ${MAIL_PORT:587}
-    username: ${MAIL_USERNAME}
-    password: ${MAIL_PASSWORD}
-    properties:
-        mail:
-            smtp:
-                auth: true
-                starttls:
-                    enable: true
-                    required: true
-                connectiontimeout: 5000
-                timeout: 5000
-                writetimeout: 5000
 
 # ==================== Actuator ====================
 # In prod, only expose health (for load-balancer probes) and prometheus (for Grafana).
@@ -142,6 +125,9 @@ management:
             show-details: when-authorized
             probes:
                 enabled: true
+    health:
+        mail:
+            enabled: false
 
 # ==================== SpringDoc / Swagger ====================
 # Completely disables the /swagger-ui and /v3/api-docs endpoints.

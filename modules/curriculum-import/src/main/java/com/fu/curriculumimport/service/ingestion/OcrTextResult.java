@@ -3,12 +3,11 @@ package com.fu.curriculumimport.service.ingestion;
 import java.util.List;
 
 /**
- * Result returned by {@link OcrClient#extractText(java.awt.image.BufferedImage)}.
+ * Result returned by {@link OcrClient#extractTextBatch(java.util.List, byte[])}.
  *
  * <p>In addition to plain text, the result may carry structured table rows
- * detected by the OCR provider (currently populated by {@link GoogleVisionOcrClient}).
- * When non-empty, {@link MnNTableParser} can convert them to vocabulary items
- * without an LLM call.
+ * detected by Document AI. When non-empty, {@link MnNTableParser} can convert
+ * them to vocabulary items without an LLM call.
  *
  * @param text               extracted plain text (may be empty string)
  * @param confidence         average line-level confidence [0.0, 1.0]; 0.0 when OCR failed

@@ -10,6 +10,7 @@ import com.fu.curriculumimport.service.ingestion.MarkdownVocabParser;
 import com.fu.curriculumimport.service.ingestion.MnNTableParser;
 import com.fu.curriculumimport.service.vision.VisionPageExtractor;
 import com.fu.curriculumimport.util.LlmResponseUtils;
+import com.fu.curriculumimport.util.LlmStreamCollector;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
@@ -153,13 +154,17 @@ public class VocabularyExtractionAgent {
         try {
             String ragSection = VocabularyPromptBuilder.formatRagContext(ragContext);
             String prompt = VocabularyPromptBuilder.buildExtractionPrompt(chunk, jlptLevel, ragSection, "");
+            int maxTokens = estimateMaxTokens(chunk);
 
-            String response = chatClient.prompt()
-                    .system(VocabularyPromptBuilder.SYSTEM_PROMPT)
-                    .user(prompt)
-                    .options(OpenAiChatOptions.builder().maxTokens(16384).build())
-                    .call()
-                    .content();
+            String response = LlmStreamCollector.collect(
+                    chatClient.prompt()
+                            .system(VocabularyPromptBuilder.SYSTEM_PROMPT)
+                            .user(prompt)
+                            .options(OpenAiChatOptions.builder()
+                                    .temperature(0.0).seed(42)
+                                    .maxTokens(maxTokens).build())
+                            .stream()
+                            .content());
 
             return parseResponse(response, chunk.getChunkIndex(), System.currentTimeMillis() - t0);
         } catch (Exception e) {
@@ -182,14 +187,18 @@ public class VocabularyExtractionAgent {
 
             String prompt = VocabularyPromptBuilder.buildExtractionPrompt(
                     chunk, jlptLevel, ragSection, feedbackSection);
+            int maxTokens = estimateMaxTokens(chunk);
 
-            String response = chatClient.prompt()
-                    .system(VocabularyPromptBuilder.SYSTEM_PROMPT
-                            + VocabularyPromptBuilder.REEXTRACTION_SYSTEM_SUFFIX)
-                    .user(prompt)
-                    .options(OpenAiChatOptions.builder().maxTokens(16384).build())
-                    .call()
-                    .content();
+            String response = LlmStreamCollector.collect(
+                    chatClient.prompt()
+                            .system(VocabularyPromptBuilder.SYSTEM_PROMPT
+                                    + VocabularyPromptBuilder.REEXTRACTION_SYSTEM_SUFFIX)
+                            .user(prompt)
+                            .options(OpenAiChatOptions.builder()
+                                    .temperature(0.0).seed(42)
+                                    .maxTokens(maxTokens).build())
+                            .stream()
+                            .content());
 
             return parseResponse(response, chunk.getChunkIndex(), System.currentTimeMillis() - t0);
         } catch (Exception e) {
@@ -236,6 +245,46 @@ public class VocabularyExtractionAgent {
             log.error("Failed to parse vocab response for chunk {}: {}", chunkIndex, e.getMessage());
             return ExtractionResult.empty(chunkIndex, ms);
         }
+    }
+
+    // ── Dynamic token budget ────────────────────────────────────────────────
+
+    private static final int MIN_MAX_TOKENS = 4096;
+    private static final int MAX_MAX_TOKENS = 16384;
+    private static final int TOKENS_PER_VOCAB_ITEM = 200;
+    private static final int JSON_OVERHEAD_TOKENS = 512;
+
+    /**
+     * Estimate the maxTokens budget from chunk content size.
+     *
+     * <p>Each non-empty line in the source is a potential vocabulary entry;
+     * each entry produces ~200 output tokens in JSON.  Small single-lesson
+     * chunks (~10 items) get 4 096 tokens and finish fast.  Full textbook
+     * chapters with 60+ items scale up to 16 384.
+     */
+    static int estimateMaxTokens(DocumentChunk chunk) {
+        String content = chunk.getContent();
+        if (content == null || content.isBlank()) return MIN_MAX_TOKENS;
+
+        long lineCount = content.lines()
+                .filter(l -> !l.isBlank())
+                .count();
+
+        // When fullPageContext is available (multi-section chunk), use the
+        // larger of the two to avoid underestimating.
+        String fullPage = chunk.getFullPageContext();
+        if (fullPage != null && fullPage.length() > content.length()) {
+            lineCount = Math.max(lineCount, fullPage.lines()
+                    .filter(l -> !l.isBlank())
+                    .count());
+        }
+
+        int estimated = (int) (lineCount * TOKENS_PER_VOCAB_ITEM) + JSON_OVERHEAD_TOKENS;
+        int clamped = Math.min(MAX_MAX_TOKENS, Math.max(MIN_MAX_TOKENS, estimated));
+
+        log.debug("estimateMaxTokens: {} non-empty lines → {} estimated → {} clamped",
+                lineCount, estimated, clamped);
+        return clamped;
     }
 
     // ── Post-processing: furigana/kanji fix ──────────────────────────────────

@@ -34,12 +34,13 @@ import java.util.UUID;
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 @RequiredArgsConstructor
 public class LearnerAchievementController {
-    
+
     private final AchievementService achievementService;
-    
+    private final com.fu.achievement.service.StreakService streakService;
+
     /**
      * Get all badges earned by the current learner
-     * 
+     *
      * @param userId Current authenticated user ID
      * @return List of earned badges with details
      */
@@ -49,10 +50,10 @@ public class LearnerAchievementController {
         List<UserAchievementResponse> badges = achievementService.getUserEarnedBadges(userId);
         return ResponseEntity.ok(ApiResponse.success(badges));
     }
-    
+
     /**
      * Get progress information toward all available badges
-     * 
+     *
      * @param userId Current authenticated user ID
      * @return Progress data including current values and progress toward locked badges
      */
@@ -62,10 +63,10 @@ public class LearnerAchievementController {
         UserAchievementProgressDTO progress = achievementService.getUserProgress(userId);
         return ResponseEntity.ok(ApiResponse.success(progress));
     }
-    
+
     /**
      * Get badges earned by the learner in the last 24 hours (for notifications)
-     * 
+     *
      * @param userId Current authenticated user ID
      * @return List of recently earned badges
      */
@@ -75,21 +76,22 @@ public class LearnerAchievementController {
         // Filter badges earned in last 24 hours from the full list
         List<UserAchievementResponse> allBadges = achievementService.getUserEarnedBadges(userId);
         java.time.LocalDateTime oneDayAgo = java.time.LocalDateTime.now().minusHours(24);
-        
+
         List<UserAchievementResponse> newBadges = allBadges.stream()
                 .filter(badge -> badge.getEarnedAt() != null && badge.getEarnedAt().isAfter(oneDayAgo))
                 .toList();
-        
+
         return ResponseEntity.ok(ApiResponse.success(newBadges));
     }
+
     /**
      * Get all available badges with learner's progress toward each
      *
      * @param userId Current authenticated user ID
-     * @param page Page number (default 0)
-     * @param size Page size (default 20, max 50)
-     * @param type Optional badge type filter
-     * @param sort Sort field (default "name")
+     * @param page   Page number (default 0)
+     * @param size   Page size (default 20, max 50)
+     * @param type   Optional badge type filter
+     * @param sort   Sort field (default "name")
      * @return Paginated list of badges with learner progress
      */
     @Operation(summary = "Browse all available badges",
@@ -116,7 +118,7 @@ public class LearnerAchievementController {
     /**
      * Get detailed information about a specific badge with learner's progress
      *
-     * @param userId Current authenticated user ID
+     * @param userId  Current authenticated user ID
      * @param badgeId The badge ID to get details for
      * @return Comprehensive badge detail including unlocking conditions and learner progress
      */
@@ -148,32 +150,28 @@ public class LearnerAchievementController {
     @GetMapping("/streaks/current")
     public ResponseEntity<ApiResponse<CurrentStreakResponse>> getCurrentStreak(
             @AuthenticationPrincipal UUID userId) {
+        // Validate and reset streak if expired (>1 day since last activity)
+        streakService.validateAndResetStreakIfExpired(userId);
+        
         CurrentStreakResponse streak = achievementService.getCurrentStreakStatus(userId);
         return ResponseEntity.ok(ApiResponse.success(streak));
     }
 
     /**
-     * Get streak history for a date range with daily breakdown
+     * Get streak history for the current week (MON-SUN)
      *
      * @param userId Current authenticated user ID
-     * @param days Number of days to retrieve (default: 7, max: 90)
-     * @return Streak history with daily records and summary statistics
+     * @return Streak history for the current week with daily records and summary statistics
      */
-    @Operation(summary = "Get streak history by date range",
-            description = "Get detailed streak history showing which days had activity and which didn't (last 7/30/90 days)")
+    @Operation(summary = "Get current week streak history",
+            description = "Get detailed streak history for the current week (Monday to Sunday) showing which days had activity")
     @GetMapping("/streaks/history")
     public ResponseEntity<ApiResponse<StreakHistoryResponse>> getStreakHistory(
-            @AuthenticationPrincipal UUID userId,
-            @RequestParam(defaultValue = "7") int days) {
+            @AuthenticationPrincipal UUID userId) {
+        // Validate and reset streak if expired (>1 day since last activity)
+        streakService.validateAndResetStreakIfExpired(userId);
 
-        // Validate days parameter
-        if (days < 1) days = 1;
-        if (days > 90) days = 90;
-
-        LocalDate endDate = LocalDate.now();
-        LocalDate startDate = endDate.minusDays(days - 1);
-
-        StreakHistoryResponse history = achievementService.getStreakHistory(userId, startDate, endDate);
+        StreakHistoryResponse history = achievementService.getStreakHistory(userId);
         return ResponseEntity.ok(ApiResponse.success(history));
     }
 }

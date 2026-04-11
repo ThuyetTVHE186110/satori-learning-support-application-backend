@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -47,4 +48,18 @@ public interface PracticeSessionRepository extends JpaRepository<PracticeSession
      * Count completed practice sessions for a user (for achievement tracking)
      */
     long countByUserIdAndStatus(UUID userId, PracticeStatus status);
+
+    /**
+     * Completed sessions within a date range (for weekly/monthly progress stats).
+     */
+    @Query("""
+            SELECT ps FROM PracticeSession ps
+            WHERE ps.userId = :userId AND ps.status = 'COMPLETED'
+              AND ps.completedAt BETWEEN :startDate AND :endDate
+            ORDER BY ps.completedAt ASC
+            """)
+    List<PracticeSession> findCompletedInDateRange(
+            @Param("userId") UUID userId,
+            @Param("startDate") LocalDateTime startDate,
+            @Param("endDate") LocalDateTime endDate);
 }

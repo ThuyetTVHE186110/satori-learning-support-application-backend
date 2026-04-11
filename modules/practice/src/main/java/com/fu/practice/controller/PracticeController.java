@@ -84,6 +84,32 @@ public class PracticeController {
     }
 
     /**
+     * Lấy danh sách vocab/grammar của bài học kèm mastery status.
+     * Dùng để render item picker trước khi bắt đầu phiên luyện tập.
+     * GET /api/v1/learner/practice/lessons/{lessonId}/items
+     *
+     * @param masteryLevel filter theo mức mastery (0=Chưa luyện, 1=Quen thuộc, 2=Nắm vững, 3=Thuộc).
+     *                     Null = trả về tất cả. Có thể truyền nhiều giá trị: ?masteryLevel=0&masteryLevel=1
+     */
+    @GetMapping("/lessons/{lessonId}/items")
+    public ResponseEntity<ApiResponse<LessonItemsResponse>> getLessonItems(
+            @AuthenticationPrincipal(expression = "id") UUID userId,
+            @PathVariable UUID lessonId,
+            @RequestParam(required = false) List<Integer> masteryLevel) {
+
+        // Lọc bỏ các giá trị null/invalid trong list trước khi truyền vào service
+        List<Integer> validFilter = (masteryLevel == null) ? null :
+                masteryLevel.stream()
+                        .filter(l -> l != null && l >= 0 && l <= 3)
+                        .collect(java.util.stream.Collectors.toList());
+        // List rỗng sau khi lọc = coi như không có filter
+        if (validFilter != null && validFilter.isEmpty()) validFilter = null;
+
+        LessonItemsResponse response = practiceSessionService.getLessonItems(userId, lessonId, validFilter);
+        return ResponseEntity.ok(ApiResponse.success("Danh sách nội dung bài học.", response));
+    }
+
+    /**
      * Xem tiến độ luyện tập theo bài học.
      * GET /api/v1/learner/practice/lessons/{lessonId}/progress
      */
@@ -153,5 +179,20 @@ public class PracticeController {
         StartPracticeResponse response = practiceSessionService.redoSession(sessionId, userId);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Phiên luyện tập mới đã được tạo.", response));
+    }
+
+    /**
+     * Tạo phiên ôn lại chỉ gồm các câu trả lời sai trong phiên đã hoàn thành.
+     * POST /api/v1/learner/practice/sessions/{sessionId}/retry-wrong
+     */
+    @PostMapping("/sessions/{sessionId}/retry-wrong")
+    public ResponseEntity<ApiResponse<StartPracticeResponse>> retryWrongItems(
+            @AuthenticationPrincipal(expression = "id") UUID userId,
+            @PathVariable UUID sessionId) {
+
+        log.info("Học viên {} ôn lại câu sai của phiên {}", userId, sessionId);
+        StartPracticeResponse response = practiceSessionService.retryWrongItems(sessionId, userId);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("Phiên ôn lại câu sai đã được tạo.", response));
     }
 }

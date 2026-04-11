@@ -2,6 +2,7 @@ package com.fu.user.service.impl;
 
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
+import com.fu.infrastructure.cloudinary.CloudinaryService;
 import com.fu.user.dto.*;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserLearningPreferences;
@@ -14,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -31,6 +33,9 @@ public class ProfileServiceImpl implements ProfileService {
     private final UserRepository userRepository;
     private final UserLearningPreferencesRepository preferencesRepository;
     private final UserMapper userMapper;
+    private final CloudinaryService cloudinaryService;
+
+    private static final String AVATAR_FOLDER = "satori/avatars";
 
     // ── GET /api/v1/profile ──────────────────────────────────────────────────
 
@@ -146,7 +151,52 @@ public class ProfileServiceImpl implements ProfileService {
         return LearningPreferencesResponse.from(saved);
     }
 
+    // ── POST /api/v1/profile/avatar ────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public UserResponse uploadAvatar(UUID userId, MultipartFile file) {
+        log.info("User {} uploading avatar", userId);
+
+        User user = findActiveUser(userId);
+
+        // Delete old avatar from Cloudinary if exists
+        deleteOldAvatar(user.getAvatarUrl());
+
+        String newUrl = cloudinaryService.uploadImage(file, AVATAR_FOLDER);
+        user.setAvatarUrl(newUrl);
+
+        return userMapper.toResponse(userRepository.save(user));
+    }
+
+    // ── DELETE /api/v1/profile/avatar ───────────────────────────────────────
+
+    @Override
+    @Transactional
+    public void deleteAvatar(UUID userId) {
+        log.info("User {} deleting avatar", userId);
+
+        User user = findActiveUser(userId);
+
+        if (user.getAvatarUrl() == null) {
+            return; // nothing to delete
+        }
+
+        deleteOldAvatar(user.getAvatarUrl());
+        user.setAvatarUrl(null);
+        userRepository.save(user);
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private void deleteOldAvatar(String avatarUrl) {
+        if (avatarUrl != null && !avatarUrl.isBlank()) {
+            String publicId = cloudinaryService.extractPublicId(avatarUrl);
+            if (publicId != null) {
+                cloudinaryService.deleteImage(publicId);
+            }
+        }
+    }
 
     /**
      * Maps the single active class enrollment (if any) to ClassEnrollmentResponse.
@@ -166,6 +216,7 @@ public class ProfileServiceImpl implements ProfileService {
                 .startDate(toLocalDateTime(row[4]))
                 .endDate(toLocalDateTime(row[5]))
                 .status((String) row[6])
+                .jlptLevel(row.length > 7 ? (String) row[7] : null)
                 .role(null)
                 .build();
         return List.of(enrollment);

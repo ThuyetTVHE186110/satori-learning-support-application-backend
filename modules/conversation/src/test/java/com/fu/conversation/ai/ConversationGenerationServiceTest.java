@@ -52,17 +52,15 @@ class ConversationGenerationServiceTest {
     private static final String VALID_TOPICS_JSON = """
             [
               {
-                "title": "Daily Shopping",
+                "title": "Mua sắm hàng ngày",
                 "titleJapanese": "日常のショッピング",
-                "description": "Practice shopping vocabulary",
-                "descriptionVi": "Luyện từ vựng mua sắm",
-                "scenario": "At the supermarket",
+                "description": "Luyện các kỹ năng mua sắm tại siêu thị, cửa hàng tạp hóa hoặc thị trường",
+                "descriptionVi": "Luyện từ vựng và diễn tả liên quan đến việc mua sắm, hỏi giá cả, chọn sản phẩm",
+                "scenario": "Bạn vào siêu thị để mua các mặt hàng hàng ngày",
                 "category": "shopping",
-                "jlptLevel": "N5",
-                "difficultyScore": 2,
-                "vocabularyHints": ["買い物", "値段"],
-                "grammarPoints": ["〜てください"],
-                "usefulExpressions": ["いくらですか"],
+                "vocabularyHints": ["買い物", "値段", "スーパー", "商品"],
+                "grammarPoints": ["〜てください", "〜はいくらですか", "〜をください"],
+                "usefulExpressions": ["いくらですか", "これをください", "合わせていくらですか"],
                 "missions": []
               }
             ]
@@ -71,18 +69,51 @@ class ConversationGenerationServiceTest {
     private static final String VALID_CONVERSATIONS_JSON = """
             [
               {
-                "title": "Ordering Food",
+                "title": "Gọi đồ ăn tại nhà hàng",
                 "titleJapanese": "食べ物を注文する",
-                "description": "Practice ordering at a restaurant",
-                "descriptionVi": "Luyện gọi món ở nhà hàng",
-                "scenario": "You are a customer at a Japanese restaurant",
+                "description": "Luyện gọi món ở nhà hàng Nhật Bản",
+                "descriptionVi": "Luyện các cách gọi đồ ăn, hỏi giá, và trao đổi với nhân viên phục vụ tại nhà hàng",
+                "scenario": "Bạn là khách hàng vào nhà hàng Nhật Bản, nhân viên phục vụ sẽ chào đón và giới thiệu menu cho bạn",
                 "category": "restaurant",
-                "jlptLevel": "N5",
-                "difficultyScore": 2,
-                "vocabularyHints": ["食べ物", "注文"],
-                "grammarPoints": ["〜をください"],
-                "usefulExpressions": ["これをください"],
-                "missions": []
+                "aiRole": "Nhân viên phục vụ nhà hàng",
+                "learnerRole": "Khách hàng",
+                "vocabularyHints": ["食べ物", "注文", "メニュー", "値段"],
+                "grammarPoints": ["〜をください", "〜があります", "〜はどうですか"],
+                "usefulExpressions": ["いらっしゃいませ", "これをください", "いくらですか"],
+                "missions": [
+                  {
+                    "title": "Gọi một món ăn",
+                    "titleJapanese": "一品注文する",
+                    "titleVi": "Gọi một món ăn",
+                    "description": "Bạn phải gọi ít nhất một món ăn từ menu, hỏi giá và nội dung của nó",
+                    "descriptionVi": "Đọc menu, chọn một món ăn, hỏi giá tiền, và xác nhận đơn hàng",
+                    "missionType": "TRANSACTIONAL",
+                    "successCriteria": {
+                      "requiredActions": ["gọi một món ăn", "hỏi giá tiền", "xác nhận đơn hàng"],
+                      "requiredVocabulary": ["〜をください", "値段"],
+                      "completionConditions": "Khách hàng gọi thành công một món ăn"
+                    },
+                    "requiredVocabulary": ["メニュー", "注文", "値段"],
+                    "requiredGrammar": ["〜をください", "いくらですか"],
+                    "orderIndex": 1
+                  },
+                  {
+                    "title": "Thương lượng về danh sách ăn chay",
+                    "titleJapanese": "ベジタリアン料理について聞く",
+                    "titleVi": "Hỏi về món ăn chay",
+                    "description": "Hỏi xem có món ăn chay nào không và danh sách các thành phần",
+                    "descriptionVi": "Bạn là người ăn chay, hãy hỏi nhân viên về các lựa chọn ăn chay có sẵn",
+                    "missionType": "INFORMATION_GATHERING",
+                    "successCriteria": {
+                      "requiredActions": ["hỏi về món ăn chay", "liệt kê các thành phần"],
+                      "requiredVocabulary": ["野菜", "ベジタリアン"],
+                      "completionConditions": "Nhân viên cung cấp thông tin về các lựa chọn ăn chay"
+                    },
+                    "requiredVocabulary": ["野菜", "材料"],
+                    "requiredGrammar": ["〜はありますか", "〜について"],
+                    "orderIndex": 2
+                  }
+                ]
               }
             ]
             """;
@@ -172,7 +203,7 @@ class ConversationGenerationServiceTest {
                     generationService.generateTopics(Course.JlptLevel.N5, "shopping", null, 1);
 
             assertThat(result).hasSize(1);
-            assertThat(result.get(0).getTitle()).isEqualTo("Daily Shopping");
+            assertThat(result.get(0).getTitle()).isEqualTo("Mua sắm hàng ngày");
             assertThat(result.get(0).getTitleJapanese()).isEqualTo("日常のショッピング");
             assertThat(result.get(0).getCategory()).isEqualTo("shopping");
         }
@@ -187,7 +218,7 @@ class ConversationGenerationServiceTest {
                     generationService.generateTopics(null, null, null, 1);
 
             assertThat(result).hasSize(1);
-            assertThat(result.get(0).getTitle()).isEqualTo("Daily Shopping");
+            assertThat(result.get(0).getTitle()).isEqualTo("Mua sắm hàng ngày");
         }
 
         @Test
@@ -288,10 +319,14 @@ class ConversationGenerationServiceTest {
             stubChatResponse(VALID_CONVERSATIONS_JSON);
 
             List<GeneratedConversationSuggestionResponse> result =
-                    generationService.generateConversationsForTopic(topicId, courseId, null, 1);
+                    generationService.generateConversationsForTopic(topicId, courseId, "Restaurant Ordering", 
+                            "Practice ordering food at a restaurant", 2, Course.JlptLevel.N5);
 
             assertThat(result).hasSize(1);
-            assertThat(result.get(0).getTitle()).isEqualTo("Ordering Food");
+            assertThat(result.get(0).getTitle()).isEqualTo("Gọi đồ ăn tại nhà hàng");
+            assertThat(result.get(0).getAiRole()).isEqualTo("Nhân viên phục vụ nhà hàng");
+            assertThat(result.get(0).getLearnerRole()).isEqualTo("Khách hàng");
+            assertThat(result.get(0).getMissions()).hasSize(2);
         }
 
         @Test
@@ -300,38 +335,38 @@ class ConversationGenerationServiceTest {
             when(topicRepository.findById(topicId)).thenReturn(Optional.empty());
 
             List<GeneratedConversationSuggestionResponse> result =
-                    generationService.generateConversationsForTopic(topicId, courseId, null, 1);
-
-            assertThat(result).isEmpty();
-            verify(chatClient, never()).prompt();
+                    generationService.generateConversationsForTopic(topicId, courseId, "Title", "Description", 1, 
+                            Course.JlptLevel.N5);
         }
 
         @Test
-        @DisplayName("Should use jlptLevel override when provided")
-        void shouldUseJlptLevelOverrideWhenProvided() {
+        @DisplayName("Should use provided jlptLevel from course in prompt")
+        void shouldUseProvidedJlptLevelFromCourseInPrompt() {
             when(topicRepository.findById(topicId)).thenReturn(Optional.of(topic));
             when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
             when(vocabularyRepository.findByCourseId(any(), any())).thenReturn(new PageImpl<>(List.of()));
             when(grammarPointRepository.findByCourseId(any(), any())).thenReturn(new PageImpl<>(List.of()));
             ArgumentCaptor<String> userCaptor = stubChatResponseAndCaptureUserPrompt(VALID_CONVERSATIONS_JSON);
 
-            generationService.generateConversationsForTopic(topicId, courseId, Course.JlptLevel.N3, 1);
+            generationService.generateConversationsForTopic(topicId, courseId, "Title", "Description", 1, 
+                    Course.JlptLevel.N3);
 
             assertThat(userCaptor.getValue()).contains("N3");
         }
 
         @Test
-        @DisplayName("Should fall back to topic JLPT level when override not provided")
-        void shouldFallbackToTopicJlptLevelWhenOverrideNull() {
+        @DisplayName("Should handle null jlptLevel gracefully")
+        void shouldHandleNullJlptLevelGracefully() {
             when(topicRepository.findById(topicId)).thenReturn(Optional.of(topic));
             when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
             when(vocabularyRepository.findByCourseId(any(), any())).thenReturn(new PageImpl<>(List.of()));
             when(grammarPointRepository.findByCourseId(any(), any())).thenReturn(new PageImpl<>(List.of()));
             ArgumentCaptor<String> userCaptor = stubChatResponseAndCaptureUserPrompt(VALID_CONVERSATIONS_JSON);
 
-            generationService.generateConversationsForTopic(topicId, courseId, null, 1);
+            generationService.generateConversationsForTopic(topicId, courseId, "Title", "Description", 1, null);
 
-            assertThat(userCaptor.getValue()).contains("N5"); // topic's JLPT
+            String userPrompt = userCaptor.getValue();
+            assertThat(userPrompt).doesNotContain("Target JLPT Level:");
         }
 
         @Test
@@ -351,7 +386,8 @@ class ConversationGenerationServiceTest {
             when(callSpec.content()).thenThrow(new RuntimeException("API error"));
 
             List<GeneratedConversationSuggestionResponse> result =
-                    generationService.generateConversationsForTopic(topicId, courseId, null, 1);
+                    generationService.generateConversationsForTopic(topicId, courseId, "Title", "Description", 1, 
+                            Course.JlptLevel.N5);
 
             assertThat(result).isEmpty();
         }

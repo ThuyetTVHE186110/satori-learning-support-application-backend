@@ -54,11 +54,11 @@ public class AssignmentDueReminderScheduler {
             WHERE a.status = 'PUBLISHED'
               AND a.due_date > ?
               AND a.due_date <= ?
-              AND a.deleted_at IS NULL
+              AND cm.removed_at IS NULL
               AND NOT EXISTS (
                   SELECT 1 FROM assignment.assignment_submissions s 
                   WHERE s.assignment_id = a.id 
-                    AND s.student_id = cm.user_id
+                    AND s.user_id = cm.user_id
                     AND s.status IN ('SUBMITTED', 'GRADED')
               )
             """;

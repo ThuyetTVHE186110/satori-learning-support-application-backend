@@ -8,6 +8,7 @@ import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
 import com.fu.clazz.dto.response.LearnerClassResponse;
+import com.fu.clazz.dto.response.TeacherClassHistoryResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -53,6 +54,24 @@ public interface ClassService {
     ClassMemberResponse addMember(UUID classId, AddMemberRequest request, UUID managerId);
 
     /**
+     * Add multiple members to a class in a batch operation (MANAGER only).
+     * All-or-nothing transaction: if any validation fails, no members are added.
+     * 
+     * Validation:
+     * - Each learner must have status = INACTIVE
+     * - Each learner must not have an active ClassMember record (removedAt must be null or not exist)
+     * - Total members after adding must not exceed maxStudents
+     * 
+     * @param classId the class to add members to
+     * @param request contains list of learnerIds to add
+     * @param managerId the manager performing the operation
+     * @return list of ClassMemberResponse for all added members
+     * @throws com.fu.common.exception.ResourceNotFoundException if class or any learner not found
+     * @throws com.fu.common.exception.BusinessException if learner is not INACTIVE, already active member, or would exceed capacity
+     */
+    List<ClassMemberResponse> addMembers(UUID classId, com.fu.clazz.dto.request.AddMembersRequest request, UUID managerId);
+
+    /**
      * Remove a member from a class (MANAGER only)
      */
     void removeMember(UUID classId, UUID userId, UUID managerId);
@@ -74,12 +93,29 @@ public interface ClassService {
 
     /**
      * Get eligible learners to add to a class (Active or Inactive, and not currently an active member)
+     * Optional filtering by a closed class to show members from that specific class
+     * 
+     * @param classId the target class ID to add members to
+     * @param keyword optional search term
+     * @param filterByClassId optional closed class ID to filter eligible learners by
+     * @param pageable pagination parameters
+     * @return paginated list of eligible learners
      */
-    Page<com.fu.user.dto.UserResponse> getEligibleLearners(UUID classId, String keyword, Pageable pageable);
+    Page<com.fu.user.dto.UserResponse> getEligibleLearners(UUID classId, String keyword, UUID filterByClassId, Pageable pageable);
 
     /**
      * Get learner's enrolled classes (ACTIVE or CLOSED status, active membership only)
      * Returns classes where ClassMember.removedAt IS NULL
      */
     List<LearnerClassResponse> getLearnerClasses(UUID learnerId);
+
+    /**
+     * Get all classes a teacher has taught or is currently teaching
+     * Returns paginated list sorted by assignment date (descending)
+     * 
+     * @param teacherId the teacher UUID
+     * @param pageable pagination parameters
+     * @return paginated list of class information
+     */
+    Page<TeacherClassHistoryResponse> getTeacherClassHistory(UUID teacherId, Pageable pageable);
 }

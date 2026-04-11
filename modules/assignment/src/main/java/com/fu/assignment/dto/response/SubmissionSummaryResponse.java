@@ -9,6 +9,7 @@ import java.util.UUID;
 
 /**
  * Summary submission response (list view).
+ * Includes ALL students in class: those with submissions and those without (NOT_STARTED).
  */
 @Data
 @Builder
@@ -17,12 +18,8 @@ import java.util.UUID;
 public class SubmissionSummaryResponse {
 
     private UUID id;
-    private UUID assignmentId;
-    private String assignmentTitle;
-    private UUID userId;
     private String userFullName;
     private SubmissionStatus status;
-    private Integer attemptNumber;
     private BigDecimal score;
     private LocalDateTime submittedAt;
 

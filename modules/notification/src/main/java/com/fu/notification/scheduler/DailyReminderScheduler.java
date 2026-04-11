@@ -53,7 +53,7 @@ public class DailyReminderScheduler {
                 .type(NotificationType.DAILY_REMINDER)
                 .priority(NotificationPriority.NORMAL)
                 .title("📚 Đến giờ học rồi!")
-                .body("Hãy dành ít phút học tiếng Hàn mỗi ngày để duy trì streak nhé!")
+                .body("Hãy dành ít phút học tiếng Nhật mỗi ngày để duy trì streak nhé!")
                 .data(data)
                 .actionUrl("/learn")
                 .build();

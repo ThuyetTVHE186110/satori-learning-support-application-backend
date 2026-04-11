@@ -10,6 +10,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.UUID;
 
@@ -19,10 +20,12 @@ import java.util.UUID;
  * All endpoints require a valid JWT (isAuthenticated()).
  *
  * Endpoints:
- *   GET  /api/v1/profile                          → enriched profile (user info + learning prefs)
- *   PUT  /api/v1/profile                          → update basic profile fields
- *   GET  /api/v1/profile/learning-preferences     → learning preferences only
- *   PUT  /api/v1/profile/learning-preferences     → create / update learning preferences
+ *   GET    /api/v1/profile                          → enriched profile (user info + learning prefs)
+ *   PUT    /api/v1/profile                          → update basic profile fields
+ *   POST   /api/v1/profile/avatar                   → upload avatar image (multipart)
+ *   DELETE /api/v1/profile/avatar                   → remove avatar
+ *   GET    /api/v1/profile/learning-preferences     → learning preferences only
+ *   PUT    /api/v1/profile/learning-preferences     → create / update learning preferences
  */
 @RestController
 @RequestMapping("/api/v1/profile")
@@ -54,6 +57,31 @@ public class ProfileController {
         UUID userId = extractUserId(userDetails);
         UserResponse response = profileService.updateMyProfile(userId, request);
         return ResponseEntity.ok(ApiResponse.success("Cập nhật thông tin thành công", response));
+    }
+
+    /**
+     * POST /api/v1/profile/avatar
+     * Upload or replace the user's avatar image.
+     */
+    @PostMapping(value = "/avatar", consumes = "multipart/form-data")
+    public ResponseEntity<ApiResponse<UserResponse>> uploadAvatar(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @RequestParam("file") MultipartFile file) {
+        UUID userId = extractUserId(userDetails);
+        UserResponse response = profileService.uploadAvatar(userId, file);
+        return ResponseEntity.ok(ApiResponse.success("Cập nhật ảnh đại diện thành công", response));
+    }
+
+    /**
+     * DELETE /api/v1/profile/avatar
+     * Remove the user's avatar (reset to default).
+     */
+    @DeleteMapping("/avatar")
+    public ResponseEntity<ApiResponse<Void>> deleteAvatar(
+            @AuthenticationPrincipal UserDetails userDetails) {
+        UUID userId = extractUserId(userDetails);
+        profileService.deleteAvatar(userId);
+        return ResponseEntity.ok(ApiResponse.success("Xóa ảnh đại diện thành công", null));
     }
 
     /**
