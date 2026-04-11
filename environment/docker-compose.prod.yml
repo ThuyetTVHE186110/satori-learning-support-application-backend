@@ -33,10 +33,7 @@ services:
 
     # ==================== Application ====================
     app:
-        build:
-            context: ..
-            dockerfile: environment/Dockerfile
-        image: satori-backend:prod
+        image: ${APP_IMAGE:-satori-backend:prod}
         container_name: satori-app
         restart: unless-stopped
         ports:
