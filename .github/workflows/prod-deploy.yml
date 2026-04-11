@@ -12,8 +12,8 @@ jobs:
         name: Build & Push Image
         runs-on: ubuntu-latest
         outputs:
-            image: ${{ steps.meta.outputs.tags && format('ghcr.io/{0}:{1}', github.repository, steps.sha.outputs.short) }}
             image_tag: ${{ steps.sha.outputs.short }}
+            repo_lower: ${{ steps.repo.outputs.name }}
 
         steps:
             - name: Checkout source
@@ -22,6 +22,10 @@ jobs:
             - name: Short SHA
               id: sha
               run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+            - name: Lowercase repository name
+              id: repo
+              run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
             - name: Log in to GHCR
               uses: docker/login-action@v3
@@ -40,8 +44,8 @@ jobs:
                   file: environment/Dockerfile
                   push: true
                   tags: |
-                      ghcr.io/${{ github.repository }}:${{ steps.sha.outputs.short }}
-                      ghcr.io/${{ github.repository }}:latest
+                      ghcr.io/${{ steps.repo.outputs.name }}:${{ steps.sha.outputs.short }}
+                      ghcr.io/${{ steps.repo.outputs.name }}:latest
                   # Layer cache — speeds up subsequent builds significantly
                   cache-from: type=gha
                   cache-to: type=gha,mode=max
@@ -91,7 +95,7 @@ jobs:
                   username: ${{ secrets.PROD_SERVER_USER }}
                   key: ${{ secrets.PROD_SSH_KEY }}
                   script: |
-                      IMAGE="ghcr.io/${{ github.repository }}:${{ needs.build.outputs.image_tag }}"
+                      IMAGE="ghcr.io/${{ needs.build.outputs.repo_lower }}:${{ needs.build.outputs.image_tag }}"
                       echo "Deploying image: $IMAGE"
 
                       # Authenticate to GHCR
