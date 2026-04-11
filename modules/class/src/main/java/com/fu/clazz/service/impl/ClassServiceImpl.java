@@ -8,6 +8,7 @@ import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
 import com.fu.clazz.dto.response.LearnerClassResponse;
+import com.fu.clazz.dto.response.TeacherClassHistoryResponse;
 import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.entity.ClassStatus;
 import com.fu.clazz.entity.ClassTeacherHistory;
@@ -33,6 +34,7 @@ import com.fu.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -515,15 +517,51 @@ public class ClassServiceImpl implements ClassService {
     }
 
     @Override
-    public Page<com.fu.user.dto.UserResponse> getEligibleLearners(UUID classId, String keyword, Pageable pageable) {
-        log.debug("Lấy danh sách học viên đủ điều kiện thêm vào lớp: {}", classId);
+    public Page<com.fu.user.dto.UserResponse> getEligibleLearners(UUID classId, String keyword, UUID filterByClassId, Pageable pageable) {
+        log.debug("Lấy danh sách học viên đủ điều kiện thêm vào lớp: {} với filter: {}", classId, filterByClassId);
 
         // Verify class exists
         findClassOrThrow(classId);
+
+        // If filterByClassId is provided, validate it exists and is CLOSED
+        if (filterByClassId != null) {
+            Clazz filterClass = findClassOrThrow(filterByClassId);
+            if (filterClass.getStatus() != ClassStatus.CLOSED) {
+                throw new BusinessException("INVALID_FILTER_CLASS", "Lớp lọc phải có trạng thái CLOSED.");
+            }
+        }
+        
         List<UUID> excludedIds = classMemberRepository.findUserIdsInActiveClasses();
         Page<User> usersPage = userRepository.findEligibleLearnersForClass(keyword, excludedIds, pageable);
-
-        return usersPage.map(user -> com.fu.user.dto.UserResponse.builder().id(user.getId()).email(user.getEmail()).firstName(user.getFirstName()).lastName(user.getLastName()).displayName(user.getDisplayName()).fullName(user.getFullName()).avatarUrl(user.getAvatarUrl()).phoneNumber(user.getPhoneNumber()).dateOfBirth(user.getDateOfBirth()).role(user.getRole()).status(user.getStatus()).createdAt(user.getCreatedAt()).updatedAt(user.getUpdatedAt()).lastLoginAt(user.getLastLoginAt()).build());
+        
+        List<com.fu.user.dto.UserResponse> responses = usersPage.getContent().stream()
+                .map(user -> com.fu.user.dto.UserResponse.builder()
+                        .id(user.getId())
+                        .email(user.getEmail())
+                        .firstName(user.getFirstName())
+                        .lastName(user.getLastName())
+                        .displayName(user.getDisplayName())
+                        .fullName(user.getFullName())
+                        .avatarUrl(user.getAvatarUrl())
+                        .phoneNumber(user.getPhoneNumber())
+                        .dateOfBirth(user.getDateOfBirth())
+                        .role(user.getRole())
+                        .status(user.getStatus())
+                        .createdAt(user.getCreatedAt())
+                        .updatedAt(user.getUpdatedAt())
+                        .lastLoginAt(user.getLastLoginAt())
+                        .build())
+                .toList();
+        
+        // If filterByClassId is provided, filter by membership in that class
+        if (filterByClassId != null) {
+            List<UUID> filterClassMemberIds = classMemberRepository.findUserIdsByClosedClass(filterByClassId);
+            responses = responses.stream()
+                    .filter(response -> filterClassMemberIds.contains(response.getId()))
+                    .toList();
+        }
+        
+        return new PageImpl<>(responses, pageable, responses.size());
     }
 
     /**
@@ -682,5 +720,44 @@ public class ClassServiceImpl implements ClassService {
         return classes.stream()
                 .map(classMapper::toLearnerClassResponse)
                 .collect(Collectors.toList());
+    }
+
+    // =====================================================
+    // TEACHER CLASS HISTORY
+    // =====================================================
+    @Override
+    public Page<TeacherClassHistoryResponse> getTeacherClassHistory(UUID teacherId, Pageable pageable) {
+        log.info("Lấy danh sách lớp đã/đang dạy của giáo viên: {}", teacherId);
+
+        // Fetch teacher's class history sorted by assignedAt DESC
+        Page<ClassTeacherHistory> historyPage = classTeacherHistoryRepository.findTeacherClassHistory(teacherId, pageable);
+
+        // Map each history record to response DTO with class information
+        List<TeacherClassHistoryResponse> responses = historyPage.getContent().stream()
+                .map(history -> {
+                    Clazz clazz = classRepository.findById(history.getClassId())
+                            .orElse(null);
+
+                    if (clazz == null) {
+                        log.warn("Không tìm thấy lớp học với ID: {}", history.getClassId());
+                        return null;
+                    }
+
+                    TeacherClassHistoryResponse response = classMapper.toTeacherClassHistoryResponse(clazz);
+                    
+                    // Enrich with course info
+                    if (clazz.getCourseId() != null) {
+                        courseRepository.findById(clazz.getCourseId()).ifPresent(course -> {
+                            response.setCourseName(course.getName());
+                            response.setCourseLevel(course.getJlptLevel() != null ? course.getJlptLevel().name() : null);
+                        });
+                    }
+
+                    return response;
+                })
+                .filter(r -> r != null)
+                .collect(Collectors.toList());
+
+        return new org.springframework.data.domain.PageImpl<>(responses, pageable, historyPage.getTotalElements());
     }
 }

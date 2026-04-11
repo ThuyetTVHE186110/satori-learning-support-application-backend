@@ -538,9 +538,8 @@ class AssignmentServiceImplTest {
                     .build();
 
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
-            stubTeacherAccess();
-            given(classRepository.findByIdAndNotDeleted(targetClassId)).willReturn(Optional.of(targetClazz));
-            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(targetClassId)).willReturn(Optional.of(teacherId));
+            given(classRepository.findByIdAndNotDeleted(any(UUID.class))).willReturn(Optional.of(targetClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(any(UUID.class))).willReturn(Optional.of(teacherId));
 
             Assignment clonedAssignment = Assignment.builder()
                     .title("Cloned Quiz")

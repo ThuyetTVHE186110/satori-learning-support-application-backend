@@ -6,6 +6,7 @@ import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
 import com.fu.clazz.dto.response.LearnerClassResponse;
+import com.fu.clazz.dto.response.TeacherClassHistoryResponse;
 import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.entity.Clazz;
 import org.mapstruct.*;
@@ -72,4 +73,11 @@ public interface ClassMapper {
      * Map Clazz entity to LearnerClassResponse (lightweight)
      */
     LearnerClassResponse toLearnerClassResponse(Clazz clazz);
+
+    /**
+     * Map Clazz entity to TeacherClassHistoryResponse
+     */
+    @Mapping(target = "courseName", ignore = true) // Set by service
+    @Mapping(target = "courseLevel", ignore = true) // Set by service
+    TeacherClassHistoryResponse toTeacherClassHistoryResponse(Clazz clazz);
 }
