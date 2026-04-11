@@ -60,5 +60,12 @@ public interface ClassMemberRepository extends JpaRepository<ClassMember, UUID> 
 
     @Query("SELECT m.userId FROM ClassMember m WHERE m.classId = :classId AND m.removedAt IS NULL")
     java.util.List<UUID> findActiveUserIdsByClassId(@Param("classId") UUID classId);
+
+    /**
+     * Find all user IDs who were members of a closed class (regardless of removedAt status)
+     * Used for filtering eligible learners to show students from a specific closed class
+     */
+    @Query("SELECT m.userId FROM ClassMember m WHERE m.classId = :closedClassId")
+    java.util.List<UUID> findUserIdsByClosedClass(@Param("closedClassId") UUID closedClassId);
 }
 
