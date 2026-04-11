@@ -216,6 +216,7 @@ public class ProfileServiceImpl implements ProfileService {
                 .startDate(toLocalDateTime(row[4]))
                 .endDate(toLocalDateTime(row[5]))
                 .status((String) row[6])
+                .jlptLevel(row.length > 7 ? (String) row[7] : null)
                 .role(null)
                 .build();
         return List.of(enrollment);

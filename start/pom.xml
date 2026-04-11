@@ -70,6 +70,10 @@
             <groupId>com.fu</groupId>
             <artifactId>notification</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.fu</groupId>
+            <artifactId>analytics</artifactId>
+        </dependency>
 
         <!-- Spring Boot -->
         <dependency>

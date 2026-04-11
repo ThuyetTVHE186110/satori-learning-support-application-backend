@@ -6,9 +6,11 @@ import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.service.ingestion.MnNSectionSplitter;
 import com.fu.curriculumimport.util.LlmResponseUtils;
+import com.fu.curriculumimport.util.LlmStreamCollector;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
@@ -94,6 +96,18 @@ public class ContentClassifierAgent {
         // Fast-path 1: trust structural section type from MnNSectionSplitter
         ClassificationResult.ContentType structuralType = mapSectionType(chunk.getSectionType());
         if (structuralType != null) {
+            // DIALOG sections in MnN Vietnamese companion editions are often fully
+            // translated to Vietnamese with no Japanese text. Routing these to
+            // VOCABULARY causes a ~100s LLM call on non-extractable content.
+            // Require a minimum density of Japanese characters before accepting.
+            if (MnNSectionSplitter.DIALOG.equals(chunk.getSectionType())
+                    && !hasExtractableJapanese(chunk.getContent())) {
+                return ClassificationResult.builder()
+                        .contentType(ClassificationResult.ContentType.OTHER)
+                        .confidence(0.90)
+                        .reasoning("Structural: DIALOG with no extractable Japanese — skipping extraction")
+                        .build();
+            }
             return ClassificationResult.builder()
                     .contentType(structuralType)
                     .confidence(0.95)
@@ -166,6 +180,14 @@ public class ContentClassifierAgent {
         // Fast-path: trust structural section type from MnNSectionSplitter
         ClassificationResult.ContentType structuralType = mapSectionType(chunk.getSectionType());
         if (structuralType != null) {
+            if (MnNSectionSplitter.DIALOG.equals(chunk.getSectionType())
+                    && !hasExtractableJapanese(chunk.getContent())) {
+                return ClassificationResult.builder()
+                        .contentType(ClassificationResult.ContentType.OTHER)
+                        .confidence(0.90)
+                        .reasoning("Structural: DIALOG with no extractable Japanese — skipping extraction")
+                        .build();
+            }
             return ClassificationResult.builder()
                     .contentType(structuralType)
                     .confidence(0.95)
@@ -181,11 +203,15 @@ public class ContentClassifierAgent {
                     "pageEnd", String.valueOf(chunk.getPageEnd()),
                     "content", truncateForClassification(chunk.getContent())));
 
-            String response = chatClient.prompt()
-                    .system(systemPrompt)
-                    .user(userPrompt)
-                    .call()
-                    .content();
+            String response = LlmStreamCollector.collect(
+                    chatClient.prompt()
+                            .system(systemPrompt)
+                            .user(userPrompt)
+                            .options(OpenAiChatOptions.builder()
+                                    .temperature(0.0).seed(42)
+                                    .build())
+                            .stream()
+                            .content());
 
             return parseClassificationResponse(response);
 
@@ -248,6 +274,27 @@ public class ContentClassifierAgent {
             log.warn("Failed to parse classification response: {}", e.getMessage());
             return ClassificationResult.fallback();
         }
+    }
+
+    /**
+     * MnN Vietnamese companion DIALOG sections are often fully translated to Vietnamese
+     * with zero Japanese. Below this threshold, routing to an extraction agent is wasted
+     * LLM budget (~100 s per chunk with no extractable content).
+     */
+    private static final int MIN_EXTRACTABLE_JAPANESE_CHARS = 20;
+
+    static boolean hasExtractableJapanese(String content) {
+        if (content == null || content.isBlank()) return false;
+        int count = 0;
+        for (int i = 0; i < content.length(); i++) {
+            char c = content.charAt(i);
+            // Hiragana (0x3040-0x309F) | Katakana (0x30A0-0x30FF) | CJK Unified Ideographs (0x4E00-0x9FFF)
+            if ((c >= 0x3040 && c <= 0x30FF) || (c >= 0x4E00 && c <= 0x9FFF)) {
+                count++;
+                if (count >= MIN_EXTRACTABLE_JAPANESE_CHARS) return true;
+            }
+        }
+        return false;
     }
 
     /**

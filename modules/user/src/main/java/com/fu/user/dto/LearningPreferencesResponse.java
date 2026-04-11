@@ -1,5 +1,7 @@
 package com.fu.user.dto;
 
+import com.fu.infrastructure.learner.LearningInsightPoint;
+import com.fu.infrastructure.learner.SkillScore;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -38,9 +40,12 @@ public class LearningPreferencesResponse {
     private Boolean streakReminderEnabled;
     private LocalTime reminderTime;
 
-    // Personalization insights
-    private List<Object> weakPoints;
-    private List<Object> strongPoints;
+    // Personalization insights (typed)
+    private List<LearningInsightPoint> weakPoints;
+    private List<LearningInsightPoint> strongPoints;
+
+    // Satori Pentagon skill radar scores
+    private List<SkillScore> skillScores;
 
     /**
      * Build from entity, converting String[] to List<String>.
@@ -60,6 +65,7 @@ public class LearningPreferencesResponse {
                 .reminderTime(prefs.getReminderTime())
                 .weakPoints(prefs.getWeakPoints() != null ? prefs.getWeakPoints() : List.of())
                 .strongPoints(prefs.getStrongPoints() != null ? prefs.getStrongPoints() : List.of())
+                .skillScores(prefs.getSkillScores() != null ? prefs.getSkillScores() : defaultSkillScores())
                 .build();
     }
 
@@ -79,6 +85,20 @@ public class LearningPreferencesResponse {
                 .reminderTime(LocalTime.of(20, 0))
                 .weakPoints(List.of())
                 .strongPoints(List.of())
+                .skillScores(defaultSkillScores())
                 .build();
+    }
+
+    /**
+     * Default Satori Pentagon scores — all zeros (no data yet).
+     */
+    private static List<SkillScore> defaultSkillScores() {
+        return List.of(
+                SkillScore.defaultScore("VOCABULARY"),
+                SkillScore.defaultScore("GRAMMAR"),
+                SkillScore.defaultScore("PRONUNCIATION"),
+                SkillScore.defaultScore("FLUENCY"),
+                SkillScore.defaultScore("SPEAKING")
+        );
     }
 }

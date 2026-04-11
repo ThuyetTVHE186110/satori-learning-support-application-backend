@@ -49,4 +49,13 @@ public interface ItemMasteryRepository extends JpaRepository<ItemMastery, UUID> 
     List<ItemMastery> findForDimensionVote(
             @Param("userId") UUID userId,
             @Param("entityIds") Collection<UUID> entityIds);
+
+    /** Weak items: mastery level 0 or 1 (needs work / familiar). */
+    List<ItemMastery> findByUserIdAndMasteryLevelLessThanEqual(UUID userId, int level);
+
+    /** Strong items: mastery level 2 or 3 (proficient / mastered). */
+    List<ItemMastery> findByUserIdAndMasteryLevelGreaterThanEqual(UUID userId, int level);
+
+    /** All mastery records for a user, ordered by EMA score ascending (weakest first). */
+    List<ItemMastery> findByUserIdOrderByEmaScoreAsc(UUID userId);
 }

@@ -1,4 +1,4 @@
-package com.fu.common.event;
+package com.fu.infrastructure.event;
 
 import lombok.Getter;
 import org.springframework.context.ApplicationEvent;
@@ -20,7 +20,7 @@ public class AssignmentGradedEvent extends ApplicationEvent {
     private final Double maxScore;
 
     public AssignmentGradedEvent(Object source, UUID assignmentId, UUID submissionId,
-                                  UUID studentId, String assignmentTitle, 
+                                  UUID studentId, String assignmentTitle,
                                   Double score, Double maxScore) {
         super(source);
         this.assignmentId = assignmentId;

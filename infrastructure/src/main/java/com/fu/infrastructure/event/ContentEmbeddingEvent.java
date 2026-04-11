@@ -1,4 +1,4 @@
-package com.fu.common.event;
+package com.fu.infrastructure.event;
 
 import lombok.Getter;
 import org.springframework.context.ApplicationEvent;

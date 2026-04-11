@@ -22,10 +22,6 @@ public class AssessmentResult {
     private boolean success;
     private String errorMessage;
 
-    // Japanese pitch accent / mora timing — always 0, kept for API/DB compatibility
-    private double pitchAccentScore;
-    private double moraTimingScore;
-
     // Azure-specific fields (null when using SpeechSuper)
     private double completenessScore;
     private String providerName; // "AZURE" | "SPEECHSUPER"

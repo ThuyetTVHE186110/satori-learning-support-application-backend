@@ -174,7 +174,8 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
                 co.name                                                 AS course_name,
                 c.start_date                                            AS start_date,
                 c.end_date                                              AS end_date,
-                                c.status::TEXT                                          AS status
+                c.status::TEXT                                          AS status,
+                co.jlpt_level::TEXT                                     AS jlpt_level
             FROM user_management.class_members cm
             JOIN user_management.classes c   ON c.id  = cm.class_id
             JOIN learning_content.courses co ON co.id = c.course_id

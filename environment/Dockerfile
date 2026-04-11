@@ -30,6 +30,7 @@ COPY modules/practice/pom.xml modules/practice/
 COPY modules/pronunciation/pom.xml modules/pronunciation/
 COPY modules/roleplay/pom.xml modules/roleplay/
 COPY modules/user/pom.xml modules/user/
+COPY modules/analytics/pom.xml modules/analytics/
 COPY start/pom.xml start/
 
 # Pre-fetch all dependencies including plugin dependencies
@@ -50,6 +51,7 @@ COPY modules/practice/src modules/practice/src
 COPY modules/pronunciation/src modules/pronunciation/src
 COPY modules/roleplay/src modules/roleplay/src
 COPY modules/user/src modules/user/src
+COPY modules/analytics/src modules/analytics/src
 COPY start/src start/src
 
 # Build — skip tests (tests run in CI, not in image build)

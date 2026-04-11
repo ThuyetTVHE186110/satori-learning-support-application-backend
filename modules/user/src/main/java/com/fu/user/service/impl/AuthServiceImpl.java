@@ -1,6 +1,6 @@
 package com.fu.user.service.impl;
 
-import com.fu.common.event.PasswordChangedEvent;
+import com.fu.infrastructure.event.PasswordChangedEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.infrastructure.email.EmailService;

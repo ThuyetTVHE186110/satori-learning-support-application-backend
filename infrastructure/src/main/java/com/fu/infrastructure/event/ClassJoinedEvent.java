@@ -1,4 +1,4 @@
-package com.fu.common.event;
+package com.fu.infrastructure.event;
 
 import lombok.Getter;
 import org.springframework.context.ApplicationEvent;
@@ -17,7 +17,7 @@ public class ClassJoinedEvent extends ApplicationEvent {
     private final String className;
     private final String teacherName;
 
-    public ClassJoinedEvent(Object source, UUID userId, UUID classId, 
+    public ClassJoinedEvent(Object source, UUID userId, UUID classId,
                             String className, String teacherName) {
         super(source);
         this.userId = userId;

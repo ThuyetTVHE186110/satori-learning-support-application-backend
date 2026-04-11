@@ -70,7 +70,8 @@ public class ChatbotFilter {
                         "GRAMMAR",
                         "GRAMMAR_EXPLANATION",
                         "DIALOG",
-                        "EXAMPLE"
+                        "EXAMPLE",
+                        EmbeddingService.DOC_AI_CHUNK_TYPE
                 ))
                 .similarityThreshold(0.30)
                 .topK(8)

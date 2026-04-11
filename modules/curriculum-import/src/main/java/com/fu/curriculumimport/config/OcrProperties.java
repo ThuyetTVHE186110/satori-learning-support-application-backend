@@ -7,7 +7,8 @@ import org.springframework.stereotype.Component;
 /**
  * Configuration properties for the OCR subsystem.
  * Bound from curriculum-import.ocr.* in application.yml.
- * Uses Google Cloud Vision DOCUMENT_TEXT_DETECTION.
+ * Uses Google Cloud Document AI Layout Parser as the sole OCR provider,
+ * with GPT-4o Vision as the Tier 2 fallback for chunks Document AI cannot cover.
  */
 @Data
 @Component
@@ -40,25 +41,19 @@ public class OcrProperties {
     private double minConfidence = 0.5;
 
     /**
-     * Path to the Google Cloud service-account JSON key file.
+     * Path to the Google Cloud service-account JSON key file used by Document AI.
      * If empty, falls back to Application Default Credentials
      * ({@code GOOGLE_APPLICATION_CREDENTIALS} env var).
      */
     private String credentialsFile = "";
 
-    /**
-     * Number of pages sent in a single {@code batchAnnotateImages} call to Google Vision.
-     * Google Vision supports up to 16 images per batch request.
-     */
-    private int googleVisionBatchSize = 8;
-
-    // ── Document AI Layout Parser (Tier 0) ────────────────────────────────────
+    // ── Document AI Layout Parser ─────────────────────────────────────────────
 
     /**
-     * Whether to enable Document AI Layout Parser as Tier 0 for structured table extraction.
-     * When true, each scanned page is first sent to Document AI for proper table detection.
-     * Falls back to Google Vision OCR if Document AI fails or returns empty.
+     * Whether to enable Document AI Layout Parser for structured OCR.
      * Requires documentAiProjectId, documentAiLocation, and documentAiProcessorId to be set.
+     * When disabled, scanned PDFs produce empty OCR text and rely entirely on the
+     * GPT-4o Vision Tier 2 fallback in {@code VisionPageExtractor}.
      */
     private boolean documentAiEnabled = false;
 
@@ -89,24 +84,31 @@ public class OcrProperties {
 
     /**
      * Minimum characters a Document AI page result must contain (excluding table rows)
-     * to be accepted without falling back to Google Vision.
-     *
-     * <p>Document AI Layout Parser can struggle with certain scanned PDFs, returning
-     * 5–97 chars for pages that Google Vision extracts 900–1400 chars from.
-     * Pages below this threshold (and with no structured table rows) are queued
-     * for Vision re-processing instead. Set to 0 to disable and accept any non-empty result.
-     *
-     * <p>Default 100 — same as {@link #scannedPageThreshold}, which is the point below
-     * which PDFBox native text extraction is considered inadequate for text PDFs.
+     * to be accepted. Pages below this threshold (and with no structured table rows)
+     * return empty OCR text — the GPT-4o Vision Tier 2 path in {@code VisionPageExtractor}
+     * then handles those chunks from the rendered page images.
+     * Set to 0 to accept any non-empty result.
      */
     private int documentAiMinCharsPerPage = 100;
 
-    // ── Gemini Vision (Tier 2 replacement for GPT-4o) ─────────────────────────
+    /**
+     * Whether to request semantic chunking from Document AI Layout Parser.
+     * When enabled, the response includes {@code document.chunked_document.chunks[]}
+     * — pre-chunked, heading-aware text blocks suitable for direct RAG embedding.
+     * Only applies when {@code documentAiEnabled} is also true.
+     */
+    private boolean documentAiChunkingEnabled = false;
 
     /**
-     * Google AI API key for Gemini 2.5 Flash vision extraction.
-     * Obtain from https://aistudio.google.com/app/apikey.
-     * If blank, VisionPageExtractor falls back to GPT-4o (existing behaviour).
+     * Target chunk size (in tokens) for Document AI semantic chunking.
+     * Google's Layout Parser default is 500. A value of 0 uses the service default.
      */
-    private String geminiApiKey = "";
+    private int documentAiChunkSize = 500;
+
+    /**
+     * Whether semantic chunks should include ancestor heading context
+     * (e.g. "Bài 1 > Từ vựng") prepended to the chunk text. Improves RAG retrieval
+     * quality by giving the embedder structural context.
+     */
+    private boolean documentAiIncludeAncestorHeadings = true;
 }

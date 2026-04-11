@@ -35,7 +35,10 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 -- This index accelerates:
 --   WHERE text_content ILIKE '%<keyword>%'         (substring match)
 --   ORDER BY word_similarity('<keyword>', text_content) DESC  (ranked similarity)
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_content_embeddings_text_trgm
+--
+-- Note: CONCURRENTLY is not used here because init scripts run in a single-connection
+-- context where concurrent DDL is not permitted (Docker ON_ERROR_STOP=1).
+CREATE INDEX IF NOT EXISTS idx_content_embeddings_text_trgm
     ON progress.content_embeddings
     USING GIN (text_content gin_trgm_ops);
 

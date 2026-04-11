@@ -59,12 +59,9 @@ import java.util.regex.Pattern;
  * </ol>
  *
  * <h3>Fallback</h3>
- * <p>If Document AI is disabled, unavailable, or returns an empty result,
- * {@link OcrClient} automatically falls back to {@link GoogleVisionOcrClient}.
- *
- * <h3>Pricing note</h3>
- * <p>Document AI Layout Parser costs ~$10 / 1 000 pages (vs $1.50 for Vision).
- * Enable selectively for documents expected to contain vocabulary tables.
+ * <p>If Document AI is disabled, unavailable, or returns an empty result for a page,
+ * {@link OcrClient} leaves that page empty; the GPT-4o Vision Tier 2 path in
+ * {@code VisionPageExtractor} then handles the chunk from the rendered page images.
  */
 @Slf4j
 @Component
@@ -92,9 +89,15 @@ public class DocumentAiLayoutClient {
     private final boolean enabled;
     private final String processorName;
     private final DocumentProcessorServiceClient client;
+    private final boolean chunkingEnabled;
+    private final int chunkSize;
+    private final boolean includeAncestorHeadings;
 
     public DocumentAiLayoutClient(OcrProperties props) {
         this.enabled = props.isDocumentAiEnabled();
+        this.chunkingEnabled = props.isDocumentAiChunkingEnabled();
+        this.chunkSize = props.getDocumentAiChunkSize();
+        this.includeAncestorHeadings = props.isDocumentAiIncludeAncestorHeadings();
 
         if (!enabled) {
             this.processorName = "";
@@ -140,8 +143,11 @@ public class DocumentAiLayoutClient {
             settingsBuilder.processDocumentSettings().setRetrySettings(noRetryLongTimeout);
 
             builtClient = DocumentProcessorServiceClient.create(settingsBuilder.build());
-            log.info("Document AI client initialised (processor: {}, endpoint: {})",
-                    processorName, endpoint);
+            log.info("Document AI client initialised (processor: {}, endpoint: {}, chunking: {})",
+                    processorName, endpoint,
+                    chunkingEnabled
+                            ? "on (size=" + chunkSize + ", ancestorHeadings=" + includeAncestorHeadings + ")"
+                            : "off");
         } catch (Exception e) {
             log.warn("Document AI client init failed: {} — Tier 0 disabled, will use Vision OCR",
                     e.getMessage());
@@ -165,11 +171,12 @@ public class DocumentAiLayoutClient {
      * PDFs that exceed the size limit are split into sub-PDFs as a fallback.
      *
      * @param pdfBytes raw bytes of the original PDF file
-     * @return one {@link OcrTextResult} per page, in page order;
-     *         an empty list when Document AI is unavailable or every batch fails
+     * @return an {@link OcrBatchResult} carrying per-page OCR results in page order
+     *         plus (when chunking is enabled) the document's semantic chunks;
+     *         {@link OcrBatchResult#empty()} when Document AI is unavailable or every batch fails
      */
-    public List<OcrTextResult> processDocument(byte[] pdfBytes) {
-        if (!isAvailable()) return List.of();
+    public OcrBatchResult processDocument(byte[] pdfBytes) {
+        if (!isAvailable()) return OcrBatchResult.empty();
 
         try (PDDocument fullDoc = Loader.loadPDF(new RandomAccessReadBuffer(pdfBytes))) {
             int totalPages = fullDoc.getNumberOfPages();
@@ -178,19 +185,21 @@ public class DocumentAiLayoutClient {
             if (pdfBytes.length <= MAX_PDF_BYTES) {
                 log.debug("Document AI: sending full original PDF ({} pages, {} KB)",
                         totalPages, pdfBytes.length / 1024);
-                List<OcrTextResult> results = processBatch(pdfBytes, 1, totalPages);
-                if (!results.isEmpty()) {
+                OcrBatchResult batch = processBatch(pdfBytes, 1, totalPages);
+                if (!batch.pages().isEmpty()) {
                     // Pad if Document AI returned fewer pages than expected
+                    List<OcrTextResult> results = new ArrayList<>(batch.pages());
                     while (results.size() < totalPages) {
                         results.add(OcrTextResult.empty());
                     }
-                    return results;
+                    return new OcrBatchResult(results, batch.documentChunks());
                 }
                 log.warn("Document AI full-PDF call returned empty — falling back to page-range splitting");
             }
 
             // ── Fallback: split into sub-PDFs for oversized documents ────────────
             List<OcrTextResult> allResults = new ArrayList<>(totalPages);
+            List<LayoutChunk> allChunks = new ArrayList<>();
 
             for (int start = 0; start < totalPages; start += MAX_PAGES_PER_REQUEST) {
                 int end = Math.min(start + MAX_PAGES_PER_REQUEST, totalPages);
@@ -205,12 +214,23 @@ public class DocumentAiLayoutClient {
 
                 log.debug("Document AI: sending pages {}-{} of {} ({} KB)",
                         start + 1, end, totalPages, batchPdfBytes.length / 1024);
-                List<OcrTextResult> batchResults = processBatch(batchPdfBytes, start + 1, end);
+                OcrBatchResult batch = processBatch(batchPdfBytes, start + 1, end);
+                List<OcrTextResult> batchResults = batch.pages();
+
+                // Re-base sub-PDF chunk page spans onto the original document's page numbers
+                // (sub-PDFs always start at page 1; here `start` is the 0-based offset).
+                for (LayoutChunk c : batch.documentChunks()) {
+                    allChunks.add(new LayoutChunk(
+                            c.chunkId(),
+                            c.content(),
+                            c.pageStart() + start,
+                            c.pageEnd()   + start));
+                }
 
                 // IMPORTANT: always add exactly (end - start) entries to keep allResults
                 // index-aligned with page numbers. If the batch failed (empty list) or
                 // returned fewer results than expected, pad with empty placeholders so
-                // OcrClient sees them as "no text" and queues them for Vision fallback.
+                // OcrClient sees them as "no text" and lets the Tier 2 vision path handle them.
                 // Without this guard a single failed batch shifts every subsequent page's
                 // index, silently discarding content and mapping wrong text to wrong pages.
                 if (batchResults.size() == end - start) {
@@ -222,19 +242,19 @@ public class DocumentAiLayoutClient {
                     if (missing > 0) {
                         log.warn("Document AI batch {}-{}: returned {} results, expected {} — " +
                                 "padding {} empty placeholders to preserve page-index alignment " +
-                                "(Vision fallback will handle these pages)",
+                                "(Tier 2 GPT-4o Vision will handle these pages)",
                                 start + 1, end, batchResults.size(), expected, missing);
                         for (int i = 0; i < missing; i++) allResults.add(OcrTextResult.empty());
                     }
                 }
             }
 
-            return allResults;
+            return new OcrBatchResult(allResults, allChunks);
 
         } catch (Exception e) {
-            log.warn("Document AI processDocument failed (will fallback to Vision): {}", e.getMessage());
+            log.warn("Document AI processDocument failed (Tier 2 vision will handle): {}", e.getMessage());
             log.debug("Document AI stack trace:", e);
-            return List.of();
+            return OcrBatchResult.empty();
         }
     }
 
@@ -251,21 +271,32 @@ public class DocumentAiLayoutClient {
      * The method tries the OCR format first; if {@code document.text} is empty,
      * falls back to the Layout Parser format.
      */
-    private List<OcrTextResult> processBatch(byte[] batchPdfBytes, int logPageStart, int logPageEnd) {
+    private OcrBatchResult processBatch(byte[] batchPdfBytes, int logPageStart, int logPageEnd) {
         try {
             RawDocument rawDocument = RawDocument.newBuilder()
                     .setContent(ByteString.copyFrom(batchPdfBytes))
                     .setMimeType("application/pdf")
                     .build();
 
+            ProcessOptions.LayoutConfig.Builder layoutCfg = ProcessOptions.LayoutConfig.newBuilder()
+                    .setEnableTableAnnotation(true)
+                    .setEnableImageAnnotation(false);
+
+            if (chunkingEnabled) {
+                ProcessOptions.LayoutConfig.ChunkingConfig.Builder chunkCfg =
+                        ProcessOptions.LayoutConfig.ChunkingConfig.newBuilder()
+                                .setIncludeAncestorHeadings(includeAncestorHeadings);
+                if (chunkSize > 0) {
+                    chunkCfg.setChunkSize(chunkSize);
+                }
+                layoutCfg.setChunkingConfig(chunkCfg.build());
+            }
+
             ProcessRequest request = ProcessRequest.newBuilder()
                     .setName(processorName)
                     .setRawDocument(rawDocument)
                     .setProcessOptions(ProcessOptions.newBuilder()
-                            .setLayoutConfig(ProcessOptions.LayoutConfig.newBuilder()
-                                    .setEnableTableAnnotation(true)
-                                    .setEnableImageAnnotation(false)
-                                    .build())
+                            .setLayoutConfig(layoutCfg.build())
                             .build())
                     .build();
 
@@ -278,31 +309,54 @@ public class DocumentAiLayoutClient {
             int pageCount = doc.getPagesCount();
             int blockCount = doc.getDocumentLayout().getBlocksCount();
 
-            log.debug("Document AI batch {}-{}: {} chars fullText, {} pages, {} layout blocks",
-                    logPageStart, logPageEnd, fullText.length(), pageCount, blockCount);
+            int chunkCount = doc.getChunkedDocument().getChunksCount();
+            log.debug("Document AI batch {}-{}: {} chars fullText, {} pages, {} layout blocks, {} chunks",
+                    logPageStart, logPageEnd, fullText.length(), pageCount, blockCount, chunkCount);
+
+            // Always try to harvest semantic chunks regardless of which page-format we use.
+            List<LayoutChunk> chunks = extractLayoutChunks(doc);
 
             if (!fullText.isEmpty() && pageCount > 0) {
                 log.debug("Document AI batch {}-{}: using OCR format (document.text + pages[])",
                         logPageStart, logPageEnd);
-                return parseOcrFormat(doc, fullText, pageCount, batchSize, logPageStart);
+                return new OcrBatchResult(parseOcrFormat(doc, fullText, pageCount, batchSize, logPageStart), chunks);
             }
 
             // ── Fallback: Layout Parser format (documentLayout.blocks) ───────────
             if (blockCount > 0) {
                 log.debug("Document AI batch {}-{}: using Layout Parser format (documentLayout.blocks)",
                         logPageStart, logPageEnd);
-                return parseLayoutBlocks(doc, blockCount, batchSize, logPageStart);
+                return new OcrBatchResult(parseLayoutBlocks(doc, blockCount, batchSize, logPageStart), chunks);
             }
 
             log.warn("Document AI batch {}-{}: empty response (no text, no pages, no blocks)",
                     logPageStart, logPageEnd);
-            return List.of();
+            return new OcrBatchResult(List.of(), chunks);
 
         } catch (Exception e) {
-            log.warn("Document AI batch {}-{} failed: {} — Vision will handle these pages",
+            log.warn("Document AI batch {}-{} failed: {} — Tier 2 vision will handle these pages",
                     logPageStart, logPageEnd, e.getMessage());
-            return List.of();
+            return OcrBatchResult.empty();
         }
+    }
+
+    /**
+     * Extract semantic chunks from {@code document.chunked_document.chunks[]}.
+     * Returns an empty list when chunking is disabled or the response carries none.
+     */
+    private static List<LayoutChunk> extractLayoutChunks(Document doc) {
+        var chunked = doc.getChunkedDocument();
+        if (chunked.getChunksCount() == 0) return List.of();
+
+        List<LayoutChunk> out = new ArrayList<>(chunked.getChunksCount());
+        for (Document.ChunkedDocument.Chunk c : chunked.getChunksList()) {
+            String content = c.getContent();
+            if (content == null || content.isBlank()) continue;
+            int pageStart = c.hasPageSpan() ? c.getPageSpan().getPageStart() : 0;
+            int pageEnd   = c.hasPageSpan() ? c.getPageSpan().getPageEnd()   : 0;
+            out.add(new LayoutChunk(c.getChunkId(), content, pageStart, pageEnd));
+        }
+        return out;
     }
 
     /** Parse response using OCR-processor format: document.text + document.pages[]. */

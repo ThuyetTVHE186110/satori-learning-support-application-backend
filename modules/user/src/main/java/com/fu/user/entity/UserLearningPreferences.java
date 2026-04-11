@@ -1,5 +1,7 @@
 package com.fu.user.entity;
 
+import com.fu.infrastructure.learner.LearningInsightPoint;
+import com.fu.infrastructure.learner.SkillScore;
 import com.fu.infrastructure.persistence.BaseEntity;
 import jakarta.persistence.*;
 import lombok.*;
@@ -64,12 +66,17 @@ public class UserLearningPreferences extends BaseEntity {
     @Column(name = "reminder_time")
     private LocalTime reminderTime;
 
-    // AI personalization (JSONB)
+    // AI personalization (JSONB — typed schemas)
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "weak_points", columnDefinition = "jsonb")
-    private List<Object> weakPoints;
+    private List<LearningInsightPoint> weakPoints;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "strong_points", columnDefinition = "jsonb")
-    private List<Object> strongPoints;
+    private List<LearningInsightPoint> strongPoints;
+
+    // Satori Pentagon — 5-dimension skill radar (VOCABULARY, GRAMMAR, PRONUNCIATION, FLUENCY, SPEAKING)
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "skill_scores", columnDefinition = "jsonb")
+    private List<SkillScore> skillScores;
 }

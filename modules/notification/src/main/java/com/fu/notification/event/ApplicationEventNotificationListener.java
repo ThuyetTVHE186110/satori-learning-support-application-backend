@@ -1,6 +1,6 @@
 package com.fu.notification.event;
 
-import com.fu.common.event.*;
+import com.fu.infrastructure.event.*;
 import com.fu.notification.dto.SendNotificationRequest;
 import com.fu.notification.entity.NotificationPriority;
 import com.fu.notification.entity.NotificationType;

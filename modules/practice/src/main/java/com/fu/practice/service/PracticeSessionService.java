@@ -9,7 +9,7 @@ import com.fu.achievement.dto.response.LevelUpNotificationResponse;
 import com.fu.achievement.dto.response.StreakNotificationResponse;
 import com.fu.achievement.enums.BadgeType;
 import com.fu.achievement.service.StreakService;
-import com.fu.common.event.PracticeFeedbackReadyEvent;
+import com.fu.infrastructure.event.PracticeFeedbackReadyEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.course.entity.Course;
 import com.fu.course.entity.GrammarPoint;
@@ -785,7 +785,7 @@ public class PracticeSessionService {
      * GET /api/v1/learner/practice/lessons/{lessonId}/items
      */
     @Transactional(readOnly = true)
-    public LessonItemsResponse getLessonItems(UUID userId, UUID lessonId) {
+    public LessonItemsResponse getLessonItems(UUID userId, UUID lessonId, List<Integer> masteryLevelFilter) {
         // Validate lesson access
         Lesson lesson = lessonRepository.findByIdAndNotDeleted(lessonId)
                 .orElseThrow(() -> new BusinessException("LESSON_NOT_FOUND",
@@ -801,7 +801,25 @@ public class PracticeSessionService {
         grammarList.forEach(g -> allIds.add(g.getId()));
         Map<UUID, ItemMastery> masteryMap = itemMasteryService.buildMasteryMap(userId, allIds);
 
-        List<LessonItemsResponse.VocabItemDto> vocabDtos = vocabList.stream()
+        // Summary tính trên toàn bộ danh sách (trước khi filter)
+        Comparator<LessonItemsResponse.VocabItemDto> vocabComparator = Comparator
+                .<LessonItemsResponse.VocabItemDto, Integer>comparing(
+                        v -> v.getMastery() != null ? v.getMastery().getLevel() : 0)
+                .thenComparing(v -> v.getMastery() != null && v.getMastery().getLastPracticedAt() != null
+                        ? v.getMastery().getLastPracticedAt()
+                        : LocalDateTime.MIN);
+
+        Comparator<LessonItemsResponse.GrammarItemDto> grammarComparator = Comparator
+                .<LessonItemsResponse.GrammarItemDto, Integer>comparing(
+                        g -> g.getMastery() != null ? g.getMastery().getLevel() : 0)
+                .thenComparing(g -> g.getMastery() != null && g.getMastery().getLastPracticedAt() != null
+                        ? g.getMastery().getLastPracticedAt()
+                        : LocalDateTime.MIN);
+
+        Set<Integer> filterSet = (masteryLevelFilter != null && !masteryLevelFilter.isEmpty())
+                ? new HashSet<>(masteryLevelFilter) : null;
+
+        List<LessonItemsResponse.VocabItemDto> allVocabDtos = vocabList.stream()
                 .map(v -> {
                     ItemMastery m = masteryMap.get(v.getId());
                     return LessonItemsResponse.VocabItemDto.builder()
@@ -815,7 +833,7 @@ public class PracticeSessionService {
                 })
                 .collect(Collectors.toList());
 
-        List<LessonItemsResponse.GrammarItemDto> grammarDtos = grammarList.stream()
+        List<LessonItemsResponse.GrammarItemDto> allGrammarDtos = grammarList.stream()
                 .map(g -> {
                     ItemMastery m = masteryMap.get(g.getId());
                     return LessonItemsResponse.GrammarItemDto.builder()
@@ -828,18 +846,40 @@ public class PracticeSessionService {
                 })
                 .collect(Collectors.toList());
 
-        int masteredVocab    = (int) vocabDtos.stream()
+        // Summary luôn tính trên toàn bộ (không phụ thuộc filter)
+        int masteredVocab   = (int) allVocabDtos.stream()
                 .filter(v -> v.getMastery() != null && v.getMastery().getLevel() == 3).count();
-        int masteredGrammar  = (int) grammarDtos.stream()
+        int masteredGrammar = (int) allGrammarDtos.stream()
                 .filter(g -> g.getMastery() != null && g.getMastery().getLevel() == 3).count();
-        int needsReview      = (int) vocabDtos.stream()
+        int needsReview     = (int) allVocabDtos.stream()
                 .filter(v -> v.getMastery() == null || v.getMastery().getLevel() <= 1).count()
-                + (int) grammarDtos.stream()
+                + (int) allGrammarDtos.stream()
                 .filter(g -> g.getMastery() == null || g.getMastery().getLevel() <= 1).count();
 
+        // Apply filter (null filter set = trả về tất cả).
+        // Items chưa luyện (mastery == null) có effective level = 0.
+        // Chỉ match khi filterSet chứa đúng 0, KHÔNG tự động lọt qua khi filterSet khác null.
+        List<LessonItemsResponse.VocabItemDto> vocabDtos = allVocabDtos.stream()
+                .filter(v -> {
+                    if (filterSet == null) return true;
+                    int effectiveLevel = (v.getMastery() != null) ? v.getMastery().getLevel() : 0;
+                    return filterSet.contains(effectiveLevel);
+                })
+                .sorted(vocabComparator)
+                .collect(Collectors.toList());
+
+        List<LessonItemsResponse.GrammarItemDto> grammarDtos = allGrammarDtos.stream()
+                .filter(g -> {
+                    if (filterSet == null) return true;
+                    int effectiveLevel = (g.getMastery() != null) ? g.getMastery().getLevel() : 0;
+                    return filterSet.contains(effectiveLevel);
+                })
+                .sorted(grammarComparator)
+                .collect(Collectors.toList());
+
         LessonItemsResponse.LessonItemSummary summary = LessonItemsResponse.LessonItemSummary.builder()
-                .totalVocab(vocabDtos.size())
-                .totalGrammar(grammarDtos.size())
+                .totalVocab(allVocabDtos.size())
+                .totalGrammar(allGrammarDtos.size())
                 .masteredVocab(masteredVocab)
                 .masteredGrammar(masteredGrammar)
                 .needsReviewCount(needsReview)
