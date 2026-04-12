@@ -4,6 +4,10 @@ on:
     push:
         branches: [ master ]
 
+concurrency:
+    group: prod-deploy
+    cancel-in-progress: false
+
 permissions:
     contents: read
     packages: write
@@ -74,8 +78,10 @@ jobs:
                   host: ${{ secrets.PROD_SERVER_HOST }}
                   username: ${{ secrets.PROD_SERVER_USER }}
                   key: ${{ secrets.PROD_SSH_KEY }}
+                  passphrase: ${{ secrets.PROD_SSH_PASSPHRASE }}
                   source: "environment/docker-compose.prod.yml,environment/docker/init-scripts/,environment/apply-migrations.sh"
                   target: /opt/satori-backend/
+                  overwrite: true
 
             # ── Run pending DB migrations ──────────────────────────────────
             # Uses --container mode: psql runs inside the postgres container
@@ -86,6 +92,7 @@ jobs:
                   host: ${{ secrets.PROD_SERVER_HOST }}
                   username: ${{ secrets.PROD_SERVER_USER }}
                   key: ${{ secrets.PROD_SSH_KEY }}
+                  passphrase: ${{ secrets.PROD_SSH_PASSPHRASE }}
                   script: |
                       chmod +x /opt/satori-backend/environment/apply-migrations.sh
                       cd /opt/satori-backend/environment
@@ -98,6 +105,7 @@ jobs:
                   host: ${{ secrets.PROD_SERVER_HOST }}
                   username: ${{ secrets.PROD_SERVER_USER }}
                   key: ${{ secrets.PROD_SSH_KEY }}
+                  passphrase: ${{ secrets.PROD_SSH_PASSPHRASE }}
                   script: |
                       IMAGE="ghcr.io/${{ needs.build.outputs.repo_lower }}:${{ needs.build.outputs.image_tag }}"
                       echo "Deploying image: $IMAGE"
@@ -127,6 +135,7 @@ jobs:
                   host: ${{ secrets.PROD_SERVER_HOST }}
                   username: ${{ secrets.PROD_SERVER_USER }}
                   key: ${{ secrets.PROD_SSH_KEY }}
+                  passphrase: ${{ secrets.PROD_SSH_PASSPHRASE }}
                   script: |
                       echo "Waiting for application to become healthy..."
                       for i in $(seq 1 30); do
