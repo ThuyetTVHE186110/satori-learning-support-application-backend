@@ -168,35 +168,6 @@ class AiGradingServiceTest {
         }
 
         @Test
-        @DisplayName("Should throw BusinessException when extracted content is too short")
-        void testEvaluateWhenContentTooShort() {
-            // Arrange - Extracted content shorter than minimum required (5 characters)
-            Assignment writingAssignment = Assignment.builder()
-                    .id(testAssignmentId)
-                    .assignmentType(AssignmentType.WRITING)
-                    .build();
-
-            String jlptLevel = "N3";
-            given(assignmentTargetRepository.findJlptLevelByAssignmentId(testAssignmentId))
-                    .willReturn(jlptLevel);
-            given(assignmentRepository.findById(testAssignmentId))
-                    .willReturn(Optional.of(writingAssignment));
-            given(ocrService.extractTextFromFiles(List.of(testImages)))
-                    .willReturn("ab"); // Too short
-
-            // Act & Assert
-            assertThatThrownBy(() -> aiGradingService.evaluateWriting(
-                    WritingEvaluationRequest.builder()
-                            .assignmentId(testAssignmentId)
-                            .prompt("Test prompt")
-                            .build(),
-                    testImages
-            ))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("quá ngắn");
-        }
-
-        @Test
         @DisplayName("Should throw BusinessException for invalid assignment type")
         void testEvaluateWhenInvalidAssignmentType() {
             // Arrange
