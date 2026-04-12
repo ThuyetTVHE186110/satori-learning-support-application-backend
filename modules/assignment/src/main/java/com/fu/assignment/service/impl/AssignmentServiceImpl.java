@@ -22,6 +22,7 @@ import com.fu.assignment.scheduler.AssignmentScheduleManager;
 import com.fu.assignment.service.AssignmentService;
 import com.fu.assignment.service.SubmissionService;
 import com.fu.clazz.entity.Clazz;
+import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.repository.ClassMemberRepository;
 import com.fu.clazz.repository.ClassRepository;
 import com.fu.assignment.util.MarkdownUtils;
@@ -626,87 +627,96 @@ public class AssignmentServiceImpl implements AssignmentService {
         return getSubmissionsByAssignment(assignmentId, null, null, pageable, teacherId);
     }
 
-    @Override
-    public Page<SubmissionSummaryResponse> getSubmissionsByAssignment(
-            UUID assignmentId,
-            String keyword,
-            SubmissionStatus status,
-            Pageable pageable,
-            UUID teacherId) {
-        Assignment assignment = findAssignmentOrThrow(assignmentId);
-        verifyAssignmentAccess(assignment, teacherId);
-
-        // Get assignment's class
-        UUID classId = assignment.getClassId();
-
-        // Fetch all active student IDs in the class
-        List<UUID> allStudentIds = classMemberRepository.findActiveUserIdsByClassId(classId);
-
-        // Fetch user information for all students
-        Map<UUID, com.fu.user.entity.User> userMap = userRepository.findAllById(allStudentIds).stream()
-                .collect(Collectors.toMap(com.fu.user.entity.User::getId, u -> u));
-
-        // Fetch all submissions for this assignment
-        List<AssignmentSubmission> submissions = submissionRepository.findByAssignmentId(assignmentId);
-
-        // Create a map of userId -> latest submission
-        Map<UUID, AssignmentSubmission> submissionMap = submissions.stream()
-                .collect(Collectors.toMap(
-                        AssignmentSubmission::getUserId,
-                        s -> s,
-                        (existing, newer) -> newer.getAttemptNumber() > existing.getAttemptNumber() ? newer : existing
-                ));
-
-        // Combine all students with their submission status
-        List<SubmissionSummaryResponse> allResponses = allStudentIds.stream()
-                .map(studentId -> {
-                    AssignmentSubmission submission = submissionMap.get(studentId);
-                    SubmissionSummaryResponse response;
-
-                    if (submission != null) {
-                        response = enrichSummaryResponse(submission);
-                    } else {
-                        // Create NOT_STARTED response for student without submission
-                        com.fu.user.entity.User user = userMap.get(studentId);
-                        if (user == null) {
-                            return null;
-                        }
-                        response = SubmissionSummaryResponse.builder()
-                                .id(null)
-                                .userFullName(user.getFullName())
-                                .status(SubmissionStatus.NOT_STARTED)
-                                .score(null)
-                                .submittedAt(null)
-                                .build();
-                    }
-
-                    return response;
-                })
-                .filter(Objects::nonNull)
-                .filter(r -> {
-                    // Apply keyword filter if provided
-                    if (keyword != null && !keyword.isBlank()) {
-                        String lowerKeyword = keyword.toLowerCase();
-                        return r.getUserFullName() != null && r.getUserFullName().toLowerCase().contains(lowerKeyword);
-                    }
-                    return true;
-                })
-                .filter(r -> {
-                    // Apply status filter if provided
-                    if (status != null) {
-                        return r.getStatus() == status;
-                    }
-                    return true;
-                })
-                .toList();
-
-        // Apply manual pagination
-        int start = (int) pageable.getOffset();
-        int end = Math.min(start + pageable.getPageSize(), allResponses.size());
-        List<SubmissionSummaryResponse> pageContent = allResponses.subList(start, end);
-
-        return new org.springframework.data.domain.PageImpl<>(pageContent, pageable, allResponses.size());
-    }
+     @Override
+     public Page<SubmissionSummaryResponse> getSubmissionsByAssignment(
+             UUID assignmentId,
+             String keyword,
+             SubmissionStatus status,
+             Pageable pageable,
+             UUID teacherId) {
+         Assignment assignment = findAssignmentOrThrow(assignmentId);
+         verifyAssignmentAccess(assignment, teacherId);
+ 
+         // Get assignment's class
+         UUID classId = assignment.getClassId();
+ 
+         // Fetch ALL student IDs in the class (active AND removed members)
+         List<ClassMember> allClassMembers = classMemberRepository.findAllByClassId(classId);
+         Map<UUID, ClassMember> memberMap = allClassMembers.stream()
+                 .collect(Collectors.toMap(com.fu.clazz.entity.ClassMember::getUserId, m -> m));
+         List<UUID> allStudentIds = allClassMembers.stream()
+                 .map(ClassMember::getUserId)
+                 .toList();
+ 
+         // Fetch user information for all students
+         Map<UUID, com.fu.user.entity.User> userMap = userRepository.findAllById(allStudentIds).stream()
+                 .collect(Collectors.toMap(com.fu.user.entity.User::getId, u -> u));
+ 
+         // Fetch all submissions for this assignment
+         List<AssignmentSubmission> submissions = submissionRepository.findByAssignmentId(assignmentId);
+ 
+         // Create a map of userId -> latest submission
+         Map<UUID, AssignmentSubmission> submissionMap = submissions.stream()
+                 .collect(Collectors.toMap(
+                         AssignmentSubmission::getUserId,
+                         s -> s,
+                         (existing, newer) -> newer.getAttemptNumber() > existing.getAttemptNumber() ? newer : existing
+                 ));
+ 
+         // Combine all students with their submission status
+         List<SubmissionSummaryResponse> allResponses = allStudentIds.stream()
+                 .map(studentId -> {
+                     AssignmentSubmission submission = submissionMap.get(studentId);
+                     SubmissionSummaryResponse response;
+                     ClassMember classMember = memberMap.get(studentId);
+                     boolean isRemoved = classMember != null && classMember.getRemovedAt() != null;
+ 
+                     if (submission != null) {
+                         response = enrichSummaryResponse(submission);
+                     } else {
+                         // Create NOT_STARTED response for student without submission
+                         com.fu.user.entity.User user = userMap.get(studentId);
+                         if (user == null) {
+                             return null;
+                         }
+                         response = SubmissionSummaryResponse.builder()
+                                 .id(null)
+                                 .userFullName(user.getFullName())
+                                 .status(SubmissionStatus.NOT_STARTED)
+                                 .score(null)
+                                 .submittedAt(null)
+                                 .build();
+                     }
+ 
+                     // Set the isRemovedLearner flag for both cases
+                     response.setIsRemovedLearner(isRemoved);
+                     return response;
+                 })
+                 .filter(Objects::nonNull)
+                 .filter(r -> {
+                     // Apply keyword filter if provided
+                     if (keyword != null && !keyword.isBlank()) {
+                         String lowerKeyword = keyword.toLowerCase();
+                         return r.getUserFullName() != null && r.getUserFullName().toLowerCase().contains(lowerKeyword);
+                     }
+                     return true;
+                 })
+                 .filter(r -> {
+                     // Apply status filter if provided
+                     if (status != null) {
+                         return r.getStatus() == status;
+                     }
+                     return true;
+                 })
+                 .toList();
+ 
+         // Apply manual pagination
+         int start = (int) pageable.getOffset();
+         int end = Math.min(start + pageable.getPageSize(), allResponses.size());
+         List<SubmissionSummaryResponse> pageContent = allResponses.subList(start, end);
+ 
+         return new org.springframework.data.domain.PageImpl<>(pageContent, pageable, allResponses.size());
+     }
 
     @Override
     public SubmissionResponse getSubmission(UUID submissionId, UUID teacherId) {
