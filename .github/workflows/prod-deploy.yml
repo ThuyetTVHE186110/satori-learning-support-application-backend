@@ -71,6 +71,18 @@ jobs:
             - name: Checkout source
               uses: actions/checkout@v4.2.2
 
+            # ── Ensure deploy user owns the target directory ──────────────
+            - name: Prepare deployment directory
+              uses: appleboy/ssh-action@v1.0.3
+              with:
+                  host: ${{ secrets.PROD_SERVER_HOST }}
+                  username: ${{ secrets.PROD_SERVER_USER }}
+                  key: ${{ secrets.PROD_SSH_KEY }}
+                  passphrase: ${{ secrets.PROD_SSH_PASSPHRASE }}
+                  script: |
+                      sudo mkdir -p /opt/satori-backend/environment
+                      sudo chown -R "$USER":"$USER" /opt/satori-backend
+
             # ── Copy compose file + migration scripts to server ────────────
             - name: Copy deployment files to server
               uses: appleboy/scp-action@v0.1.7
