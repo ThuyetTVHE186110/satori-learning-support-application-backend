@@ -96,6 +96,10 @@ public class PracticeSession extends BaseEntity {
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
 
+    /** Duration of the session in minutes, computed when the session completes. */
+    @Column(name = "duration_minutes")
+    private Integer durationMinutes;
+
     // ── Explicit selection mode ───────────────────────────────────────────────
 
     /** true khi học viên tự chọn từng vocab/grammar cụ thể. */

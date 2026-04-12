@@ -5,17 +5,20 @@ import com.fu.notification.dto.*;
 import com.fu.notification.service.DeviceTokenService;
 import com.fu.notification.service.NotificationPreferencesService;
 import com.fu.notification.service.NotificationService;
+import com.fu.notification.sse.NotificationSseEmitterRegistry;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.UUID;
@@ -46,6 +49,7 @@ public class NotificationController {
     private final NotificationService notificationService;
     private final DeviceTokenService deviceTokenService;
     private final NotificationPreferencesService preferencesService;
+    private final NotificationSseEmitterRegistry sseRegistry;
 
     // ── Device Token Management ───────────────────────────────────────────────
 
@@ -179,6 +183,21 @@ public class NotificationController {
         UUID userId = extractUserId(userDetails);
         NotificationPreferencesResponse response = preferencesService.updatePreferences(userId, request);
         return ResponseEntity.ok(ApiResponse.success("Preferences updated successfully", response));
+    }
+
+    // ── Real-time SSE ─────────────────────────────────────────────────────────
+
+    /**
+     * GET /api/v1/notifications/stream
+     * Opens a Server-Sent Events stream. The client receives a {@code notification}
+     * event for each new notification saved to the database while the connection
+     * is open. Reconnect automatically on timeout (every 5 minutes).
+     */
+    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamNotifications(
+            @AuthenticationPrincipal UserDetails userDetails) {
+        UUID userId = extractUserId(userDetails);
+        return sseRegistry.register(userId);
     }
 
     // ── Helper Methods ────────────────────────────────────────────────────────

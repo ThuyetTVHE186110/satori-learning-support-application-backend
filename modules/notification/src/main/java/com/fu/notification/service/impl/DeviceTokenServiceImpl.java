@@ -3,10 +3,12 @@ package com.fu.notification.service.impl;
 import com.fu.notification.dto.DeviceTokenResponse;
 import com.fu.notification.dto.RegisterDeviceTokenRequest;
 import com.fu.notification.entity.UserDeviceToken;
+import com.fu.notification.event.DeviceReassignedEvent;
 import com.fu.notification.repository.UserDeviceTokenRepository;
 import com.fu.notification.service.DeviceTokenService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +28,7 @@ import java.util.stream.Collectors;
 public class DeviceTokenServiceImpl implements DeviceTokenService {
 
     private final UserDeviceTokenRepository deviceTokenRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     @Transactional
@@ -49,16 +52,21 @@ public class DeviceTokenServiceImpl implements DeviceTokenService {
                 log.debug("Updated existing device token for user: {}", userId);
                 return mapToResponse(saved);
             } else {
-                // Token belongs to different user - reassign it
+                // Token belongs to different user - reassign it and alert the evicted user
+                UUID previousUserId = token.getUserId();
                 token.setUserId(userId);
                 token.setDeviceType(request.getDeviceType());
                 token.setDeviceName(request.getDeviceName());
                 token.setAppVersion(request.getAppVersion());
                 token.markActive();
-                
+
                 UserDeviceToken saved = deviceTokenRepository.save(token);
-                log.info("Reassigned device token from user {} to user {}", 
-                        existingToken.get().getUserId(), userId);
+                log.info("Reassigned device token from user {} to user {}", previousUserId, userId);
+
+                // Notify the evicted user so they are aware their device is now signed into another account
+                String deviceName = request.getDeviceName() != null ? request.getDeviceName() : "Thiết bị không xác định";
+                eventPublisher.publishEvent(new DeviceReassignedEvent(previousUserId, deviceName));
+
                 return mapToResponse(saved);
             }
         }

@@ -34,6 +34,10 @@
             <groupId>com.fu</groupId>
             <artifactId>achievement</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.fu</groupId>
+            <artifactId>user</artifactId>
+        </dependency>
 
         <!-- Spring AI for exercise generation and evaluation -->
         <dependency>
@@ -52,6 +56,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
+        </dependency>
+        <!-- JPA declared explicitly: infrastructure transitive deps may not resolve
+             when building this module in isolation without the full reactor. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.security</groupId>

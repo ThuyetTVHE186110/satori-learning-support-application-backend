@@ -2,7 +2,9 @@ package com.fu.user.service.impl;
 
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
+import com.fu.common.port.NotificationPreferencesQueryPort;
 import com.fu.infrastructure.cloudinary.CloudinaryService;
+import com.fu.infrastructure.event.ReminderSettingsUpdatedEvent;
 import com.fu.user.dto.*;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserLearningPreferences;
@@ -17,8 +19,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import org.springframework.context.ApplicationEventPublisher;
+
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -34,6 +37,8 @@ public class ProfileServiceImpl implements ProfileService {
     private final UserLearningPreferencesRepository preferencesRepository;
     private final UserMapper userMapper;
     private final CloudinaryService cloudinaryService;
+    private final NotificationPreferencesQueryPort notificationPreferencesQueryPort;
+    private final ApplicationEventPublisher eventPublisher;
 
     private static final String AVATAR_FOLDER = "satori/avatars";
 
@@ -129,24 +134,25 @@ public class ProfileServiceImpl implements ProfileService {
                             .dailyStudyGoalMinutes(30)
                             .learningPace("normal")
                             .preferredFormality("polite")
-                            .streakReminderEnabled(true)
-                            .reminderTime(LocalTime.of(20, 0))
                             .build();
                 });
 
         if (request.getDailyStudyGoalMinutes() != null) prefs.setDailyStudyGoalMinutes(request.getDailyStudyGoalMinutes());
-        if (request.getPreferredStudyTime() != null)  prefs.setPreferredStudyTime(request.getPreferredStudyTime());
         if (request.getLearningPace() != null)        prefs.setLearningPace(request.getLearningPace());
         if (request.getPreferredFormality() != null)  prefs.setPreferredFormality(request.getPreferredFormality());
         if (request.getConversationStyle() != null)   prefs.setConversationStyle(request.getConversationStyle());
-        if (request.getStreakReminderEnabled() != null) prefs.setStreakReminderEnabled(request.getStreakReminderEnabled());
-        if (request.getReminderTime() != null)        prefs.setReminderTime(request.getReminderTime());
         if (request.getPreferredTopics() != null) {
             prefs.setPreferredTopics(request.getPreferredTopics().toArray(String[]::new));
         }
 
         UserLearningPreferences saved = preferencesRepository.save(prefs);
         log.info("Learning preferences updated for user: {}", userId);
+
+        // Forward reminder settings to notification_prefs (source of truth for the scheduler)
+        if (request.getReminderTime() != null || request.getStreakReminderEnabled() != null) {
+            eventPublisher.publishEvent(new ReminderSettingsUpdatedEvent(
+                    this, userId, request.getReminderTime(), request.getStreakReminderEnabled()));
+        }
 
         return LearningPreferencesResponse.from(saved);
     }
@@ -233,6 +239,17 @@ public class ProfileServiceImpl implements ProfileService {
         if (val instanceof LocalDateTime ldt) return ldt;
         if (val instanceof java.sql.Timestamp ts) return ts.toLocalDateTime();
         return null;
+    }
+
+    // ── GET /api/v1/profile/settings ─────────────────────────────────────────
+
+    @Override
+    public UserSettingsResponse getSettings(UUID userId) {
+        UserProfileResponse profile = getMyProfile(userId);
+        return UserSettingsResponse.builder()
+                .profile(profile)
+                .notificationPreferences(notificationPreferencesQueryPort.getSnapshot(userId))
+                .build();
     }
 
     private User findActiveUser(UUID userId) {

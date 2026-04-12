@@ -28,6 +28,7 @@ import com.fu.achievement.service.ActivityCountProvider;
 import com.fu.achievement.service.LearningLevelService;
 import com.fu.achievement.service.StreakService;
 import com.fu.common.exception.ResourceNotFoundException;
+import com.fu.common.port.UserQueryPort;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
@@ -47,6 +48,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -62,6 +64,7 @@ public class AchievementServiceImpl implements AchievementService {
     BadgeMapper badgeMapper;
     LearningLevelService learningLevelService;
     UserStatsRepository userStatsRepository;
+    UserQueryPort userQueryPort;
     List<ActivityCountProvider> activityCountProviders;
 
     public AchievementServiceImpl(
@@ -71,6 +74,7 @@ public class AchievementServiceImpl implements AchievementService {
             BadgeMapper badgeMapper,
             LearningLevelService learningLevelService,
             UserStatsRepository userStatsRepository,
+            UserQueryPort userQueryPort,
             @org.springframework.beans.factory.annotation.Autowired(required = false)
             List<ActivityCountProvider> activityCountProviders) {
         this.badgeRepository = badgeRepository;
@@ -79,6 +83,7 @@ public class AchievementServiceImpl implements AchievementService {
         this.badgeMapper = badgeMapper;
         this.learningLevelService = learningLevelService;
         this.userStatsRepository = userStatsRepository;
+        this.userQueryPort = userQueryPort;
         this.activityCountProviders = activityCountProviders != null ? activityCountProviders : List.of();
     }
 
@@ -540,11 +545,19 @@ public class AchievementServiceImpl implements AchievementService {
 //        // Fallback: If currentStreak is 0, check streak_history (source of truth)
         Integer currentStreak = userStats.getCurrentStreak();
 
+        int goalMinutes = Optional.ofNullable(userQueryPort.getDailyStudyGoalMinutes(userId)).orElse(30);
+        int studiedToday = userStats.getStudiedMinutesToday() != null ? userStats.getStudiedMinutesToday() : 0;
+        int progressPct = goalMinutes > 0 ? Math.min(100, studiedToday * 100 / goalMinutes) : 0;
+
         return CurrentStreakResponse.builder()
                 .currentStreak(currentStreak != null ? currentStreak : 0)
                 .longestStreak(userStats.getLongestStreak() != null ? userStats.getLongestStreak() : 0)
                 .streakLastDate(userStats.getStreakLastDate())
                 .freezeTokensAvailable(userStats.getStreakFreezeCount() != null ? userStats.getStreakFreezeCount() : 0)
+                .studiedMinutesToday(studiedToday)
+                .studyDate(userStats.getStudyDate())
+                .dailyGoalMinutes(goalMinutes)
+                .goalProgressPercent(progressPct)
                 .build();
     }
 
