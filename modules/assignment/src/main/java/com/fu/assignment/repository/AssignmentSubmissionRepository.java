@@ -143,16 +143,19 @@ public interface AssignmentSubmissionRepository extends JpaRepository<Assignment
     /**
      * Count distinct students who submitted (SUBMITTED or GRADED) for a specific assignment in a class.
      * Returns count of distinct user_ids that have submissions with SUBMITTED or GRADED status.
+     * Only counts submissions from active class members (ClassMember.removedAt IS NULL).
      */
     @Query(value = """
             SELECT COUNT(DISTINCT s.user_id)
             FROM assignment.assignment_submissions s
             JOIN assignment.assignments a ON a.id = s.assignment_id
             JOIN assignment.assignment_targets t ON t.assignment_id = a.id
+            JOIN user_management.class_members cm ON cm.class_id = t.class_id AND cm.user_id = s.user_id
             WHERE a.id = :assignmentId
               AND t.class_id = :classId
               AND s.status IN ('SUBMITTED', 'GRADED')
               AND a.deleted_at IS NULL
+              AND cm.removed_at IS NULL
             """, nativeQuery = true)
     long countSubmissionsInClassForAssignment(
             @Param("assignmentId") UUID assignmentId,
@@ -161,16 +164,19 @@ public interface AssignmentSubmissionRepository extends JpaRepository<Assignment
     /**
      * Get average score of GRADED submissions for a specific assignment in a class.
      * Returns null if no graded submissions exist.
+     * Only calculates average for active class members (ClassMember.removedAt IS NULL).
      */
     @Query(value = """
             SELECT AVG(CAST(s.score AS NUMERIC))
             FROM assignment.assignment_submissions s
             JOIN assignment.assignments a ON a.id = s.assignment_id
             JOIN assignment.assignment_targets t ON t.assignment_id = a.id
+            JOIN user_management.class_members cm ON cm.class_id = t.class_id AND cm.user_id = s.user_id
             WHERE a.id = :assignmentId
               AND t.class_id = :classId
               AND s.status = 'GRADED'
               AND a.deleted_at IS NULL
+              AND cm.removed_at IS NULL
             """, nativeQuery = true)
     Double getAverageScoreForAssignmentInClass(
             @Param("assignmentId") UUID assignmentId,
