@@ -249,8 +249,10 @@ public class NotificationServiceImpl implements NotificationService {
     private Notification saveNotification(UUID userId, SendNotificationRequest request) {
         Notification notification = buildNotification(userId, request);
         Notification saved = notificationRepository.save(notification);
-        // Push to any open SSE streams for real-time in-app delivery
-        sseRegistry.send(userId, mapToResponse(saved));
+        // Push to any open SSE streams for real-time in-app delivery (null-safe for test environments)
+        if (sseRegistry != null) {
+            sseRegistry.send(userId, mapToResponse(saved));
+        }
         return saved;
     }
 
