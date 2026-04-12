@@ -62,6 +62,15 @@ public class UserStats {
     @Builder.Default
     Integer streakFreezeCount = 0;
 
+    /** Total minutes studied today (resets at midnight via study_date comparison). */
+    @Column(name = "studied_minutes_today", nullable = false)
+    @Builder.Default
+    Integer studiedMinutesToday = 0;
+
+    /** The date for which studiedMinutesToday was last updated (used for midnight reset). */
+    @Column(name = "study_date")
+    LocalDate studyDate;
+
     @Column(name = "created_at", updatable = false)
     @CreationTimestamp
     LocalDateTime createdAt;

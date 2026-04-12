@@ -108,6 +108,19 @@ public class ProfileController {
         return ResponseEntity.ok(ApiResponse.success("Cập nhật tùy chỉnh học tập thành công", response));
     }
 
+    /**
+     * GET /api/v1/profile/settings
+     * Returns profile + notification preferences in a single response.
+     * Intended for settings screens that need all user preferences at once.
+     */
+    @GetMapping("/settings")
+    public ResponseEntity<ApiResponse<UserSettingsResponse>> getSettings(
+            @AuthenticationPrincipal UserDetails userDetails) {
+        UUID userId = extractUserId(userDetails);
+        UserSettingsResponse settings = profileService.getSettings(userId);
+        return ResponseEntity.ok(ApiResponse.success(settings));
+    }
+
     private UUID extractUserId(UserDetails userDetails) {
         return UUID.fromString(userDetails.getUsername());
     }
