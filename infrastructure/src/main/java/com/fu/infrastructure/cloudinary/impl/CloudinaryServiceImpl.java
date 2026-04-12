@@ -149,16 +149,13 @@ public class CloudinaryServiceImpl implements CloudinaryService {
         }
 
         String fileName = file.getOriginalFilename();
-        String contentType = file.getContentType();
 
         // Danh sách các đuôi file ảnh cho phép
         List<String> allowedExtensions = Arrays.asList("jpg", "jpeg", "png", "gif", "webp", "heic", "heif");
 
-        boolean isImageMime = contentType != null && contentType.startsWith("image/");
-        boolean isHeicExtension = fileName != null && (fileName.toLowerCase().endsWith(".heic") || fileName.toLowerCase().endsWith(".heif"));
 
-        if (!isImageMime && !isHeicExtension) {
-            throw new BusinessException("INVALID_FILE_TYPE", "Chỉ cho phép các định dạng ảnh JPEG, PNG, GIF, WebP, HEIC");
+        if (fileName == null || allowedExtensions.stream().noneMatch(ext -> fileName.toLowerCase().endsWith("." + ext))) {
+            throw new BusinessException("INVALID_FILE_TYPE", "Chỉ cho phép các định dạng ảnh JPEG, PNG, GIF, WebP, HEIC, HEIF, JPG");
         }
     }
 
