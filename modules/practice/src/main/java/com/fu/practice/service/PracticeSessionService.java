@@ -45,9 +45,11 @@ import com.fu.practice.entity.ItemMastery;
 import com.fu.practice.entity.PracticePreset;
 import com.fu.practice.entity.QuestionDimension;
 
+import com.fu.infrastructure.event.StudyMinutesRecordedEvent;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -473,8 +475,19 @@ public class PracticeSessionService {
         BigDecimal score = BigDecimal.valueOf(scoreValue).setScale(2, RoundingMode.HALF_UP);
         session.setScore(score);
         session.setStatus(PracticeStatus.COMPLETED);
-        session.setCompletedAt(LocalDateTime.now());
+        LocalDateTime completedAt = LocalDateTime.now();
+        session.setCompletedAt(completedAt);
+        int durationMinutes = (int) ChronoUnit.MINUTES.between(session.getStartedAt(), completedAt);
+        session.setDurationMinutes(durationMinutes);
         sessionRepository.save(session);
+
+        // Publish event so achievement module can track daily study goal
+        try {
+            eventPublisher.publishEvent(new StudyMinutesRecordedEvent(this, session.getUserId(), durationMinutes));
+        } catch (Exception e) {
+            log.warn("finishSession: could not publish StudyMinutesRecordedEvent for session {}: {}",
+                    session.getId(), e.getMessage());
+        }
 
         if (session.getLessonId() != null) {
             upsertLessonProgress(session);

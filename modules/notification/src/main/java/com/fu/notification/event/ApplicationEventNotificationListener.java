@@ -2,6 +2,8 @@ package com.fu.notification.event;
 
 import com.fu.infrastructure.event.*;
 import com.fu.notification.dto.SendNotificationRequest;
+import com.fu.notification.repository.UserNotificationPreferencesRepository;
+import com.fu.notification.entity.UserNotificationPreferences;
 import com.fu.notification.entity.NotificationPriority;
 import com.fu.notification.entity.NotificationType;
 import com.fu.notification.service.DeviceTokenService;
@@ -11,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashMap;
 import java.util.List;
@@ -28,6 +31,7 @@ public class ApplicationEventNotificationListener {
 
     private final NotificationService notificationService;
     private final DeviceTokenService deviceTokenService;
+    private final UserNotificationPreferencesRepository notificationPreferencesRepository;
 
     /**
      * Handles AssignmentCreatedEvent - notifies class members about new assignment.
@@ -273,5 +277,58 @@ public class ApplicationEventNotificationListener {
         deviceTokenService.deactivateAllTokens(event.getUserId());
 
         log.info("Password changed notification sent and tokens deactivated: {}", event.getUserId());
+    }
+
+    /**
+     * Handles DeviceReassignedEvent — notifies the evicted user that their device
+     * is now signed into another account (ACCOUNT_SECURITY alert).
+     */
+    @Async
+    @EventListener
+    public void handleDeviceReassigned(DeviceReassignedEvent event) {
+        log.info("Device reassigned — alerting evicted user {}, device: {}",
+                event.getEvictedUserId(), event.getDeviceName());
+
+        SendNotificationRequest request = SendNotificationRequest.builder()
+                .userId(event.getEvictedUserId())
+                .type(NotificationType.ACCOUNT_SECURITY)
+                .priority(NotificationPriority.HIGH)
+                .title("Cảnh báo bảo mật: Thiết bị đã đăng nhập tài khoản khác")
+                .body("Thiết bị \"" + event.getDeviceName()
+                        + "\" của bạn vừa được đăng nhập bởi tài khoản khác. "
+                        + "Nếu không phải bạn, hãy đổi mật khẩu ngay.")
+                .saveToHistory(true)
+                .bypassPreferences(true)
+                .build();
+
+        notificationService.send(request);
+    }
+
+    /**
+     * Syncs reminder settings from learning-preferences into notification_prefs
+     * so the DailyReminderScheduler uses the value set by the user in the settings screen.
+     */
+    @EventListener
+    @Transactional
+    public void handleReminderSettingsUpdated(ReminderSettingsUpdatedEvent event) {
+        log.debug("Syncing reminder settings for user {} — time={}, enabled={}",
+                event.getUserId(), event.getReminderTime(), event.getReminderEnabled());
+
+        UserNotificationPreferences prefs = notificationPreferencesRepository
+                .findByUserId(event.getUserId())
+                .orElseGet(() -> {
+                    log.debug("Creating default notification prefs for user {}", event.getUserId());
+                    return UserNotificationPreferences.createDefault(event.getUserId());
+                });
+
+        if (event.getReminderTime() != null) {
+            prefs.setDailyReminderTime(event.getReminderTime());
+        }
+        if (event.getReminderEnabled() != null) {
+            prefs.setDailyReminderEnabled(event.getReminderEnabled());
+        }
+
+        notificationPreferencesRepository.save(prefs);
+        log.info("Notification prefs synced for user {}", event.getUserId());
     }
 }
