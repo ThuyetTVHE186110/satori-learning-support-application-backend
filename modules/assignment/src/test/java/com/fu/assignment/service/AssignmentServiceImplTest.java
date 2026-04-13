@@ -619,7 +619,7 @@ class AssignmentServiceImplTest {
         @Test
         @DisplayName("Should throw when submission status is not SUBMITTED")
         void shouldThrowWhenStatusNotSubmitted() {
-            testSubmission.setStatus(SubmissionStatus.GRADED);
+            testSubmission.setStatus(SubmissionStatus.IN_PROGRESS);
             given(submissionRepository.findById(submissionId)).willReturn(Optional.of(testSubmission));
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testWritingAssignment));
             stubTeacherAccess();
@@ -629,7 +629,22 @@ class AssignmentServiceImplTest {
 
             assertThatThrownBy(() -> assignmentService.gradeWritingSubmission(submissionId, request, teacherId))
                     .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("Chỉ có thể chấm điểm bài nộp ở trạng thái SUBMITTED");
+                    .hasMessageContaining("Chỉ có thể chấm điểm bài nộp ở trạng thái");
+        }
+        @Test
+        @DisplayName("Should throw when submission status is not GRADED")
+        void shouldThrowWhenStatusNotGraded() {
+            testSubmission.setStatus(SubmissionStatus.IN_PROGRESS);
+            given(submissionRepository.findById(submissionId)).willReturn(Optional.of(testSubmission));
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testWritingAssignment));
+            stubTeacherAccess();
+
+            GradeWritingRequest request = GradeWritingRequest.builder()
+                    .teacherScore(BigDecimal.valueOf(8.5)).feedback("f").build();
+
+            assertThatThrownBy(() -> assignmentService.gradeWritingSubmission(submissionId, request, teacherId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Chỉ có thể chấm điểm bài nộp ở trạng thái");
         }
 
         @Test
