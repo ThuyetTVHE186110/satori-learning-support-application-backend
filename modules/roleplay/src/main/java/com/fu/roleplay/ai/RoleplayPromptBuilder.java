@@ -126,7 +126,11 @@ public class RoleplayPromptBuilder {
         sb.append("  ⚠ This is what YOU said translated to Vietnamese — NOT what the learner should say.\n");
         sb.append("- `romaji`: Romaji reading of your Japanese line.\n");
         sb.append("- `corrections`: Grammar/vocabulary corrections of the learner's last message.\n");
-        sb.append("  Leave as [] if the learner spoke correctly.\n\n");
+        sb.append("  Leave as [] if the learner spoke correctly.\n");
+        sb.append("  Each correction MUST include an `errorType` field: PARTICLE, CONJUGATION, WORD_ORDER, WORD_CHOICE, FORMALITY, SPELLING, or OTHER.\n");
+        sb.append("- `vocabulary_detected`: Array of Japanese content words the LEARNER used in their message.\n");
+        sb.append("  Include nouns, verbs, adjectives, adverbs. Exclude particles, copulas, and conjunctions.\n");
+        sb.append("  Example: [\"レストラン\",\"食べる\",\"おいしい\"]\n\n");
 
         sb.append("### Session OPENING — return exactly 3 segments:\n");
         sb.append("[\n");
@@ -160,8 +164,9 @@ public class RoleplayPromptBuilder {
         sb.append("    \"romaji\": \"(romaji)\",\n");
         sb.append("    \"corrections\": [\n");
         sb.append("      // Only if learner made mistakes:\n");
-        sb.append("      // {\"original\":\"...\",\"corrected\":\"...\",\"explanation\":\"... (Vietnamese)\"}\n");
-        sb.append("    ]\n");
+        sb.append("      // {\"original\":\"...\",\"corrected\":\"...\",\"explanation\":\"... (Vietnamese)\",\"errorType\":\"PARTICLE|CONJUGATION|WORD_ORDER|WORD_CHOICE|FORMALITY|SPELLING|OTHER\"}\n");
+        sb.append("    ],\n");
+        sb.append("    \"vocabulary_detected\": [\"word1\",\"word2\"]  // Content words the LEARNER used\n");
         sb.append("  }\n");
         sb.append("]\n\n");
 

@@ -96,6 +96,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     private final LearningLevelService learningLevelService;
     private final ApplicationEventPublisher eventPublisher;
     private final LearnerProfileProvider learnerProfileProvider;
+    private final com.fu.roleplay.evaluation.ErrorPatternAggregator errorPatternAggregator;
+    private final com.fu.roleplay.evaluation.VocabularyRangeAnalyzer vocabularyRangeAnalyzer;
+    private final com.fu.roleplay.evaluation.CrossSessionTracker crossSessionTracker;
 
     public RoleplaySessionServiceImpl(
             ConversationSessionRepository sessionRepository,
@@ -119,7 +122,10 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             LearningLevelService learningLevelService,
             StreakServiceImpl streakService,
             ApplicationEventPublisher eventPublisher,
-            LearnerProfileProvider learnerProfileProvider
+            LearnerProfileProvider learnerProfileProvider,
+            com.fu.roleplay.evaluation.ErrorPatternAggregator errorPatternAggregator,
+            com.fu.roleplay.evaluation.VocabularyRangeAnalyzer vocabularyRangeAnalyzer,
+            com.fu.roleplay.evaluation.CrossSessionTracker crossSessionTracker
     ) {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
@@ -143,6 +149,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         this.streakService = streakService;
         this.eventPublisher = eventPublisher;
         this.learnerProfileProvider = learnerProfileProvider;
+        this.errorPatternAggregator = errorPatternAggregator;
+        this.vocabularyRangeAnalyzer = vocabularyRangeAnalyzer;
+        this.crossSessionTracker = crossSessionTracker;
     }
 
     @Override
@@ -519,64 +528,62 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         List<MessagePronunciation> pronunciations = pronunciationRepository.findBySessionId(sessionId);
         List<SessionMission> sessionMissions = sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
 
-        // 2. Pronunciation score = AVG (delegate to shared helper)
+        // ── EVALUATION v2: Data-driven orthogonal scoring ──
+
+        // Resolve JLPT level from session context
+        String jlptLevel = extractJlptLevel(session);
+
+        // 2. ACCURACY — from corrections data (NO LLM)
+        var errorBreakdown = errorPatternAggregator.aggregate(messages, jlptLevel);
+
+        // 3. PRONUNCIATION — unchanged (Azure calibrated)
         SessionEvaluationResponse.PronunciationSummary pronunciationSummary = buildPronunciationSummary(pronunciations);
         BigDecimal pronunciationScore = pronunciationSummary != null
                 ? pronunciationSummary.getAverageOverall()
                 : BigDecimal.ZERO;
 
-        // 3. Mission score = AVG progress
-        BigDecimal missionScore = BigDecimal.ZERO;
-        if (!sessionMissions.isEmpty()) {
-            int totalProgress = sessionMissions.stream()
-                    .mapToInt(SessionMission::getProgressPct)
-                    .sum();
-            missionScore = BigDecimal.valueOf(totalProgress)
-                    .divide(BigDecimal.valueOf(sessionMissions.size()), 2, RoundingMode.HALF_UP);
-        }
+        // 4. TASK COMPLETION — binary per mission for scoring (progress % kept for real-time UX only)
+        long completedMissionCount = sessionMissions.stream()
+                .filter(m -> m.getStatus() == SessionMission.MissionStatus.COMPLETED).count();
+        BigDecimal taskCompletionScore = sessionMissions.isEmpty() ? null :
+                BigDecimal.valueOf(completedMissionCount * 100.0 / sessionMissions.size())
+                        .setScale(2, RoundingMode.HALF_UP);
 
-        // 4. Language evaluation via AI
-        SessionEvaluationResponse.LanguageEvaluationDetail languageEval = sessionEvaluatorAI.evaluateSession(messages);
-        BigDecimal languageScore = languageEval.getFluencyScore()
-                .add(languageEval.getAccuracyScore())
-                .add(languageEval.getVocabularyScore())
-                .add(languageEval.getGrammarScore())
-                .divide(BigDecimal.valueOf(4), 2, RoundingMode.HALF_UP);
+        // 5. COMPLEXITY — from vocabulary data (NO LLM)
+        var complexityResult = vocabularyRangeAnalyzer.analyze(messages, jlptLevel);
 
-        // 5. Calculate overall score with weights
-        boolean hasMissions = !sessionMissions.isEmpty();
-        boolean hasPronunciation = !pronunciations.isEmpty();
-        BigDecimal overallScore;
-        if (hasMissions && hasPronunciation) {
-            overallScore = missionScore.multiply(BigDecimal.valueOf(properties.getScoring().getMissionWeight()))
-                    .add(pronunciationScore.multiply(BigDecimal.valueOf(properties.getScoring().getPronunciationWeight())))
-                    .add(languageScore.multiply(BigDecimal.valueOf(properties.getScoring().getLanguageWeight())))
-                    .setScale(2, RoundingMode.HALF_UP);
-        } else if (hasMissions) {
-            // No pronunciation: normalize mission + language weights
-            double mw = properties.getScoring().getMissionWeight();
-            double lw = properties.getScoring().getLanguageWeight();
-            double sum = mw + lw;
-            overallScore = missionScore.multiply(BigDecimal.valueOf(mw / sum))
-                    .add(languageScore.multiply(BigDecimal.valueOf(lw / sum)))
-                    .setScale(2, RoundingMode.HALF_UP);
-        } else if (hasPronunciation) {
-            // No missions: normalize pronunciation + language weights
-            double pw = properties.getScoring().getPronunciationWeight();
-            double lw = properties.getScoring().getLanguageWeight();
-            double sum = pw + lw;
-            overallScore = pronunciationScore.multiply(BigDecimal.valueOf(pw / sum))
-                    .add(languageScore.multiply(BigDecimal.valueOf(lw / sum)))
-                    .setScale(2, RoundingMode.HALF_UP);
-        } else {
-            overallScore = languageScore.setScale(2, RoundingMode.HALF_UP);
-        }
+        // 6. CROSS-SESSION — record + query error patterns
+        crossSessionTracker.recordSessionErrors(userId, sessionId, errorBreakdown);
+        var recurringPatterns = crossSessionTracker.getRecurringPatterns(userId, 5);
 
-        // 6. Update session
+        // 7. QUALITATIVE SUMMARY — LLM as synthesizer (given all facts above)
+        List<String> failedMissionTitles = sessionMissions.stream()
+                .filter(m -> m.getStatus() != SessionMission.MissionStatus.COMPLETED)
+                .map(SessionMission::getTitle)
+                .collect(Collectors.toList());
+
+        var qualitativeSummary = sessionEvaluatorAI.synthesize(
+                errorBreakdown, pronunciationSummary, taskCompletionScore,
+                (int) completedMissionCount, sessionMissions.size(), failedMissionTitles,
+                complexityResult, recurringPatterns, jlptLevel);
+
+        // 8. INTERNAL overallScore (NOT shown to learner — gamification + EXP only)
+        BigDecimal overallScore = computeInternalOverall(
+                errorBreakdown.accuracyScore(), pronunciationScore,
+                taskCompletionScore, complexityResult.score());
+
+        // Legacy mission/language scores for backward compat
+        BigDecimal missionScore = taskCompletionScore != null ? taskCompletionScore : BigDecimal.ZERO;
+        BigDecimal languageScore = errorBreakdown.accuracyScore();
+
+        // 9. Update session
         session.setMissionScore(missionScore);
         session.setPronunciationScore(pronunciationScore);
         session.setLanguageScore(languageScore);
         session.setOverallScore(overallScore);
+        session.setAccuracyScore(errorBreakdown.accuracyScore());
+        session.setTaskCompletionScore(taskCompletionScore);
+        session.setComplexityScore(complexityResult.score());
         session.setStatus(ConversationSession.SessionStatus.COMPLETED);
         LocalDateTime completedAt = LocalDateTime.now();
         session.setCompletedAt(completedAt);
@@ -584,10 +591,13 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // Persist evaluation details so feedback can be retrieved later without re-calling AI
         try {
             ObjectNode feedbackNode = objectMapper.createObjectNode();
-            feedbackNode.set("languageEvaluation", objectMapper.valueToTree(languageEval));
+            feedbackNode.put("version", 2);
+            feedbackNode.set("qualitativeSummary", objectMapper.valueToTree(qualitativeSummary));
+            feedbackNode.set("errorBreakdown", objectMapper.valueToTree(errorBreakdown.errorCountsAsStringMap()));
             if (pronunciationSummary != null) {
                 feedbackNode.set("pronunciationSummary", objectMapper.valueToTree(pronunciationSummary));
             }
+            feedbackNode.set("jlptDistribution", objectMapper.valueToTree(complexityResult.jlptDistribution()));
             session.setFeedback(objectMapper.writeValueAsString(feedbackNode));
         } catch (Exception e) {
             log.warn("Failed to serialize evaluation feedback for session {}: {}", sessionId, e.getMessage());
@@ -599,13 +609,13 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         try {
             eventPublisher.publishEvent(new RoleplaySessionCompletedEvent(
                     this, sessionId, userId,
-                    overallScore.doubleValue(), languageScore.doubleValue(),
+                    overallScore.doubleValue(),
+                    errorBreakdown.accuracyScore().doubleValue(),
                     pronunciationScore.doubleValue(),
-                    languageEval.getFluencyScore().doubleValue(),
-                    languageEval.getAccuracyScore().doubleValue(),
-                    languageEval.getVocabularyScore().doubleValue(),
-                    languageEval.getGrammarScore().doubleValue(),
-                    languageEval.getStrengths(), languageEval.getImprovements()));
+                    taskCompletionScore != null ? taskCompletionScore.doubleValue() : 0.0,
+                    complexityResult.score().doubleValue(),
+                    errorBreakdown.errorCountsAsStringMap(),
+                    complexityResult.jlptDistribution()));
         } catch (Exception e) {
             log.warn("Failed to publish RoleplaySessionCompletedEvent for session {}: {}", sessionId, e.getMessage());
         }
@@ -617,9 +627,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     session.getConversationId(),
                     completedAt,
                     overallScore,
-                    languageEval.getFluencyScore(),
-                    languageEval.getAccuracyScore(),
-                    languageEval.getVocabularyScore());
+                    errorBreakdown.accuracyScore(),
+                    complexityResult.score(),
+                    pronunciationScore);
         }
         // Record daily activity for streak tracking
         StreakNotificationResponse streakNotification = null;
@@ -709,15 +719,70 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         } catch (Exception e) {
             log.error("Error retrieving level-up info for session summary", e);
         }
+        // Build new v2 dimension objects
+        SessionEvaluationResponse.AccuracyDimension accuracyDimension =
+                SessionEvaluationResponse.AccuracyDimension.builder()
+                        .score(errorBreakdown.accuracyScore())
+                        .totalCorrections(errorBreakdown.totalCorrections())
+                        .userMessageCount(errorBreakdown.userMessageCount())
+                        .errorRate(errorBreakdown.errorRate())
+                        .errorBreakdown(errorBreakdown.errorCountsAsStringMap())
+                        .feedback(qualitativeSummary.getAccuracyFeedback())
+                        .build();
+
+        SessionEvaluationResponse.PronunciationDimension pronunciationDimension =
+                SessionEvaluationResponse.PronunciationDimension.builder()
+                        .score(pronunciationScore)
+                        .averageAccuracy(pronunciationSummary != null ? pronunciationSummary.getAverageAccuracy() : null)
+                        .averageFluency(pronunciationSummary != null ? pronunciationSummary.getAverageFluency() : null)
+                        .averageCompleteness(pronunciationSummary != null ? pronunciationSummary.getAverageCompleteness() : null)
+                        .totalAssessed(pronunciationSummary != null ? pronunciationSummary.getTotalAssessed() : 0)
+                        .feedback(qualitativeSummary.getPronunciationFeedback())
+                        .build();
+
+        SessionEvaluationResponse.TaskCompletionDimension taskCompletionDimension =
+                SessionEvaluationResponse.TaskCompletionDimension.builder()
+                        .score(taskCompletionScore)
+                        .completedMissions((int) completedMissionCount)
+                        .totalMissions(sessionMissions.size())
+                        .details(missionDetails)
+                        .feedback(qualitativeSummary.getTaskCompletionFeedback())
+                        .build();
+
+        SessionEvaluationResponse.ComplexityDimension complexityDimension =
+                SessionEvaluationResponse.ComplexityDimension.builder()
+                        .score(complexityResult.score())
+                        .uniqueVocabularyCount(complexityResult.uniqueVocabularyCount())
+                        .jlptDistribution(complexityResult.jlptDistribution())
+                        .feedback(qualitativeSummary.getComplexityFeedback())
+                        .build();
+
+        List<SessionEvaluationResponse.RecurringErrorPattern> recurringErrorPatterns =
+                recurringPatterns.stream()
+                        .map(rp -> SessionEvaluationResponse.RecurringErrorPattern.builder()
+                                .errorType(rp.errorType().name())
+                                .totalOccurrences(rp.totalOccurrences())
+                                .sessionCount(rp.sessionCount())
+                                .totalSessionsChecked(rp.totalSessionsChecked())
+                                .build())
+                        .collect(Collectors.toList());
+
         return SessionEvaluationResponse.builder()
                 .sessionId(sessionId)
+                // Legacy fields (backward compat)
                 .missionScore(missionScore)
                 .pronunciationScore(pronunciationScore)
                 .languageScore(languageScore)
                 .overallScore(overallScore)
                 .missionDetails(missionDetails)
-                .pronunciationSummary(pronunciationSummary)
-                .languageEvaluation(languageEval)
+                // New v2 dimensions
+                .accuracy(accuracyDimension)
+                .pronunciation(pronunciationDimension)
+                .taskCompletion(taskCompletionDimension)
+                .complexity(complexityDimension)
+                .qualitativeSummary(qualitativeSummary)
+                .recurringPatterns(recurringErrorPatterns)
+                // Gamification
                 .earnedBadges(earnedBadges)
                 .levelUpInfo(levelUpInfo)
                 .streakNotification(streakNotification)
@@ -816,12 +881,34 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                         .build())
                 .collect(Collectors.toList());
 
-        // Parse languageEvaluation from persisted JSONB — avoids re-calling AI
+        // Parse v2 evaluation from persisted JSONB — avoids re-calling AI
+        SessionEvaluationResponse.QualitativeSummary qualitativeSummary = null;
         SessionEvaluationResponse.LanguageEvaluationDetail languageEval = null;
+        Map<String, Integer> errorBreakdownMap = null;
+        Map<String, BigDecimal> jlptDistributionMap = null;
+
         String feedbackJson = session.getFeedback();
         if (feedbackJson != null && !feedbackJson.equals("{}")) {
             try {
                 JsonNode feedbackNode = objectMapper.readTree(feedbackJson);
+                int version = feedbackNode.path("version").asInt(1);
+
+                if (version >= 2 && feedbackNode.has("qualitativeSummary")) {
+                    qualitativeSummary = objectMapper.treeToValue(
+                            feedbackNode.get("qualitativeSummary"),
+                            SessionEvaluationResponse.QualitativeSummary.class);
+                }
+                if (feedbackNode.has("errorBreakdown")) {
+                    errorBreakdownMap = objectMapper.convertValue(
+                            feedbackNode.get("errorBreakdown"),
+                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, Integer>>() {});
+                }
+                if (feedbackNode.has("jlptDistribution")) {
+                    jlptDistributionMap = objectMapper.convertValue(
+                            feedbackNode.get("jlptDistribution"),
+                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, BigDecimal>>() {});
+                }
+                // Legacy v1 fallback
                 if (feedbackNode.has("languageEvaluation")) {
                     languageEval = objectMapper.treeToValue(
                             feedbackNode.get("languageEvaluation"),
@@ -833,19 +920,68 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         }
 
         // pronunciationSummary: always recompute from DB records — JSONB copy is unreliable
-        // (MessagePronunciation rows are the source of truth, cheap to aggregate)
         List<MessagePronunciation> pronunciations = pronunciationRepository.findBySessionId(session.getId());
         SessionEvaluationResponse.PronunciationSummary pronunciationSummary = buildPronunciationSummary(pronunciations);
 
+        // Build v2 dimension objects if we have the data
+        SessionEvaluationResponse.AccuracyDimension accuracyDimension = null;
+        if (session.getAccuracyScore() != null) {
+            accuracyDimension = SessionEvaluationResponse.AccuracyDimension.builder()
+                    .score(session.getAccuracyScore())
+                    .errorBreakdown(errorBreakdownMap)
+                    .feedback(qualitativeSummary != null ? qualitativeSummary.getAccuracyFeedback() : null)
+                    .build();
+        }
+
+        SessionEvaluationResponse.PronunciationDimension pronunciationDimension = null;
+        if (pronunciationSummary != null) {
+            pronunciationDimension = SessionEvaluationResponse.PronunciationDimension.builder()
+                    .score(pronunciationSummary.getAverageOverall())
+                    .averageAccuracy(pronunciationSummary.getAverageAccuracy())
+                    .averageFluency(pronunciationSummary.getAverageFluency())
+                    .averageCompleteness(pronunciationSummary.getAverageCompleteness())
+                    .totalAssessed(pronunciationSummary.getTotalAssessed())
+                    .feedback(qualitativeSummary != null ? qualitativeSummary.getPronunciationFeedback() : null)
+                    .build();
+        }
+
+        SessionEvaluationResponse.TaskCompletionDimension taskCompletionDimension = null;
+        if (session.getTaskCompletionScore() != null) {
+            long completed = sessionMissions.stream()
+                    .filter(m -> m.getStatus() == SessionMission.MissionStatus.COMPLETED).count();
+            taskCompletionDimension = SessionEvaluationResponse.TaskCompletionDimension.builder()
+                    .score(session.getTaskCompletionScore())
+                    .completedMissions((int) completed)
+                    .totalMissions(sessionMissions.size())
+                    .details(missionDetails)
+                    .feedback(qualitativeSummary != null ? qualitativeSummary.getTaskCompletionFeedback() : null)
+                    .build();
+        }
+
+        SessionEvaluationResponse.ComplexityDimension complexityDimension = null;
+        if (session.getComplexityScore() != null) {
+            complexityDimension = SessionEvaluationResponse.ComplexityDimension.builder()
+                    .score(session.getComplexityScore())
+                    .jlptDistribution(jlptDistributionMap)
+                    .feedback(qualitativeSummary != null ? qualitativeSummary.getComplexityFeedback() : null)
+                    .build();
+        }
+
         return SessionEvaluationResponse.builder()
                 .sessionId(session.getId())
+                // Legacy fields
                 .missionScore(session.getMissionScore())
                 .pronunciationScore(session.getPronunciationScore())
                 .languageScore(session.getLanguageScore())
                 .overallScore(session.getOverallScore())
                 .missionDetails(missionDetails)
-                .pronunciationSummary(pronunciationSummary)
                 .languageEvaluation(languageEval)
+                // New v2 dimensions
+                .accuracy(accuracyDimension)
+                .pronunciation(pronunciationDimension)
+                .taskCompletion(taskCompletionDimension)
+                .complexity(complexityDimension)
+                .qualitativeSummary(qualitativeSummary)
                 .build();
     }
 
@@ -881,6 +1017,12 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     corrections = objectMapper.writeValueAsString(correctionsNode);
                 }
 
+                String vocabularyUsed = "[]";
+                JsonNode vocabNode = node.path("vocabulary_detected");
+                if (vocabNode.isArray() && !vocabNode.isEmpty()) {
+                    vocabularyUsed = objectMapper.writeValueAsString(vocabNode);
+                }
+
                 ConversationMessage msg = ConversationMessage.builder()
                         .sessionId(sessionId)
                         .role(ConversationMessage.MessageRole.ASSISTANT)
@@ -890,6 +1032,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                         .translation(translation)
                         .romaji(romaji)
                         .corrections(corrections)
+                        .vocabularyUsed(vocabularyUsed)
                         .sequenceNumber(seq++)
                         .build();
                 saved.add(messageRepository.save(msg));
@@ -942,6 +1085,35 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         } catch (Exception e) {
             log.warn("Failed to parse PHASE_TRANSITION for session {}: {}", sessionId, e.getMessage());
         }
+    }
+
+    /**
+     * Resolves the JLPT level for a session — checks conversation entity first, then context JSON.
+     */
+    private String extractJlptLevel(ConversationSession session) {
+        if (session.getConversationId() != null) {
+            return conversationRepository.findById(session.getConversationId())
+                    .filter(c -> c.getDeletedAt() == null)
+                    .map(conv -> conv.getJlptLevel() != null ? conv.getJlptLevel().name() : "N5")
+                    .orElseGet(() -> extractJlptFromContext(session.getContext()));
+        }
+        return extractJlptFromContext(session.getContext());
+    }
+
+    /**
+     * Computes internal overall score (weighted average of 4 dimensions).
+     * NOT shown to learner — used only for gamification EXP/badges.
+     */
+    private BigDecimal computeInternalOverall(BigDecimal accuracyScore, BigDecimal pronunciationScore,
+                                               BigDecimal taskCompletionScore, BigDecimal complexityScore) {
+        // Weights: accuracy 30%, pronunciation 25%, task completion 30%, complexity 15%
+        double accuracy = accuracyScore != null ? accuracyScore.doubleValue() : 0;
+        double pronunciation = pronunciationScore != null ? pronunciationScore.doubleValue() : 0;
+        double taskCompletion = taskCompletionScore != null ? taskCompletionScore.doubleValue() : 0;
+        double complexity = complexityScore != null ? complexityScore.doubleValue() : 0;
+
+        double weighted = accuracy * 0.30 + pronunciation * 0.25 + taskCompletion * 0.30 + complexity * 0.15;
+        return BigDecimal.valueOf(weighted).setScale(2, RoundingMode.HALF_UP);
     }
 
     /**

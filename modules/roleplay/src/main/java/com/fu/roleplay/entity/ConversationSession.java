@@ -91,6 +91,16 @@ public class ConversationSession extends BaseEntity {
     @Column(name = "overall_score", precision = 5, scale = 2)
     private BigDecimal overallScore;
 
+    // New v2 scoring columns (data-driven orthogonal dimensions)
+    @Column(name = "accuracy_score", precision = 5, scale = 2)
+    private BigDecimal accuracyScore;
+
+    @Column(name = "task_completion_score", precision = 5, scale = 2)
+    private BigDecimal taskCompletionScore;
+
+    @Column(name = "complexity_score", precision = 5, scale = 2)
+    private BigDecimal complexityScore;
+
     @Column(name = "mission_summary", columnDefinition = "jsonb")
     @ColumnTransformer(write = "?::jsonb")
     @Builder.Default
