@@ -44,7 +44,7 @@ public class LearnerAssignmentController {
     @GetMapping
     @Operation(summary = "List all published and closed assignments for the learner's active classes")
     public ApiResponse<PageResponse<LearnerAssignmentSummaryResponse>> getAvailableAssignments(
-            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) String title,
             @RequestParam(required = false) AssignmentType type,
@@ -54,12 +54,12 @@ public class LearnerAssignmentController {
         if (size <= 0) {
             throw new BusinessException("INVALID_PAGE_SIZE", "Kích thước trang phải lớn hơn 0.");
         }
-        if (page <= 0) {
-            throw new BusinessException("INVALID_PAGE_NUMBER", "Số trang phải lớn hơn hoặc bằng 1.");
+        if (page < 0) {
+            throw new BusinessException("INVALID_PAGE_NUMBER", "Số trang phải lớn hơn hoặc bằng 0.");
         }
         Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(
-                getUserId(userDetails), classId, title, type, status, PageRequest.of(page - 1, size));
-        return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber() + 1, 
+                getUserId(userDetails), classId, title, type, status, PageRequest.of(page , size));
+        return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber(),
                 result.getSize(), result.getTotalElements(), result.getTotalPages()));
     }
 

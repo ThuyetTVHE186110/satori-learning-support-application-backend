@@ -72,7 +72,13 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
     public CurriculumImportResponse initiateImport(MultipartFile file, UUID courseId, UUID managerId) {
         log.info("Initiating curriculum import by manager: {}, courseId: {}, file: {}",
                 managerId, courseId, file.getOriginalFilename());
-
+        List<CurriculumImport.ImportStatus> processingStatuses = Arrays.asList(
+                ImportStatus.QUEUED, ImportStatus.AI_PROCESSING, ImportStatus.CHUNKING, ImportStatus.PERSISTING, ImportStatus.CLASSIFYING, ImportStatus.EXTRACTING, ImportStatus.EMBEDDING, ImportStatus.VALIDATING);
+        boolean checkProcessingImport = importRepository.existsCurriculumImportWithStatusIn(processingStatuses);
+        if (checkProcessingImport) {
+            throw new BusinessException("VALIDATION_ERROR",
+                    "Đang có một tiến trình nhập khác đang được xử lý. Vui lòng chờ cho đến khi quá trình đó hoàn tất trước khi bắt đầu một import mới.");
+        }
         // 1. Fast metadata checks (no file I/O): null, extension, size
         String filename = validateFileMetadata(file);
 
@@ -541,7 +547,7 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
      * PDF magic bytes: "%PDF-" (0x25 0x50 0x44 0x46 0x2D)
      * PPTX/XLSX/ZIP magic bytes: "PK\x03\x04" (Office Open XML is a ZIP archive)
      */
-    private static final byte[] PDF_MAGIC  = {0x25, 0x50, 0x44, 0x46, 0x2D}; // %PDF-
+    private static final byte[] PDF_MAGIC = {0x25, 0x50, 0x44, 0x46, 0x2D}; // %PDF-
     private static final byte[] PPTX_MAGIC = {0x50, 0x4B, 0x03, 0x04};        // PK..
 
     /**
