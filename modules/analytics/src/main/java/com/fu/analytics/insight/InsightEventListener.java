@@ -38,11 +38,9 @@ public class InsightEventListener {
                     event.getSessionId(), event.getUserId());
             aggregationService.aggregateFromRoleplay(
                     event.getUserId(),
-                    event.getOverallScore(), event.getLanguageScore(),
-                    event.getPronunciationScore(), event.getFluencyScore(),
-                    event.getAccuracyScore(), event.getVocabularyScore(),
-                    event.getGrammarScore(),
-                    event.getStrengths(), event.getImprovements());
+                    event.getOverallScore(), event.getAccuracyScore(),
+                    event.getPronunciationScore(), event.getTaskCompletionScore(),
+                    event.getComplexityScore(), event.getErrorBreakdown());
         } catch (Exception e) {
             log.error("Failed to aggregate roleplay insights for user {}: {}",
                     event.getUserId(), e.getMessage(), e);
