@@ -14,6 +14,7 @@ import java.util.UUID;
 public class ClassAssignmentStatisticsResponse {
     private UUID classId;
     private long totalAssignments;
+    private long totalEstimatedSubmissions;
     private long draftAssignments;
     private long publishedAssignments;
     private long closedAssignments;

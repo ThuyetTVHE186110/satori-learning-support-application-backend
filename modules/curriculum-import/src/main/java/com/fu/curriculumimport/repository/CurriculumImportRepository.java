@@ -6,6 +6,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
@@ -150,6 +151,8 @@ public interface CurriculumImportRepository extends JpaRepository<CurriculumImpo
 
     @Query("SELECT COALESCE(SUM(ci.hallucinatedItems), 0) FROM CurriculumImport ci WHERE ci.courseId = :courseId AND ci.status = 'COMPLETED'")
     long sumHallucinatedItemsByCourseId(@org.springframework.data.repository.query.Param("courseId") UUID courseId);
+    @Query("SELECT CASE WHEN COUNT(ci) > 0 THEN true ELSE false END FROM CurriculumImport ci WHERE ci.status IN :statuses")
+    boolean existsCurriculumImportWithStatusIn(@Param("statuses") List<ImportStatus> processingStatuses);
 
     //
 }
