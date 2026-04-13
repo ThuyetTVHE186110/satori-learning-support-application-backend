@@ -112,47 +112,60 @@ public class InsightAggregationService {
 
     @Transactional
     public void aggregateFromRoleplay(UUID userId, double overallScore,
-                                       double languageScore, double pronunciationScore,
-                                       double fluencyScore, double accuracyScore,
-                                       double vocabularyScore, double grammarScore,
-                                       List<String> strengths, List<String> improvements) {
+                                       double accuracyScore, double pronunciationScore,
+                                       double taskCompletionScore, double complexityScore,
+                                       Map<String, Integer> errorBreakdown) {
         log.debug("Aggregating roleplay insights for user {}", userId);
 
         UserLearningPreferences prefs = getOrCreatePreferences(userId);
 
         List<SkillScore> scores = ensureAllSkills(prefs.getSkillScores());
         scores = updateSkill(scores, "PRONUNCIATION", pronunciationScore);
-        scores = updateSkill(scores, "FLUENCY", fluencyScore);
         scores = updateSkill(scores, "SPEAKING", overallScore);
-        scores = updateSkill(scores, "GRAMMAR", grammarScore);
-        scores = updateSkill(scores, "VOCABULARY", vocabularyScore);
+        scores = updateSkill(scores, "GRAMMAR", accuracyScore);
+        scores = updateSkill(scores, "VOCABULARY", complexityScore);
+        scores = updateSkill(scores, "FLUENCY", taskCompletionScore);
         prefs.setSkillScores(scores);
 
+        // Use structured error breakdown for weak points (replaces fragile text classification)
         List<LearningInsightPoint> weakPoints = new ArrayList<>(
                 prefs.getWeakPoints() != null ? prefs.getWeakPoints() : List.of());
-        for (String improvement : improvements) {
-            String category = classifyInsightText(improvement);
-            weakPoints = mergeInsight(weakPoints, new LearningInsightPoint(
-                    category, "roleplay_improvement", improvement,
-                    0.75, "ROLEPLAY", null, null, LocalDateTime.now()));
+        if (errorBreakdown != null) {
+            for (Map.Entry<String, Integer> entry : errorBreakdown.entrySet()) {
+                if (entry.getValue() <= 1) continue; // only flag repeated errors
+                String category = mapErrorTypeToCategory(entry.getKey());
+                String description = "Lỗi " + entry.getKey().toLowerCase() + " trong hội thoại: "
+                        + entry.getValue() + " lần";
+                weakPoints = mergeInsight(weakPoints, new LearningInsightPoint(
+                        category, "roleplay_error_" + entry.getKey().toLowerCase(), description,
+                        Math.min(1.0, entry.getValue() / 10.0),
+                        "ROLEPLAY", null, null, LocalDateTime.now()));
+            }
         }
 
-        List<LearningInsightPoint> strongPoints = new ArrayList<>(
-                prefs.getStrongPoints() != null ? prefs.getStrongPoints() : List.of());
-        for (String strength : strengths) {
-            String category = classifyInsightText(strength);
-            strongPoints = mergeInsight(strongPoints, new LearningInsightPoint(
-                    category, "roleplay_strength", strength,
+        // Flag low scores as weak points
+        if (accuracyScore < 60) {
+            weakPoints = mergeInsight(weakPoints, new LearningInsightPoint(
+                    "GRAMMAR", "roleplay_low_accuracy",
+                    "Độ chính xác ngữ pháp thấp trong hội thoại: " + String.format("%.0f", accuracyScore) + "/100",
                     0.80, "ROLEPLAY", null, null, LocalDateTime.now()));
         }
 
         prefs.setWeakPoints(trimInsights(weakPoints));
-        prefs.setStrongPoints(trimInsights(strongPoints));
         prefsRepository.save(prefs);
 
         eventPublisher.publishEvent(new LearningInsightsUpdatedEvent(this, userId));
-        log.info("Roleplay insights updated for user {}: pronunciation={}, fluency={}, speaking={}",
-                userId, pronunciationScore, fluencyScore, overallScore);
+        log.info("Roleplay insights updated for user {}: accuracy={}, pronunciation={}, taskCompletion={}, complexity={}",
+                userId, accuracyScore, pronunciationScore, taskCompletionScore, complexityScore);
+    }
+
+    private String mapErrorTypeToCategory(String errorType) {
+        return switch (errorType) {
+            case "PARTICLE", "WORD_ORDER", "CONJUGATION" -> "GRAMMAR";
+            case "WORD_CHOICE", "SPELLING" -> "VOCABULARY";
+            case "FORMALITY" -> "GRAMMAR";
+            default -> "GRAMMAR";
+        };
     }
 
     // ── Conversation aggregation ────────────────────────────────────────────
