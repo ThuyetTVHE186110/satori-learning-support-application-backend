@@ -130,11 +130,22 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
             // Get overall scores from PronunciationAssessmentResult
             PronunciationAssessmentResult pronResult =
                     PronunciationAssessmentResult.fromResult(result);
+            if (pronResult == null) {
+                log.warn("Azure returned null PronunciationAssessmentResult — fallback response");
+                return AssessmentResult.builder()
+                        .success(true)
+                        .transcribedText(result.getText())
+                        .rawResponse("{\"error\":\"no_assessment_result\"}")
+                        .providerName("AZURE")
+                        .build();
+            }
 
-            double accuracyScore = pronResult.getAccuracyScore();
-            double fluencyScore = pronResult.getFluencyScore();
-            double prosodyScore = pronResult.getProsodyScore();
-            double completenessScore = pronResult.getCompletenessScore();
+            // Null-safe extraction: Azure Speech SDK có thể trả null cho một số field
+            // (đặc biệt prosodyScore — chỉ hỗ trợ locale en-US, ja-JP luôn null).
+            double accuracyScore     = safeScore(pronResult.getAccuracyScore());
+            double fluencyScore      = safeScore(pronResult.getFluencyScore());
+            double prosodyScore      = safeScore(pronResult.getProsodyScore());
+            double completenessScore = safeScore(pronResult.getCompletenessScore());
 
             // Overall = weighted average for ja-JP (prosody is always 0 for non-en-US locales)
             // Accuracy 50%: correct mora/phoneme production is foundational for Japanese
@@ -170,6 +181,11 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
                     .providerName("AZURE")
                     .build();
         }
+    }
+
+    /** Null-safe score extraction — Azure SDK có thể trả null (boxed Double) cho một số metric/locale. */
+    private static double safeScore(Double score) {
+        return score != null ? score : 0.0;
     }
 
     /**

@@ -428,11 +428,17 @@ public class PracticeSessionService {
                 ? toItemResponse(nextItem)
                 : null;
 
+        // Resolve text của đáp án đúng + đáp án user — chỉ áp dụng cho dạng chọn 1 option.
+        String correctAnswerText = resolveSelectionOptionText(item, item.getCorrectAnswer());
+        String userAnswerText    = resolveSelectionOptionText(item, userAnswer);
+
         return AnswerFeedbackResponse.builder()
                 .isCorrect(result.isCorrect())
                 .score(result.score())
                 .feedback(result.feedback())
                 .correctAnswer(item.getCorrectAnswer())
+                .correctAnswerText(correctAnswerText)
+                .userAnswerText(userAnswerText)
                 .explanation(explanation)
                 .sessionCompleted(sessionCompleted)
                 .nextItem(nextItemResponse)
@@ -440,6 +446,42 @@ public class PracticeSessionService {
                 .masteryLevelAfter(masteryLevelAfter)
                 .entityJapanese(entityJapanese)
                 .build();
+    }
+
+    /**
+     * Resolve text của một option từ index-based answer.
+     * Chỉ áp dụng cho dạng chọn 1 option (MC/TRUE_FALSE/FILL_BLANK/TRANSLATION) — các dạng còn lại
+     * (SENTENCE_ORDER / MATCHING) trả về null vì không có "text đơn".
+     *
+     * - Nếu answer là integer id hợp lệ → trả text tại index đó trong options JSON.
+     * - Nếu không parse được (legacy text answer): trả nguyên answer.
+     * - Null-safe cho mọi input không hợp lệ.
+     */
+    private String resolveSelectionOptionText(PracticeItem item, String answer) {
+        if (item == null || answer == null || answer.isBlank()) return null;
+        PracticeItemType type = item.getItemType();
+        if (type != PracticeItemType.MULTIPLE_CHOICE
+                && type != PracticeItemType.TRUE_FALSE
+                && type != PracticeItemType.FILL_BLANK
+                && type != PracticeItemType.TRANSLATION) {
+            return null;
+        }
+        try {
+            int id = Integer.parseInt(answer.trim());
+            com.fasterxml.jackson.databind.JsonNode options = objectMapper.readTree(
+                    item.getOptions() != null ? item.getOptions() : "[]");
+            if (!options.isArray() || id < 0 || id >= options.size()) return null;
+            com.fasterxml.jackson.databind.JsonNode opt = options.get(id);
+            com.fasterxml.jackson.databind.JsonNode textNode = opt.get("text");
+            return textNode != null && !textNode.isNull() ? textNode.asText() : null;
+        } catch (NumberFormatException e) {
+            // Legacy item với correctAnswer dạng text → trả nguyên text
+            return answer;
+        } catch (Exception e) {
+            log.debug("resolveSelectionOptionText: không parse được options cho item {}: {}",
+                    item.getId(), e.getMessage());
+            return null;
+        }
     }
 
     // ── Complete Session ──────────────────────────────────────────────────
@@ -1128,20 +1170,19 @@ public class PracticeSessionService {
         if (resolvedType == PracticeItemType.SENTENCE_ORDER) {
             return buildSentenceOrderItem(session, gen, index);
         }
-        // FILL_BLANK và TRANSLATION đều là chọn 1 trong N options → cùng build logic
-        if (resolvedType == PracticeItemType.FILL_BLANK
-                || resolvedType == PracticeItemType.TRANSLATION) {
-            return buildSelectionItem(session, gen, index, resolvedType);
+        // Tất cả dạng "chọn 1 trong N options" (MC, TRUE_FALSE, FILL_BLANK, TRANSLATION)
+        // cùng build logic → correctAnswer = index của option đúng (string integer).
+        // TRUE_FALSE KHÔNG shuffle để giữ thứ tự Đúng/Sai cố định do LLM trả về.
+        if (resolvedType == PracticeItemType.MULTIPLE_CHOICE
+                || resolvedType == PracticeItemType.FILL_BLANK
+                || resolvedType == PracticeItemType.TRANSLATION
+                || resolvedType == PracticeItemType.TRUE_FALSE) {
+            boolean shuffle = resolvedType != PracticeItemType.TRUE_FALSE;
+            return buildSelectionItem(session, gen, index, resolvedType, shuffle);
         }
 
-        // MULTIPLE_CHOICE, TRUE_FALSE: shuffle options (trừ TRUE_FALSE giữ Đúng/Sai cố định)
+        // Fallback — loại item chưa xử lý (không nên xảy ra với enum hiện tại).
         List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.getOptions();
-        if (options != null && options.size() > 1
-                && resolvedType != PracticeItemType.TRUE_FALSE) {
-            options = new ArrayList<>(options);
-            Collections.shuffle(options);
-        }
-
         return PracticeItem.builder()
                 .sessionId(session.getId())
                 .itemIndex(index)
@@ -1158,16 +1199,19 @@ public class PracticeSessionService {
     }
 
     /**
-     * Build item dạng "chọn 1 trong N options": FILL_BLANK và TRANSLATION.
+     * Build item dạng "chọn 1 trong N options": MULTIPLE_CHOICE, FILL_BLANK, TRANSLATION, TRUE_FALSE.
      *
-     * Options được shuffle để đáp án không luôn ở vị trí cố định.
-     * correctAnswer = index (id) của option có isCorrect=true sau khi shuffle.
+     * Options có thể được shuffle (trừ TRUE_FALSE) để đáp án không luôn ở vị trí cố định.
+     * correctAnswer = index (id) của option có isCorrect=true sau khi shuffle (string integer).
      * Frontend submit id option được chọn → server so sánh integer — không LLM.
+     *
+     * Fallback: nếu LLM không đánh dấu isCorrect, thử map theo text correctAnswer do LLM trả.
      */
     private PracticeItem buildSelectionItem(PracticeSession session,
                                              ExerciseGeneratorAgent.GeneratedItem gen,
                                              int index,
-                                             PracticeItemType itemType) {
+                                             PracticeItemType itemType,
+                                             boolean shuffle) {
         List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> options = gen.getOptions();
         if (options == null || options.isEmpty()) {
             log.warn("buildSelectionItem: LLM không trả về options cho {} item {}", itemType, index);
@@ -1177,33 +1221,49 @@ public class PracticeSessionService {
                     .itemType(itemType)
                     .question(gen.getQuestion() != null ? gen.getQuestion() : "")
                     .options("[]")
-                    .correctAnswer(gen.getCorrectAnswer() != null ? gen.getCorrectAnswer() : "")
+                    .correctAnswer("")
                     .explanation(gen.getExplanation())
                     .build();
         }
 
-        List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> shuffled = new ArrayList<>(options);
-        Collections.shuffle(shuffled);
+        List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> finalOptions =
+                shuffle && options.size() > 1
+                        ? new ArrayList<>(options)
+                        : options;
+        if (shuffle && options.size() > 1) {
+            Collections.shuffle(finalOptions);
+        }
 
-        // correctAnswer = index của option có isCorrect=true trong mảng sau shuffle
+        // correctAnswer = index của option có isCorrect=true trong mảng cuối
         int correctId = -1;
-        for (int i = 0; i < shuffled.size(); i++) {
-            if (shuffled.get(i).isCorrect()) {
+        for (int i = 0; i < finalOptions.size(); i++) {
+            if (finalOptions.get(i).isCorrect()) {
                 correctId = i;
                 break;
             }
         }
+        // Fallback: LLM không set isCorrect → thử khớp text với correctAnswer mà LLM trả về
+        if (correctId == -1 && gen.getCorrectAnswer() != null && !gen.getCorrectAnswer().isBlank()) {
+            String target = gen.getCorrectAnswer().trim();
+            for (int i = 0; i < finalOptions.size(); i++) {
+                String text = finalOptions.get(i).text();
+                if (text != null && text.trim().equalsIgnoreCase(target)) {
+                    correctId = i;
+                    break;
+                }
+            }
+        }
         if (correctId == -1) {
-            // Fallback: LLM không đánh dấu isCorrect → dùng correctAnswer text của LLM
-            log.warn("buildSelectionItem: không tìm thấy isCorrect=true cho {} item {}, fallback text", itemType, index);
+            log.warn("buildSelectionItem: không xác định được đáp án cho {} item {}", itemType, index);
             return PracticeItem.builder()
                     .sessionId(session.getId())
                     .itemIndex(index)
                     .itemType(itemType)
                     .question(gen.getQuestion() != null ? gen.getQuestion() : "")
+                    .questionJapanese(gen.getQuestionJapanese())
                     .hint(gen.getHint())
-                    .options(buildOptionsJson(shuffled))
-                    .correctAnswer(gen.getCorrectAnswer() != null ? gen.getCorrectAnswer() : "")
+                    .options(buildOptionsJson(finalOptions))
+                    .correctAnswer("")
                     .explanation(gen.getExplanation())
                     .refContentId(parseUuid(gen.getRefContentId()))
                     .refContentType(gen.getRefContentType())
@@ -1217,7 +1277,7 @@ public class PracticeSessionService {
                 .question(gen.getQuestion() != null ? gen.getQuestion() : "")
                 .questionJapanese(gen.getQuestionJapanese())
                 .hint(gen.getHint())
-                .options(buildOptionsJson(shuffled))
+                .options(buildOptionsJson(finalOptions))
                 .correctAnswer(String.valueOf(correctId))
                 .explanation(gen.getExplanation())
                 .refContentId(parseUuid(gen.getRefContentId()))
