@@ -623,11 +623,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             progressRepository.markCompleted(
                     session.getUserId(),
                     session.getConversationId(),
-                    completedAt,
-                    overallScore,
-                    errorBreakdown.accuracyScore(),
-                    complexityResult.score(),
-                    pronunciationScore);
+                    completedAt);
         }
         // Record daily activity for streak tracking
         StreakNotificationResponse streakNotification = null;
