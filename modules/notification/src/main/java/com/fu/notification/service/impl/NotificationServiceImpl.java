@@ -1,6 +1,9 @@
 package com.fu.notification.service.impl;
 
+import com.fu.common.port.UserQueryPort;
+import com.fu.infrastructure.email.EmailService;
 import com.fu.notification.dto.NotificationResponse;
+import com.fu.notification.dto.NotificationPreferencesResponse;
 import com.fu.notification.dto.SendNotificationRequest;
 import com.fu.notification.entity.Notification;
 import com.fu.notification.entity.NotificationPriority;
@@ -12,13 +15,13 @@ import com.fu.notification.service.DeviceTokenService;
 import com.fu.notification.service.FcmService;
 import com.fu.notification.service.NotificationPreferencesService;
 import com.fu.notification.service.NotificationService;
+import com.fu.notification.sse.NotificationSseEmitterRegistry;
 import com.google.firebase.messaging.BatchResponse;
 import com.google.firebase.messaging.SendResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +44,9 @@ public class NotificationServiceImpl implements NotificationService {
     private final DeviceTokenService deviceTokenService;
     private final NotificationPreferencesService preferencesService;
     private final FcmService fcmService;
+    private final EmailService emailService;
+    private final UserQueryPort userQueryPort;
+    private final NotificationSseEmitterRegistry sseRegistry;
 
     @Override
     @Transactional
@@ -79,7 +85,7 @@ public class NotificationServiceImpl implements NotificationService {
             // Deduplication: skip if identical type was already sent recently
             LocalDateTime deduplicationSince = LocalDateTime.now().minusMinutes(DEDUP_WINDOW_MINUTES);
             List<Notification> recent = notificationRepository.findRecentByUserAndType(
-                    userId, request.getType(), deduplicationSince);
+                    userId, request.getType().name(), deduplicationSince);
             if (!recent.isEmpty()) {
                 log.debug("Dedup: skipping {} for user {} (sent {} min ago)",
                         request.getType(), userId, DEDUP_WINDOW_MINUTES);
@@ -110,6 +116,22 @@ public class NotificationServiceImpl implements NotificationService {
         if (notification != null && pushSent) {
             notification.markPushSent();
             notificationRepository.save(notification);
+        }
+
+        // Email notification for HIGH/CRITICAL priority when user opted in
+        if (request.getPriority() == NotificationPriority.HIGH
+                || request.getPriority() == NotificationPriority.CRITICAL) {
+            try {
+                NotificationPreferencesResponse prefs = preferencesService.getPreferences(userId);
+                if (prefs != null && Boolean.TRUE.equals(prefs.getEmailEnabled())) {
+                    String email = userQueryPort.getUserEmail(userId);
+                    if (email != null) {
+                        emailService.sendSimpleEmail(email, request.getTitle(), request.getBody());
+                    }
+                }
+            } catch (Exception ex) {
+                log.warn("Email notification failed for user {}: {}", userId, ex.getMessage());
+            }
         }
 
         return true;
@@ -226,7 +248,12 @@ public class NotificationServiceImpl implements NotificationService {
 
     private Notification saveNotification(UUID userId, SendNotificationRequest request) {
         Notification notification = buildNotification(userId, request);
-        return notificationRepository.save(notification);
+        Notification saved = notificationRepository.save(notification);
+        // Push to any open SSE streams for real-time in-app delivery (null-safe for test environments)
+        if (sseRegistry != null) {
+            sseRegistry.send(userId, mapToResponse(saved));
+        }
+        return saved;
     }
 
     private Notification buildNotification(UUID userId, SendNotificationRequest request) {
@@ -275,7 +302,7 @@ public class NotificationServiceImpl implements NotificationService {
             
             if (!invalidTokens.isEmpty()) {
                 // Deactivate invalid tokens asynchronously
-                handleInvalidTokensAsync(invalidTokens);
+                handleInvalidTokens(invalidTokens);
             }
             
             return response.getSuccessCount() > 0;
@@ -284,8 +311,7 @@ public class NotificationServiceImpl implements NotificationService {
         return false;
     }
 
-    @Async
-    protected void handleInvalidTokensAsync(List<String> invalidTokens) {
+    private void handleInvalidTokens(List<String> invalidTokens) {
         deviceTokenService.handleInvalidTokens(invalidTokens);
     }
 

@@ -9,10 +9,12 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.NoHandlerFoundException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -107,6 +109,37 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.error("INVALID_PARAMETER", message));
+    }
+
+    /**
+     * Handles HTTP 405 Method Not Allowed — client called the right URL but with the wrong HTTP verb.
+     * Logged at WARN without stack trace to avoid polluting production logs as if it were a server bug.
+     */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMethodNotSupported(
+            HttpRequestMethodNotSupportedException ex) {
+        String supported = ex.getSupportedHttpMethods() == null
+                ? "unknown"
+                : ex.getSupportedHttpMethods().toString();
+        String message = String.format(
+                "HTTP method '%s' not supported for this endpoint. Supported: %s",
+                ex.getMethod(), supported);
+        log.warn("Method not allowed: {}", message);
+        return ResponseEntity
+                .status(HttpStatus.METHOD_NOT_ALLOWED)
+                .body(ApiResponse.error("METHOD_NOT_ALLOWED", message));
+    }
+
+    /**
+     * Handles HTTP 404 when no controller matches the requested path.
+     * Requires `spring.mvc.throw-exception-if-no-handler-found=true`; harmless otherwise.
+     */
+    @ExceptionHandler(NoHandlerFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoHandlerFound(NoHandlerFoundException ex) {
+        log.warn("No handler found: {} {}", ex.getHttpMethod(), ex.getRequestURL());
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error("NOT_FOUND", "Endpoint not found"));
     }
 
     @ExceptionHandler(Exception.class)

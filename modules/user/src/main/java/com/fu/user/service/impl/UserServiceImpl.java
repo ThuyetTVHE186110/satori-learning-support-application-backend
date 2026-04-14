@@ -4,7 +4,7 @@ import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.infrastructure.email.EmailService;
 import com.fu.user.dto.*;
-import com.fu.user.entity.AuthProvider;
+
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
@@ -22,7 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.swing.text.DateFormatter;
+
 import java.io.InputStream;
 import java.security.SecureRandom;
 import java.text.SimpleDateFormat;
@@ -60,7 +60,7 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class UserServiceImpl implements UserService {
 
-    private static final String EMAIL_REGEX = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$";
+    private static final String EMAIL_REGEX = com.fu.common.constant.AppConstants.EMAIL_REGEX;
     // Phone — 10 digits only
     private static final String PHONE_REGEX = "^\\d{10}$";
     // Full name (Unicode letters, spaces, hyphens, apostrophes)
@@ -223,6 +223,14 @@ public class UserServiceImpl implements UserService {
         }
         // Validate permission to update this user
         validateUpdatePermission(user, updaterRole);
+        // validate email
+        if (request.getEmail() != null && !request.getEmail().trim().isBlank() && !user.getEmail().trim().equalsIgnoreCase(request.getEmail().trim())) {
+            User existingUser = userRepository.findByEmail(request.getEmail().trim()).orElse(null);
+            if (existingUser != null) {
+                throw new BusinessException("EXISTED_EMAIL", "Email này đã được sử dụng. Vui lòng sử dụng email khác.");
+            }
+            user.setEmail(request.getEmail().trim());
+        }
         // Update fields if provided
         if (request.getFirstName() != null) {
             user.setFirstName(request.getFirstName());
@@ -426,9 +434,9 @@ public class UserServiceImpl implements UserService {
         List<UserChangedFromImportResponse> updated = new ArrayList<>();
         List<ImportRowError> errors = new ArrayList<>();
 
-        //Size limit 5MB
+        //Size limit 20MB
         if (file.getSize() > 20 * 1024 * 1024) {
-            throw new BusinessException("FILE_TOO_LARGE", "Kích thước file vượt quá giới hạn 5MB");
+            throw new BusinessException("FILE_TOO_LARGE", "Kích thước file vượt quá giới hạn 20MB");
         }
 
         try (InputStream inputStream = file.getInputStream(); Workbook workbook = WorkbookFactory.create(inputStream)) {
@@ -568,7 +576,7 @@ public class UserServiceImpl implements UserService {
                 user.setPasswordHash(passwordEncoder.encode(rawPassword));
                 user.setRole(createReq.getRole());
                 user.setStatus(createReq.getRole() == UserRole.LEARNER ? UserStatus.INACTIVE : UserStatus.ACTIVE);
-                user.setAuthProvider(AuthProvider.LOCAL);
+
                 user.setEmailVerifiedAt(LocalDateTime.now());
                 user.setCreatedBy(currentUserId);
 
@@ -719,7 +727,6 @@ public class UserServiceImpl implements UserService {
         user.setPasswordHash(passwordEncoder.encode(rawPassword));
         user.setRole(request.getRole());
         user.setStatus(request.getRole() == UserRole.LEARNER ? UserStatus.INACTIVE : UserStatus.ACTIVE);
-        user.setAuthProvider(AuthProvider.LOCAL);
         user.setEmailVerifiedAt(LocalDateTime.now()); // Verified by manager/admin
         user.setCreatedBy(createdByUserId);
 

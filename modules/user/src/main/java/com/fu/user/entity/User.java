@@ -67,16 +67,6 @@ public class User extends SoftDeletableEntity {
     @Builder.Default
     private UserStatus status = UserStatus.PENDING_ACTIVATION;
 
-    @Enumerated(EnumType.STRING)
-    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
-    @Column(name = "auth_provider", columnDefinition = "auth_provider", nullable = false)
-    @ColumnTransformer(write = "CAST(? AS auth_provider)")
-    @Builder.Default
-    private AuthProvider authProvider = AuthProvider.LOCAL;
-
-    @Column(name = "google_id", unique = true)
-    private String googleId;
-
     // Security fields
     @Column(name = "activation_token")
     private String activationToken;

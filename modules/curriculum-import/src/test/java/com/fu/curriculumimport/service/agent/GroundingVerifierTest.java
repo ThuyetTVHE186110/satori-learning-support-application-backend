@@ -308,6 +308,95 @@ class GroundingVerifierTest {
     }
 
     // =========================================================================
+    // Vocabulary — LLM output normalization (fix for 24/24 false positives)
+    // =========================================================================
+
+    @Nested
+    @DisplayName("Vocabulary — LLM output normalization")
+    class VocabNormalizationTests {
+
+        @Test
+        @DisplayName("Tilde prefix: LLM returns 〜さん, source has raw さん → textGrounded")
+        void vocab_tildePrefix_matchesRawSuffix() {
+            String source = "| さん | | suffix honorific |";
+            ExtractionResult result = resultWith(
+                    List.of(vocab("〜さん", "さん", null)), List.of());
+
+            GroundingVerifier.GroundingResult gr = verifier.verify(chunk(source), result);
+
+            GroundingCheck check = gr.getGroundingChecks().get(0);
+            assertThat(check.isTextGrounded()).isTrue();
+            assertThat(check.isHallucinated()).isFalse();
+        }
+
+        @Test
+        @DisplayName("Full-width tilde ～: LLM returns ～じん → textGrounded against じん")
+        void vocab_fullWidthTilde_matchesRawSuffix() {
+            String source = "じん (じん) suffix for nationality";
+            ExtractionResult result = resultWith(
+                    List.of(vocab("～じん", "じん", null)), List.of());
+
+            GroundingVerifier.GroundingResult gr = verifier.verify(chunk(source), result);
+
+            GroundingCheck check = gr.getGroundingChecks().get(0);
+            assertThat(check.isTextGrounded()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Country+人 compound: LLM returns インドネシア人, source has country col + 人 col → textGrounded via compound decomposition")
+        void vocab_countryJinCompound_matchesViaDecomposition() {
+            String source = "| インドネシア | | Indonesia | 人 | person suffix |";
+            ExtractionResult result = resultWith(
+                    List.of(vocab("インドネシア人", null, null)), List.of());
+
+            GroundingVerifier.GroundingResult gr = verifier.verify(chunk(source), result);
+
+            GroundingCheck check = gr.getGroundingChecks().get(0);
+            assertThat(check.isTextGrounded()).isTrue();
+            assertThat(check.getEvidenceSnippet()).contains("Compound suffix");
+        }
+
+        @Test
+        @DisplayName("Language compound: フランス語 decomposes to フランス + 語")
+        void vocab_languageCompound_matchesViaDecomposition() {
+            String source = "フランス Pháp 語 ngôn ngữ";
+            ExtractionResult result = resultWith(
+                    List.of(vocab("フランス語", null, null)), List.of());
+
+            GroundingVerifier.GroundingResult gr = verifier.verify(chunk(source), result);
+
+            GroundingCheck check = gr.getGroundingChecks().get(0);
+            assertThat(check.isTextGrounded()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Bracketed optional parts: [X] and 【X】 delimiters stripped, content kept")
+        void vocab_bracketedOptional_delimitersStripped() {
+            String source = "こちらこそどうぞよろしくお願いします。";
+            ExtractionResult result = resultWith(
+                    List.of(vocab("こちらこそ[どうぞ]よろしく[お願いします]。", null, null)), List.of());
+
+            GroundingVerifier.GroundingResult gr = verifier.verify(chunk(source), result);
+
+            GroundingCheck check = gr.getGroundingChecks().get(0);
+            assertThat(check.isTextGrounded()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Compound decomposition rejects when stem is absent (e.g. ベトナム absent → ベトナム人 not grounded)")
+        void vocab_compound_stemMissing_notGrounded() {
+            String source = "日本人 は 人 です";
+            ExtractionResult result = resultWith(
+                    List.of(vocab("ベトナム人", null, null)), List.of());
+
+            GroundingVerifier.GroundingResult gr = verifier.verify(chunk(source), result);
+
+            GroundingCheck check = gr.getGroundingChecks().get(0);
+            assertThat(check.isTextGrounded()).isFalse();
+        }
+    }
+
+    // =========================================================================
     // Vocabulary grounding — reading verification
     // =========================================================================
 

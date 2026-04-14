@@ -8,6 +8,13 @@ spring:
     profiles:
         active: ${SPRING_PROFILES_ACTIVE:local}
 
+    main:
+        # Force servlet (WebMVC) mode even when spring-webflux is on the classpath.
+        # The monitoring module uses WebClient (from webflux) as an HTTP client only —
+        # it does NOT start a reactive web server. Without this, Spring Boot may
+        # detect both starters and fail to resolve the application type.
+        web-application-type: servlet
+
     # ==================== PostgreSQL Configuration ====================
     datasource:
         url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:satori_learning}?stringtype=unspecified
@@ -58,16 +65,24 @@ spring:
     # ==================== AI Configuration ====================
     ai:
         openai:
-            api-key: ${OPENAI_API_KEY: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}
+            api-key: ${OPENAI_API_KEY:}
             chat:
                 options:
-                    model: gpt-4o
+                    model: gpt-4o-mini
                     temperature: 0.7
                     max-tokens: 4096
             embedding:
                 options:
                     model: text-embedding-3-large
                     dimensions: 1536
+        # Retry config: extraction agents already handle their own retries via
+        # ImportOrchestrator re-extraction loop, so keep Spring AI retry minimal.
+        retry:
+            max-attempts: 2
+            backoff:
+                initial-interval: 2000
+                multiplier: 2
+                max-interval: 10000
 
     # ==================== File Upload Configuration ====================
     servlet:
@@ -107,21 +122,37 @@ app:
             access-token-expiration-ms: ${JWT_ACCESS_EXPIRATION:1800000}
             # Refresh token expiration: 7 days (604800000 ms)
             refresh-token-expiration-ms: ${JWT_REFRESH_EXPIRATION:604800000}
+        # CORS allowed origins (comma-separated). Override per environment.
+        # Production MUST set APP_ALLOWED_ORIGINS to the actual frontend URL.
+        cors:
+            allowed-origins: ${APP_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+        # Swagger UI public access — true for local/dev, false for prod (application-prod.yml overrides)
+        swagger:
+            public: ${SWAGGER_PUBLIC:true}
         # Max failed login attempts before account lock
         max-failed-attempts: ${MAX_FAILED_ATTEMPTS:5}
-        # Account lock duration in minutes
-        lock-duration-minutes: ${LOCK_DURATION_MINUTES:30}
+        # Account lock duration in minutes (reduced from 30 to 15 for better UX)
+        lock-duration-minutes: ${LOCK_DURATION_MINUTES:5}
         # OTP expiration time in minutes
         otp-expiration-minutes: ${OTP_EXPIRATION_MINUTES:10}
+        # Password reset token expiration in minutes
+        reset-token-expiration-minutes: ${RESET_TOKEN_EXPIRATION_MINUTES:5}
         # Activation token expiration time in hours
         activation-token-expiration-hours: ${ACTIVATION_TOKEN_EXPIRATION_HOURS:24}
-
-    # Google OAuth / Firebase Configuration
-    google:
-        firebase:
-            enabled: ${FIREBASE_ENABLED:false}
-            credentials-file: ${FIREBASE_CREDENTIALS_FILE:}
-            project-id: ${FIREBASE_PROJECT_ID:}
+        # Per-IP rate limits for public auth endpoints
+        rate-limits:
+            login:
+                max-requests: ${AUTH_RATE_LOGIN_MAX:10}
+                window-minutes: ${AUTH_RATE_LOGIN_WINDOW:1}
+            forgot-password:
+                max-requests: ${AUTH_RATE_FORGOT_MAX:3}
+                window-minutes: ${AUTH_RATE_FORGOT_WINDOW:10}
+            register:
+                max-requests: ${AUTH_RATE_REGISTER_MAX:5}
+                window-minutes: ${AUTH_RATE_REGISTER_WINDOW:1}
+            verify-otp:
+                max-requests: ${AUTH_RATE_OTP_MAX:5}
+                window-minutes: ${AUTH_RATE_OTP_WINDOW:5}
 
     # Push Notification Configuration (FCM)
     notification:
@@ -137,39 +168,24 @@ app:
             max-batch-size: ${NOTIFICATION_BATCH_SIZE:500}
             batch-delay-ms: ${NOTIFICATION_BATCH_DELAY_MS:100}
 
-    # Email Configuration
+    # Email Configuration (Resend HTTP API — no SMTP needed)
     email:
         enabled: ${EMAIL_ENABLED:true}
-        from: ${EMAIL_FROM:noreply@satori-learning.com}
-        from-name: ${EMAIL_FROM_NAME:Satori Learning}
+        resend-api-key: ${RESEND_API_KEY:}
+        from: ${EMAIL_FROM:Satori Learning <noreply@satorinihongo.id.vn>}
         base-url: ${APP_BASE_URL:http://localhost:3000}
 
     # Cloudinary Configuration
     cloudinary:
-      enabled: ${CLOUDINARY_ENABLED:true}
-      cloud-name: ${CLOUDINARY_CLOUD_NAME:dtn0i6fvs}
-      api-key: ${CLOUDINARY_API_KEY:945286173851369}
-      api-secret: ${CLOUDINARY_API_SECRET:oefJ4xJOHTtcwoGfU3Te_MaLMPY}
+        enabled: ${CLOUDINARY_ENABLED:true}
+        cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+        api-key: ${CLOUDINARY_API_KEY:}
+        api-secret: ${CLOUDINARY_API_SECRET:}
 
-
-# ==================== Spring Mail Configuration ====================
-spring.mail:
-  host: smtp.gmail.com
-  port: 587
-  username: ${MAIL_USERNAME:nihongosatori@gmail.com}
-  password: ${MAIL_PASSWORD:wzsn ucsx jnsh mptd}
-  properties:
-    mail:
-      smtp:
-        auth: true
-        starttls:
-          enable: true
-          required: true
-    default-encoding: UTF-8
 # ==================== Logging Configuration ====================
 logging:
     level:
-        root: INFO
+        root: INF
         com.fu: DEBUG
         org.springframework.data.redis: DEBUG
         # Suppress Hibernate SQL noise (scheduler polls, retry queries, etc.)
@@ -196,45 +212,40 @@ management:
 curriculum-import:
     # ===== OCR Subsystem =====
     ocr:
-        # Google Cloud Vision DOCUMENT_TEXT_DETECTION for scanned PDF import.
-        # Requires GOOGLE_APPLICATION_CREDENTIALS env var or credentials-file below.
+        # Google Cloud Document AI Layout Parser for scanned PDF import.
+        # Tier 2 fallback: GPT-4o Vision in VisionPageExtractor runs on rendered
+        # page images for chunks Document AI cannot cover.
         # Set to false to disable OCR (scanned PDFs will be rejected).
         enabled: ${OCR_ENABLED:true}
         # DPI for rendering PDF pages to images.
-        # 300 DPI = recommended for MnN scanned pages (furigana strokes preserved,
-        #           ~3 MB/page; OCR service downscales to 1800px after preprocessing).
+        # 300 DPI = recommended for MnN scanned pages (furigana strokes preserved).
         # 150 DPI = fallback for memory-constrained environments.
         render-dpi: ${OCR_RENDER_DPI:300}
         # Chars-per-page below this → treated as scanned PDF (route to OCR)
         scanned-page-threshold: ${OCR_SCANNED_PAGE_THRESHOLD:100.0}
         # Minimum OCR confidence to accept (below = logged as low quality)
         min-confidence: ${OCR_MIN_CONFIDENCE:0.5}
-        # Path to Google Cloud service-account JSON key (for google_vision / auto provider).
+        # Path to Google Cloud service-account JSON key used by Document AI.
         # If blank, uses GOOGLE_APPLICATION_CREDENTIALS env var (ADC).
-        # Example: environment/secrets/satori-489709-ce922a405186.json
         credentials-file: ${GOOGLE_APPLICATION_CREDENTIALS:environment/secrets/satori-489709-ce922a405186.json}
 
-        # ===== Document AI Layout Parser (OCR Tier 0) =====
-        # Enable for highest-fidelity table extraction from Minna no Nihongo vocabulary pages.
+        # ===== Document AI Layout Parser =====
         # Requires a Layout Parser processor created in Google Cloud Console → Document AI.
-        # Cost: ~$10/1000 pages (vs $1.50 for Vision). Disable to use Vision OCR only.
         document-ai-enabled: ${DOCUMENT_AI_ENABLED:false}
-        # Google Cloud project ID (same project as Vision API is fine).
         document-ai-project-id: ${DOCUMENT_AI_PROJECT_ID:703548005421}
         # Processor region — must be "us" or "eu" (Document AI has no global endpoint).
         document-ai-location: ${DOCUMENT_AI_LOCATION:us}
-        # Processor ID from Google Cloud Console (e.g. abc123def456).
         document-ai-processor-id: ${DOCUMENT_AI_PROCESSOR_ID:}
         # Timeout in minutes for a single processDocument call.
-        # OCR of a full scanned PDF (17 pages @ 300 DPI) can take 2-4 min.
-        # Increase for larger documents; decrease to fail faster on slow connections.
         document-ai-timeout-minutes: ${DOCUMENT_AI_TIMEOUT_MINUTES:5}
-
-        # ===== Gemini 2.5 Flash Vision (OCR Tier 2 — replaces GPT-4o) =====
-        # Get an API key at https://aistudio.google.com/app/apikey (free tier available).
-        # When blank, Tier 2 falls back to GPT-4o (existing behaviour).
-        # Enabling Gemini reduces Tier 2 cost by ~95 % vs GPT-4o.
-        gemini-api-key: ${GEMINI_API_KEY:}
+        # ----- Semantic chunking (Layout Parser feature) -----
+        # When enabled, Document AI returns document.chunked_document.chunks[]
+        # — heading-aware pre-chunked text blocks suitable for direct RAG embedding.
+        document-ai-chunking-enabled: ${DOCUMENT_AI_CHUNKING_ENABLED:true}
+        # Target chunk size in tokens. 0 = use the Layout Parser default (~500).
+        document-ai-chunk-size: ${DOCUMENT_AI_CHUNK_SIZE:500}
+        # Prepend ancestor headings (e.g. "Bài 1 > Từ vựng") to each chunk's text.
+        document-ai-include-ancestor-headings: ${DOCUMENT_AI_INCLUDE_ANCESTOR_HEADINGS:true}
 
     agentic-rag:
         # Minimum confidence for extraction (Corrective RAG threshold)
@@ -263,8 +274,11 @@ curriculum-import:
         retry-scheduler-delay-ms: ${RAG_RETRY_SCHEDULER_DELAY:30000}
 
         # ===== Self-Reflection (Self-RAG, Asai et al. 2023) =====
-        # Enable LLM self-critique with reflection tokens
-        self-reflection-enabled: ${RAG_SELF_REFLECTION_ENABLED:true}
+        # Disabled on first-import: reflection truncates source to 4000 chars then
+        # fabricates "not in source" complaints on the truncated view, rejecting
+        # canonical patterns that grounding verifier confirms at 100%. Kept as
+        # opt-in for future telemetry via env override.
+        self-reflection-enabled: ${RAG_SELF_REFLECTION_ENABLED:false}
         # Max source chars for reflection prompt (context window limit)
         self-reflection-max-source-chars: ${RAG_SELF_REFLECTION_MAX_SOURCE_CHARS:4000}
 
@@ -275,11 +289,47 @@ curriculum-import:
         grounding-threshold: ${RAG_GROUNDING_THRESHOLD:0.4}
 
         # ===== Combined Scoring Weights (must sum to 1.0) =====
-        rule-based-weight: ${RAG_RULE_BASED_WEIGHT:0.30}
-        reflection-weight: ${RAG_REFLECTION_WEIGHT:0.35}
-        grounding-weight: ${RAG_GROUNDING_WEIGHT:0.35}
+        # With reflection disabled, grounding dominates. Rule-based is kept at
+        # low weight until its scorer is audited (see task #16).
+        rule-based-weight: ${RAG_RULE_BASED_WEIGHT:0.20}
+        reflection-weight: ${RAG_REFLECTION_WEIGHT:0.00}
+        grounding-weight: ${RAG_GROUNDING_WEIGHT:0.80}
         # Combined score below this triggers re-extraction
         combined-re-extraction-threshold: ${RAG_COMBINED_RE_EXTRACTION_THRESHOLD:0.5}
+
+        # ===== Model & Agent Configuration =====
+        # OpenAI model for per-section grammar/vocabulary extraction
+        extraction-model: ${RAG_EXTRACTION_MODEL:gpt-4o}
+        # OpenAI model for vision-based page extraction
+        vision-model: ${RAG_VISION_MODEL:gpt-4o}
+        # Minimum confidence for vision extraction results
+        vision-confidence-threshold: ${RAG_VISION_CONFIDENCE:0.75}
+        # Per-agent timeout in minutes
+        agent-timeout-minutes: ${RAG_AGENT_TIMEOUT:4}
+        # Estimated cost per token in USD (for cost estimation display)
+        cost-per-token-usd: ${RAG_COST_PER_TOKEN:0.0000003}
+        # Max concurrent LLM calls across all imports
+        max-concurrent-llm-calls: ${RAG_MAX_CONCURRENT_LLM:6}
+        # Per-batch timeout in minutes for parallel chunk processing
+        batch-timeout-minutes: ${RAG_BATCH_TIMEOUT:15}
+        # Minutes an import can stay in processing state before being considered stuck
+        stuck-import-threshold-minutes: ${RAG_STUCK_THRESHOLD:120}
+
+# ==================== Practice Module Configuration ====================
+practice:
+    llm-timeout-seconds: ${PRACTICE_LLM_TIMEOUT:120}
+    rag-timeout-seconds: ${PRACTICE_RAG_TIMEOUT:3}
+    anti-repeat-window-hours: ${PRACTICE_ANTI_REPEAT_HOURS:24}
+    ema-alpha: ${PRACTICE_EMA_ALPHA:0.4}
+    initial-ema: ${PRACTICE_INITIAL_EMA:0.5}
+    mastery-thresholds: 0.40,0.70,0.90
+    mastery-weights:
+        accuracy: 0.30
+        ema: 0.50
+        streak: 0.20
+    score-tiers:
+        excellent: 80
+        good: 60
 
 # ==================== Conversation Module Configuration ====================
 conversation:
@@ -296,6 +346,10 @@ conversation:
         rate-limit-max-requests: ${CHAT_RATE_LIMIT_MAX_REQUESTS:20}
         # Duration of the rate-limit window in minutes
         rate-limit-window-minutes: ${CHAT_RATE_LIMIT_WINDOW_MINUTES:1}
+        # Max messages to fetch from DB for conversation history
+        max-db-messages: ${CHAT_MAX_DB_MESSAGES:40}
+        # SSE timeout in milliseconds for streaming responses
+        sse-timeout-ms: ${CHAT_SSE_TIMEOUT_MS:60000}
         # ACTIVE sessions older than this are marked ABANDONED by the nightly cleanup scheduler
         session-cleanup-retention-days: ${CHAT_SESSION_CLEANUP_RETENTION_DAYS:30}
     rag:
@@ -309,6 +363,14 @@ conversation:
         grounding-threshold: ${CHAT_RAG_GROUNDING_THRESHOLD:0.6}
         # Min cosine similarity for best retrieved item to be considered meaningful context
         min-meaningful-similarity: ${CHAT_RAG_MIN_SIMILARITY:0.50}
+        # Per-intent overrides for the quality gate threshold (lower = more lenient retrieval)
+        # LOOKUP: exact term match needs tighter control to avoid unrelated words
+        # EXPLAIN: grammar explanations are verbose — cross-lingual score naturally lower
+        # EXAMPLE: example/dialog queries use meta-language ("ví dụ") not Japanese text
+        intent-thresholds:
+            LOOKUP: ${CHAT_RAG_THRESHOLD_LOOKUP:0.55}
+            EXPLAIN: ${CHAT_RAG_THRESHOLD_EXPLAIN:0.42}
+            EXAMPLE: ${CHAT_RAG_THRESHOLD_EXAMPLE:0.35}
         # Model for lightweight advisor LLM calls (relevance + grounding checks)
         check-model: ${CHAT_RAG_CHECK_MODEL:gpt-4o-mini}
         # Max tokens for advisor check calls
@@ -317,6 +379,16 @@ conversation:
         query-analysis-enabled: ${CHAT_RAG_QUERY_ANALYSIS:true}
         # Fallback bilingual query expansion when query-analysis-enabled=false
         bilingual-query-enabled: ${CHAT_RAG_BILINGUAL:true}
+        # Enable hybrid retrieval (dense HNSW + sparse pg_trgm) with RRF fusion
+        # Requires migration 49-bm25-hybrid-index.sql; disable if pg_trgm is not installed
+        hybrid-enabled: ${CHAT_RAG_HYBRID_ENABLED:true}
+        # Top-K results for vector retrieval
+        retrieval-top-k: ${CHAT_RAG_RETRIEVAL_TOP_K:8}
+        # Minimum cosine similarity floor for retrieval (below this, results are discarded)
+        retrieval-similarity-floor: ${CHAT_RAG_RETRIEVAL_FLOOR:0.30}
+        # Enable HyDE (Hypothetical Document Embeddings) for LOOKUP/EXPLAIN intents
+        # Generates a short hypothetical curriculum entry before embedding → +5-15% cosine similarity
+        hyde-enabled: ${CHAT_RAG_HYDE_ENABLED:true}
 
 # ==================== Pronunciation Assessment ====================
 # Provider priority: Azure > SpeechSuper (auto-selected by CompositePronunciationProvider)
@@ -338,7 +410,24 @@ pronunciation:
 roleplay:
     max-messages: ${ROLEPLAY_MAX_MESSAGES:50}
     max-active-sessions: ${ROLEPLAY_MAX_ACTIVE_SESSIONS:3}
+    # AI model for roleplay conversation
+    model-name: ${ROLEPLAY_MODEL:gpt-4.1-mini}
+    # AI model for evaluation (mission + session)
+    evaluator-model: ${ROLEPLAY_EVALUATOR_MODEL:gpt-4.1-mini}
+    # Redis session TTL in hours
+    redis-session-ttl-hours: ${ROLEPLAY_REDIS_TTL:2}
+    # Max context messages for AI conversation
+    max-context-messages: ${ROLEPLAY_MAX_CONTEXT:20}
+    # Max messages for evaluation input
+    max-eval-messages: ${ROLEPLAY_MAX_EVAL:20}
+    # Max audio file size in MB
+    max-audio-size-mb: ${ROLEPLAY_MAX_AUDIO_MB:10}
     scoring:
         mission-weight: ${ROLEPLAY_MISSION_WEIGHT:0.35}
         pronunciation-weight: ${ROLEPLAY_PRONUNCIATION_WEIGHT:0.30}
         language-weight: ${ROLEPLAY_LANGUAGE_WEIGHT:0.35}
+    evaluation-weights:
+        accuracy: 0.30
+        pronunciation: 0.25
+        task-completion: 0.30
+        complexity: 0.15

@@ -25,10 +25,6 @@ public class UpdateLearningPreferencesRequest {
     @Max(value = 480, message = "dailyStudyGoalMinutes must be at most 480")
     private Integer dailyStudyGoalMinutes;
 
-    @Pattern(regexp = "morning|afternoon|evening|night",
-             message = "preferredStudyTime must be one of: morning, afternoon, evening, night")
-    private String preferredStudyTime;
-
     private List<String> preferredTopics;
 
     @Pattern(regexp = "slow|normal|fast",
@@ -43,7 +39,15 @@ public class UpdateLearningPreferencesRequest {
              message = "conversationStyle must be one of: practical, creative, business, travel")
     private String conversationStyle;
 
+    /**
+     * Forwarded to notification_prefs.daily_reminder_enabled — not stored in learning_prefs.
+     * Kept here so the settings screen can send a single PUT for all preferences.
+     */
     private Boolean streakReminderEnabled;
 
+    /**
+     * Forwarded to notification_prefs.daily_reminder_time — not stored in learning_prefs.
+     * Kept here so the settings screen can send a single PUT for all preferences.
+     */
     private LocalTime reminderTime;
 }

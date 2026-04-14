@@ -94,7 +94,7 @@ public class AgenticRagProperties {
      * When enabled, the LLM critiques its own extraction output
      * using reflection tokens: [IsRelevant], [IsSupported], [IsUseful].
      */
-    private boolean selfReflectionEnabled = true;
+    private boolean selfReflectionEnabled = false;
 
     /**
      * Max source content chars to include in reflection prompt.
@@ -122,22 +122,39 @@ public class AgenticRagProperties {
      * Weight for rule-based validation in combined score.
      * Must sum to 1.0 with reflectionWeight and groundingWeight.
      */
-    private double ruleBasedWeight = 0.30;
+    private double ruleBasedWeight = 0.20;
 
     /**
      * Weight for LLM self-reflection in combined score.
      */
-    private double reflectionWeight = 0.35;
+    private double reflectionWeight = 0.00;
 
     /**
      * Weight for source grounding in combined score.
      */
-    private double groundingWeight = 0.35;
+    private double groundingWeight = 0.80;
 
     /**
      * Combined score threshold below which re-extraction is triggered.
      */
     private double combinedReExtractionThreshold = 0.5;
+
+    // ==================== Model & Agent Configuration ====================
+
+    /** OpenAI model for per-section grammar/vocabulary extraction. */
+    private String extractionModel = "gpt-4o";
+
+    /** OpenAI model for vision-based page extraction. */
+    private String visionModel = "gpt-4o";
+
+    /** Minimum confidence for vision extraction results. */
+    private double visionConfidenceThreshold = 0.75;
+
+    /** Per-agent timeout in minutes (for individual extraction calls). */
+    private int agentTimeoutMinutes = 4;
+
+    /** Estimated cost per token in USD (for cost estimation display). */
+    private double costPerTokenUsd = 0.0000003;
 
     /**
      * Maximum concurrent LLM calls across all imports.

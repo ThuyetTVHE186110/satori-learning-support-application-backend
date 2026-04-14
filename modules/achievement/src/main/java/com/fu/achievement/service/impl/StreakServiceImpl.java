@@ -1,6 +1,7 @@
 package com.fu.achievement.service.impl;
 
 import com.fu.achievement.dto.response.BadgeResponse;
+import com.fu.achievement.dto.response.StreakNotificationResponse;
 import com.fu.achievement.entity.StreakHistory;
 import com.fu.achievement.entity.UserStats;
 import com.fu.achievement.enums.BadgeType;
@@ -30,17 +31,18 @@ public class StreakServiceImpl implements StreakService {
 
     @Override
     @Transactional
-    public List<BadgeResponse> recordDailyActivity(UUID userId, String activityType) {
+    public StreakNotificationResponse recordDailyActivity(UUID userId, String activityType) {
         LocalDate today = LocalDate.now();
 
         // Get or create user stats
         UserStats userStats = getUserStats(userId);
 
         // Check if user already has activity today
-        boolean hasActivityToday = streakHistoryRepository.hasActivityOnDate(userId, today);
-        if (hasActivityToday) {
+        boolean isFirstActivityToday = !streakHistoryRepository.hasActivityOnDate(userId, today);
+        if (!isFirstActivityToday) {
             log.debug("User {} already has activity recorded for today", userId);
-            return Collections.emptyList();
+            // Return current stats without streak update
+            return buildStreakNotification(userStats, false);
         }
 
         // Determine new streak count based on business rules
@@ -69,12 +71,25 @@ public class StreakServiceImpl implements StreakService {
             if (!earnedBadges.isEmpty()) {
                 log.info("User {} earned {} streak badges", userId, earnedBadges.size());
             }
-            
-            return earnedBadges;
         } catch (Exception e) {
             log.error("Error checking streak badges for user: {}", userId, e);
-            return Collections.emptyList();
         }
+
+        // Refresh user stats after update to get latest values
+        UserStats updatedStats = getUserStats(userId);
+        return buildStreakNotification(updatedStats, true);
+    }
+
+    /**
+     * Build StreakNotificationResponse with current user stats and first-activity flag
+     */
+    private StreakNotificationResponse buildStreakNotification(UserStats userStats, boolean isFirstActivityToday) {
+        return StreakNotificationResponse.builder()
+                .isFirstActivityToday(isFirstActivityToday)
+                .currentStreak(userStats.getCurrentStreak())
+                .longestStreak(userStats.getLongestStreak())
+                .streakLastDate(userStats.getStreakLastDate())
+                .build();
     }
 
     /**
@@ -107,9 +122,9 @@ public class StreakServiceImpl implements StreakService {
             return userStats.getCurrentStreak() + 1;
         }
 
-        // Streak broken: reset to 1
-        log.info("User {} streak broken after {} days, resetting to 1", userStats.getUserId(), daysBetween);
-        return 1;
+        // Streak broken: reset to 0
+        log.info("User {} streak broken after {} days, resetting to 0", userStats.getUserId(), daysBetween);
+        return 1; // Start new streak with today's activity
     }
 
     @Override
@@ -159,6 +174,33 @@ public class StreakServiceImpl implements StreakService {
     public void resetStreak(UUID userId) {
         userStatsRepository.updateStreak(userId, 0, null);
         log.warn("User {} streak reset to 0 (admin action)", userId);
+    }
+
+    @Override
+    @Transactional
+    public void validateAndResetStreakIfExpired(UUID userId) {
+        UserStats userStats = getUserStats(userId);
+        LocalDate lastActivityDate = userStats.getStreakLastDate();
+        
+        if (lastActivityDate == null) {
+            return;
+        }
+        
+        long daysBetween = java.time.temporal.ChronoUnit.DAYS.between(lastActivityDate, LocalDate.now());
+        
+        // Streak expired: reset to 0
+        if (daysBetween > 1) {
+            // Check freeze before resetting
+            if (daysBetween == 2 && userStats.getStreakFreezeCount() > 0) {
+                // Has freeze: don't reset yet, let activity logic handle it
+                log.debug("User {} has freeze token, streak validation skipped", userId);
+                return;
+            }
+            
+            // Reset streak to 0 
+            userStatsRepository.updateStreak(userId, 0, userStats.getStreakLastDate());
+            log.info("User {} streak expired and reset to 0", userId);
+        }
     }
 
     @Override

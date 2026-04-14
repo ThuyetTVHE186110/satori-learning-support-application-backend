@@ -14,6 +14,7 @@ import java.util.UUID;
 public class ClassAssignmentStatisticsResponse {
     private UUID classId;
     private long totalAssignments;
+    private long totalEstimatedSubmissions;
     private long draftAssignments;
     private long publishedAssignments;
     private long closedAssignments;
@@ -22,4 +23,7 @@ public class ClassAssignmentStatisticsResponse {
     private long gradedSubmissions;
     private long inProgressSubmissions;
     private long overdueSubmissions;
+    private Double averageGradedScore;
+    private long dueSoon24hCount;
+    private Double completionRate;
 }

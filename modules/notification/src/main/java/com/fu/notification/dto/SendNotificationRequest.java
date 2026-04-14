@@ -16,7 +16,7 @@ import java.util.UUID;
  * Used by services to request notification delivery.
  */
 @Data
-@Builder
+@Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
 public class SendNotificationRequest {

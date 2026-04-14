@@ -6,6 +6,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
@@ -114,6 +115,44 @@ public interface CurriculumImportRepository extends JpaRepository<CurriculumImpo
 
     @Query("SELECT COALESCE(SUM(ci.hallucinatedItems), 0) FROM CurriculumImport ci WHERE ci.status = 'COMPLETED'")
     long sumHallucinatedItems();
+
+    // --- Course-specific statistics queries (NEW) ---
+
+    @Query("SELECT COUNT(ci) FROM CurriculumImport ci WHERE ci.courseId = :courseId AND ci.status = :status")
+    long countByCourseIdAndStatus(@org.springframework.data.repository.query.Param("courseId") UUID courseId, 
+                                   @org.springframework.data.repository.query.Param("status") ImportStatus status);
+
+    @Query("SELECT COALESCE(SUM(ci.lessonsCreated), 0) FROM CurriculumImport ci WHERE ci.courseId = :courseId AND ci.status = 'COMPLETED'")
+    long sumLessonsCreatedByCourseId(@org.springframework.data.repository.query.Param("courseId") UUID courseId);
+
+    @Query("SELECT COALESCE(SUM(ci.vocabularyCreated), 0) FROM CurriculumImport ci WHERE ci.courseId = :courseId AND ci.status = 'COMPLETED'")
+    long sumVocabularyCreatedByCourseId(@org.springframework.data.repository.query.Param("courseId") UUID courseId);
+
+    @Query("SELECT COALESCE(SUM(ci.grammarPointsCreated), 0) FROM CurriculumImport ci WHERE ci.courseId = :courseId AND ci.status = 'COMPLETED'")
+    long sumGrammarPointsCreatedByCourseId(@org.springframework.data.repository.query.Param("courseId") UUID courseId);
+
+    @Query("SELECT COALESCE(SUM(ci.tokensUsed), 0) FROM CurriculumImport ci WHERE ci.courseId = :courseId")
+    long sumTokensUsedByCourseId(@org.springframework.data.repository.query.Param("courseId") UUID courseId);
+
+    @Query("SELECT COALESCE(SUM(ci.actualCostUsd), 0) FROM CurriculumImport ci WHERE ci.courseId = :courseId")
+    BigDecimal sumActualCostUsdByCourseId(@org.springframework.data.repository.query.Param("courseId") UUID courseId);
+
+    @Query("SELECT COALESCE(SUM(ci.validationPassed), 0) FROM CurriculumImport ci WHERE ci.courseId = :courseId AND ci.status = 'COMPLETED'")
+    long sumValidationPassedByCourseId(@org.springframework.data.repository.query.Param("courseId") UUID courseId);
+
+    @Query("SELECT COALESCE(SUM(ci.validationFailed), 0) FROM CurriculumImport ci WHERE ci.courseId = :courseId AND ci.status = 'COMPLETED'")
+    long sumValidationFailedByCourseId(@org.springframework.data.repository.query.Param("courseId") UUID courseId);
+
+    @Query("SELECT COALESCE(SUM(ci.reExtractions), 0) FROM CurriculumImport ci WHERE ci.courseId = :courseId AND ci.status = 'COMPLETED'")
+    long sumReExtractionsByCourseId(@org.springframework.data.repository.query.Param("courseId") UUID courseId);
+
+    @Query("SELECT COALESCE(SUM(ci.embeddingsCreated), 0) FROM CurriculumImport ci WHERE ci.courseId = :courseId AND ci.status = 'COMPLETED'")
+    long sumEmbeddingsCreatedByCourseId(@org.springframework.data.repository.query.Param("courseId") UUID courseId);
+
+    @Query("SELECT COALESCE(SUM(ci.hallucinatedItems), 0) FROM CurriculumImport ci WHERE ci.courseId = :courseId AND ci.status = 'COMPLETED'")
+    long sumHallucinatedItemsByCourseId(@org.springframework.data.repository.query.Param("courseId") UUID courseId);
+    @Query("SELECT CASE WHEN COUNT(ci) > 0 THEN true ELSE false END FROM CurriculumImport ci WHERE ci.status IN :statuses")
+    boolean existsCurriculumImportWithStatusIn(@Param("statuses") List<ImportStatus> processingStatuses);
 
     //
 }

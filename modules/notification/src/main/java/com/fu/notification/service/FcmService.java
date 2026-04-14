@@ -1,6 +1,5 @@
 package com.fu.notification.service;
 
-import com.fu.notification.entity.Notification;
 import com.google.firebase.messaging.BatchResponse;
 
 import java.util.List;

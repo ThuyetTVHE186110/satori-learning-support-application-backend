@@ -42,6 +42,13 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
+        <!-- JPA declared explicitly: infrastructure transitive deps may not resolve
+             when building this module in isolation without the full reactor. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
         <!-- JDBC for cross-module queries -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

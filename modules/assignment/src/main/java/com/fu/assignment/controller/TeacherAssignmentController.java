@@ -300,6 +300,16 @@ public class TeacherAssignmentController {
         return ApiResponse.success(assignmentService.getClassAssignmentStatistics(classId, getUserId(userDetails)));
     }
 
+    @GetMapping("/{assignmentId}/class/{classId}/statistics")
+    @Operation(summary = "Get submission statistics for a specific assignment in a class")
+    public ApiResponse<AssignmentClassStatisticsResponse> getAssignmentStatisticsForClass(
+            @PathVariable UUID assignmentId,
+            @PathVariable UUID classId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ApiResponse.success(assignmentService.getAssignmentStatisticsForClass(
+                assignmentId, classId, getUserId(userDetails)));
+    }
+
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CLONE
@@ -335,11 +345,15 @@ public class TeacherAssignmentController {
 
     /**
      * List all submissions for a specific assignment (teacher view).
+     * Supports optional keyword search by learner name/email and status filtering.
+     * Returns ALL students in the class, even those without submissions (status = NOT_STARTED).
      *
-     * @param id   the assignment UUID
-     * @param page page number (1-based, default: 1)
-     * @param size page size (default: 10)
-     * @return paginated list of submission summaries
+     * @param id      the assignment UUID
+     * @param page    page number (1-based, default: 1)
+     * @param size    page size (default: 10)
+     * @param keyword optional search term (firstName, lastName, displayName, email)
+     * @param status  optional submission status filter (NOT_STARTED, IN_PROGRESS, SUBMITTED, GRADED, OVERDUE)
+     * @return paginated list of submission summaries (all class students + their submission status)
      */
     @GetMapping("/{id}/submissions")
     @Operation(summary = "List all submissions for an assignment")
@@ -347,6 +361,8 @@ public class TeacherAssignmentController {
             @PathVariable UUID id,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) com.fu.assignment.entity.SubmissionStatus status,
             @AuthenticationPrincipal UserDetails userDetails) {
         if (size <= 0) {
             throw new BusinessException("INVALID_PAGE_SIZE", "Kích thước trang phải lớn hơn 0.");
@@ -354,7 +370,12 @@ public class TeacherAssignmentController {
         if (page <= 0) {
             throw new BusinessException("INVALID_PAGE_NUMBER", "Số trang phải lớn hơn hoặc bằng 1.");
         }
-        Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(id, PageRequest.of(page - 1, size), getUserId(userDetails));
+        Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
+                id,
+                keyword != null ? keyword.trim() : null,
+                status,
+                PageRequest.of(page - 1, size),
+                getUserId(userDetails));
         return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages()));
     }
 

@@ -27,8 +27,7 @@ public interface UserMapper {
     @Mapping(target = "role", ignore = true)
     @Mapping(target = "status", ignore = true)
     @Mapping(target = "avatarUrl", ignore = true)
-    @Mapping(target = "authProvider", ignore = true)
-    @Mapping(target = "googleId", ignore = true)
+
     @Mapping(target = "activationToken", ignore = true)
     @Mapping(target = "activationTokenExpiresAt", ignore = true)
     @Mapping(target = "passwordResetToken", ignore = true)
@@ -53,8 +52,7 @@ public interface UserMapper {
     @Mapping(target = "role", ignore = true)
     @Mapping(target = "status", ignore = true)
     @Mapping(target = "avatarUrl", ignore = true)
-    @Mapping(target = "authProvider", ignore = true)
-    @Mapping(target = "googleId", ignore = true)
+
     @Mapping(target = "activationToken", ignore = true)
     @Mapping(target = "activationTokenExpiresAt", ignore = true)
     @Mapping(target = "passwordResetToken", ignore = true)

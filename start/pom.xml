@@ -70,6 +70,10 @@
             <groupId>com.fu</groupId>
             <artifactId>notification</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.fu</groupId>
+            <artifactId>analytics</artifactId>
+        </dependency>
 
         <!-- Spring Boot -->
         <dependency>
@@ -118,8 +122,15 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
                 <configuration>
-                    <jvmArguments>-Xms512m -Xmx2g</jvmArguments>
+                    <mainClass>com.fu.StartApplication</mainClass>
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>

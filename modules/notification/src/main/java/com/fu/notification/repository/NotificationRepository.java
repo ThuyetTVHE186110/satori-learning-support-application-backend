@@ -62,11 +62,14 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
 
     /**
      * Find recent notifications by type (for deduplication).
+     * Native query required: JPQL binds enum as character varying which PostgreSQL
+     * cannot implicitly cast to the custom notification_type ENUM type.
      */
-    @Query("SELECT n FROM Notification n WHERE n.userId = :userId AND n.type = :type AND n.createdAt > :since")
+    @Query(value = "SELECT * FROM notification.notifications n WHERE n.user_id = :userId AND n.type = cast(:type AS notification_type) AND n.created_at > :since",
+           nativeQuery = true)
     List<Notification> findRecentByUserAndType(
             @Param("userId") UUID userId,
-            @Param("type") NotificationType type,
+            @Param("type") String type,
             @Param("since") LocalDateTime since
     );
 }

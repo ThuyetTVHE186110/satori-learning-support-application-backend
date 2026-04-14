@@ -5,6 +5,7 @@ import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.service.ingestion.MarkdownVocabParser;
 import com.fu.curriculumimport.service.ingestion.MnNTableParser;
+import com.fu.curriculumimport.config.AgenticRagProperties;
 import com.fu.curriculumimport.service.vision.VisionPageExtractor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -21,6 +22,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.openai.OpenAiChatModel;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 import java.util.UUID;
@@ -65,6 +67,9 @@ class VocabularyExtractionAgentTest {
     @Mock
     private MarkdownVocabParser markdownVocabParser;
 
+    @Mock
+    private AgenticRagProperties ragProperties;
+
     @Spy
     ObjectMapper objectMapper = new ObjectMapper();
 
@@ -72,7 +77,7 @@ class VocabularyExtractionAgentTest {
 
     @BeforeEach
     void setUp() {
-        agent = new VocabularyExtractionAgent(chatModel, objectMapper, visionPageExtractor, mnNTableParser, markdownVocabParser);
+        agent = new VocabularyExtractionAgent(chatModel, objectMapper, visionPageExtractor, mnNTableParser, markdownVocabParser, ragProperties);
     }
 
     // -------------------------------------------------------------------------
@@ -89,7 +94,7 @@ class VocabularyExtractionAgentTest {
         ChatResponse chatResp = mock(ChatResponse.class);
         given(chatResp.getResult()).willReturn(gen);
 
-        given(chatModel.call(any(Prompt.class))).willReturn(chatResp);
+        given(chatModel.stream(any(Prompt.class))).willReturn(Flux.just(chatResp));
     }
 
     private DocumentChunk chunk(int chunkIndex, String content) {
@@ -163,7 +168,7 @@ class VocabularyExtractionAgentTest {
             ExtractionResult result = agent.extractVocabulary(chunk("飲む N5"), "N5", ragContext);
 
             // Verify ChatModel was called (context was formatted into prompt)
-            verify(chatModel, times(1)).call(any(Prompt.class));
+            verify(chatModel, times(1)).stream(any(Prompt.class));
             assertThat(result.getVocabulary()).hasSize(1);
             assertThat(result.getVocabulary().get(0).getJapaneseText()).isEqualTo("飲む");
         }
@@ -179,7 +184,7 @@ class VocabularyExtractionAgentTest {
             ExtractionResult result = agent.extractVocabulary(chunk("書く N5"), "N5", ragContext);
 
             // ChatModel should still be called even if grammar items are filtered
-            verify(chatModel, times(1)).call(any(Prompt.class));
+            verify(chatModel, times(1)).stream(any(Prompt.class));
             assertThat(result.getVocabulary()).hasSize(1);
             assertThat(result.getVocabulary().get(0).getJapaneseText()).isEqualTo("書く");
         }
@@ -200,8 +205,8 @@ class VocabularyExtractionAgentTest {
         @Test
         @DisplayName("ChatModel throws exception -> returns empty result with confidence=0.0")
         void extractVocabulary_chatModelThrows_returnsEmptyResult() {
-            given(chatModel.call(any(Prompt.class)))
-                    .willThrow(new RuntimeException("API timeout"));
+            given(chatModel.stream(any(Prompt.class)))
+                    .willReturn(Flux.error(new RuntimeException("API timeout")));
 
             ExtractionResult result = agent.extractVocabulary(chunk("some content"), "N5", RagContext.empty());
 
@@ -255,8 +260,8 @@ class VocabularyExtractionAgentTest {
         @Test
         @DisplayName("ChatModel throws exception during re-extraction -> returns empty result")
         void reExtractWithFeedback_chatModelThrows_returnsEmptyResult() {
-            given(chatModel.call(any(Prompt.class)))
-                    .willThrow(new RuntimeException("Rate limit exceeded"));
+            given(chatModel.stream(any(Prompt.class)))
+                    .willReturn(Flux.error(new RuntimeException("Rate limit exceeded")));
 
             ExtractionResult result = agent.reExtractWithFeedback(
                     chunk(2, "some content"),

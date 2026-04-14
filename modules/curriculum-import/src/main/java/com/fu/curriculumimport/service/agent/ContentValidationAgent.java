@@ -58,8 +58,6 @@ public class ContentValidationAgent {
     private static final Pattern ROMAJI = JapaneseTextPatterns.ROMAJI;
     private static final Pattern VALID_JLPT = JapaneseTextPatterns.VALID_JLPT;
 
-    private static final double DEFAULT_CONFIDENCE_THRESHOLD = 0.6;
-
     /**
      * Full 3-layer validation: Rule-Based + Self-Reflection + Grounding.
      *
@@ -218,25 +216,35 @@ public class ContentValidationAgent {
                     .build());
         }
 
-        // 2. Validate vocabulary items
+        // 2. Validate vocabulary items.
+        // Items with only INFO-severity issues (e.g., missing optional English meaning)
+        // are counted as valid — INFO is advisory and should not tank the quality score.
         for (ExtractionResult.ExtractedVocabulary vocab : result.getVocabulary()) {
             List<ValidationIssue> vocabIssues = validateVocabulary(vocab);
-            if (vocabIssues.isEmpty()) {
+            boolean needsAttention = vocabIssues.stream()
+                    .anyMatch(i -> i.getSeverity() != IssueSeverity.INFO);
+            if (!needsAttention) {
                 validVocab++;
             } else {
-                issues.addAll(vocabIssues);
                 flagged++;
+            }
+            if (!vocabIssues.isEmpty()) {
+                issues.addAll(vocabIssues);
             }
         }
 
-        // 3. Validate grammar points
+        // 3. Validate grammar points (same INFO-exclusion rule).
         for (ExtractionResult.ExtractedGrammar grammar : result.getGrammarPoints()) {
             List<ValidationIssue> grammarIssues = validateGrammar(grammar);
-            if (grammarIssues.isEmpty()) {
+            boolean needsAttention = grammarIssues.stream()
+                    .anyMatch(i -> i.getSeverity() != IssueSeverity.INFO);
+            if (!needsAttention) {
                 validGrammar++;
             } else {
-                issues.addAll(grammarIssues);
                 flagged++;
+            }
+            if (!grammarIssues.isEmpty()) {
+                issues.addAll(grammarIssues);
             }
         }
 
@@ -432,9 +440,12 @@ public class ContentValidationAgent {
             issues.add(issue(id, "meaningVi", IssueSeverity.WARNING,
                     "Vietnamese meaning is missing", "Add Vietnamese translation"));
         }
+        // English meanings are reported as INFO because the curriculum target (MnN Vietnamese
+        // companion edition) has no English text — flagging every item as WARNING here
+        // tanked the rule-based quality score to 0 for perfectly-extracted vocab.
         if (isBlank(vocab.getMeaningEn())) {
-            issues.add(issue(id, "meaningEn", IssueSeverity.WARNING,
-                    "English meaning is missing", "Add English translation"));
+            issues.add(issue(id, "meaningEn", IssueSeverity.INFO,
+                    "English meaning is missing", "Optional — add English translation if available"));
         }
 
         // JLPT level validation
@@ -499,9 +510,10 @@ public class ContentValidationAgent {
             issues.add(issue(id, "meaningVi", IssueSeverity.WARNING,
                     "Vietnamese meaning is missing", "Add Vietnamese explanation"));
         }
+        // English meanings: INFO, not WARNING — see vocabulary comment above.
         if (isBlank(grammar.getMeaningEn())) {
-            issues.add(issue(id, "meaningEn", IssueSeverity.WARNING,
-                    "English meaning is missing", "Add English explanation"));
+            issues.add(issue(id, "meaningEn", IssueSeverity.INFO,
+                    "English meaning is missing", "Optional — add English explanation if available"));
         }
 
         // Explanation

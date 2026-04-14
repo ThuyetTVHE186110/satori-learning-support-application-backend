@@ -11,14 +11,17 @@ import com.fu.assignment.entity.*;
 import com.fu.assignment.exception.AssignmentNotFoundException;
 import com.fu.assignment.mapper.AssignmentMapper;
 import com.fu.assignment.repository.*;
+import com.fu.assignment.scheduler.AssignmentScheduleManager;
 import com.fu.assignment.service.impl.AssignmentServiceImpl;
 import com.fu.clazz.entity.Clazz;
+import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.repository.ClassMemberRepository;
 import com.fu.clazz.repository.ClassRepository;
 import com.fu.clazz.repository.ClassTeacherHistoryRepository;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.infrastructure.cloudinary.CloudinaryService;
+import com.fu.user.entity.User;
 import com.fu.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -536,9 +539,8 @@ class AssignmentServiceImplTest {
                     .build();
 
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testQuizAssignment));
-            stubTeacherAccess();
-            given(classRepository.findByIdAndNotDeleted(targetClassId)).willReturn(Optional.of(targetClazz));
-            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(targetClassId)).willReturn(Optional.of(teacherId));
+            given(classRepository.findByIdAndNotDeleted(any(UUID.class))).willReturn(Optional.of(targetClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(any(UUID.class))).willReturn(Optional.of(teacherId));
 
             Assignment clonedAssignment = Assignment.builder()
                     .title("Cloned Quiz")
@@ -617,7 +619,7 @@ class AssignmentServiceImplTest {
         @Test
         @DisplayName("Should throw when submission status is not SUBMITTED")
         void shouldThrowWhenStatusNotSubmitted() {
-            testSubmission.setStatus(SubmissionStatus.GRADED);
+            testSubmission.setStatus(SubmissionStatus.IN_PROGRESS);
             given(submissionRepository.findById(submissionId)).willReturn(Optional.of(testSubmission));
             given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testWritingAssignment));
             stubTeacherAccess();
@@ -627,7 +629,22 @@ class AssignmentServiceImplTest {
 
             assertThatThrownBy(() -> assignmentService.gradeWritingSubmission(submissionId, request, teacherId))
                     .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("Chỉ có thể chấm điểm bài nộp ở trạng thái SUBMITTED");
+                    .hasMessageContaining("Chỉ có thể chấm điểm bài nộp ở trạng thái");
+        }
+        @Test
+        @DisplayName("Should throw when submission status is not GRADED")
+        void shouldThrowWhenStatusNotGraded() {
+            testSubmission.setStatus(SubmissionStatus.IN_PROGRESS);
+            given(submissionRepository.findById(submissionId)).willReturn(Optional.of(testSubmission));
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId)).willReturn(Optional.of(testWritingAssignment));
+            stubTeacherAccess();
+
+            GradeWritingRequest request = GradeWritingRequest.builder()
+                    .teacherScore(BigDecimal.valueOf(8.5)).feedback("f").build();
+
+            assertThatThrownBy(() -> assignmentService.gradeWritingSubmission(submissionId, request, teacherId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Chỉ có thể chấm điểm bài nộp ở trạng thái");
         }
 
         @Test
@@ -950,20 +967,22 @@ class AssignmentServiceImplTest {
         void shouldReturnStatistics() {
             stubTeacherAccess();
 
-            List<Object[]> assignmentCounts = List.of(
-                    new Object[]{"DRAFT", 2L},
-                    new Object[]{"PUBLISHED", 3L},
-                    new Object[]{"CLOSED", 1L}
-            );
-            List<Object[]> submissionCounts = List.of(
-                    new Object[]{"SUBMITTED", 5L},
-                    new Object[]{"GRADED", 10L},
-                    new Object[]{"IN_PROGRESS", 2L},
-                    new Object[]{"OVERDUE", 1L}
-            );
+            List<Object[]> assignmentCounts = new ArrayList<>();
+            assignmentCounts.add(new Object[]{"DRAFT", 2L});
+            assignmentCounts.add(new Object[]{"PUBLISHED", 3L});
+            assignmentCounts.add(new Object[]{"CLOSED", 1L});
+
+            List<Object[]> submissionCounts = new ArrayList<>();
+            submissionCounts.add(new Object[]{"SUBMITTED", 5L});
+            submissionCounts.add(new Object[]{"GRADED", 10L});
+            submissionCounts.add(new Object[]{"IN_PROGRESS", 2L});
+            submissionCounts.add(new Object[]{"OVERDUE", 1L});
 
             given(assignmentRepository.countByStatusForClass(classId)).willReturn(assignmentCounts);
             given(submissionRepository.countSubmissionsByStatusForClass(classId)).willReturn(submissionCounts);
+            given(submissionRepository.getAverageScoreForGradedSubmissions(classId)).willReturn(85.5);
+            given(assignmentRepository.findPublishedByClassAndDueWithin24h(classId)).willReturn(Collections.emptyList());
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(20L);
 
             ClassAssignmentStatisticsResponse result = assignmentService.getClassAssignmentStatistics(classId, teacherId);
 
@@ -977,6 +996,167 @@ class AssignmentServiceImplTest {
             assertThat(result.getGradedSubmissions()).isEqualTo(10L);
             assertThat(result.getInProgressSubmissions()).isEqualTo(2L);
             assertThat(result.getOverdueSubmissions()).isEqualTo(1L);
+            assertThat(result.getAverageGradedScore()).isEqualTo(85.5);
+            assertThat(result.getDueSoon24hCount()).isEqualTo(0L);
+            assertThat(result.getCompletionRate()).isEqualTo((15.0 / (6L * 20L)) * 100.0);
+        }
+
+        @Test
+        @DisplayName("Should calculate average graded score correctly")
+        void shouldCalculateAverageGradedScore() {
+            stubTeacherAccess();
+
+            List<Object[]> assignmentCounts = new ArrayList<>();
+            assignmentCounts.add(new Object[]{"PUBLISHED", 1L});
+            List<Object[]> submissionCounts = new ArrayList<>();
+            submissionCounts.add(new Object[]{"GRADED", 5L});
+
+            given(assignmentRepository.countByStatusForClass(classId)).willReturn(assignmentCounts);
+            given(submissionRepository.countSubmissionsByStatusForClass(classId)).willReturn(submissionCounts);
+            given(submissionRepository.getAverageScoreForGradedSubmissions(classId)).willReturn(92.0);
+            given(assignmentRepository.findPublishedByClassAndDueWithin24h(classId)).willReturn(Collections.emptyList());
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(10L);
+
+            ClassAssignmentStatisticsResponse result = assignmentService.getClassAssignmentStatistics(classId, teacherId);
+
+            assertThat(result.getAverageGradedScore()).isEqualTo(92.0);
+            verify(submissionRepository).getAverageScoreForGradedSubmissions(classId);
+        }
+
+        @Test
+        @DisplayName("Should return 0.0 when no graded submissions exist")
+        void shouldReturnZeroWhenNoGradedSubmissions() {
+            stubTeacherAccess();
+
+            List<Object[]> assignmentCounts = new ArrayList<>();
+            assignmentCounts.add(new Object[]{"PUBLISHED", 2L});
+            List<Object[]> submissionCounts = new ArrayList<>();
+            submissionCounts.add(new Object[]{"SUBMITTED", 3L});
+
+            given(assignmentRepository.countByStatusForClass(classId)).willReturn(assignmentCounts);
+            given(submissionRepository.countSubmissionsByStatusForClass(classId)).willReturn(submissionCounts);
+            given(submissionRepository.getAverageScoreForGradedSubmissions(classId)).willReturn(null);
+            given(assignmentRepository.findPublishedByClassAndDueWithin24h(classId)).willReturn(Collections.emptyList());
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(15L);
+
+            ClassAssignmentStatisticsResponse result = assignmentService.getClassAssignmentStatistics(classId, teacherId);
+
+            assertThat(result.getAverageGradedScore()).isEqualTo(0.0);
+        }
+
+        @Test
+        @DisplayName("Should count assignments due within 24 hours")
+        void shouldCountAssignmentsDueWithin24Hours() {
+            stubTeacherAccess();
+
+            List<Object[]> assignmentCounts = new ArrayList<>();
+            assignmentCounts.add(new Object[]{"PUBLISHED", 5L});
+            List<Object[]> submissionCounts = new ArrayList<>();
+            submissionCounts.add(new Object[]{"GRADED", 4L});
+
+            Assignment dueSoonAssignment1 = new Assignment();
+            dueSoonAssignment1.setId(UUID.randomUUID());
+            Assignment dueSoonAssignment2 = new Assignment();
+            dueSoonAssignment2.setId(UUID.randomUUID());
+
+            given(assignmentRepository.countByStatusForClass(classId)).willReturn(assignmentCounts);
+            given(submissionRepository.countSubmissionsByStatusForClass(classId)).willReturn(submissionCounts);
+            given(submissionRepository.getAverageScoreForGradedSubmissions(classId)).willReturn(75.0);
+            given(assignmentRepository.findPublishedByClassAndDueWithin24h(classId))
+                    .willReturn(List.of(dueSoonAssignment1, dueSoonAssignment2));
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(10L);
+
+            ClassAssignmentStatisticsResponse result = assignmentService.getClassAssignmentStatistics(classId, teacherId);
+
+            assertThat(result.getDueSoon24hCount()).isEqualTo(2L);
+            verify(assignmentRepository).findPublishedByClassAndDueWithin24h(classId);
+        }
+
+        @Test
+        @DisplayName("Should calculate completion rate correctly")
+        void shouldCalculateCompletionRateCorrectly() {
+            stubTeacherAccess();
+
+            List<Object[]> assignmentCounts = new ArrayList<>();
+            assignmentCounts.add(new Object[]{"PUBLISHED", 10L});
+            List<Object[]> submissionCounts = new ArrayList<>();
+            submissionCounts.add(new Object[]{"SUBMITTED", 30L});
+            submissionCounts.add(new Object[]{"GRADED", 50L});
+
+            given(assignmentRepository.countByStatusForClass(classId)).willReturn(assignmentCounts);
+            given(submissionRepository.countSubmissionsByStatusForClass(classId)).willReturn(submissionCounts);
+            given(submissionRepository.getAverageScoreForGradedSubmissions(classId)).willReturn(80.0);
+            given(assignmentRepository.findPublishedByClassAndDueWithin24h(classId)).willReturn(Collections.emptyList());
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(10L);
+
+            ClassAssignmentStatisticsResponse result = assignmentService.getClassAssignmentStatistics(classId, teacherId);
+
+            // completion rate = (30 + 50) / (10 * 10) * 100 = 80 / 100 * 100 = 80.0%
+            assertThat(result.getCompletionRate()).isEqualTo(80.0);
+        }
+
+        @Test
+        @DisplayName("Should return 0.0 completion rate when no assignments exist")
+        void shouldReturnZeroCompletionRateWhenNoAssignments() {
+            stubTeacherAccess();
+
+            List<Object[]> assignmentCounts = Collections.emptyList();
+            List<Object[]> submissionCounts = Collections.emptyList();
+
+            given(assignmentRepository.countByStatusForClass(classId)).willReturn(assignmentCounts);
+            given(submissionRepository.countSubmissionsByStatusForClass(classId)).willReturn(submissionCounts);
+            given(submissionRepository.getAverageScoreForGradedSubmissions(classId)).willReturn(null);
+            given(assignmentRepository.findPublishedByClassAndDueWithin24h(classId)).willReturn(Collections.emptyList());
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(15L);
+
+            ClassAssignmentStatisticsResponse result = assignmentService.getClassAssignmentStatistics(classId, teacherId);
+
+            assertThat(result.getCompletionRate()).isEqualTo(0.0);
+            assertThat(result.getTotalAssignments()).isEqualTo(0L);
+        }
+
+        @Test
+        @DisplayName("Should return 0.0 completion rate when no students exist")
+        void shouldReturnZeroCompletionRateWhenNoStudents() {
+            stubTeacherAccess();
+
+            List<Object[]> assignmentCounts = new ArrayList<>();
+            assignmentCounts.add(new Object[]{"PUBLISHED", 5L});
+            List<Object[]> submissionCounts = new ArrayList<>();
+            submissionCounts.add(new Object[]{"GRADED", 10L});
+
+            given(assignmentRepository.countByStatusForClass(classId)).willReturn(assignmentCounts);
+            given(submissionRepository.countSubmissionsByStatusForClass(classId)).willReturn(submissionCounts);
+            given(submissionRepository.getAverageScoreForGradedSubmissions(classId)).willReturn(75.0);
+            given(assignmentRepository.findPublishedByClassAndDueWithin24h(classId)).willReturn(Collections.emptyList());
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(0L);
+
+            ClassAssignmentStatisticsResponse result = assignmentService.getClassAssignmentStatistics(classId, teacherId);
+
+            assertThat(result.getCompletionRate()).isEqualTo(0.0);
+        }
+
+        @Test
+        @DisplayName("Should cap completion rate at 100%")
+        void shouldCapCompletionRateAt100Percent() {
+            stubTeacherAccess();
+
+            List<Object[]> assignmentCounts = new ArrayList<>();
+            assignmentCounts.add(new Object[]{"PUBLISHED", 2L});
+            List<Object[]> submissionCounts = new ArrayList<>();
+            submissionCounts.add(new Object[]{"SUBMITTED", 50L});
+            submissionCounts.add(new Object[]{"GRADED", 100L});
+
+            given(assignmentRepository.countByStatusForClass(classId)).willReturn(assignmentCounts);
+            given(submissionRepository.countSubmissionsByStatusForClass(classId)).willReturn(submissionCounts);
+            given(submissionRepository.getAverageScoreForGradedSubmissions(classId)).willReturn(85.0);
+            given(assignmentRepository.findPublishedByClassAndDueWithin24h(classId)).willReturn(Collections.emptyList());
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(5L);
+
+            ClassAssignmentStatisticsResponse result = assignmentService.getClassAssignmentStatistics(classId, teacherId);
+
+            // completion rate would be (50 + 100) / (2 * 5) * 100 = 1500%, capped at 100%
+            assertThat(result.getCompletionRate()).isEqualTo(100.0);
         }
     }
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1096,4 +1276,810 @@ class AssignmentServiceImplTest {
     }
 
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 16. GET ASSIGNMENT STATISTICS FOR CLASS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("GetAssignmentStatisticsForClass Tests")
+    class GetAssignmentStatisticsForClassTests {
+
+        private UUID assignmentId;
+
+        @BeforeEach
+        void setUp() {
+            assignmentId = UUID.randomUUID();
+        }
+
+        @Test
+        @DisplayName("Should return statistics for assignment in class")
+        void shouldReturnStatisticsForAssignment() {
+            testQuizAssignment.setId(assignmentId);
+            testQuizAssignment.setTitle("Test Quiz");
+            testQuizAssignment.setClassId(classId);
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(30L);
+            given(submissionRepository.countSubmissionsInClassForAssignment(assignmentId, classId))
+                    .willReturn(25L);
+            given(submissionRepository.getAverageScoreForAssignmentInClass(assignmentId, classId))
+                    .willReturn(82.5);
+            given(assignmentRepository.getAssignmentTitleById(assignmentId))
+                    .willReturn(Optional.of("Test Quiz"));
+
+            AssignmentClassStatisticsResponse result = assignmentService.getAssignmentStatisticsForClass(
+                    assignmentId, classId, teacherId);
+
+            assertThat(result).isNotNull();
+            assertThat(result.getAssignmentId()).isEqualTo(assignmentId);
+            assertThat(result.getClassId()).isEqualTo(classId);
+            assertThat(result.getAssignmentTitle()).isEqualTo("Test Quiz");
+            assertThat(result.getTotalStudents()).isEqualTo(30L);
+            assertThat(result.getSubmittedCount()).isEqualTo(25L);
+            assertThat(result.getNotSubmittedCount()).isEqualTo(5L);
+            assertThat(result.getAverageScore()).isEqualTo(82.5);
+        }
+
+        @Test
+        @DisplayName("Should calculate not submitted count correctly")
+        void shouldCalculateNotSubmittedCount() {
+            testQuizAssignment.setId(assignmentId);
+            testQuizAssignment.setTitle("Test Quiz");
+            testQuizAssignment.setClassId(classId);
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(50L);
+            given(submissionRepository.countSubmissionsInClassForAssignment(assignmentId, classId))
+                    .willReturn(30L);
+            given(submissionRepository.getAverageScoreForAssignmentInClass(assignmentId, classId))
+                    .willReturn(75.0);
+            given(assignmentRepository.getAssignmentTitleById(assignmentId))
+                    .willReturn(Optional.of("Test Quiz"));
+
+            AssignmentClassStatisticsResponse result = assignmentService.getAssignmentStatisticsForClass(
+                    assignmentId, classId, teacherId);
+
+            assertThat(result.getNotSubmittedCount()).isEqualTo(20L);
+        }
+
+        @Test
+        @DisplayName("Should return 0.0 average score when no graded submissions")
+        void shouldReturnZeroAverageWhenNoGradedSubmissions() {
+            testQuizAssignment.setId(assignmentId);
+            testQuizAssignment.setTitle("Test Quiz");
+            testQuizAssignment.setClassId(classId);
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(30L);
+            given(submissionRepository.countSubmissionsInClassForAssignment(assignmentId, classId))
+                    .willReturn(5L);
+            given(submissionRepository.getAverageScoreForAssignmentInClass(assignmentId, classId))
+                    .willReturn(null);
+            given(assignmentRepository.getAssignmentTitleById(assignmentId))
+                    .willReturn(Optional.of("Test Quiz"));
+
+            AssignmentClassStatisticsResponse result = assignmentService.getAssignmentStatisticsForClass(
+                    assignmentId, classId, teacherId);
+
+            assertThat(result.getAverageScore()).isEqualTo(0.0);
+        }
+
+        @Test
+        @DisplayName("Should throw exception when teacher not verified")
+        void shouldThrowExceptionWhenTeacherNotVerified() {
+            testQuizAssignment.setId(assignmentId);
+            testQuizAssignment.setClassId(classId);
+
+            UUID otherTeacherId = UUID.randomUUID();
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(otherTeacherId));
+
+            assertThatThrownBy(() -> assignmentService.getAssignmentStatisticsForClass(
+                    assignmentId, classId, teacherId))
+                    .isInstanceOf(BusinessException.class);
+        }
+
+        @Test
+        @DisplayName("Should throw exception when assignment not in class")
+        void shouldThrowExceptionWhenAssignmentNotInClass() {
+            UUID otherClassId = UUID.randomUUID();
+            testQuizAssignment.setId(assignmentId);
+            testQuizAssignment.setClassId(otherClassId);
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+
+            assertThatThrownBy(() -> assignmentService.getAssignmentStatisticsForClass(
+                    assignmentId, classId, teacherId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("không thuộc về lớp học này");
+        }
+
+        @Test
+        @DisplayName("Should throw exception when assignment not found")
+        void shouldThrowExceptionWhenAssignmentNotFound() {
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.empty());
+
+            assertThatThrownBy(() -> assignmentService.getAssignmentStatisticsForClass(
+                    assignmentId, classId, teacherId))
+                    .isInstanceOf(ResourceNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("Should exclude removed members from submission count")
+        void shouldExcludeRemovedMembersFromSubmissionCount() {
+            testQuizAssignment.setId(assignmentId);
+            testQuizAssignment.setTitle("Test Quiz");
+            testQuizAssignment.setClassId(classId);
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            // 30 total class members, but only active ones are counted
+            given(classMemberRepository.countActiveByClassId(classId)).willReturn(30L);
+            // Only 20 students from active members submitted
+            given(submissionRepository.countSubmissionsInClassForAssignment(assignmentId, classId))
+                    .willReturn(20L);
+            given(submissionRepository.getAverageScoreForAssignmentInClass(assignmentId, classId))
+                    .willReturn(80.0);
+            given(assignmentRepository.getAssignmentTitleById(assignmentId))
+                    .willReturn(Optional.of("Test Quiz"));
+
+            AssignmentClassStatisticsResponse result = assignmentService.getAssignmentStatisticsForClass(
+                    assignmentId, classId, teacherId);
+
+            // Verify statistics only include active members
+            assertThat(result.getTotalStudents()).isEqualTo(30L); // Active members only
+            assertThat(result.getSubmittedCount()).isEqualTo(20L); // From active members only
+            assertThat(result.getNotSubmittedCount()).isEqualTo(10L); // 30 - 20
+            assertThat(result.getAverageScore()).isEqualTo(80.0);
+            
+            // Verify repository methods were called (these ensure removed members are filtered)
+            verify(submissionRepository).countSubmissionsInClassForAssignment(assignmentId, classId);
+            verify(submissionRepository).getAverageScoreForAssignmentInClass(assignmentId, classId);
+        }
+    }
+
+    @Nested
+    @DisplayName("GetSubmissionsByAssignment with Keyword Tests")
+    class GetSubmissionsByAssignmentKeywordTests {
+
+        @Test
+        @DisplayName("Should return all students (with and without submissions)")
+        void shouldReturnAllStudentsIncludingNotStarted() {
+            Pageable pageable = PageRequest.of(0, 10);
+            UUID student1Id = UUID.randomUUID();
+            UUID student2Id = UUID.randomUUID();
+            UUID student3Id = UUID.randomUUID();
+            
+            User user1 = User.builder()
+                    .firstName("John").lastName("Doe").displayName("John Doe")
+                    .email("john@example.com").build();
+            ReflectionTestUtils.setField(user1, "id", student1Id);
+            
+            User user2 = User.builder()
+                    .firstName("Jane").lastName("Smith").displayName("Jane Smith")
+                    .email("jane@example.com").build();
+            ReflectionTestUtils.setField(user2, "id", student2Id);
+            
+            User user3 = User.builder()
+                    .firstName("Bob").lastName("Johnson").displayName("Charlie Brown")
+                    .email("bob@example.com").build();
+            ReflectionTestUtils.setField(user3, "id", student3Id);
+
+            AssignmentSubmission submission1 = AssignmentSubmission.builder()
+                    .id(UUID.randomUUID())
+                    .assignmentId(assignmentId)
+                    .userId(student1Id)
+                    .status(SubmissionStatus.SUBMITTED)
+                    .attemptNumber(1)
+                    .build();
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            
+            // Create ClassMember objects (all active, no removed)
+            ClassMember member1 = ClassMember.builder()
+                    .userId(student1Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member2 = ClassMember.builder()
+                    .userId(student2Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member3 = ClassMember.builder()
+                    .userId(student3Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            
+            given(classMemberRepository.findAllByClassId(classId))
+                    .willReturn(List.of(member1, member2, member3));
+            given(submissionRepository.findByAssignmentId(assignmentId))
+                    .willReturn(List.of(submission1));
+            given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
+                    .willReturn(List.of(user1, user2, user3));
+            given(mapper.toSummaryResponse(submission1))
+                    .willReturn(SubmissionSummaryResponse.builder()
+                            .id(submission1.getId())
+                            .userFullName(user1.getDisplayName())
+                            .status(SubmissionStatus.SUBMITTED)
+                            .isRemovedLearner(false)
+                            .build());
+
+            Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
+                    assignmentId, null, null, pageable, teacherId);
+
+            assertThat(result).isNotNull();
+            assertThat(result.getTotalElements()).isEqualTo(3);
+            assertThat(result.getContent())
+                    .extracting(SubmissionSummaryResponse::getStatus)
+                    .contains(SubmissionStatus.SUBMITTED, SubmissionStatus.NOT_STARTED, SubmissionStatus.NOT_STARTED);
+            // Verify all responses have isRemovedLearner flag set to false (all active members)
+            assertThat(result.getContent())
+                    .allMatch(r -> r.getIsRemovedLearner() == false);
+        }
+
+        @Test
+        @DisplayName("Should filter by status (NOT_STARTED)")
+        void shouldFilterByStatusNotStarted() {
+            Pageable pageable = PageRequest.of(0, 10);
+            UUID student1Id = UUID.randomUUID();
+            UUID student2Id = UUID.randomUUID();
+            UUID student3Id = UUID.randomUUID();
+            
+            User user1 = User.builder()
+                    .firstName("John").lastName("Doe").displayName("John Doe")
+                    .email("john@example.com").build();
+            ReflectionTestUtils.setField(user1, "id", student1Id);
+            
+            User user2 = User.builder()
+                    .firstName("Jane").lastName("Smith").displayName("Jane Smith")
+                    .email("jane@example.com").build();
+            ReflectionTestUtils.setField(user2, "id", student2Id);
+            
+            User user3 = User.builder()
+                    .firstName("Bob").lastName("Johnson").displayName("Charlie Brown")
+                    .email("bob@example.com").build();
+            ReflectionTestUtils.setField(user3, "id", student3Id);
+
+            AssignmentSubmission submission1 = AssignmentSubmission.builder()
+                    .id(UUID.randomUUID())
+                    .assignmentId(assignmentId)
+                    .userId(student1Id)
+                    .status(SubmissionStatus.SUBMITTED)
+                    .attemptNumber(1)
+                    .build();
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            
+            // Create ClassMember objects (all active, no removed)
+            ClassMember member1 = ClassMember.builder()
+                    .userId(student1Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member2 = ClassMember.builder()
+                    .userId(student2Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member3 = ClassMember.builder()
+                    .userId(student3Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            
+            given(classMemberRepository.findAllByClassId(classId))
+                    .willReturn(List.of(member1, member2, member3));
+            given(submissionRepository.findByAssignmentId(assignmentId))
+                    .willReturn(List.of(submission1));
+            given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
+                    .willReturn(List.of(user1, user2, user3));
+            given(mapper.toSummaryResponse(submission1))
+                    .willReturn(SubmissionSummaryResponse.builder()
+                            .id(submission1.getId())
+                            .userFullName(user1.getDisplayName())
+                            .status(SubmissionStatus.SUBMITTED)
+                            .isRemovedLearner(false)
+                            .build());
+
+            Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
+                    assignmentId, null, SubmissionStatus.NOT_STARTED, pageable, teacherId);
+
+            assertThat(result).isNotNull();
+            assertThat(result.getTotalElements()).isEqualTo(2);
+            assertThat(result.getContent())
+                    .extracting(SubmissionSummaryResponse::getStatus)
+                    .allMatch(status -> status == SubmissionStatus.NOT_STARTED);
+        }
+
+        @Test
+        @DisplayName("Should filter by keyword (student name)")
+        void shouldFilterByKeyword() {
+            Pageable pageable = PageRequest.of(0, 10);
+            UUID student1Id = UUID.randomUUID();
+            UUID student2Id = UUID.randomUUID();
+            UUID student3Id = UUID.randomUUID();
+
+            User user1 = User.builder()
+                    .firstName("John").lastName("Doe").displayName("John Doe")
+                    .email("john@example.com").build();
+            ReflectionTestUtils.setField(user1, "id", student1Id);
+
+            User user2 = User.builder()
+                    .firstName("Jane").lastName("Smith").displayName("Jane Smith")
+                    .email("jane@example.com").build();
+            ReflectionTestUtils.setField(user2, "id", student2Id);
+
+            User user3 = User.builder()
+                    .firstName("Bob").lastName("Johnson").displayName("Charlie Brown")
+                    .email("bob@example.com").build();
+            ReflectionTestUtils.setField(user3, "id", student3Id);
+
+            AssignmentSubmission submission1 = AssignmentSubmission.builder()
+                    .id(UUID.randomUUID())
+                    .assignmentId(assignmentId)
+                    .userId(student1Id)
+                    .status(SubmissionStatus.SUBMITTED)
+                    .attemptNumber(1)
+                    .build();
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            
+            // Create ClassMember objects (all active, no removed)
+            ClassMember member1 = ClassMember.builder()
+                    .userId(student1Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member2 = ClassMember.builder()
+                    .userId(student2Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member3 = ClassMember.builder()
+                    .userId(student3Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            
+            given(classMemberRepository.findAllByClassId(classId))
+                    .willReturn(List.of(member1, member2, member3));
+            given(submissionRepository.findByAssignmentId(assignmentId))
+                    .willReturn(List.of(submission1));
+            given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
+                    .willReturn(List.of(user1, user2, user3));
+            given(mapper.toSummaryResponse(submission1))
+                    .willReturn(SubmissionSummaryResponse.builder()
+                            .id(submission1.getId())
+                            .userFullName(user1.getDisplayName())
+                            .status(SubmissionStatus.SUBMITTED)
+                            .isRemovedLearner(false)
+                            .build());
+
+            Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
+                    assignmentId, "Jane", null, pageable, teacherId);
+
+            assertThat(result).isNotNull();
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            assertThat(result.getContent().get(0).getUserFullName()).contains("Jane");
+        }
+
+        @Test
+        @DisplayName("Should include removed members with isRemovedLearner flag")
+        void shouldIncludeRemovedMembersWithFlag() {
+            Pageable pageable = PageRequest.of(0, 10);
+            UUID activeStudentId = UUID.randomUUID();
+            UUID removedStudentId = UUID.randomUUID();
+            
+            // Active member
+            ClassMember activeMember = ClassMember.builder()
+                    .userId(activeStudentId)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            
+            // Removed member (removed 5 days ago)
+            ClassMember removedMember = ClassMember.builder()
+                    .userId(removedStudentId)
+                    .classId(classId)
+                    .removedAt(LocalDateTime.now().minusDays(5))
+                    .build();
+            
+            // Users
+            User activeUser = User.builder()
+                    .firstName("Active").lastName("Student")
+                    .displayName("Active Student").email("active@example.com").build();
+            ReflectionTestUtils.setField(activeUser, "id", activeStudentId);
+            
+            User removedUser = User.builder()
+                    .firstName("Removed").lastName("Student")
+                    .displayName("Removed Student").email("removed@example.com").build();
+            ReflectionTestUtils.setField(removedUser, "id", removedStudentId);
+            
+            // Submission from active student
+            AssignmentSubmission activeSubmission = AssignmentSubmission.builder()
+                    .id(UUID.randomUUID())
+                    .assignmentId(assignmentId)
+                    .userId(activeStudentId)
+                    .status(SubmissionStatus.SUBMITTED)
+                    .attemptNumber(1)
+                    .build();
+            
+            // Submission from removed student (historical)
+            AssignmentSubmission removedSubmission = AssignmentSubmission.builder()
+                    .id(UUID.randomUUID())
+                    .assignmentId(assignmentId)
+                    .userId(removedStudentId)
+                    .status(SubmissionStatus.GRADED)
+                    .score(BigDecimal.valueOf(8.5))
+                    .attemptNumber(1)
+                    .build();
+            
+            // Setup mocks
+            testQuizAssignment.setClassId(classId);
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            given(classMemberRepository.findAllByClassId(classId))
+                    .willReturn(List.of(activeMember, removedMember));
+            given(submissionRepository.findByAssignmentId(assignmentId))
+                    .willReturn(List.of(activeSubmission, removedSubmission));
+            given(userRepository.findAllById(List.of(activeStudentId, removedStudentId)))
+                    .willReturn(List.of(activeUser, removedUser));
+            given(mapper.toSummaryResponse(activeSubmission))
+                    .willReturn(SubmissionSummaryResponse.builder()
+                            .id(activeSubmission.getId())
+                            .userFullName(activeUser.getDisplayName())
+                            .status(SubmissionStatus.SUBMITTED)
+                            .isRemovedLearner(false)
+                            .build());
+            given(mapper.toSummaryResponse(removedSubmission))
+                    .willReturn(SubmissionSummaryResponse.builder()
+                            .id(removedSubmission.getId())
+                            .userFullName(removedUser.getDisplayName())
+                            .status(SubmissionStatus.GRADED)
+                            .score(BigDecimal.valueOf(8.5))
+                            .isRemovedLearner(true)
+                            .build());
+            
+            // Execute
+            Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
+                    assignmentId, null, null, pageable, teacherId);
+            
+            // Verify both active and removed members are included
+            assertThat(result.getTotalElements()).isEqualTo(2);
+            
+            // Verify active member has correct flag
+            SubmissionSummaryResponse activeResponse = result.getContent().stream()
+                    .filter(r -> r.getUserFullName().contains("Active"))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(activeResponse.getIsRemovedLearner()).isFalse();
+            assertThat(activeResponse.getStatus()).isEqualTo(SubmissionStatus.SUBMITTED);
+            
+            // Verify removed member has correct flag
+            SubmissionSummaryResponse removedResponse = result.getContent().stream()
+                    .filter(r -> r.getUserFullName().contains("Removed"))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(removedResponse.getIsRemovedLearner()).isTrue();
+            assertThat(removedResponse.getStatus()).isEqualTo(SubmissionStatus.GRADED);
+            assertThat(removedResponse.getScore()).isEqualTo(BigDecimal.valueOf(8.5));
+        }
+
+        @Test
+        @DisplayName("Should filter by keyword AND status")
+        void shouldFilterByKeywordAndStatus() {
+            Pageable pageable = PageRequest.of(0, 10);
+            UUID student1Id = UUID.randomUUID();
+            UUID student2Id = UUID.randomUUID();
+            UUID student3Id = UUID.randomUUID();
+
+            User user1 = User.builder()
+                    .firstName("John").lastName("Doe").displayName("John Doe")
+                    .email("john@example.com").build();
+            ReflectionTestUtils.setField(user1, "id", student1Id);
+
+            User user2 = User.builder()
+                    .firstName("Jane").lastName("Smith").displayName("Jane Smith")
+                    .email("jane@example.com").build();
+            ReflectionTestUtils.setField(user2, "id", student2Id);
+
+            User user3 = User.builder()
+                    .firstName("Bob").lastName("Johnson").displayName("Charlie Brown")
+                    .email("bob@example.com").build();
+            ReflectionTestUtils.setField(user3, "id", student3Id);
+
+            AssignmentSubmission submission1 = AssignmentSubmission.builder()
+                    .id(UUID.randomUUID())
+                    .assignmentId(assignmentId)
+                    .userId(student1Id)
+                    .status(SubmissionStatus.SUBMITTED)
+                    .attemptNumber(1)
+                    .build();
+ 
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            
+            // Create ClassMember objects (all active, no removed)
+            ClassMember member1 = ClassMember.builder()
+                    .userId(student1Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member2 = ClassMember.builder()
+                    .userId(student2Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member3 = ClassMember.builder()
+                    .userId(student3Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            
+            given(classMemberRepository.findAllByClassId(classId))
+                    .willReturn(List.of(member1, member2, member3));
+            given(submissionRepository.findByAssignmentId(assignmentId))
+                    .willReturn(List.of(submission1));
+            given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
+                    .willReturn(List.of(user1, user2, user3));
+            given(mapper.toSummaryResponse(submission1))
+                    .willReturn(SubmissionSummaryResponse.builder()
+                            .id(submission1.getId())
+                            .userFullName(user1.getDisplayName())
+                            .status(SubmissionStatus.SUBMITTED)
+                            .build());
+
+            Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
+                    assignmentId, "Jane", SubmissionStatus.NOT_STARTED, pageable, teacherId);
+
+            assertThat(result).isNotNull();
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            assertThat(result.getContent().get(0).getUserFullName()).isEqualTo("Jane Smith");
+            assertThat(result.getContent().get(0).getStatus()).isEqualTo(SubmissionStatus.NOT_STARTED);
+        }
+
+        @Test
+        @DisplayName("Should return empty when keyword matches no students")
+        void shouldReturnEmptyWhenKeywordNoMatch() {
+            Pageable pageable = PageRequest.of(0, 10);
+            UUID student1Id = UUID.randomUUID();
+            UUID student2Id = UUID.randomUUID();
+            UUID student3Id = UUID.randomUUID();
+            
+            User user1 = User.builder()
+                    .firstName("John").lastName("Doe").displayName("John Doe")
+                    .email("john@example.com").build();
+            ReflectionTestUtils.setField(user1, "id", student1Id);
+            
+            User user2 = User.builder()
+                    .firstName("Jane").lastName("Smith").displayName("Jane Smith")
+                    .email("jane@example.com").build();
+            ReflectionTestUtils.setField(user2, "id", student2Id);
+            
+            User user3 = User.builder()
+                    .firstName("Bob").lastName("Johnson").displayName("Charlie Brown")
+                    .email("bob@example.com").build();
+            ReflectionTestUtils.setField(user3, "id", student3Id);
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            
+            // Create ClassMember objects (all active, no removed)
+            ClassMember member1 = ClassMember.builder()
+                    .userId(student1Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member2 = ClassMember.builder()
+                    .userId(student2Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member3 = ClassMember.builder()
+                    .userId(student3Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            
+            given(classMemberRepository.findAllByClassId(classId))
+                    .willReturn(List.of(member1, member2, member3));
+            given(submissionRepository.findByAssignmentId(assignmentId))
+                    .willReturn(List.of());
+            given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
+                    .willReturn(List.of(user1, user2, user3));
+
+            Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
+                    assignmentId, "NonExistent", null, pageable, teacherId);
+
+            assertThat(result).isNotNull();
+            assertThat(result.getTotalElements()).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("Should paginate results correctly")
+        void shouldPaginateResultsCorrectly() {
+            Pageable pageable = PageRequest.of(1, 1); // page 2, size 1
+            UUID student1Id = UUID.randomUUID();
+            UUID student2Id = UUID.randomUUID();
+            UUID student3Id = UUID.randomUUID();
+            
+            User user1 = User.builder()
+                    .firstName("Alice").lastName("Anderson").displayName("Alice Anderson")
+                    .email("alice@example.com").build();
+            ReflectionTestUtils.setField(user1, "id", student1Id);
+            
+            User user2 = User.builder()
+                    .firstName("Bob").lastName("Brown").displayName("Bob Brown")
+                    .email("bob@example.com").build();
+            ReflectionTestUtils.setField(user2, "id", student2Id);
+            
+            User user3 = User.builder()
+                    .firstName("Charlie").lastName("Charles").displayName("Charlie Charles")
+                    .email("charlie@example.com").build();
+            ReflectionTestUtils.setField(user3, "id", student3Id);
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            
+            // Create ClassMember objects (all active, no removed)
+            ClassMember member1 = ClassMember.builder()
+                    .userId(student1Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member2 = ClassMember.builder()
+                    .userId(student2Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            ClassMember member3 = ClassMember.builder()
+                    .userId(student3Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            
+            given(classMemberRepository.findAllByClassId(classId))
+                    .willReturn(List.of(member1, member2, member3));
+            given(submissionRepository.findByAssignmentId(assignmentId))
+                    .willReturn(List.of());
+            given(userRepository.findAllById(List.of(student1Id, student2Id, student3Id)))
+                    .willReturn(List.of(user1, user2, user3));
+
+            Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
+                    assignmentId, null, null, pageable, teacherId);
+
+            assertThat(result).isNotNull();
+            assertThat(result.getNumber()).isEqualTo(1);
+            assertThat(result.getSize()).isEqualTo(1);
+            assertThat(result.getTotalElements()).isEqualTo(3);
+            assertThat(result.getTotalPages()).isEqualTo(3);
+            assertThat(result.getContent()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("Should use latest attempt when student has multiple submissions")
+        void shouldUseLatestAttempt() {
+            Pageable pageable = PageRequest.of(0, 10);
+            UUID student1Id = UUID.randomUUID();
+            
+            User user1 = User.builder()
+                    .firstName("John").lastName("Doe").displayName("John Doe")
+                    .email("john@example.com").build();
+            ReflectionTestUtils.setField(user1, "id", student1Id);
+
+            AssignmentSubmission submission1 = AssignmentSubmission.builder()
+                    .id(UUID.randomUUID())
+                    .assignmentId(assignmentId)
+                    .userId(student1Id)
+                    .status(SubmissionStatus.SUBMITTED)
+                    .attemptNumber(1)
+                    .build();
+            
+            AssignmentSubmission submission2 = AssignmentSubmission.builder()
+                    .id(UUID.randomUUID())
+                    .assignmentId(assignmentId)
+                    .userId(student1Id)
+                    .status(SubmissionStatus.GRADED)
+                    .attemptNumber(2)
+                    .score(BigDecimal.valueOf(85.5))
+                    .build();
+
+            given(assignmentRepository.findByIdAndNotDeleted(assignmentId))
+                    .willReturn(Optional.of(testQuizAssignment));
+            given(classRepository.findByIdAndNotDeleted(classId))
+                    .willReturn(Optional.of(testClazz));
+            given(classTeacherHistoryRepository.findCurrentTeacherIdByClassId(classId))
+                    .willReturn(Optional.of(teacherId));
+            
+            // Create ClassMember object (active member)
+            ClassMember member1 = ClassMember.builder()
+                    .userId(student1Id)
+                    .classId(classId)
+                    .removedAt(null)
+                    .build();
+            
+            given(classMemberRepository.findAllByClassId(classId))
+                    .willReturn(List.of(member1));
+            given(submissionRepository.findByAssignmentId(assignmentId))
+                    .willReturn(List.of(submission1, submission2));
+            given(userRepository.findAllById(List.of(student1Id)))
+                    .willReturn(List.of(user1));
+            given(mapper.toSummaryResponse(submission2))
+                    .willReturn(SubmissionSummaryResponse.builder()
+                            .id(submission2.getId())
+                            .userFullName(user1.getDisplayName())
+                            .status(SubmissionStatus.GRADED)
+                            .score(BigDecimal.valueOf(85.5))
+                            .build());
+
+            Page<SubmissionSummaryResponse> result = assignmentService.getSubmissionsByAssignment(
+                    assignmentId, null, null, pageable, teacherId);
+
+            assertThat(result).isNotNull();
+            assertThat(result.getTotalElements()).isEqualTo(1);
+            assertThat(result.getContent().get(0).getStatus()).isEqualTo(SubmissionStatus.GRADED);
+            assertThat(result.getContent().get(0).getScore()).isEqualTo(BigDecimal.valueOf(85.5));
+        }
+    }
+
 }
+

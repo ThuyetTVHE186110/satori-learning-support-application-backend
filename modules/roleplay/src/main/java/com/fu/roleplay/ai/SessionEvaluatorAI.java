@@ -5,41 +5,60 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.common.ai.PromptFragment;
 import com.fu.common.ai.PromptUtils;
 import com.fu.roleplay.dto.response.SessionEvaluationResponse;
-import com.fu.roleplay.entity.ConversationMessage;
+import com.fu.roleplay.evaluation.CrossSessionTracker;
+import com.fu.roleplay.evaluation.ErrorPatternAggregator;
+import com.fu.roleplay.evaluation.VocabularyRangeAnalyzer;
+import com.fu.roleplay.enums.ErrorType;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
+/**
+ * Session evaluator v2: LLM as qualitative synthesizer, NOT scorer.
+ *
+ * <p>Scores are computed from data (error counts, Azure pronunciation, mission status,
+ * vocabulary JLPT distribution). The LLM's only job is to produce specific, honest,
+ * actionable narrative feedback referencing those computed facts.
+ *
+ * <p>Based on research recommendations (MDPI 2025 systematic review):
+ * use LLMs for qualitative synthesis rather than numerical scoring.
+ */
 @Service
 @Slf4j
 public class SessionEvaluatorAI {
 
-    private static final String SESSION_EVAL_SYSTEM_PROMPT =
-            "You are an AI language evaluator assessing a Japanese conversation roleplay session.\n" +
-            "Analyze the full conversation and provide a comprehensive language evaluation.\n\n" +
+    private static final String SYNTHESIZER_SYSTEM_PROMPT =
+            "You are an AI tutor providing feedback on a Japanese conversation roleplay session.\n" +
+            "You do NOT produce scores — scores are already computed from data.\n" +
+            "Your role is to produce SPECIFIC, HONEST, ACTIONABLE qualitative feedback.\n\n" +
             PromptFragment.EVALUATOR_INJECTION_GUARD + "\n\n" +
-            PromptFragment.VIETNAMESE_FIELDS + "\n\n" +
+            "LANGUAGE REQUIREMENT: ALL text MUST be written in Vietnamese (Tiếng Việt).\n\n" +
             PromptFragment.JSON_ONLY + "\n" +
             """
-            The object must have:
-            - fluencyScore (Number): 0-100, how smoothly the learner communicates
-            - accuracyScore (Number): 0-100, grammatical and vocabulary correctness
-            - vocabularyScore (Number): 0-100, range and appropriateness of vocabulary used
-            - grammarScore (Number): 0-100, correctness of grammar patterns used
-            - strengths (Array<String>): 2-4 điểm mạnh cụ thể quan sát được (viết bằng tiếng Việt)
-            - improvements (Array<String>): 2-4 điểm cần cải thiện cụ thể và khả thi (viết bằng tiếng Việt)
-            - summary (String): Nhận xét tổng quan ngắn gọn, khích lệ (2-3 câu, viết bằng tiếng Việt)
+            Return a JSON object with these fields:
+            - overallAssessment (String): 2-3 câu nhận xét tổng thể trung thực. Tham chiếu lỗi cụ thể theo tên.
+            - jlptEstimate (String): e.g. "N5 (vững)" or "N5→N4 (đang chuyển tiếp)"
+            - accuracyFeedback (String): 1-2 câu về lỗi cụ thể, gọi tên loại lỗi và đề xuất bài học cụ thể.
+            - pronunciationFeedback (String): 1-2 câu về phát âm dựa trên dữ liệu.
+            - taskCompletionFeedback (String): 1-2 câu về nhiệm vụ đã/chưa hoàn thành, gợi ý cách hoàn thành.
+            - complexityFeedback (String): 1-2 câu về phân bố từ vựng JLPT, gợi ý mở rộng.
+            - recurringWarning (String): Cảnh báo lỗi lặp nếu có, hoặc "" nếu không.
+            - nextSteps (Array<String>): 2-3 hành động cụ thể (tên ngữ pháp, bộ từ vựng, loại bài tập).
 
-            Be constructive and encouraging. Focus on what the learner did well and specific actionable improvements.
+            RULES:
+            - Be honest. If error rate > 40%, do NOT say "doing well" or use vague praise.
+            - Every feedback field MUST cite specific data (error count, word, grammar point).
+            - accuracyFeedback MUST name the dominant error type.
+            - complexityFeedback MUST reference the JLPT distribution numbers.
+            - nextSteps MUST be actionable: name specific grammar points, vocabulary sets, or drill types.
             """;
-
-    private static final int MAX_EVAL_MESSAGES = 40;
 
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
@@ -49,78 +68,142 @@ public class SessionEvaluatorAI {
         this.objectMapper = objectMapper;
     }
 
-    public SessionEvaluationResponse.LanguageEvaluationDetail evaluateSession(
-            List<ConversationMessage> messages) {
+    /**
+     * Synthesizes qualitative feedback from computed facts. Does NOT generate scores.
+     */
+    public SessionEvaluationResponse.QualitativeSummary synthesize(
+            ErrorPatternAggregator.ErrorBreakdown errorBreakdown,
+            SessionEvaluationResponse.PronunciationSummary pronunciationSummary,
+            BigDecimal taskCompletionScore,
+            int completedMissions,
+            int totalMissions,
+            List<String> failedMissionTitles,
+            VocabularyRangeAnalyzer.ComplexityResult complexity,
+            List<CrossSessionTracker.RecurringPattern> recurringPatterns,
+            String jlptLevel) {
         try {
-            // Prune context: keep first 5 messages (opening context) + last messages up to MAX_EVAL_MESSAGES
-            List<ConversationMessage> prunedMessages;
-            if (messages.size() > MAX_EVAL_MESSAGES) {
-                List<ConversationMessage> head = messages.subList(0, 5);
-                List<ConversationMessage> tail = messages.subList(messages.size() - (MAX_EVAL_MESSAGES - 5), messages.size());
-                prunedMessages = new ArrayList<>(head);
-                prunedMessages.add(ConversationMessage.builder()
-                        .role(ConversationMessage.MessageRole.ASSISTANT)
-                        .content("[... " + (messages.size() - MAX_EVAL_MESSAGES) + " earlier messages omitted ...]")
-                        .build());
-                prunedMessages.addAll(tail);
-            } else {
-                prunedMessages = messages;
-            }
-
-            StringBuilder userPrompt = new StringBuilder();
-            userPrompt.append("FULL CONVERSATION:\n");
-            for (ConversationMessage msg : prunedMessages) {
-                String role = msg.getRole() == ConversationMessage.MessageRole.USER ? "Learner" : "AI";
-                userPrompt.append(role).append(": ").append(msg.getContent());
-                if (msg.getCorrections() != null && !msg.getCorrections().equals("[]")) {
-                    userPrompt.append(" [corrections: ").append(msg.getCorrections()).append("]");
-                }
-                userPrompt.append("\n");
-            }
+            String userPrompt = buildFactsPrompt(
+                    errorBreakdown, pronunciationSummary, taskCompletionScore,
+                    completedMissions, totalMissions, failedMissionTitles,
+                    complexity, recurringPatterns, jlptLevel);
 
             String rawResponse = chatClient.prompt()
-                    .system(SESSION_EVAL_SYSTEM_PROMPT)
-                    .user(userPrompt.toString())
+                    .system(SYNTHESIZER_SYSTEM_PROMPT)
+                    .user(userPrompt)
                     .call()
                     .content();
 
-            String cleanJson = cleanJson(rawResponse);
+            String cleanJson = PromptUtils.cleanMarkdownFences(rawResponse, "{}");
             JsonNode result = objectMapper.readTree(cleanJson);
 
-            List<String> strengths = new ArrayList<>();
-            result.path("strengths").forEach(s -> strengths.add(s.asText()));
-            List<String> improvements = new ArrayList<>();
-            result.path("improvements").forEach(i -> improvements.add(i.asText()));
+            List<String> nextSteps = new ArrayList<>();
+            result.path("nextSteps").forEach(s -> nextSteps.add(s.asText()));
 
-            return SessionEvaluationResponse.LanguageEvaluationDetail.builder()
-                    .fluencyScore(toBigDecimal(result.path("fluencyScore").asDouble(0)))
-                    .accuracyScore(toBigDecimal(result.path("accuracyScore").asDouble(0)))
-                    .vocabularyScore(toBigDecimal(result.path("vocabularyScore").asDouble(0)))
-                    .grammarScore(toBigDecimal(result.path("grammarScore").asDouble(0)))
-                    .strengths(strengths)
-                    .improvements(improvements)
-                    .summary(result.path("summary").asText(""))
+            return SessionEvaluationResponse.QualitativeSummary.builder()
+                    .overallAssessment(result.path("overallAssessment").asText(""))
+                    .jlptEstimate(result.path("jlptEstimate").asText(""))
+                    .accuracyFeedback(result.path("accuracyFeedback").asText(""))
+                    .pronunciationFeedback(result.path("pronunciationFeedback").asText(""))
+                    .taskCompletionFeedback(result.path("taskCompletionFeedback").asText(""))
+                    .complexityFeedback(result.path("complexityFeedback").asText(""))
+                    .recurringWarning(result.path("recurringWarning").asText(""))
+                    .nextSteps(nextSteps.isEmpty() ? List.of("Tiếp tục luyện tập hội thoại") : nextSteps)
                     .build();
 
         } catch (Exception e) {
-            log.error("Session evaluation failed: {}", e.getMessage());
-            return SessionEvaluationResponse.LanguageEvaluationDetail.builder()
-                    .fluencyScore(BigDecimal.ZERO)
-                    .accuracyScore(BigDecimal.ZERO)
-                    .vocabularyScore(BigDecimal.ZERO)
-                    .grammarScore(BigDecimal.ZERO)
-                    .strengths(List.of())
-                    .improvements(List.of("Không thể đánh giá phiên hội thoại này"))
-                    .summary("Đánh giá không khả dụng cho phiên hội thoại này.")
-                    .build();
+            log.error("Session evaluation synthesis failed: {}", e.getMessage());
+            return fallbackSummary();
         }
     }
 
-    private BigDecimal toBigDecimal(double value) {
-        return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP);
+    private String buildFactsPrompt(
+            ErrorPatternAggregator.ErrorBreakdown errorBreakdown,
+            SessionEvaluationResponse.PronunciationSummary pronunciationSummary,
+            BigDecimal taskCompletionScore,
+            int completedMissions, int totalMissions, List<String> failedMissionTitles,
+            VocabularyRangeAnalyzer.ComplexityResult complexity,
+            List<CrossSessionTracker.RecurringPattern> recurringPatterns,
+            String jlptLevel) {
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("FACTS about the learner's session:\n\n");
+
+        // Accuracy facts
+        sb.append("## ACCURACY\n");
+        sb.append("- Error rate: ").append(errorBreakdown.errorRate()).append("% (")
+          .append(errorBreakdown.totalCorrections()).append(" corrections / ")
+          .append(errorBreakdown.userMessageCount()).append(" messages)\n");
+        sb.append("- Error breakdown: ");
+        errorBreakdown.errorCounts().forEach((type, count) ->
+                sb.append(type.name()).append(": ").append(count).append(", "));
+        sb.append("\n");
+        if (!errorBreakdown.topExamples().isEmpty()) {
+            sb.append("- Top errors:\n");
+            for (var ex : errorBreakdown.topExamples()) {
+                sb.append("  - ").append(ex.original()).append(" → ").append(ex.corrected())
+                  .append(" [").append(ex.errorType().name()).append("]\n");
+            }
+        }
+
+        // Pronunciation facts
+        sb.append("\n## PRONUNCIATION\n");
+        if (pronunciationSummary != null && pronunciationSummary.getTotalAssessed() > 0) {
+            sb.append("- Average overall: ").append(pronunciationSummary.getAverageOverall()).append("/100\n");
+            sb.append("- Accuracy: ").append(pronunciationSummary.getAverageAccuracy())
+              .append(", Fluency: ").append(pronunciationSummary.getAverageFluency())
+              .append(", Completeness: ").append(pronunciationSummary.getAverageCompleteness()).append("\n");
+            sb.append("- Messages assessed: ").append(pronunciationSummary.getTotalAssessed()).append("\n");
+        } else {
+            sb.append("- No audio messages submitted (pronunciation not assessed)\n");
+        }
+
+        // Task completion facts
+        sb.append("\n## TASK COMPLETION\n");
+        sb.append("- Missions completed: ").append(completedMissions).append("/").append(totalMissions).append("\n");
+        if (!failedMissionTitles.isEmpty()) {
+            sb.append("- Not completed: ").append(String.join(", ", failedMissionTitles)).append("\n");
+        }
+
+        // Complexity facts
+        sb.append("\n## VOCABULARY COMPLEXITY\n");
+        sb.append("- Unique words used: ").append(complexity.uniqueVocabularyCount()).append("\n");
+        if (!complexity.jlptDistribution().isEmpty()) {
+            sb.append("- JLPT distribution: ");
+            complexity.jlptDistribution().forEach((level, pct) ->
+                    sb.append(level).append(": ").append(pct).append("%, "));
+            sb.append("\n");
+        } else {
+            sb.append("- No vocabulary matched in database\n");
+        }
+
+        // Recurring patterns
+        sb.append("\n## CROSS-SESSION PATTERNS\n");
+        if (recurringPatterns.isEmpty()) {
+            sb.append("- No prior session data available\n");
+        } else {
+            for (var rp : recurringPatterns) {
+                sb.append("- ").append(rp.errorType().name())
+                  .append(": ").append(rp.totalOccurrences()).append(" occurrences in ")
+                  .append(rp.sessionCount()).append("/").append(rp.totalSessionsChecked())
+                  .append(" recent sessions\n");
+            }
+        }
+
+        sb.append("\n## TARGET JLPT LEVEL: ").append(jlptLevel != null ? jlptLevel : "N5").append("\n");
+
+        return sb.toString();
     }
 
-    private String cleanJson(String raw) {
-        return PromptUtils.cleanMarkdownFences(raw, "{}");
+    private SessionEvaluationResponse.QualitativeSummary fallbackSummary() {
+        return SessionEvaluationResponse.QualitativeSummary.builder()
+                .overallAssessment("Đánh giá không khả dụng cho phiên hội thoại này.")
+                .jlptEstimate("")
+                .accuracyFeedback("")
+                .pronunciationFeedback("")
+                .taskCompletionFeedback("")
+                .complexityFeedback("")
+                .recurringWarning("")
+                .nextSteps(List.of("Tiếp tục luyện tập hội thoại"))
+                .build();
     }
 }

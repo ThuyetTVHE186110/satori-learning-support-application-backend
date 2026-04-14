@@ -39,6 +39,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -114,6 +115,13 @@ class CurriculumImportServiceImplTest {
 
         @Mock private MultipartFile validPdf;
 
+        // PDF magic bytes: %PDF- (0x25 0x50 0x44 0x46 0x2D) + padding
+        private static final byte[] PDF_HEADER =
+                {0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34}; // %PDF-1.4
+        // PPTX/ZIP magic bytes: PK\x03\x04 (Office Open XML is a ZIP archive)
+        private static final byte[] PPTX_HEADER =
+                {0x50, 0x4B, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00}; // PK..
+
         @BeforeEach
         void setupValidFile() throws java.io.IOException {
             given(validPdf.isEmpty()).willReturn(false);
@@ -121,6 +129,8 @@ class CurriculumImportServiceImplTest {
             given(validPdf.getSize()).willReturn(1024L);
             given(validPdf.getOriginalFilename()).willReturn("lesson.pdf");
             given(validPdf.getBytes()).willReturn(new byte[1024]); // needed for InMemoryMultipartFile.from()
+            // Return a fresh stream each call — magic bytes check reads from position 0
+            given(validPdf.getInputStream()).willAnswer(inv -> new ByteArrayInputStream(PDF_HEADER));
         }
 
         @Test
@@ -229,6 +239,7 @@ class CurriculumImportServiceImplTest {
             long oversizeBytes = 101L * 1024 * 1024;
             given(bigFile.isEmpty()).willReturn(false);
             given(bigFile.getContentType()).willReturn("application/pdf");
+            given(bigFile.getOriginalFilename()).willReturn("big.pdf"); // must pass extension check first
             given(bigFile.getSize()).willReturn(oversizeBytes);
 
             assertThatThrownBy(() -> service.initiateImport(bigFile, null, MANAGER_ID))
@@ -296,6 +307,7 @@ class CurriculumImportServiceImplTest {
                 given(pptxFile.getSize()).willReturn(1024L);
                 given(pptxFile.getOriginalFilename()).willReturn("slides.pptx");
                 given(pptxFile.getBytes()).willReturn(new byte[1024]);
+                given(pptxFile.getInputStream()).willAnswer(inv -> new ByteArrayInputStream(PPTX_HEADER));
 
                 Course course = new Course();
                 course.setName("Korean N5");
@@ -333,6 +345,7 @@ class CurriculumImportServiceImplTest {
                 given(pptxFile.getSize()).willReturn(2048L);
                 given(pptxFile.getOriginalFilename()).willReturn("curriculum.pptx");
                 given(pptxFile.getBytes()).willReturn(new byte[2048]);
+                given(pptxFile.getInputStream()).willAnswer(inv -> new ByteArrayInputStream(PPTX_HEADER));
 
                 Course course = new Course();
                 given(courseRepository.findById(COURSE_ID)).willReturn(Optional.of(course));
@@ -894,27 +907,29 @@ class CurriculumImportServiceImplTest {
     class GetStatisticsTests {
 
         @Test
-        @DisplayName("Happy path — returns aggregated statistics from repository")
+        @DisplayName("Happy path — returns aggregated statistics from repository for given course")
         void getStatistics_normal_returnsAggregatedStats() {
-            given(importRepository.count()).willReturn(10L);
-            given(importRepository.countByStatus(ImportStatus.COMPLETED)).willReturn(6L);
-            given(importRepository.countByStatus(ImportStatus.FAILED)).willReturn(2L);
-            given(importRepository.countByStatus(ImportStatus.QUEUED)).willReturn(1L);
-            given(importRepository.countByStatus(ImportStatus.ROLLED_BACK)).willReturn(1L);
-            given(importRepository.countByStatus(ImportStatus.PENDING_APPROVAL)).willReturn(2L);
-            given(importRepository.countByStatus(ImportStatus.CANCELLED)).willReturn(0L);
-            given(importRepository.sumLessonsCreated()).willReturn(50L);
-            given(importRepository.sumVocabularyCreated()).willReturn(300L);
-            given(importRepository.sumGrammarPointsCreated()).willReturn(100L);
-            given(importRepository.sumTokensUsed()).willReturn(1_000_000L);
-            given(importRepository.sumActualCostUsd()).willReturn(new BigDecimal("0.30"));
-            given(importRepository.sumValidationPassed()).willReturn(90L);
-            given(importRepository.sumValidationFailed()).willReturn(10L);
-            given(importRepository.sumReExtractions()).willReturn(5L);
-            given(importRepository.sumEmbeddingsCreated()).willReturn(400L);
-            given(importRepository.sumHallucinatedItems()).willReturn(3L);
+            UUID courseId = UUID.randomUUID();
+            given(courseRepository.findById(courseId)).willReturn(Optional.of(new Course())); // Mock course exists
+            given(importRepository.countByCourseId(courseId)).willReturn(10L);
+            given(importRepository.countByCourseIdAndStatus(courseId, ImportStatus.COMPLETED)).willReturn(6L);
+            given(importRepository.countByCourseIdAndStatus(courseId, ImportStatus.FAILED)).willReturn(2L);
+            given(importRepository.countByCourseIdAndStatus(courseId, ImportStatus.QUEUED)).willReturn(1L);
+            given(importRepository.countByCourseIdAndStatus(courseId, ImportStatus.ROLLED_BACK)).willReturn(1L);
+            given(importRepository.countByCourseIdAndStatus(courseId, ImportStatus.PENDING_APPROVAL)).willReturn(2L);
+            given(importRepository.countByCourseIdAndStatus(courseId, ImportStatus.CANCELLED)).willReturn(0L);
+            given(importRepository.sumLessonsCreatedByCourseId(courseId)).willReturn(50L);
+            given(importRepository.sumVocabularyCreatedByCourseId(courseId)).willReturn(300L);
+            given(importRepository.sumGrammarPointsCreatedByCourseId(courseId)).willReturn(100L);
+            given(importRepository.sumTokensUsedByCourseId(courseId)).willReturn(1_000_000L);
+            given(importRepository.sumActualCostUsdByCourseId(courseId)).willReturn(new BigDecimal("0.30"));
+            given(importRepository.sumValidationPassedByCourseId(courseId)).willReturn(90L);
+            given(importRepository.sumValidationFailedByCourseId(courseId)).willReturn(10L);
+            given(importRepository.sumReExtractionsByCourseId(courseId)).willReturn(5L);
+            given(importRepository.sumEmbeddingsCreatedByCourseId(courseId)).willReturn(400L);
+            given(importRepository.sumHallucinatedItemsByCourseId(courseId)).willReturn(3L);
 
-            ImportStatisticsResponse result = service.getStatistics();
+            ImportStatisticsResponse result = service.getStatistics(courseId);
 
             assertThat(result.getTotalImports()).isEqualTo(10L);
             assertThat(result.getCompletedImports()).isEqualTo(6L);
@@ -936,20 +951,22 @@ class CurriculumImportServiceImplTest {
         @Test
         @DisplayName("Edge case — null cost from repository defaults to ZERO")
         void getStatistics_nullCost_defaultsToZero() {
-            given(importRepository.count()).willReturn(0L);
-            given(importRepository.countByStatus(any())).willReturn(0L);
-            given(importRepository.sumLessonsCreated()).willReturn(0L);
-            given(importRepository.sumVocabularyCreated()).willReturn(0L);
-            given(importRepository.sumGrammarPointsCreated()).willReturn(0L);
-            given(importRepository.sumTokensUsed()).willReturn(0L);
-            given(importRepository.sumActualCostUsd()).willReturn(null);
-            given(importRepository.sumValidationPassed()).willReturn(0L);
-            given(importRepository.sumValidationFailed()).willReturn(0L);
-            given(importRepository.sumReExtractions()).willReturn(0L);
-            given(importRepository.sumEmbeddingsCreated()).willReturn(0L);
-            given(importRepository.sumHallucinatedItems()).willReturn(0L);
+            UUID courseId = UUID.randomUUID();
+            given(courseRepository.findById(courseId)).willReturn(Optional.of(new Course()));
+            given(importRepository.countByCourseId(courseId)).willReturn(0L);
+            given(importRepository.countByCourseIdAndStatus(eq(courseId), any())).willReturn(0L);
+            given(importRepository.sumLessonsCreatedByCourseId(courseId)).willReturn(0L);
+            given(importRepository.sumVocabularyCreatedByCourseId(courseId)).willReturn(0L);
+            given(importRepository.sumGrammarPointsCreatedByCourseId(courseId)).willReturn(0L);
+            given(importRepository.sumTokensUsedByCourseId(courseId)).willReturn(0L);
+            given(importRepository.sumActualCostUsdByCourseId(courseId)).willReturn(null);
+            given(importRepository.sumValidationPassedByCourseId(courseId)).willReturn(0L);
+            given(importRepository.sumValidationFailedByCourseId(courseId)).willReturn(0L);
+            given(importRepository.sumReExtractionsByCourseId(courseId)).willReturn(0L);
+            given(importRepository.sumEmbeddingsCreatedByCourseId(courseId)).willReturn(0L);
+            given(importRepository.sumHallucinatedItemsByCourseId(courseId)).willReturn(0L);
 
-            ImportStatisticsResponse result = service.getStatistics();
+            ImportStatisticsResponse result = service.getStatistics(courseId);
 
             assertThat(result.getTotalCostUsd()).isEqualByComparingTo(BigDecimal.ZERO);
         }
@@ -957,26 +974,28 @@ class CurriculumImportServiceImplTest {
         @Test
         @DisplayName("Edge case — in-progress cannot be negative")
         void getStatistics_negativeInProgress_floorsToZero() {
+            UUID courseId = UUID.randomUUID();
             // This can happen if counts are inconsistent
-            given(importRepository.count()).willReturn(5L);
-            given(importRepository.countByStatus(ImportStatus.COMPLETED)).willReturn(5L);
-            given(importRepository.countByStatus(ImportStatus.FAILED)).willReturn(2L); // sum > total
-            given(importRepository.countByStatus(ImportStatus.QUEUED)).willReturn(0L);
-            given(importRepository.countByStatus(ImportStatus.ROLLED_BACK)).willReturn(0L);
-            given(importRepository.countByStatus(ImportStatus.PENDING_APPROVAL)).willReturn(0L);
-            given(importRepository.countByStatus(ImportStatus.CANCELLED)).willReturn(0L);
-            given(importRepository.sumLessonsCreated()).willReturn(0L);
-            given(importRepository.sumVocabularyCreated()).willReturn(0L);
-            given(importRepository.sumGrammarPointsCreated()).willReturn(0L);
-            given(importRepository.sumTokensUsed()).willReturn(0L);
-            given(importRepository.sumActualCostUsd()).willReturn(BigDecimal.ZERO);
-            given(importRepository.sumValidationPassed()).willReturn(0L);
-            given(importRepository.sumValidationFailed()).willReturn(0L);
-            given(importRepository.sumReExtractions()).willReturn(0L);
-            given(importRepository.sumEmbeddingsCreated()).willReturn(0L);
-            given(importRepository.sumHallucinatedItems()).willReturn(0L);
+            given(courseRepository.findById(courseId)).willReturn(Optional.of(new Course()));
+            given(importRepository.countByCourseId(courseId)).willReturn(5L);
+            given(importRepository.countByCourseIdAndStatus(courseId, ImportStatus.COMPLETED)).willReturn(5L);
+            given(importRepository.countByCourseIdAndStatus(courseId, ImportStatus.FAILED)).willReturn(2L); // sum > total
+            given(importRepository.countByCourseIdAndStatus(courseId, ImportStatus.QUEUED)).willReturn(0L);
+            given(importRepository.countByCourseIdAndStatus(courseId, ImportStatus.ROLLED_BACK)).willReturn(0L);
+            given(importRepository.countByCourseIdAndStatus(courseId, ImportStatus.PENDING_APPROVAL)).willReturn(0L);
+            given(importRepository.countByCourseIdAndStatus(courseId, ImportStatus.CANCELLED)).willReturn(0L);
+            given(importRepository.sumLessonsCreatedByCourseId(courseId)).willReturn(0L);
+            given(importRepository.sumVocabularyCreatedByCourseId(courseId)).willReturn(0L);
+            given(importRepository.sumGrammarPointsCreatedByCourseId(courseId)).willReturn(0L);
+            given(importRepository.sumTokensUsedByCourseId(courseId)).willReturn(0L);
+            given(importRepository.sumActualCostUsdByCourseId(courseId)).willReturn(BigDecimal.ZERO);
+            given(importRepository.sumValidationPassedByCourseId(courseId)).willReturn(0L);
+            given(importRepository.sumValidationFailedByCourseId(courseId)).willReturn(0L);
+            given(importRepository.sumReExtractionsByCourseId(courseId)).willReturn(0L);
+            given(importRepository.sumEmbeddingsCreatedByCourseId(courseId)).willReturn(0L);
+            given(importRepository.sumHallucinatedItemsByCourseId(courseId)).willReturn(0L);
 
-            ImportStatisticsResponse result = service.getStatistics();
+            ImportStatisticsResponse result = service.getStatistics(courseId);
 
             assertThat(result.getRollbackImports()).isZero();
             assertThat(result.getPendingApprovalImports()).isZero();

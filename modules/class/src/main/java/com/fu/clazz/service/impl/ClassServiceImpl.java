@@ -1,12 +1,14 @@
 package com.fu.clazz.service.impl;
 
 import com.fu.clazz.dto.request.AddMemberRequest;
+import com.fu.clazz.dto.request.AddMembersRequest;
 import com.fu.clazz.dto.request.CreateClassRequest;
 import com.fu.clazz.dto.request.UpdateClassRequest;
 import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
 import com.fu.clazz.dto.response.LearnerClassResponse;
+import com.fu.clazz.dto.response.TeacherClassHistoryResponse;
 import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.entity.ClassStatus;
 import com.fu.clazz.entity.ClassTeacherHistory;
@@ -32,12 +34,15 @@ import com.fu.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -67,18 +72,24 @@ public class ClassServiceImpl implements ClassService {
     @Override
     @Transactional
     public ClassResponse closeClass(UUID classId, UUID managerId) {
+        log.debug("Starting closeClass for classId: {}, managerId: {}", classId, managerId);
+
         Clazz clazz = findClassOrThrow(classId);
         if (clazz.getStatus() == ClassStatus.CLOSED) {
             throw new BusinessException("CLASS_ALREADY_INACTIVE", "Lớp học đã ngưng hoạt động.");
         }
+
         clazz.setStatus(ClassStatus.CLOSED);
         clazz.setEndDate(LocalDate.now());
         clazz.setUpdatedBy(managerId);
+
         Clazz updatedClazz = classRepository.save(clazz);
-        log.info("Đóng lớp học thành công: {}", classId);
+
         // Deactivate all members when class is closed
         deactivateMembers(classId);
-        return toResponseWithMemberCount(updatedClazz);
+        log.info("Đóng lớp học thành công: {}", classId);
+        ClassResponse response = toResponseWithMemberCount(updatedClazz);
+        return response;
     }
 
     @Override
@@ -169,8 +180,8 @@ public class ClassServiceImpl implements ClassService {
                 throw new BusinessException("CAPACITY_VIOLATION", "Số lượng học viên tối đa không thể nhỏ hơn số lượng học viên hiện tại đang theo học.");
             }
         }
-        if (currentMembers > 0 && request.getStartDate() != null && request.getStartDate().isAfter(clazz.getStartDate())) {
-            throw new BusinessException("INVALID_START_DATE", "Không thể cập nhật ngày bắt đầu sau ngày bắt đầu cũ khi đã có học viên trong lớp.");
+        if (clazz.getStatus() == ClassStatus.ACTIVE && request.getStartDate() != null && !request.getStartDate().isEqual(clazz.getStartDate())) {
+            throw new BusinessException("INVALID_START_DATE", "Không thể cập nhật ngày bắt đầu sau khi lớp học đã hoạt động.");
         }
 
         // Auto-activate if startDate moved to today or earlier AND no members AND currently NOT_STARTED
@@ -227,7 +238,45 @@ public class ClassServiceImpl implements ClassService {
 
         org.springframework.data.jpa.domain.Specification<Clazz> spec = org.springframework.data.jpa.domain.Specification.where(ClassSpecification.isNotDeleted()).and(ClassSpecification.hasKeyword(keyword)).and(ClassSpecification.hasTeacherId(teacherId)).and(ClassSpecification.hasCourseId(courseId)).and(ClassSpecification.hasStatus(status));
 
-        return classRepository.findAll(spec, pageable).map(this::toSummaryWithMemberCount);
+        Page<Clazz> classPage = classRepository.findAll(spec, pageable);
+        
+        // If no status filter and pageable has no sort, apply custom status priority sorting
+        if (status == null && !pageable.getSort().isSorted()) {
+            List<Clazz> sortedClasses = classPage.getContent().stream()
+                    .sorted((c1, c2) -> {
+                        // Priority order: ACTIVE (0) > NOT_STARTED (1) > CLOSED (2)
+                        int priority1 = getStatusPriority(c1.getStatus());
+                        int priority2 = getStatusPriority(c2.getStatus());
+                        
+                        if (priority1 != priority2) {
+                            return Integer.compare(priority1, priority2);
+                        }
+                        // Same priority: sort by createdAt descending
+                        return c2.getCreatedAt().compareTo(c1.getCreatedAt());
+                    })
+                    .toList();
+            
+            return new org.springframework.data.domain.PageImpl<>(
+                    sortedClasses.stream().map(this::toSummaryWithMemberCount).toList(),
+                    pageable,
+                    classPage.getTotalElements()
+            );
+        }
+        
+        return classPage.map(this::toSummaryWithMemberCount);
+    }
+    
+    /**
+     * Get status priority for sorting (lower = higher priority)
+     * Order: ACTIVE (0) > NOT_STARTED (1) > CLOSED (2)
+     */
+    private int getStatusPriority(ClassStatus status) {
+        return switch (status) {
+            case ACTIVE -> 0;
+            case NOT_STARTED -> 1;
+            case CLOSED -> 2;
+            default -> 3;
+        };
     }
 
     // =====================================================
@@ -281,6 +330,117 @@ public class ClassServiceImpl implements ClassService {
 
     @Override
     @Transactional
+    public List<ClassMemberResponse> addMembers(UUID classId, AddMembersRequest request, UUID managerId) {
+        log.info("Thêm {} thành viên vào lớp học: {} bởi quản lý: {}", request.getLearnerIds().size(), classId, managerId);
+
+        // 1. Find and validate class
+        Clazz clazz = findClassOrThrow(classId);
+        validateClassAcceptingMembers(clazz);
+
+        // 2. Get current active member count
+        long currentMemberCount = classMemberRepository.countActiveByClassId(classId);
+
+        // 3. Validate learnerIds not empty
+        List<UUID> learnerIds = request.getLearnerIds();
+        if (learnerIds == null || learnerIds.isEmpty()) {
+            throw new BusinessException("INVALID_REQUEST", "Cần phải cung cấp ít nhất một ID học viên.");
+        }
+
+        // 4. Validate each learner before any database changes
+        List<User> learnersToAdd = new ArrayList<>();
+        Map<UUID, ClassMember> existingMembers = new HashMap<>();
+
+        for (UUID learnerId : learnerIds) {
+            // Find user
+            User user = userRepository.findById(learnerId)
+                    .filter(u -> u.getDeletedAt() == null)
+                    .orElseThrow(() -> new ResourceNotFoundException("User", "id", learnerId.toString()));
+
+            // Check status = INACTIVE
+            if (user.getStatus() != UserStatus.INACTIVE) {
+                throw new BusinessException("INVALID_MEMBER_STATUS", 
+                        "Học viên " + learnerId + " phải có trạng thái KHÔNG HOẠT ĐỘNG.");
+            }
+
+            // Validate user has LEARNER role
+            if (user.getRole() != UserRole.LEARNER) {
+                throw new BusinessException("INVALID_MEMBER_ROLE", 
+                        "Chỉ người dùng có vai trò HỌC VIÊN mới được thêm vào lớp học.");
+            }
+
+            // Check existing ClassMember
+            Optional<ClassMember> existing = classMemberRepository.findByClassIdAndUserId(classId, learnerId);
+            if (existing.isPresent()) {
+                ClassMember member = existing.get();
+                if (member.isActive()) {
+                    // Already an active member
+                    throw new BusinessException("MEMBER_ALREADY_EXISTS", 
+                            "Học viên " + learnerId + " đã là thành viên của lớp này.");
+                }
+                // Store for restoration
+                existingMembers.put(learnerId, member);
+            }
+
+            learnersToAdd.add(user);
+        }
+
+        // 5. Check capacity: currentCount + new learners > maxStudents?
+        if (currentMemberCount + learnerIds.size() > clazz.getMaxStudents()) {
+            throw new BusinessException("CLASS_FULL", 
+                    "Vượt quá sức chứa: lớp có " + currentMemberCount + " học viên, tối đa là " 
+                    + clazz.getMaxStudents() + ", không thể thêm " + learnerIds.size() + ".");
+        }
+
+        // 6. Add/restore all members (transactional)
+        List<ClassMember> addedMembers = new ArrayList<>();
+        for (UUID learnerId : learnerIds) {
+            ClassMember member;
+            if (existingMembers.containsKey(learnerId)) {
+                // Restore removed member
+                member = existingMembers.get(learnerId);
+                member.restore();  // Sets removedAt = null, joinedAt = now
+            } else {
+                // Create new member
+                member = ClassMember.builder()
+                        .classId(classId)
+                        .userId(learnerId)
+                        .build();
+            }
+            addedMembers.add(classMemberRepository.save(member));
+        }
+
+        // 7. Update learner status to ACTIVE
+        for (User learner : learnersToAdd) {
+            if (learner.getStatus() == UserStatus.INACTIVE) {
+                learner.setStatus(UserStatus.ACTIVE);
+                userRepository.save(learner);
+            }
+        }
+
+        // 8. Build and return responses
+        Map<UUID, User> userMap = learnersToAdd.stream()
+                .collect(Collectors.toMap(User::getId, user -> user));
+
+        log.info("Thêm {} thành viên vào lớp học: {} thành công", learnerIds.size(), classId);
+
+        return addedMembers.stream()
+                .map(member -> {
+                    ClassMemberResponse response = classMapper.toMemberResponse(member);
+                    User user = userMap.get(member.getUserId());
+                    if (user != null) {
+                        response.setFullName(user.getFullName());
+                        response.setEmail(user.getEmail());
+                        response.setAvatarUrl(user.getAvatarUrl());
+                        response.setRole(user.getRole().name());
+                        response.setPhoneNumber(user.getPhoneNumber());
+                    }
+                    return response;
+                })
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional
     public void removeMember(UUID classId, UUID userId, UUID managerId) {
         log.info("Xóa thành viên: {} khỏi lớp học: {} bởi quản lý: {}", userId, classId, managerId);
 
@@ -328,6 +488,7 @@ public class ClassServiceImpl implements ClassService {
                 response.setEmail(user.getEmail());
                 response.setAvatarUrl(user.getAvatarUrl());
                 response.setRole(user.getRole() != null ? user.getRole().name() : null);
+                response.setPhoneNumber(user.getPhoneNumber());
             }
             return response;
         });
@@ -353,15 +514,51 @@ public class ClassServiceImpl implements ClassService {
     }
 
     @Override
-    public Page<com.fu.user.dto.UserResponse> getEligibleLearners(UUID classId, String keyword, Pageable pageable) {
-        log.debug("Lấy danh sách học viên đủ điều kiện thêm vào lớp: {}", classId);
+    public Page<com.fu.user.dto.UserResponse> getEligibleLearners(UUID classId, String keyword, UUID filterByClassId, Pageable pageable) {
+        log.debug("Lấy danh sách học viên đủ điều kiện thêm vào lớp: {} với filter: {}", classId, filterByClassId);
 
         // Verify class exists
         findClassOrThrow(classId);
+
+        // If filterByClassId is provided, validate it exists and is CLOSED
+        if (filterByClassId != null) {
+            Clazz filterClass = findClassOrThrow(filterByClassId);
+            if (filterClass.getStatus() != ClassStatus.CLOSED) {
+                throw new BusinessException("INVALID_FILTER_CLASS", "Lớp lọc phải có trạng thái CLOSED.");
+            }
+        }
+        
         List<UUID> excludedIds = classMemberRepository.findUserIdsInActiveClasses();
         Page<User> usersPage = userRepository.findEligibleLearnersForClass(keyword, excludedIds, pageable);
-
-        return usersPage.map(user -> com.fu.user.dto.UserResponse.builder().id(user.getId()).email(user.getEmail()).firstName(user.getFirstName()).lastName(user.getLastName()).displayName(user.getDisplayName()).fullName(user.getFullName()).avatarUrl(user.getAvatarUrl()).phoneNumber(user.getPhoneNumber()).dateOfBirth(user.getDateOfBirth()).role(user.getRole()).status(user.getStatus()).createdAt(user.getCreatedAt()).updatedAt(user.getUpdatedAt()).lastLoginAt(user.getLastLoginAt()).build());
+        
+        List<com.fu.user.dto.UserResponse> responses = usersPage.getContent().stream()
+                .map(user -> com.fu.user.dto.UserResponse.builder()
+                        .id(user.getId())
+                        .email(user.getEmail())
+                        .firstName(user.getFirstName())
+                        .lastName(user.getLastName())
+                        .displayName(user.getDisplayName())
+                        .fullName(user.getFullName())
+                        .avatarUrl(user.getAvatarUrl())
+                        .phoneNumber(user.getPhoneNumber())
+                        .dateOfBirth(user.getDateOfBirth())
+                        .role(user.getRole())
+                        .status(user.getStatus())
+                        .createdAt(user.getCreatedAt())
+                        .updatedAt(user.getUpdatedAt())
+                        .lastLoginAt(user.getLastLoginAt())
+                        .build())
+                .toList();
+        
+        // If filterByClassId is provided, filter by membership in that class
+        if (filterByClassId != null) {
+            List<UUID> filterClassMemberIds = classMemberRepository.findUserIdsByClosedClass(filterByClassId);
+            responses = responses.stream()
+                    .filter(response -> filterClassMemberIds.contains(response.getId()))
+                    .toList();
+        }
+        
+        return new PageImpl<>(responses, pageable, responses.size());
     }
 
     /**
@@ -369,10 +566,14 @@ public class ClassServiceImpl implements ClassService {
      * Business rule: A learner is set to INACTIVE if their class is deleted or deactivated.
      */
     private void deactivateMembers(UUID classId) {
-        List<UUID> memberIds = classMemberRepository.findActiveUserIdsByClassId(classId);
-        if (!memberIds.isEmpty()) {
-            log.info("Deactivating {} members from class {}", memberIds.size(), classId);
-            userRepository.updateStatusByUserIdIn(memberIds, UserStatus.INACTIVE);
+        try {
+            List<UUID> memberIds = classMemberRepository.findActiveUserIdsByClassId(classId);
+            if (!memberIds.isEmpty()) {
+                userRepository.updateStatusByUserIdIn(memberIds, UserStatus.INACTIVE);
+            }
+        } catch (Exception e) {
+            log.error("ERROR deactivating members for class: {}", classId, e);
+            throw new BusinessException("MEMBER_DEACTIVATION_FAILED", "Có lỗi xảy ra khi cập nhật trạng thái học viên sau khi đóng lớp học.");
         }
     }
 
@@ -436,6 +637,7 @@ public class ClassServiceImpl implements ClassService {
             response.setEmail(user.getEmail());
             response.setAvatarUrl(user.getAvatarUrl());
             response.setRole(user.getRole().name());
+            response.setPhoneNumber(user.getPhoneNumber());
         });
         User learner = userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy học viên."));
         // If learner was previously INACTIVE, set to ACTIVE upon joining a class
@@ -506,14 +708,53 @@ public class ClassServiceImpl implements ClassService {
     @Override
     public List<LearnerClassResponse> getLearnerClasses(UUID learnerId) {
         log.info("Lấy danh sách lớp học của học viên: {}", learnerId);
-        
+
         // Query for classes with status ACTIVE or CLOSED where learner is an active member
         List<ClassStatus> allowedStatuses = List.of(ClassStatus.ACTIVE, ClassStatus.CLOSED);
         List<Clazz> classes = classRepository.findLearnerClasses(learnerId, allowedStatuses);
-        
+
         // Map to lightweight response
         return classes.stream()
                 .map(classMapper::toLearnerClassResponse)
                 .collect(Collectors.toList());
+    }
+
+    // =====================================================
+    // TEACHER CLASS HISTORY
+    // =====================================================
+    @Override
+    public Page<TeacherClassHistoryResponse> getTeacherClassHistory(UUID teacherId, Pageable pageable) {
+        log.info("Lấy danh sách lớp đã/đang dạy của giáo viên: {}", teacherId);
+
+        // Fetch teacher's class history sorted by assignedAt DESC
+        Page<ClassTeacherHistory> historyPage = classTeacherHistoryRepository.findTeacherClassHistory(teacherId, pageable);
+
+        // Map each history record to response DTO with class information
+        List<TeacherClassHistoryResponse> responses = historyPage.getContent().stream()
+                .map(history -> {
+                    Clazz clazz = classRepository.findById(history.getClassId())
+                            .orElse(null);
+
+                    if (clazz == null) {
+                        log.warn("Không tìm thấy lớp học với ID: {}", history.getClassId());
+                        return null;
+                    }
+
+                    TeacherClassHistoryResponse response = classMapper.toTeacherClassHistoryResponse(clazz);
+                    
+                    // Enrich with course info
+                    if (clazz.getCourseId() != null) {
+                        courseRepository.findById(clazz.getCourseId()).ifPresent(course -> {
+                            response.setCourseName(course.getName());
+                            response.setCourseLevel(course.getJlptLevel() != null ? course.getJlptLevel().name() : null);
+                        });
+                    }
+
+                    return response;
+                })
+                .filter(r -> r != null)
+                .collect(Collectors.toList());
+
+        return new org.springframework.data.domain.PageImpl<>(responses, pageable, historyPage.getTotalElements());
     }
 }

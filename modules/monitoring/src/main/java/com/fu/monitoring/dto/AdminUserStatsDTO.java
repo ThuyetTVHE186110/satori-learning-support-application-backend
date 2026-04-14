@@ -45,9 +45,6 @@ public class AdminUserStatsDTO {
         @Schema(description = "Total users by status (ACTIVE, PENDING_ACTIVATION, SUSPENDED, DELETED)")
         private Map<String, Long> byStatus;
 
-        @Schema(description = "Total users by authentication provider (LOCAL, GOOGLE)")
-        private Map<String, Long> byAuthProvider;
-
         @Schema(description = "Total users by gender (MALE, FEMALE, OTHER, UNKNOWN)")
         private Map<String, Long> byGender;
 

@@ -2,6 +2,7 @@ package com.fu.user.controller;
 
 import com.fu.common.response.ApiResponse;
 import com.fu.user.dto.auth.*;
+import com.fu.user.security.AuthRateLimiter;
 import com.fu.user.security.CustomUserDetails;
 import com.fu.user.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,7 +19,7 @@ import java.util.UUID;
 
 /**
  * REST Controller for Authentication operations.
- * Implements UC-06 (Login), UC-07 (Forgot Password), UC-09 (Google Login), UC-10 (Logout).
+ * Implements UC-06 (Login), UC-07 (Forgot Password), UC-10 (Logout).
  */
 @Slf4j
 @RestController
@@ -27,6 +28,7 @@ import java.util.UUID;
 public class AuthController {
 
     private final AuthService authService;
+    private final AuthRateLimiter authRateLimiter;
 
     // ==================== UC-06: Login by Email ====================
 
@@ -46,32 +48,9 @@ public class AuthController {
         
         String ipAddress = getClientIpAddress(httpRequest);
         String userAgent = httpRequest.getHeader("User-Agent");
-        
+
+        authRateLimiter.checkLogin(ipAddress);
         LoginResponse response = authService.login(request, ipAddress, userAgent);
-        
-        return ResponseEntity.ok(ApiResponse.success("Đăng nhập thành công", response));
-    }
-
-    // ==================== UC-09: Login with Google ====================
-
-    /**
-     * Login with Google OAuth.
-     * 
-     * POST /api/v1/auth/google
-     * 
-     * @param request Google ID token
-     * @param httpRequest HTTP request for IP and user agent
-     * @return JWT tokens and user info
-     */
-    @PostMapping("/google")
-    public ResponseEntity<ApiResponse<LoginResponse>> loginWithGoogle(
-            @Valid @RequestBody GoogleLoginRequest request,
-            HttpServletRequest httpRequest) {
-        
-        String ipAddress = getClientIpAddress(httpRequest);
-        String userAgent = httpRequest.getHeader("User-Agent");
-        
-        LoginResponse response = authService.loginWithGoogle(request, ipAddress, userAgent);
         
         return ResponseEntity.ok(ApiResponse.success("Đăng nhập thành công", response));
     }
@@ -88,8 +67,10 @@ public class AuthController {
      */
     @PostMapping("/forgot-password")
     public ResponseEntity<ApiResponse<Void>> forgotPassword(
-            @Valid @RequestBody ForgotPasswordRequest request) {
-        
+            @Valid @RequestBody ForgotPasswordRequest request,
+            HttpServletRequest httpRequest) {
+
+        authRateLimiter.checkForgotPassword(getClientIpAddress(httpRequest));
         authService.forgotPassword(request);
         
         return ResponseEntity.ok(ApiResponse.success(
@@ -106,8 +87,10 @@ public class AuthController {
      */
     @PostMapping("/verify-otp")
     public ResponseEntity<ApiResponse<VerifyOtpResponse>> verifyOtp(
-            @Valid @RequestBody VerifyOtpRequest request) {
-        
+            @Valid @RequestBody VerifyOtpRequest request,
+            HttpServletRequest httpRequest) {
+
+        authRateLimiter.checkVerifyOtp(getClientIpAddress(httpRequest));
         VerifyOtpResponse response = authService.verifyOtp(request);
         
         return ResponseEntity.ok(ApiResponse.success("Xác thực OTP thành công", response));

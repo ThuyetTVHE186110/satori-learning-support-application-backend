@@ -3,6 +3,7 @@ package com.fu.curriculumimport.service.agent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
+import com.fu.curriculumimport.config.AgenticRagProperties;
 import com.fu.curriculumimport.service.vision.VisionPageExtractor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -19,6 +20,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.openai.OpenAiChatModel;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 import java.util.UUID;
@@ -56,6 +58,9 @@ class GrammarExtractionAgentTest {
     @Mock
     private VisionPageExtractor visionPageExtractor;
 
+    @Mock
+    private AgenticRagProperties ragProperties;
+
     @Spy
     ObjectMapper objectMapper = new ObjectMapper();
 
@@ -63,7 +68,7 @@ class GrammarExtractionAgentTest {
 
     @BeforeEach
     void setUp() {
-        agent = new GrammarExtractionAgent(chatModel, objectMapper, visionPageExtractor);
+        agent = new GrammarExtractionAgent(chatModel, objectMapper, visionPageExtractor, ragProperties);
     }
 
     // -------------------------------------------------------------------------
@@ -80,7 +85,7 @@ class GrammarExtractionAgentTest {
         ChatResponse chatResp = mock(ChatResponse.class);
         given(chatResp.getResult()).willReturn(gen);
 
-        given(chatModel.call(any(Prompt.class))).willReturn(chatResp);
+        given(chatModel.stream(any(Prompt.class))).willReturn(Flux.just(chatResp));
     }
 
     private DocumentChunk chunk(int chunkIndex, String content) {
@@ -157,7 +162,7 @@ class GrammarExtractionAgentTest {
             ExtractionResult result = agent.extractGrammar(chunk("～てください usage"), "N5", ragContext);
 
             // Verify ChatModel was called (context was formatted into prompt)
-            verify(chatModel, times(1)).call(any(Prompt.class));
+            verify(chatModel, times(1)).stream(any(Prompt.class));
             assertThat(result.getGrammarPoints()).hasSize(1);
             assertThat(result.getGrammarPoints().get(0).getPattern()).isEqualTo("～てください");
         }
@@ -173,7 +178,7 @@ class GrammarExtractionAgentTest {
             ExtractionResult result = agent.extractGrammar(chunk("～ない grammar"), "N5", ragContext);
 
             // ChatModel should still be called even though vocabulary items are filtered out
-            verify(chatModel, times(1)).call(any(Prompt.class));
+            verify(chatModel, times(1)).stream(any(Prompt.class));
             assertThat(result.getGrammarPoints()).hasSize(1);
             assertThat(result.getGrammarPoints().get(0).getPattern()).isEqualTo("～ない");
         }
@@ -194,8 +199,8 @@ class GrammarExtractionAgentTest {
         @Test
         @DisplayName("ChatModel throws exception -> returns empty result with confidence=0.0")
         void extractGrammar_chatModelThrows_returnsEmptyResult() {
-            given(chatModel.call(any(Prompt.class)))
-                    .willThrow(new RuntimeException("Network error"));
+            given(chatModel.stream(any(Prompt.class)))
+                    .willReturn(Flux.error(new RuntimeException("Network error")));
 
             ExtractionResult result = agent.extractGrammar(chunk("some content"), "N5", RagContext.empty());
 
@@ -238,8 +243,8 @@ class GrammarExtractionAgentTest {
         @Test
         @DisplayName("ChatModel throws exception during re-extraction -> returns empty result")
         void reExtractWithFeedback_chatModelThrows_returnsEmptyResult() {
-            given(chatModel.call(any(Prompt.class)))
-                    .willThrow(new RuntimeException("Rate limit exceeded"));
+            given(chatModel.stream(any(Prompt.class)))
+                    .willReturn(Flux.error(new RuntimeException("Rate limit exceeded")));
 
             ExtractionResult result = agent.reExtractWithFeedback(
                     chunk(1, "some grammar content"),

@@ -3,7 +3,6 @@ package com.fu.user.repository;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
-import com.fu.user.entity.AuthProvider;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -87,11 +86,6 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
     long countByStatus(@Param("status") UserStatus status);
 
     /**
-     * Find user by Google ID (for OAuth login)
-     */
-    Optional<User> findByGoogleId(String googleId);
-
-    /**
      * Find user by activation token (for email verification)
      */
     @Query("SELECT u FROM User u WHERE u.activationToken = :token AND u.deletedAt IS NULL")
@@ -154,7 +148,7 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
             Pageable pageable
     );
 
-    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("UPDATE User u SET u.status = :status, u.updatedAt = CURRENT_TIMESTAMP WHERE u.id IN :ids AND u.role = 'LEARNER'")
     void updateStatusByUserIdIn(@Param("ids") java.util.Collection<java.util.UUID> ids, @Param("status") UserStatus status);
 
@@ -174,7 +168,8 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
                 co.name                                                 AS course_name,
                 c.start_date                                            AS start_date,
                 c.end_date                                              AS end_date,
-                                c.status::TEXT                                          AS status
+                c.status::TEXT                                          AS status,
+                co.jlpt_level::TEXT                                     AS jlpt_level
             FROM user_management.class_members cm
             JOIN user_management.classes c   ON c.id  = cm.class_id
             JOIN learning_content.courses co ON co.id = c.course_id
@@ -197,12 +192,6 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
     long countTotalLearners();
     @Query("SELECT u FROM User  u where u.role = 'TEACHER' and u.status = 'ACTIVE' and u.deletedAt IS NULL")
     List<User> findAllTeacher();
-
-    /**
-     * Count users by authentication provider (for admin dashboard)
-     */
-    @Query("SELECT COUNT(u) FROM User u WHERE u.authProvider = :provider AND u.deletedAt IS NULL")
-    long countByAuthProvider(@Param("provider") AuthProvider provider);
 
     /**
      * Get gender distribution of users (for admin dashboard)

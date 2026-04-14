@@ -16,26 +16,25 @@
 -- ==========================================================================
 
 -- Drop the IVFFlat index (redundant with HNSW)
-DROP INDEX CONCURRENTLY IF EXISTS idx_content_embeddings_vector;
+-- Note: CONCURRENTLY is not used here because init scripts run in a single-connection
+-- context where concurrent DDL is not permitted (Docker ON_ERROR_STOP=1).
+DROP INDEX IF EXISTS idx_content_embeddings_vector;
 
 -- Also drop the legacy IVFFlat on user_embeddings if it exists
--- (same problem: lists=100 is too high for small dataset)
-DROP INDEX CONCURRENTLY IF EXISTS idx_user_embeddings_vector;
+DROP INDEX IF EXISTS idx_user_embeddings_vector;
 
 -- Recreate HNSW on user_embeddings to match (was IVFFlat only)
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_embeddings_hnsw
+CREATE INDEX IF NOT EXISTS idx_user_embeddings_hnsw
     ON progress.user_embeddings
     USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
 
 -- Rebuild HNSW on content_embeddings with better params for 1536-dim vectors:
 -- m=32  → more connections per layer → better recall for high-dim vectors
---          (pgvector recommends m=16 for default, m=32-64 for high recall need)
 -- ef_construction=128 → higher build quality → better recall at query time
--- Trade-off: ~2x memory vs m=16 but negligible at thousands of rows
-DROP INDEX CONCURRENTLY IF EXISTS idx_content_embeddings_hnsw;
+DROP INDEX IF EXISTS idx_content_embeddings_hnsw;
 
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_content_embeddings_hnsw
+CREATE INDEX IF NOT EXISTS idx_content_embeddings_hnsw
     ON progress.content_embeddings
     USING hnsw (embedding vector_cosine_ops)
     WITH (m = 32, ef_construction = 128);

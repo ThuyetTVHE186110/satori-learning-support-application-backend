@@ -9,6 +9,7 @@ import com.fu.curriculumimport.service.agent.ReflectionResult.ItemReflection;
 import com.fu.curriculumimport.service.agent.ReflectionResult.ReflectionVerdict;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.util.LlmResponseUtils;
+import com.fu.curriculumimport.util.LlmStreamCollector;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
@@ -106,12 +107,15 @@ public class SelfReflectionAgent {
                     "extractedSummary", extractedSummary,
                     "jlptLevel", jlptLevel));
 
-            String response = chatClient.prompt()
-                    .system(systemPrompt)
-                    .user(userPrompt)
-                    .options(OpenAiChatOptions.builder().maxTokens(8192).build())
-                    .call()
-                    .content();
+            String response = LlmStreamCollector.collect(
+                    chatClient.prompt()
+                            .system(systemPrompt)
+                            .user(userPrompt)
+                            .options(OpenAiChatOptions.builder()
+                                    .temperature(0.0).seed(42)
+                                    .maxTokens(8192).build())
+                            .stream()
+                            .content());
 
             long processingTime = System.currentTimeMillis() - startTime;
             log.debug("Self-reflection for chunk {} completed in {}ms", chunk.getChunkIndex(), processingTime);

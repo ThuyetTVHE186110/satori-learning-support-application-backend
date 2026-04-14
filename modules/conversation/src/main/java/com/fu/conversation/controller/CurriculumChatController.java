@@ -12,10 +12,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.UUID;
@@ -73,6 +75,33 @@ public class CurriculumChatController {
 
         ChatMessageResponse response = chatService.chat(sessionId, userId, request.getMessage());
         return ResponseEntity.ok(ApiResponse.success("Trả lời thành công.", response));
+    }
+
+    /**
+     * Gửi tin nhắn và nhận câu trả lời từ AI qua SSE (streaming).
+     *
+     * <p>Khác với {@link #sendMessage}: trả về {@code text/event-stream}, tokens hiển thị
+     * ngay khi AI tạo ra. Endpoint cũ {@code /messages} vẫn hoạt động bình thường.
+     *
+     * <p>SSE event types:
+     * <ul>
+     *   <li>{@code token}  — chunk văn bản từ AI, field {@code content}.</li>
+     *   <li>{@code done}   — kết thúc stream; field {@code messageId}, {@code sources},
+     *                        {@code noContextFound}, {@code timestamp}.</li>
+     *   <li>{@code error}  — lỗi không phục hồi; field {@code message} (tiếng Việt).</li>
+     * </ul>
+     *
+     * <p>Frontend phải dùng {@code fetch()} + {@code ReadableStream} (không dùng
+     * {@code EventSource} vì đây là POST).
+     */
+    @PostMapping(value = "/sessions/{sessionId}/messages/stream",
+                 produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamMessage(
+            @PathVariable UUID sessionId,
+            @Valid @RequestBody SendChatMessageRequest request,
+            @AuthenticationPrincipal(expression = "id") UUID userId) {
+
+        return chatService.streamChat(sessionId, userId, request.getMessage());
     }
 
     /**

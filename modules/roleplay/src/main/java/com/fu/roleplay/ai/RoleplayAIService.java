@@ -1,6 +1,9 @@
 package com.fu.roleplay.ai;
 
 import com.fu.common.ai.PromptUtils;
+import com.fu.infrastructure.learner.LearningInsightPoint;
+import com.fu.infrastructure.learner.SkillScore;
+import com.fu.roleplay.config.RoleplayProperties;
 import com.fu.roleplay.entity.ConversationMessage;
 import com.fu.roleplay.entity.ConversationSession;
 import com.fu.roleplay.entity.SessionMission;
@@ -22,21 +25,21 @@ import java.util.regex.Pattern;
 @Slf4j
 public class RoleplayAIService {
 
-    private static final String ROLEPLAY_MODEL = "gpt-4.1-mini";
     private static final String REDIS_KEY_PREFIX = "roleplay:history:";
-    private static final Duration HISTORY_TTL = Duration.ofHours(2);
-    private static final int MAX_CONTEXT_MESSAGES = 20; // sliding window: last 20 messages
 
     private final ChatClient chatClient;
     private final RedisTemplate<String, Object> redisTemplate;
     private final RoleplayPromptBuilder promptBuilder;
+    private final RoleplayProperties roleplayProperties;
 
     public RoleplayAIService(OpenAiChatModel chatModel,
                               RedisTemplate<String, Object> redisTemplate,
-                              RoleplayPromptBuilder promptBuilder) {
+                              RoleplayPromptBuilder promptBuilder,
+                              RoleplayProperties roleplayProperties) {
         this.chatClient = ChatClient.builder(chatModel).build();
         this.redisTemplate = redisTemplate;
         this.promptBuilder = promptBuilder;
+        this.roleplayProperties = roleplayProperties;
     }
 
     /**
@@ -56,6 +59,18 @@ public class RoleplayAIService {
     }
 
     /**
+     * Overload that includes learner insights for personalized roleplay.
+     */
+    public String buildSystemPrompt(ConversationSession session, String aiRole, String learnerRole,
+                                    String scenario, String jlptLevel, List<SessionMission> missions,
+                                    List<SkillScore> skillScores,
+                                    List<LearningInsightPoint> weakPoints,
+                                    List<LearningInsightPoint> strongPoints) {
+        return promptBuilder.buildSystemPrompt(aiRole, learnerRole, scenario, jlptLevel, missions,
+                skillScores, weakPoints, strongPoints);
+    }
+
+    /**
      * Builds the system prompt for a FREE_TALK SETUP phase.
      * @see RoleplayPromptBuilder#buildSetupSystemPrompt
      */
@@ -66,7 +81,7 @@ public class RoleplayAIService {
     public String generateResponse(UUID sessionId, String systemPrompt, List<ConversationMessage> history,
                                     String userMessage) {
         try {
-            List<ConversationMessage> recentHistory = PromptUtils.slidingTail(history, MAX_CONTEXT_MESSAGES);
+            List<ConversationMessage> recentHistory = PromptUtils.slidingTail(history, roleplayProperties.getMaxContextMessages());
 
             StringBuilder conversationHistory = new StringBuilder();
             conversationHistory.append("<conversation_history>\n");
@@ -78,7 +93,7 @@ public class RoleplayAIService {
             conversationHistory.append("</conversation_history>\n");
 
             String rawResponse = chatClient.prompt()
-                    .options(OpenAiChatOptions.builder().model(ROLEPLAY_MODEL).build())
+                    .options(OpenAiChatOptions.builder().model(roleplayProperties.getModelName()).build())
                     .system(systemPrompt)
                     .user(conversationHistory.toString())
                     .call()
@@ -97,7 +112,7 @@ public class RoleplayAIService {
     public String generateOpeningMessage(String systemPrompt) {
         try {
             String rawResponse = chatClient.prompt()
-                    .options(OpenAiChatOptions.builder().model(ROLEPLAY_MODEL).build())
+                    .options(OpenAiChatOptions.builder().model(roleplayProperties.getModelName()).build())
                     .system(systemPrompt)
                     .user("Start the roleplay conversation. Return the opening JSON array with MISSION_INTRO, SCENE_INTRO, and first DIALOGUE segments as specified in your instructions.")
                     .call()
@@ -116,7 +131,7 @@ public class RoleplayAIService {
     public String generateSetupOpening(String setupSystemPrompt) {
         try {
             String rawResponse = chatClient.prompt()
-                    .options(OpenAiChatOptions.builder().model(ROLEPLAY_MODEL).build())
+                    .options(OpenAiChatOptions.builder().model(roleplayProperties.getModelName()).build())
                     .system(setupSystemPrompt)
                     .user("Start by asking the learner what scenario they want to practice.")
                     .call()
@@ -135,7 +150,7 @@ public class RoleplayAIService {
     public void cacheSystemPrompt(UUID sessionId, String systemPrompt) {
         try {
             String key = REDIS_KEY_PREFIX + sessionId + ":system";
-            redisTemplate.opsForValue().set(key, systemPrompt, HISTORY_TTL);
+            redisTemplate.opsForValue().set(key, systemPrompt, Duration.ofHours(roleplayProperties.getRedisSessionTtlHours()));
         } catch (Exception e) {
             log.warn("Failed to cache system prompt for session {}: {}", sessionId, e.getMessage());
         }
@@ -161,7 +176,7 @@ public class RoleplayAIService {
                                         List<ConversationMessage> history,
                                         List<SessionMission> missions) {
         try {
-            List<ConversationMessage> recentHistory = PromptUtils.slidingTail(history, MAX_CONTEXT_MESSAGES);
+            List<ConversationMessage> recentHistory = PromptUtils.slidingTail(history, roleplayProperties.getMaxContextMessages());
 
             StringBuilder sb = new StringBuilder();
             sb.append("<conversation_history>\n");
@@ -183,7 +198,7 @@ public class RoleplayAIService {
               .append("[{\"type\":\"HINT\",\"japanese_content\":\"...\",\"translation\":\"... (tiếng Việt)\",\"romaji\":\"...\"}]");
 
             String rawResponse = chatClient.prompt()
-                    .options(OpenAiChatOptions.builder().model(ROLEPLAY_MODEL).build())
+                    .options(OpenAiChatOptions.builder().model(roleplayProperties.getModelName()).build())
                     .system(systemPrompt)
                     .user(sb.toString())
                     .call()

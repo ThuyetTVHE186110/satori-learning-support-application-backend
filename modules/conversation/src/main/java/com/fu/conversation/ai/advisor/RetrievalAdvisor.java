@@ -52,6 +52,10 @@ public class RetrievalAdvisor implements BaseAdvisor {
     public static final String RAG_CONTEXT_KEY = "rag_context";
     /** Context key for the raw text of retrieved documents (for grounding check). */
     public static final String RAG_DOCUMENTS_TEXT_KEY = "rag_documents_text";
+    /** Context key for the query intent (COUNT|LOOKUP|EXPLAIN|EXAMPLE|GENERAL). */
+    public static final String RAG_INTENT_KEY = "rag_intent";
+    /** Context key for the retrieval strategy used (HYBRID|HYDE|BILINGUAL|BROWSE|COUNT|NONE). */
+    public static final String RAG_STRATEGY_KEY = "rag_retrieval_strategy";
     /** Marker prefix injected into the system message when RAG context is present.
      *  RelevanceCheckAdvisor uses this to locate and strip the block when irrelevant. */
     public static final String RAG_SYSTEM_MESSAGE_MARKER = "\n**[Nội dung tham khảo từ giáo trình]:**";
@@ -131,6 +135,8 @@ public class RetrievalAdvisor implements BaseAdvisor {
 
         // ── Step 1: Keyword pre-check for COUNT — fast, zero LLM cost ────────
         if (looksLikeCountQuery(question)) {
+            request.context().put(RAG_INTENT_KEY, "COUNT");
+            request.context().put(RAG_STRATEGY_KEY, "COUNT");
             return handleCountIntent(request, courseId, lessonId);
         }
 
@@ -144,30 +150,111 @@ public class RetrievalAdvisor implements BaseAdvisor {
 
         // LLM may still classify as COUNT for paraphrases not caught by keywords
         if ("COUNT".equals(analysis.intent())) {
+            request.context().put(RAG_INTENT_KEY, "COUNT");
+            request.context().put(RAG_STRATEGY_KEY, "COUNT");
             return handleCountIntent(request, courseId, lessonId);
         }
 
-        // ── Step 3: Build typed filter + bilingual retrieval ─────────────────
-        // Use extracted searchKeyword as embedding query when available.
-        // searchKeyword has question phrasing stripped (e.g. "〜ている" not "〜ている nghĩa là gì?")
-        // → cleaner vector, higher cosine similarity against stored documents.
-        // Falls back to raw question when LLM didn't extract a keyword (e.g. GENERAL intent).
+        // GENERAL intent = greeting, meta-question, chitchat — retrieval not needed.
+        // Skip vector search entirely: the AI will answer from system prompt + tools.
+        if ("GENERAL".equals(analysis.intent())) {
+            log.debug("RetrievalAdvisor: GENERAL intent — skipping retrieval for '{}'", question);
+            request.context().put(RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT, List.of());
+            request.context().put(RAG_INTENT_KEY, "GENERAL");
+            request.context().put(RAG_STRATEGY_KEY, "NONE");
+            return request;
+        }
+
+        // ── Step 3: Build typed filter + retrieval ───────────────────────────
+        ChatbotFilter filter = buildFilter(courseId, lessonId, analysis.preferredTypes());
+
+        // Browse routing: EXAMPLE intent with no specific keyword → category browse.
+        // e.g. "ví dụ hội thoại?" / "cho tôi xem ví dụ" → user wants to see examples
+        // by type, not search for a specific term. Using cosine similarity here fails
+        // because the query is in meta-language ("ví dụ") while content is Japanese text.
+        // browseByType() fetches by content_type without a similarity gate.
+        boolean isBrowseQuery = "EXAMPLE".equals(analysis.intent())
+                && (analysis.searchKeyword() == null || analysis.searchKeyword().isBlank());
+        if (isBrowseQuery) {
+            log.debug("RetrievalAdvisor: EXAMPLE browse (no keyword) — browseByType for '{}'", question);
+            request.context().put(RAG_INTENT_KEY, "EXAMPLE");
+            request.context().put(RAG_STRATEGY_KEY, "BROWSE");
+            RagContext rag = embeddingService.browseByType(filter);
+            request.context().put(RAG_CONTEXT_KEY, rag);
+            request.context().put(RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT, toDocuments(rag));
+            if (!rag.hasContext()) {
+                request.context().put(RAG_DOCUMENTS_TEXT_KEY, "");
+                return request.mutate()
+                        .prompt(request.prompt().augmentSystemMessage(
+                                "\n**Lưu ý:** Chưa có dữ liệu ví dụ/hội thoại trong giáo trình này."))
+                        .build();
+            }
+            String ragText = buildRagContextText(rag);
+            request.context().put(RAG_DOCUMENTS_TEXT_KEY, ragText);
+            return request.mutate()
+                    .prompt(request.prompt().augmentSystemMessage(
+                            RAG_SYSTEM_MESSAGE_MARKER + "\n\n" + ragText +
+                            "\n**Hãy sử dụng CHÍNH XÁC nội dung trên để trả lời. Không bịa đặt thông tin ngoài nội dung tham khảo.**\n"))
+                    .build();
+        }
+
+        // ── Step 3b: Retrieval strategy ───────────────────────────────────────
+        // Precedence (highest to lowest):
+        //   1. Hybrid (dense HNSW + sparse pg_trgm via RRF) — best recall + precision
+        //      Dense query: HyDE text when applicable, else searchKeyword
+        //      Sparse query: always the original searchKeyword (exact-term precision)
+        //   2. HyDE-only (when hybrid disabled) — embeds hypothetical answer
+        //   3. Standard bilingual retrieval — baseline (VI↔JA vector expansion)
         String searchQuery = (analysis.searchKeyword() != null && !analysis.searchKeyword().isBlank())
                 ? analysis.searchKeyword()
                 : question;
 
-        ChatbotFilter filter = buildFilter(courseId, lessonId, analysis.preferredTypes());
-        RagContext rag = retrieveBilingual(searchQuery, analysis.translatedQuery(), filter);
+        // Determine dense query: use HyDE text for LOOKUP/EXPLAIN when available
+        boolean hydeApplicable = ragProperties.isHydeEnabled()
+                && ("LOOKUP".equals(analysis.intent()) || "EXPLAIN".equals(analysis.intent()))
+                && analysis.searchKeyword() != null && !analysis.searchKeyword().isBlank();
+
+        String denseQuery = searchQuery;
+        if (hydeApplicable) {
+            String hydeText = generateHyDE(analysis.searchKeyword(), analysis.intent());
+            if (hydeText != null) {
+                denseQuery = hydeText;
+                log.debug("HyDE: '{}' → '{}'", analysis.searchKeyword(), truncate(hydeText, 80));
+            }
+        }
+
+        RagContext rag;
+        String strategy;
+        if (ragProperties.isHybridEnabled()) {
+            // Hybrid: dense (possibly HyDE) + sparse (original keyword) merged by RRF
+            String sparseKeyword = analysis.searchKeyword() != null ? analysis.searchKeyword() : searchQuery;
+            rag = embeddingService.retrieveHybridContext(denseQuery, sparseKeyword, filter);
+            strategy = "HYBRID";
+            log.debug("RetrievalAdvisor: HYBRID intent={} dense='{}' sparse='{}'",
+                    analysis.intent(), truncate(denseQuery, 60), sparseKeyword);
+        } else if (!denseQuery.equals(searchQuery)) {
+            // HyDE only (hybrid disabled) — single dense search with HyDE embedding
+            rag = embeddingService.retrieveContext(denseQuery, filter);
+            strategy = "HYDE";
+        } else {
+            // Standard bilingual retrieval
+            rag = retrieveBilingual(searchQuery, analysis.translatedQuery(), filter);
+            strategy = "BILINGUAL";
+        }
+        request.context().put(RAG_INTENT_KEY, analysis.intent());
+        request.context().put(RAG_STRATEGY_KEY, strategy);
 
         // ── Step 4: Quality gate ─────────────────────────────────────────────
         double maxSim = rag.getSimilarItems().stream()
                 .mapToDouble(RagContext.SimilarItem::getSimilarity)
                 .max().orElse(0.0);
 
-        if (maxSim < ragProperties.getMinMeaningfulSimilarity()) {
-            log.debug("RetrievalAdvisor: best sim {} < {} — discarding weak context for '{}'",
+        double simThreshold = ragProperties.getThresholdForIntent(analysis.intent());
+        if (maxSim < simThreshold) {
+            log.debug("RetrievalAdvisor: best sim {} < {} (intent={}) — discarding weak context for '{}'",
                     String.format("%.3f", maxSim),
-                    String.format("%.2f", ragProperties.getMinMeaningfulSimilarity()),
+                    String.format("%.2f", simThreshold),
+                    analysis.intent(),
                     question);
             rag = RagContext.empty();
         }
@@ -179,10 +266,14 @@ public class RetrievalAdvisor implements BaseAdvisor {
         if (!rag.hasContext()) {
             log.debug("RetrievalAdvisor: no context for '{}' (intent={})", question, analysis.intent());
             request.context().put(RAG_DOCUMENTS_TEXT_KEY, "");
+            // Soft hint — let the AI decide: call searchCurriculum tool for another attempt,
+            // or inform the user if the topic is genuinely outside the curriculum.
+            // Do NOT mandate a specific phrase — that would block tool calls.
             return request.mutate()
                     .prompt(request.prompt().augmentSystemMessage(
-                            "\n**Lưu ý:** Không tìm thấy nội dung liên quan trong giáo trình. " +
-                            "Hãy trả lời: \"Nội dung này chưa có trong giáo trình của bạn.\""))
+                            "\n**Lưu ý:** Vector search không tìm thấy nội dung liên quan trong giáo trình " +
+                            "cho câu hỏi này. Hãy thử gọi công cụ `searchCurriculum` với từ khóa cụ thể hơn " +
+                            "nếu cần, hoặc thông báo lịch sự nếu chủ đề thực sự nằm ngoài giáo trình."))
                     .build();
         }
 
@@ -305,6 +396,48 @@ public class RetrievalAdvisor implements BaseAdvisor {
         }
     }
 
+    // ── HyDE — Hypothetical Document Embedding ────────────────────────────
+
+    /**
+     * Generate a short hypothetical curriculum entry that would answer the query about
+     * {@code searchKeyword}. The generated text mirrors the format of stored documents
+     * (Japanese term + Vietnamese explanation + example), so its embedding lands in the
+     * same vector-space cluster as real curriculum content.
+     *
+     * Returns {@code null} on failure so the caller falls back to raw-keyword retrieval.
+     *
+     * @param searchKeyword cleaned term (question phrasing already stripped)
+     * @param intent        LOOKUP or EXPLAIN — shapes the generation style
+     */
+    private String generateHyDE(String searchKeyword, String intent) {
+        try {
+            String instruction = "EXPLAIN".equals(intent)
+                    ? "Viết một đoạn giải thích ngắn (2-3 câu) cho điểm ngữ pháp tiếng Nhật sau đây. "
+                      + "Bao gồm cấu trúc (pattern), nghĩa tiếng Việt, và một ví dụ ngắn. "
+                      + "Viết theo phong cách sách giáo khoa. CHỈ viết nội dung, không thêm giải thích.\n"
+                      + "Điểm ngữ pháp: " + searchKeyword
+                    : "Viết một mục từ điển ngắn cho từ/cụm từ tiếng Nhật sau đây. "
+                      + "Bao gồm: từ (kèm furigana), nghĩa tiếng Việt, loại từ, một câu ví dụ. "
+                      + "Viết theo phong cách sách giáo khoa. CHỈ viết nội dung, không thêm giải thích.\n"
+                      + "Từ: " + searchKeyword;
+
+            String hydeText = analyzeClient.prompt()
+                    .user(instruction)
+                    .options(OpenAiChatOptions.builder()
+                            .model(ragProperties.getCheckModel())
+                            .maxTokens(150)
+                            .temperature(0.1)
+                            .build())
+                    .call()
+                    .content();
+
+            return (hydeText != null && !hydeText.isBlank()) ? hydeText.trim() : null;
+        } catch (Exception e) {
+            log.debug("HyDE generation failed for '{}': {}", searchKeyword, e.getMessage());
+            return null;
+        }
+    }
+
     // ── COUNT intent handler ───────────────────────────────────────────────
 
     private ChatClientRequest handleCountIntent(ChatClientRequest request,
@@ -338,13 +471,13 @@ public class RetrievalAdvisor implements BaseAdvisor {
     private ChatbotFilter buildFilter(UUID courseId, UUID lessonId, List<String> preferredTypes) {
         List<String> types = (preferredTypes != null && !preferredTypes.isEmpty())
                 ? preferredTypes
-                : List.of("VOCABULARY", "GRAMMAR", "GRAMMAR_EXPLANATION", "DIALOG", "EXAMPLE");
+                : com.fu.common.constant.ContentTypeConstants.DEFAULT_CONTENT_TYPES;
         return ChatbotFilter.builder()
                 .courseId(courseId)
                 .lessonId(lessonId)
                 .contentTypes(types)
-                .similarityThreshold(0.30)
-                .topK(8)
+                .similarityThreshold(ragProperties.getRetrievalSimilarityFloor())
+                .topK(ragProperties.getRetrievalTopK())
                 .build();
     }
 
@@ -464,7 +597,7 @@ public class RetrievalAdvisor implements BaseAdvisor {
     }
 
     private String truncate(String text, int maxChars) {
-        return text.length() <= maxChars ? text : text.substring(0, maxChars) + "...";
+        return com.fu.common.util.TextUtils.truncate(text, maxChars, "...");
     }
 
     private UUID getUuidParam(ChatClientRequest request, String key) {

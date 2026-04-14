@@ -9,6 +9,8 @@ import java.util.UUID;
 
 /**
  * Summary submission response (list view).
+ * Includes ALL students in class: those with submissions and those without (NOT_STARTED).
+ * Includes both active and removed class members with isRemovedLearner flag.
  */
 @Data
 @Builder
@@ -17,13 +19,10 @@ import java.util.UUID;
 public class SubmissionSummaryResponse {
 
     private UUID id;
-    private UUID assignmentId;
-    private String assignmentTitle;
-    private UUID userId;
     private String userFullName;
     private SubmissionStatus status;
-    private Integer attemptNumber;
     private BigDecimal score;
     private LocalDateTime submittedAt;
+    private Boolean isRemovedLearner; // true if student was removed from class, false if active
 
 }

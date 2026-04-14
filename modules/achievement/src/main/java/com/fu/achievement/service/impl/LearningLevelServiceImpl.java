@@ -21,6 +21,16 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class LearningLevelServiceImpl implements LearningLevelService {
 
+    // ── Level formula constants (shared between calculateLevelFromExp / calculateExpForLevel) ──
+    /** EXP threshold where progression switches from linear to square-root curve. */
+    private static final int THRESHOLD_EXP = 500;
+    /** Divisor for the early (linear) phase — each level costs this many EXP. */
+    private static final int INITIAL_DIVISOR = 40;
+    /** Divisor for the late (root) phase — higher = slower progression. */
+    private static final double LATE_DIVISOR = 18.5;
+    /** Level reached exactly at THRESHOLD_EXP. */
+    private static final int LEVEL_AT_THRESHOLD = 13;
+
     private final UserStatsRepository userStatsRepository;
     private final ObjectProvider<AchievementService> achievementServiceProvider;
 
@@ -146,30 +156,10 @@ public class LearningLevelServiceImpl implements LearningLevelService {
     @Override
     public int calculateLevelFromExp(int totalExp) {
         // Hybrid formula: Linear for early levels, then square root for late levels
-        // Configuration:
-        // - THRESHOLD_EXP = 500: Switch point from linear to root progression
-        // - INITIAL_DIVISOR = 40: Early levels progress quickly
-        // - LATE_DIVISOR = 18.5: Late levels require exponentially more EXP
-        // - LEVEL_AT_THRESHOLD = 13: Level when reaching threshold
-        //
-        // Progression examples:
-        // Level 1: 0 EXP
-        // Level 5: 160 EXP (4 days @ 40 EXP/day)
-        // Level 10: 360 EXP (9 days @ 40 EXP/day)
-        // Level 13: 500 EXP (12.5 days - threshold)
-        // Level 20: 1,405 EXP (35 days)
-        // Level 30: 3,755 EXP (94 days)
-        // Level 50: 13,105 EXP (327 days ~1 year)
-        
         if (totalExp <= 0) {
             return 1;
         }
-        
-        final int THRESHOLD_EXP = 500;
-        final int INITIAL_DIVISOR = 40;
-        final double LATE_DIVISOR = 18.5;
-        final int LEVEL_AT_THRESHOLD = 13;
-        
+
         if (totalExp < THRESHOLD_EXP) {
             // Early phase: Linear progression (fast)
             return (totalExp / INITIAL_DIVISOR) + 1;
@@ -182,22 +172,10 @@ public class LearningLevelServiceImpl implements LearningLevelService {
 
     @Override
     public int calculateExpForLevel(int level) {
-        // Inverse formula for hybrid progression
-        // Must match calculateLevelFromExp() exactly
-        // - THRESHOLD_EXP = 500: Switch point from linear to root progression
-        // - INITIAL_DIVISOR = 40: Early levels progress quickly
-        // - LATE_DIVISOR = 18.5: Late levels require exponentially more EXP
-        // - LEVEL_AT_THRESHOLD = 13: Level when reaching threshold
-        
         if (level <= 1) {
             return 0;
         }
-        
-        final int THRESHOLD_EXP = 500;
-        final int INITIAL_DIVISOR = 40;
-        final double LATE_DIVISOR = 18.5;
-        final int LEVEL_AT_THRESHOLD = 13;
-        
+
         if (level <= LEVEL_AT_THRESHOLD) {
             // Early phase: Inverse of linear formula
             // Forward: level = (totalExp / 40) + 1

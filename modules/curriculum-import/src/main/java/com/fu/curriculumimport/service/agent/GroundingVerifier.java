@@ -142,34 +142,53 @@ public class GroundingVerifier {
                     null, true, "Empty Japanese text");
         }
 
-        // 1. Check exact text presence
+        // LLM output artifacts that don't appear in raw source:
+        // 〜X prefix on honorifics/suffixes, [X] optional markers, trailing 。
+        String normalizedText = normalizeForMatch(japaneseText);
+
+        // 1. Check exact text presence (raw first, then normalized)
         boolean textFound = sourceText.contains(japaneseText);
         String evidenceSnippet = null;
 
         if (textFound) {
             evidenceSnippet = extractEvidenceSnippet(sourceText, japaneseText);
+        } else if (!normalizedText.equals(japaneseText) && sourceText.contains(normalizedText)) {
+            textFound = true;
+            evidenceSnippet = extractEvidenceSnippet(sourceText, normalizedText);
         } else {
             // 2. Try OCR-condensed source — handles "た べ ま す" → "たべます" mismatch
-            textFound = condensedSource.contains(japaneseText);
+            textFound = condensedSource.contains(japaneseText)
+                    || (!normalizedText.equals(japaneseText) && condensedSource.contains(normalizedText));
             if (textFound) {
                 evidenceSnippet = "[Condensed kana match]";
             } else {
                 // 3. Try character-level kanji decomposition — handles OCR spacing in kanji
-                textFound = checkKanjiDecomposition(japaneseText, sourceText);
+                textFound = checkKanjiDecomposition(normalizedText, sourceText);
                 if (textFound) {
                     evidenceSnippet = "[Kanji decomposition match]";
+                } else {
+                    // 4. Try compound suffix decomposition for MnN nationality/language/study
+                    //    patterns: インドネシア人 → インドネシア + 人, フランス語 → フランス + 語.
+                    //    Source often has base-country column and 人/語 suffix column separately.
+                    textFound = checkCompoundSuffix(normalizedText, sourceText, condensedSource);
+                    if (textFound) {
+                        evidenceSnippet = "[Compound suffix match]";
+                    }
                 }
             }
         }
 
-        // 4. Check reading grounding
+        // 5. Check reading grounding
         boolean readingFound = false;
         if (vocab.getReading() != null && !vocab.getReading().isBlank()) {
             String reading = vocab.getReading();
+            String normalizedReading = normalizeForMatch(reading);
             readingFound = sourceText.contains(reading)
                     || condensedSource.contains(reading)
-                    || checkReadingInParentheses(reading, sourceText, japaneseText)
-                    || checkReadingInParentheses(reading, condensedSource, japaneseText);
+                    || (!normalizedReading.equals(reading) && sourceText.contains(normalizedReading))
+                    || (!normalizedReading.equals(reading) && condensedSource.contains(normalizedReading))
+                    || checkReadingInParentheses(normalizedReading, sourceText, normalizedText)
+                    || checkReadingInParentheses(normalizedReading, condensedSource, normalizedText);
         } else {
             readingFound = true; // If no reading provided, don't penalize
         }
@@ -203,8 +222,8 @@ public class GroundingVerifier {
         }
 
         // 1. Check exact pattern presence
-        // Grammar patterns often have ～ prefix, try with and without
-        String cleanPattern = pattern.replace("～", "").replace("〜", "").strip();
+        // Grammar patterns may have ～ prefix or [X] optional markers
+        String cleanPattern = normalizeForMatch(pattern);
         boolean textFound = sourceText.contains(pattern) || sourceText.contains(cleanPattern)
                 || condensedSource.contains(pattern) || condensedSource.contains(cleanPattern);
         String evidenceSnippet = null;
@@ -224,7 +243,7 @@ public class GroundingVerifier {
         // 3. Check reading grounding
         boolean readingFound = true;
         if (grammar.getPatternReading() != null && !grammar.getPatternReading().isBlank()) {
-            String cleanReading = grammar.getPatternReading().replace("～", "").replace("〜", "").strip();
+            String cleanReading = normalizeForMatch(grammar.getPatternReading());
             readingFound = sourceText.contains(grammar.getPatternReading())
                     || sourceText.contains(cleanReading)
                     || condensedSource.contains(grammar.getPatternReading())
@@ -451,6 +470,48 @@ public class GroundingVerifier {
         return text.toLowerCase()
                 .replaceAll("\\s+", " ")
                 .strip();
+    }
+
+    /**
+     * Normalize LLM-generated query text for grounding match.
+     *
+     * <p>Handles common LLM output artifacts that don't appear in raw textbook source:
+     * <ul>
+     *   <li>Tilde prefix markers (〜 U+301C, ～ U+FF5E) used by LLMs to denote particle/suffix slots</li>
+     *   <li>Optional-part brackets [X] and 【X】 — delimiters stripped, content kept</li>
+     *   <li>Trailing sentence terminators (。、！？．) that may be absent in OCR-extracted source</li>
+     * </ul>
+     */
+    private String normalizeForMatch(String text) {
+        if (text == null || text.isBlank()) return text;
+        return text
+                .replaceAll("[\u301C\uFF5E]", "")
+                .replaceAll("[\\[【]([^\\]】]*)[\\]】]", "$1")
+                .replaceAll("[。、！？．]+$", "")
+                .strip();
+    }
+
+    /**
+     * Compound suffix decomposition for MnN Bài 1 nationality/language patterns.
+     *
+     * <p>Textbook source often presents country names in one column and the 人/語/学
+     * suffix as a separate header cell. When the LLM extracts the full compound
+     * (e.g. インドネシア人) but the source has "インドネシア" and "人" apart, the literal
+     * substring check fails. This method accepts the item if both the stem and
+     * the suffix kanji appear in the source.
+     */
+    private boolean checkCompoundSuffix(String text, String sourceText, String condensedSource) {
+        if (text == null || text.length() < 3) return false;
+        char last = text.charAt(text.length() - 1);
+        if (last != '人' && last != '語' && last != '学' && last != '国') return false;
+
+        String stem = text.substring(0, text.length() - 1);
+        if (stem.length() < 2) return false; // Single-char stems are too ambiguous
+
+        boolean stemFound = sourceText.contains(stem) || condensedSource.contains(stem);
+        String suffix = String.valueOf(last);
+        boolean suffixFound = sourceText.contains(suffix) || condensedSource.contains(suffix);
+        return stemFound && suffixFound;
     }
 
     /**

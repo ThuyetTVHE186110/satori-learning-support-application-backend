@@ -27,6 +27,7 @@ public interface VocabularyRepository extends JpaRepository<Vocabulary, UUID> {
 
     /**
      * Find vocabulary by japanese text and JLPT level (includes soft-deleted).
+     *
      * @deprecated Use {@link #findByJapaneseTextAndJlptLevelAndDeletedAtIsNull} to exclude deleted records.
      */
     @Deprecated
@@ -83,4 +84,13 @@ public interface VocabularyRepository extends JpaRepository<Vocabulary, UUID> {
             "LOWER(v.meaningVi) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
             "LOWER(v.meaningEn) LIKE LOWER(CONCAT('%', :keyword, '%')))")
     Page<Vocabulary> searchByKeyword(@Param("keyword") String keyword, Pageable pageable);
+
+    /**
+     * Tìm vocabulary theo japaneseText. Cùng một từ có thể tồn tại ở nhiều bài/khóa
+     * khác nhau (import từ nhiều PDF) nên trả về first row theo createdAt ASC để
+     * deterministic và tránh NonUniqueResultException.
+     */
+    Optional<Vocabulary> findFirstByJapaneseTextAndDeletedAtIsNullOrderByCreatedAtAsc(String japaneseText);
+
+    Optional<Vocabulary> findIdByJapaneseTextAndJlptLevel(String japaneseText, JlptLevel jlptLevel);
 }

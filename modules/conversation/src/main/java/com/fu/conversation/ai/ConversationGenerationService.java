@@ -37,22 +37,22 @@ public class ConversationGenerationService {
 
             Always respond with a valid JSON array. Do not include markdown code fences.
             Each conversation object must have:
-            - title (String): Conversation title in English/Vietnamese
+            - title (String): Conversation title in Vietnamese
             - titleJapanese (String): Conversation title in Japanese
-            - description (String): 2-3 sentence description
+            - description (String): 2-3 sentence Vietnamese description
             - descriptionVi (String): Vietnamese description
-            - scenario (String): Detailed roleplay scenario in English (who learner plays, who AI plays, context)
+            - scenario (String): Detailed roleplay scenario in Vietnamese (who learner plays, who AI plays, context)
+            - aiRole (String): The role/character in Vietnamese the AI will play in this conversation (e.g., "Café staff member", "Doctor", "Shopkeeper")
+            - learnerRole (String): The role/character in Vietnamese the learner will play in this conversation (e.g., "Customer", "Patient", "Client")
             - category (String): One of: daily_life, travel, business, school, shopping, restaurant, health, culture
-            - jlptLevel (String): N5/N4/N3/N2/N1
-            - difficultyScore (Integer): 1-10
             - vocabularyHints (Array<String>): 5-8 key vocabulary
             - grammarPoints (Array<String>): 3-5 grammar patterns
             - usefulExpressions (Array<String>): 4-6 useful expressions
             - missions (Array): 2-4 missions, each with:
-              - title (String): Mission title
+              - title (String): Mission title in Vietnamese
               - titleJapanese (String): Japanese title
               - titleVi (String): Vietnamese title
-              - description (String): What learner must do
+              - description (String): What learner must do in this mission, in Vietnamese
               - descriptionVi (String): Vietnamese description
               - missionType (String): INFORMATION_GATHERING | TRANSACTIONAL | SOCIAL | PROBLEM_SOLVING | DESCRIPTIVE | CUSTOM
               - successCriteria (Object): {"requiredActions": [...], "requiredVocabulary": [...], "completionConditions": "..."}
@@ -163,15 +163,20 @@ public class ConversationGenerationService {
      * Generate conversation suggestions for a topic.
      * Conversations are course-specific: the given course's vocabulary and grammar provide context.
      *
-     * @param topicId    UUID of the topic (course-agnostic parent)
-     * @param courseId   UUID of the course whose vocab/grammar is used as context
-     * @param jlptLevel  optional JLPT level override (falls back to topic level if omitted)
-     * @param count      number of conversations to suggest (1-5)
-     * @return list of conversation suggestions (not persisted yet)
+     * @param topicId      UUID of the topic (course-agnostic parent)
+     * @param courseId     UUID of the course whose vocab/grammar is used as context
+     * @param title        conversation title to guide AI generation
+     * @param description  conversation description to guide AI generation
+     * @param difficultyLevel difficulty level (1-3) to guide AI generation
+     * @param jlptLevel    JLPT level from the course
+     * @return list of conversation suggestions (not persisted yet, always 1 suggestion)
      */
-    public List<GeneratedConversationSuggestionResponse> generateConversationsForTopic(
-            UUID topicId, UUID courseId, Course.JlptLevel jlptLevel, int count) {
-        log.info("Generating {} conversations for topic: {}, course: {}", count, topicId, courseId);
+    public List<GeneratedConversationSuggestionResponse>  generateConversationsForTopic(
+            UUID topicId, UUID courseId, String title, String description, Integer difficultyLevel,
+            Course.JlptLevel jlptLevel) {
+        int count = 1;
+        log.info("Generating {} conversation for topic: {}, course: {}, title: {}, difficulty: {}, jlptLevel: {}",
+                count, topicId, courseId, title, difficultyLevel, jlptLevel != null ? jlptLevel.name() : "null");
 
         ConversationTopic topic = topicRepository.findById(topicId).orElse(null);
         if (topic == null) {
@@ -190,9 +195,20 @@ public class ConversationGenerationService {
         if (topic.getCategory() != null) {
             contextBuilder.append("Category: ").append(topic.getCategory()).append("\n");
         }
-        Course.JlptLevel effectiveLevel = jlptLevel != null ? jlptLevel : topic.getJlptLevel();
-        if (effectiveLevel != null) {
-            contextBuilder.append("Target JLPT Level: ").append(effectiveLevel.name()).append("\n");
+        
+        contextBuilder.append("\nConversation Guidelines:\n");
+        contextBuilder.append("- Title: ").append(title).append("\n");
+        contextBuilder.append("- Description: ").append(description).append("\n");
+        String difficultyName = switch (difficultyLevel) {
+            case 1 -> "Easy (Dễ)";
+            case 2 -> "Medium (Trung bình)";
+            case 3 -> "Difficult (Khó)";
+            default -> "Medium";
+        };
+        contextBuilder.append("- Difficulty Level: ").append(difficultyName).append(" (").append(difficultyLevel).append(")\n");
+        
+        if (jlptLevel != null) {
+            contextBuilder.append("Target JLPT Level: ").append(jlptLevel.name()).append("\n");
         }
 
         String courseName = courseRepository.findById(courseId)

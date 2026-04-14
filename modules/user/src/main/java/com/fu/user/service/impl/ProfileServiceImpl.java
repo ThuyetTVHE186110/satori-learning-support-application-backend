@@ -2,6 +2,9 @@ package com.fu.user.service.impl;
 
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
+import com.fu.common.port.NotificationPreferencesQueryPort;
+import com.fu.infrastructure.cloudinary.CloudinaryService;
+import com.fu.infrastructure.event.ReminderSettingsUpdatedEvent;
 import com.fu.user.dto.*;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserLearningPreferences;
@@ -14,9 +17,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -31,6 +36,11 @@ public class ProfileServiceImpl implements ProfileService {
     private final UserRepository userRepository;
     private final UserLearningPreferencesRepository preferencesRepository;
     private final UserMapper userMapper;
+    private final CloudinaryService cloudinaryService;
+    private final NotificationPreferencesQueryPort notificationPreferencesQueryPort;
+    private final ApplicationEventPublisher eventPublisher;
+
+    private static final String AVATAR_FOLDER = "satori/avatars";
 
     // ── GET /api/v1/profile ──────────────────────────────────────────────────
 
@@ -58,7 +68,6 @@ public class ProfileServiceImpl implements ProfileService {
                 .gender(user.getGender())
                 .role(user.getRole())
                 .status(user.getStatus())
-                .authProvider(user.getAuthProvider())
                 .emailVerified(user.getEmailVerifiedAt() != null)
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
@@ -124,18 +133,13 @@ public class ProfileServiceImpl implements ProfileService {
                             .dailyStudyGoalMinutes(30)
                             .learningPace("normal")
                             .preferredFormality("polite")
-                            .streakReminderEnabled(true)
-                            .reminderTime(LocalTime.of(20, 0))
                             .build();
                 });
 
         if (request.getDailyStudyGoalMinutes() != null) prefs.setDailyStudyGoalMinutes(request.getDailyStudyGoalMinutes());
-        if (request.getPreferredStudyTime() != null)  prefs.setPreferredStudyTime(request.getPreferredStudyTime());
         if (request.getLearningPace() != null)        prefs.setLearningPace(request.getLearningPace());
         if (request.getPreferredFormality() != null)  prefs.setPreferredFormality(request.getPreferredFormality());
         if (request.getConversationStyle() != null)   prefs.setConversationStyle(request.getConversationStyle());
-        if (request.getStreakReminderEnabled() != null) prefs.setStreakReminderEnabled(request.getStreakReminderEnabled());
-        if (request.getReminderTime() != null)        prefs.setReminderTime(request.getReminderTime());
         if (request.getPreferredTopics() != null) {
             prefs.setPreferredTopics(request.getPreferredTopics().toArray(String[]::new));
         }
@@ -143,10 +147,61 @@ public class ProfileServiceImpl implements ProfileService {
         UserLearningPreferences saved = preferencesRepository.save(prefs);
         log.info("Learning preferences updated for user: {}", userId);
 
+        // Forward reminder settings to notification_prefs (source of truth for the scheduler)
+        if (request.getReminderTime() != null || request.getStreakReminderEnabled() != null) {
+            eventPublisher.publishEvent(new ReminderSettingsUpdatedEvent(
+                    this, userId, request.getReminderTime(), request.getStreakReminderEnabled()));
+        }
+
         return LearningPreferencesResponse.from(saved);
     }
 
+    // ── POST /api/v1/profile/avatar ────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public UserResponse uploadAvatar(UUID userId, MultipartFile file) {
+        log.info("User {} uploading avatar", userId);
+
+        User user = findActiveUser(userId);
+
+        // Delete old avatar from Cloudinary if exists
+        deleteOldAvatar(user.getAvatarUrl());
+
+        String newUrl = cloudinaryService.uploadImage(file, AVATAR_FOLDER);
+        user.setAvatarUrl(newUrl);
+
+        return userMapper.toResponse(userRepository.save(user));
+    }
+
+    // ── DELETE /api/v1/profile/avatar ───────────────────────────────────────
+
+    @Override
+    @Transactional
+    public void deleteAvatar(UUID userId) {
+        log.info("User {} deleting avatar", userId);
+
+        User user = findActiveUser(userId);
+
+        if (user.getAvatarUrl() == null) {
+            return; // nothing to delete
+        }
+
+        deleteOldAvatar(user.getAvatarUrl());
+        user.setAvatarUrl(null);
+        userRepository.save(user);
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private void deleteOldAvatar(String avatarUrl) {
+        if (avatarUrl != null && !avatarUrl.isBlank()) {
+            String publicId = cloudinaryService.extractPublicId(avatarUrl);
+            if (publicId != null) {
+                cloudinaryService.deleteImage(publicId);
+            }
+        }
+    }
 
     /**
      * Maps the single active class enrollment (if any) to ClassEnrollmentResponse.
@@ -166,6 +221,7 @@ public class ProfileServiceImpl implements ProfileService {
                 .startDate(toLocalDateTime(row[4]))
                 .endDate(toLocalDateTime(row[5]))
                 .status((String) row[6])
+                .jlptLevel(row.length > 7 ? (String) row[7] : null)
                 .role(null)
                 .build();
         return List.of(enrollment);
@@ -182,6 +238,17 @@ public class ProfileServiceImpl implements ProfileService {
         if (val instanceof LocalDateTime ldt) return ldt;
         if (val instanceof java.sql.Timestamp ts) return ts.toLocalDateTime();
         return null;
+    }
+
+    // ── GET /api/v1/profile/settings ─────────────────────────────────────────
+
+    @Override
+    public UserSettingsResponse getSettings(UUID userId) {
+        UserProfileResponse profile = getMyProfile(userId);
+        return UserSettingsResponse.builder()
+                .profile(profile)
+                .notificationPreferences(notificationPreferencesQueryPort.getSnapshot(userId))
+                .build();
     }
 
     private User findActiveUser(UUID userId) {

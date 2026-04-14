@@ -63,10 +63,10 @@
             <version>${spring-ai.version}</version>
         </dependency>
         
-        <!-- Spring Mail for Email Service -->
+        <!-- Resend Email SDK (HTTP API — bypasses SMTP port restrictions) -->
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-mail</artifactId>
+            <groupId>com.resend</groupId>
+            <artifactId>resend-java</artifactId>
         </dependency>
         
         <!-- Thymeleaf for Email Templates -->
@@ -85,6 +85,12 @@
             <artifactId>swagger-models-jakarta</artifactId>
             <version>2.2.25</version>
             <scope>compile</scope>
+        </dependency>
+
+        <!-- Actuator — for HealthIndicator beans (OpenAiHealthIndicator, etc.) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
     </dependencies>
     

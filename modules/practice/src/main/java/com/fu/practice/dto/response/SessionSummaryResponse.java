@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fu.achievement.dto.response.UserAchievementResponse;
 import com.fu.achievement.dto.response.LevelUpNotificationResponse;
+import com.fu.achievement.dto.response.StreakNotificationResponse;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -44,4 +45,30 @@ public class SessionSummaryResponse {
     /** Level-up notification if user leveled up during this session. */
     @JsonProperty("levelUp")
     private LevelUpNotificationResponse levelUpInfo;
+
+    /** Streak notification indicating first activity of day. */
+    @JsonProperty("streakNotification")
+    private StreakNotificationResponse streakNotification;
+
+    /**
+     * Thay đổi mastery level của từng item trong phiên này.
+     * Chỉ chứa items có refContentId (có thể track mastery).
+     * Dùng để hiển thị "先生: ◔ → ●" trên màn hình summary.
+     */
+    @JsonProperty("masteryChanges")
+    private List<MasteryChangeDto> masteryChanges;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class MasteryChangeDto {
+        private UUID   entityId;
+        private String entityType;       // "VOCABULARY" | "GRAMMAR"
+        private String japaneseText;     // "先生" / "〜てください"
+        private int    levelBefore;
+        private int    levelAfter;
+        /** true nếu levelAfter == 3 && levelBefore < 3 — để show celebration UI */
+        private boolean newlyMastered;
+    }
 }

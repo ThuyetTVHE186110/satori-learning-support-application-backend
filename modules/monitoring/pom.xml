@@ -41,14 +41,17 @@
             <artifactId>assignment</artifactId>
         </dependency>
 
-        <!-- Spring Boot Actuator -->
+        <!-- WebClient for calling OpenAI usage API.
+             Use spring-webflux (not the full starter) to avoid pulling in
+             the reactive web server, which would conflict with WebMVC in start. -->
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webflux</artifactId>
         </dependency>
+        <!-- Reactor Netty as the HTTP client transport for WebClient -->
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-webflux</artifactId>
+            <groupId>io.projectreactor.netty</groupId>
+            <artifactId>reactor-netty-http</artifactId>
         </dependency>
 
         <!-- Test Dependencies -->
