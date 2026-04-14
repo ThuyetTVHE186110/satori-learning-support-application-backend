@@ -3,7 +3,6 @@ package com.fu.monitoring.service.impl;
 import com.fu.assignment.repository.AssignmentRepository;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
-import com.fu.user.entity.AuthProvider;
 import com.fu.common.exception.BusinessException;
 import com.fu.monitoring.dto.AdminUserDetailResponse;
 import com.fu.monitoring.dto.AdminUserStatsDTO;
@@ -65,10 +64,6 @@ public class AdminUserServiceImpl implements AdminUserService {
         byStatus.put("SUSPENDED", userRepository.countByStatus(UserStatus.SUSPENDED));
         byStatus.put("INACTIVE", userRepository.countByStatus(UserStatus.INACTIVE));
 
-        Map<String, Long> byAuthProvider = new HashMap<>();
-        byAuthProvider.put("LOCAL", userRepository.countByAuthProvider(AuthProvider.LOCAL));
-        byAuthProvider.put("GOOGLE", userRepository.countByAuthProvider(AuthProvider.GOOGLE));
-
         Map<String, Long> byGender = convertGenderDistribution(userRepository.findGenderDistribution());
 
         long totalUsers = byRole.values().stream().mapToLong(Long::longValue).sum();
@@ -76,7 +71,6 @@ public class AdminUserServiceImpl implements AdminUserService {
         return AdminUserStatsDTO.UserCountBreakdown.builder()
                 .byRole(byRole)
                 .byStatus(byStatus)
-                .byAuthProvider(byAuthProvider)
                 .byGender(byGender)
                 .totalUsers(totalUsers)
                 .build();

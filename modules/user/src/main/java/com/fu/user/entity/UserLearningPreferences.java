@@ -40,9 +40,6 @@ public class UserLearningPreferences extends BaseEntity {
     @Builder.Default
     private Integer dailyStudyGoalMinutes = 30;
 
-    @Column(name = "preferred_study_time", length = 20)
-    private String preferredStudyTime; // morning | afternoon | evening | night
-
     // AI practice context
     @Column(name = "preferred_topics", columnDefinition = "text[]")
     private String[] preferredTopics;

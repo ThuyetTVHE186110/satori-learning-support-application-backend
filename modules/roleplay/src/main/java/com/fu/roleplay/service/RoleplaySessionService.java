@@ -27,7 +27,7 @@ public interface RoleplaySessionService {
 
     SessionResponse getSession(UUID sessionId, UUID userId);
 
-    Page<SessionSummaryResponse> getSessionHistory(UUID userId, Pageable pageable);
+    Page<SessionSummaryResponse> getSessionHistory(UUID userId, String status, Pageable pageable);
 
     SessionEvaluationResponse getConversationFeedback(UUID conversationId, UUID userId);
 }

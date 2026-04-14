@@ -18,6 +18,7 @@ import com.fu.infrastructure.learner.LearnerProfileProvider;
 import com.fu.infrastructure.event.RoleplaySessionCompletedEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
+import com.fu.roleplay.exception.SessionLimitExceededException;
 import com.fu.conversation.entity.Conversation;
 import com.fu.conversation.entity.ConversationMission;
 import com.fu.conversation.repository.ConversationMissionRepository;
@@ -167,7 +168,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // 2. Check active sessions limit
         long activeSessions = sessionRepository.countByUserIdAndStatus(userId, ConversationSession.SessionStatus.ACTIVE.name());
         if (activeSessions >= properties.getMaxActiveSessions()) {
-            throw new BusinessException("SESSION_LIMIT", "Maximum active sessions reached (" + properties.getMaxActiveSessions() + ")");
+            throw buildSessionLimitException(userId);
         }
 
         // 3. Load missions for conversation
@@ -188,7 +189,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // Race-condition guard: re-count inside transaction to catch concurrent session creation
         long activeAfterSave = sessionRepository.countByUserIdAndStatus(userId, ConversationSession.SessionStatus.ACTIVE.name());
         if (activeAfterSave > properties.getMaxActiveSessions()) {
-            throw new BusinessException("SESSION_LIMIT", "Maximum active sessions reached (" + properties.getMaxActiveSessions() + ")");
+            throw buildSessionLimitException(userId);
         }
 
         // 5. Create session missions (snapshot) — copy Vi fields
@@ -258,7 +259,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // 1. Check active session limit
         long activeSessions = sessionRepository.countByUserIdAndStatus(userId, ConversationSession.SessionStatus.ACTIVE.name());
         if (activeSessions >= properties.getMaxActiveSessions()) {
-            throw new BusinessException("SESSION_LIMIT", "Maximum active sessions reached (" + properties.getMaxActiveSessions() + ")");
+            throw buildSessionLimitException(userId);
         }
 
         // 2. Determine JLPT level
@@ -299,7 +300,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // Race-condition guard: re-count inside transaction to catch concurrent session creation
         long activeAfterSave = sessionRepository.countByUserIdAndStatus(userId, ConversationSession.SessionStatus.ACTIVE.name());
         if (activeAfterSave > properties.getMaxActiveSessions()) {
-            throw new BusinessException("SESSION_LIMIT", "Maximum active sessions reached (" + properties.getMaxActiveSessions() + ")");
+            throw buildSessionLimitException(userId);
         }
 
         // 7. Build response (no missions yet during SETUP)
@@ -818,6 +819,14 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         log.info("Abandoned roleplay session {} for user {}", sessionId, userId);
     }
 
+    private SessionLimitExceededException buildSessionLimitException(UUID userId) {
+        List<SessionSummaryResponse> activeSessions = sessionRepository.findActiveSessionsByUserId(userId)
+                .stream()
+                .map(sessionMapper::toSummaryResponse)
+                .collect(Collectors.toList());
+        return new SessionLimitExceededException(properties.getMaxActiveSessions(), activeSessions);
+    }
+
     @Override
     @Transactional(readOnly = true)
     public SessionResponse getSession(UUID sessionId, UUID userId) {
@@ -853,9 +862,13 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<SessionSummaryResponse> getSessionHistory(UUID userId, Pageable pageable) {
-        return sessionRepository.findByUserIdAndSessionTypeOrderByCreatedAtDesc(
-                        userId, ConversationSession.SessionType.ROLEPLAY.name(), pageable)
+    public Page<SessionSummaryResponse> getSessionHistory(UUID userId, String status, Pageable pageable) {
+        String normalizedStatus = null;
+        if (status != null && !status.isBlank()) {
+            normalizedStatus = status.toUpperCase();
+        }
+        return sessionRepository.findByUserIdAndSessionTypeAndOptionalStatus(
+                        userId, ConversationSession.SessionType.ROLEPLAY.name(), normalizedStatus, pageable)
                 .map(sessionMapper::toSummaryResponse);
     }
 

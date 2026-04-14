@@ -102,9 +102,6 @@ public class GrammarPoint extends SoftDeletableEntity {
     @Column(name = "audio_url", columnDefinition = "TEXT")
     private String audioUrl;
 
-    @Column(name = "content_hash", length = 64)
-    private String contentHash;
-
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     @Column(name = "status", columnDefinition = "content_status")

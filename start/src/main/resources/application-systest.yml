@@ -62,10 +62,6 @@ app:
         otp-expiration-minutes: 10
         activation-token-expiration-hours: 24
 
-    google:
-        firebase:
-            enabled: false
-
     email:
         enabled: false
 

@@ -4,7 +4,7 @@ import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.infrastructure.email.EmailService;
 import com.fu.user.dto.*;
-import com.fu.user.entity.AuthProvider;
+
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
@@ -576,7 +576,7 @@ public class UserServiceImpl implements UserService {
                 user.setPasswordHash(passwordEncoder.encode(rawPassword));
                 user.setRole(createReq.getRole());
                 user.setStatus(createReq.getRole() == UserRole.LEARNER ? UserStatus.INACTIVE : UserStatus.ACTIVE);
-                user.setAuthProvider(AuthProvider.LOCAL);
+
                 user.setEmailVerifiedAt(LocalDateTime.now());
                 user.setCreatedBy(currentUserId);
 
@@ -727,7 +727,6 @@ public class UserServiceImpl implements UserService {
         user.setPasswordHash(passwordEncoder.encode(rawPassword));
         user.setRole(request.getRole());
         user.setStatus(request.getRole() == UserRole.LEARNER ? UserStatus.INACTIVE : UserStatus.ACTIVE);
-        user.setAuthProvider(AuthProvider.LOCAL);
         user.setEmailVerifiedAt(LocalDateTime.now()); // Verified by manager/admin
         user.setCreatedBy(createdByUserId);
 
