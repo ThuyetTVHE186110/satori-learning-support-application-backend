@@ -68,7 +68,7 @@ public class VocabularyRangeAnalyzer {
 
         for (String word : uniqueWords) {
             Optional<Vocabulary> vocab = vocabularyRepository
-                    .findVocabularyByJapaneseTextAndDeletedAtIsNull(word);
+                    .findFirstByJapaneseTextAndDeletedAtIsNullOrderByCreatedAtAsc(word);
             if (vocab.isPresent() && vocab.get().getJlptLevel() != null) {
                 String level = vocab.get().getJlptLevel().name();
                 jlptCounts.merge(level, 1, Integer::sum);

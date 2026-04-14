@@ -85,7 +85,12 @@ public interface VocabularyRepository extends JpaRepository<Vocabulary, UUID> {
             "LOWER(v.meaningEn) LIKE LOWER(CONCAT('%', :keyword, '%')))")
     Page<Vocabulary> searchByKeyword(@Param("keyword") String keyword, Pageable pageable);
 
-    Optional<Vocabulary> findVocabularyByJapaneseTextAndDeletedAtIsNull(String japaneseText);
+    /**
+     * Tìm vocabulary theo japaneseText. Cùng một từ có thể tồn tại ở nhiều bài/khóa
+     * khác nhau (import từ nhiều PDF) nên trả về first row theo createdAt ASC để
+     * deterministic và tránh NonUniqueResultException.
+     */
+    Optional<Vocabulary> findFirstByJapaneseTextAndDeletedAtIsNullOrderByCreatedAtAsc(String japaneseText);
 
     Optional<Vocabulary> findIdByJapaneseTextAndJlptLevel(String japaneseText, JlptLevel jlptLevel);
 }
