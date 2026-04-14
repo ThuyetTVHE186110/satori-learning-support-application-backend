@@ -9,6 +9,7 @@ import com.fu.roleplay.dto.response.SendMessageResponse;
 import com.fu.roleplay.dto.response.SessionEvaluationResponse;
 import com.fu.roleplay.dto.response.SessionResponse;
 import com.fu.roleplay.dto.response.SessionSummaryResponse;
+import com.fu.roleplay.exception.SessionLimitExceededException;
 import com.fu.roleplay.service.RoleplaySessionService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -25,6 +26,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.List;
 import java.util.UUID;
 
 @Slf4j
@@ -94,11 +96,12 @@ public class LearnerRoleplayController {
     public ResponseEntity<ApiResponse<PageResponse<SessionSummaryResponse>>> getSessionHistory(
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "10") @Min(1) int size,
+            @RequestParam(required = false) String status,
             @AuthenticationPrincipal(expression = "id") UUID userId) {
 
         // Keep Pageable unsorted because repository native SQL already orders by created_at DESC.
         Pageable pageable = PageRequest.of(page, Math.min(size, 100));
-        Page<SessionSummaryResponse> result = sessionService.getSessionHistory(userId, pageable);
+        Page<SessionSummaryResponse> result = sessionService.getSessionHistory(userId, status, pageable);
         return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
                 result.getContent(), result.getNumber(), result.getSize(),
                 result.getTotalElements(), result.getTotalPages())));
@@ -126,5 +129,12 @@ public class LearnerRoleplayController {
 
         SessionEvaluationResponse response = sessionService.getConversationFeedback(conversationId, userId);
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @ExceptionHandler(SessionLimitExceededException.class)
+    public ResponseEntity<ApiResponse<List<SessionSummaryResponse>>> handleSessionLimit(
+            SessionLimitExceededException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(ex.getErrorCode(), ex.getMessage(), ex.getActiveSessions()));
     }
 }

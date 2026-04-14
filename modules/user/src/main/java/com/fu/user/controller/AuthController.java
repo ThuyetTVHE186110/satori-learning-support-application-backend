@@ -19,7 +19,7 @@ import java.util.UUID;
 
 /**
  * REST Controller for Authentication operations.
- * Implements UC-06 (Login), UC-07 (Forgot Password), UC-09 (Google Login), UC-10 (Logout).
+ * Implements UC-06 (Login), UC-07 (Forgot Password), UC-10 (Logout).
  */
 @Slf4j
 @RestController
@@ -51,30 +51,6 @@ public class AuthController {
 
         authRateLimiter.checkLogin(ipAddress);
         LoginResponse response = authService.login(request, ipAddress, userAgent);
-        
-        return ResponseEntity.ok(ApiResponse.success("Đăng nhập thành công", response));
-    }
-
-    // ==================== UC-09: Login with Google ====================
-
-    /**
-     * Login with Google OAuth.
-     * 
-     * POST /api/v1/auth/google
-     * 
-     * @param request Google ID token
-     * @param httpRequest HTTP request for IP and user agent
-     * @return JWT tokens and user info
-     */
-    @PostMapping("/google")
-    public ResponseEntity<ApiResponse<LoginResponse>> loginWithGoogle(
-            @Valid @RequestBody GoogleLoginRequest request,
-            HttpServletRequest httpRequest) {
-        
-        String ipAddress = getClientIpAddress(httpRequest);
-        String userAgent = httpRequest.getHeader("User-Agent");
-        
-        LoginResponse response = authService.loginWithGoogle(request, ipAddress, userAgent);
         
         return ResponseEntity.ok(ApiResponse.success("Đăng nhập thành công", response));
     }

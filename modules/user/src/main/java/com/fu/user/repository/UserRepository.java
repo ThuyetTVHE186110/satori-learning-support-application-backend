@@ -3,7 +3,6 @@ package com.fu.user.repository;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
-import com.fu.user.entity.AuthProvider;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -85,11 +84,6 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
      */
     @Query("SELECT COUNT(u) FROM User u WHERE u.status = :status AND u.deletedAt IS NULL")
     long countByStatus(@Param("status") UserStatus status);
-
-    /**
-     * Find user by Google ID (for OAuth login)
-     */
-    Optional<User> findByGoogleId(String googleId);
 
     /**
      * Find user by activation token (for email verification)
@@ -198,12 +192,6 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
     long countTotalLearners();
     @Query("SELECT u FROM User  u where u.role = 'TEACHER' and u.status = 'ACTIVE' and u.deletedAt IS NULL")
     List<User> findAllTeacher();
-
-    /**
-     * Count users by authentication provider (for admin dashboard)
-     */
-    @Query("SELECT COUNT(u) FROM User u WHERE u.authProvider = :provider AND u.deletedAt IS NULL")
-    long countByAuthProvider(@Param("provider") AuthProvider provider);
 
     /**
      * Get gender distribution of users (for admin dashboard)

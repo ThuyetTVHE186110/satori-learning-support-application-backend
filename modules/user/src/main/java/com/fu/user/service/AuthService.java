@@ -7,7 +7,7 @@ import java.util.UUID;
 
 /**
  * Service interface for Authentication operations.
- * Implements UC-06 (Login), UC-07 (Forgot Password), UC-09 (Google Login), UC-10 (Logout).
+ * Implements UC-06 (Login), UC-07 (Forgot Password), UC-10 (Logout).
  */
 public interface AuthService {
 
@@ -37,26 +37,6 @@ public interface AuthService {
      * @return JWT tokens and user info
      */
     LoginResponse login(LoginRequest request, String ipAddress, String userAgent);
-
-    // ==================== UC-09: Login with Google ====================
-    
-    /**
-     * Authenticate user with Google OAuth ID Token.
-     * 
-     * Logic:
-     * 1. Verify Google ID Token with Firebase
-     * 2. Extract email and Google ID from token
-     * 3. Find user by email or Google ID
-     * 4. If user not found → access denied
-     * 5. Check account status (must be ACTIVE)
-     * 6. Create session and generate tokens
-     * 
-     * @param request Google ID token and device info
-     * @param ipAddress Client IP address
-     * @param userAgent User agent string
-     * @return JWT tokens and user info
-     */
-    LoginResponse loginWithGoogle(GoogleLoginRequest request, String ipAddress, String userAgent);
 
     // ==================== UC-07: Forgot Password ====================
     

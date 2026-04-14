@@ -41,9 +41,6 @@ public class AdminUserDetailResponse {
     @Schema(description = "Account status", example = "ACTIVE")
     private UserStatus status;
 
-    @Schema(description = "Authentication provider (LOCAL or GOOGLE)", example = "LOCAL")
-    private String authProvider;
-
     @Schema(description = "Email verification status")
     private Boolean emailVerified;
 

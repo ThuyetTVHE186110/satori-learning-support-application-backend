@@ -12,8 +12,6 @@ import com.fu.user.security.JwtService;
 import com.fu.user.service.AuthService;
 import com.fu.user.service.LoginAttemptService;
 import com.fu.user.util.DeviceDetector;
-import com.google.firebase.auth.FirebaseAuth;
-import com.google.firebase.auth.FirebaseToken;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,7 +28,7 @@ import java.util.stream.Collectors;
 
 /**
  * Implementation of AuthService.
- * Handles all authentication use cases (UC-06, UC-07, UC-09, UC-10).
+ * Handles all authentication use cases (UC-06, UC-07, UC-10).
  */
 @Slf4j
 @Service
@@ -43,8 +41,6 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final EmailService emailService;
-    // Firebase Auth is optional - may be null if not configured
-    private final Optional<FirebaseAuth> firebaseAuth;
     private final LoginAttemptService loginAttemptService;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -133,45 +129,6 @@ public class AuthServiceImpl implements AuthService {
         return createSessionAndGenerateTokens(user, request.getDeviceInfo(), ipAddress, userAgent);
     }
 
-    // ==================== UC-09: Login with Google ====================
-
-    @Override
-    @Transactional
-    public LoginResponse loginWithGoogle(GoogleLoginRequest request, String ipAddress, String userAgent) {
-        log.info("Google login attempt");
-
-        // Verify Google ID token
-        FirebaseToken decodedToken = verifyGoogleIdToken(request.getIdToken());
-        String email = decodedToken.getEmail();
-        String googleId = decodedToken.getUid();
-
-        log.info("Google login - verified email: {}", email);
-
-        // Find user by Google ID or email
-        User user = userRepository.findByGoogleId(googleId)
-                .or(() -> userRepository.findByEmail(email))
-                .orElseThrow(() -> {
-                    log.warn("Google login failed - user not found: {}", email);
-                    return new BusinessException("USER_NOT_FOUND",
-                            "Email chưa được đăng ký trong hệ thống. Vui lòng liên hệ quản lý");
-                });
-
-        // Check account status
-        validateAccountStatus(user);
-
-        // Link Google ID if not already linked
-        if (user.getGoogleId() == null) {
-            user.setGoogleId(googleId);
-            user.setAuthProvider(AuthProvider.GOOGLE);
-        }
-
-        // Update last login time
-        user.setLastLoginAt(LocalDateTime.now());
-        userRepository.save(user);
-
-        return createSessionAndGenerateTokens(user, request.getDeviceInfo(), ipAddress, userAgent);
-    }
-
     // ==================== UC-07: Forgot Password ====================
 
     @Override
@@ -185,13 +142,6 @@ public class AuthServiceImpl implements AuthService {
         // Don't reveal if email exists or not (security best practice)
         if (user == null) {
             log.info("Forgot password - email not found (silent): {}", request.getEmail());
-            return;
-        }
-
-        // Check if user can reset password (not Google-only account)
-        if (user.getAuthProvider() == AuthProvider.GOOGLE && user.getPasswordHash() == null) {
-            log.info("Forgot password - Google account: {}", request.getEmail());
-            // Still don't reveal this to the user
             return;
         }
 
@@ -481,21 +431,6 @@ public class AuthServiceImpl implements AuthService {
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new BusinessException("ACCOUNT_INACTIVE",
                     "Tài khoản chưa được kích hoạt");
-        }
-    }
-
-    private FirebaseToken verifyGoogleIdToken(String idToken) {
-        if (firebaseAuth.isEmpty()) {
-            throw new BusinessException("GOOGLE_AUTH_NOT_CONFIGURED",
-                    "Đăng nhập Google chưa được cấu hình");
-        }
-
-        try {
-            return firebaseAuth.get().verifyIdToken(idToken);
-        } catch (Exception e) {
-            log.error("Failed to verify Google ID token: {}", e.getMessage());
-            throw new BusinessException("INVALID_GOOGLE_TOKEN",
-                    "Token Google không hợp lệ");
         }
     }
 

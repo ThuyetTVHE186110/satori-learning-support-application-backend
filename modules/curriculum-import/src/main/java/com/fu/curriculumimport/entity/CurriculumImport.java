@@ -95,10 +95,6 @@ public class CurriculumImport extends BaseEntity {
     @Builder.Default
     private Integer vocabularyCreated = 0;
 
-    @Column(name = "quiz_questions_created")
-    @Builder.Default
-    private Integer quizQuestionsCreated = 0;
-
     // --- Timing ---
 
     @Column(name = "queued_at")

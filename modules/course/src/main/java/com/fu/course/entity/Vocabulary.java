@@ -79,16 +79,8 @@ public class Vocabulary extends SoftDeletableEntity {
     @Column(name = "usage_notes", columnDefinition = "TEXT")
     private String usageNotes;
 
-    @Column(name = "common_collocations", columnDefinition = "jsonb")
-    @ColumnTransformer(write = "CAST(? AS jsonb)")
-    @Builder.Default
-    private String commonCollocations = "[]";
-
     @Column(name = "tags", columnDefinition = "TEXT[]")
     private String[] tags;
-
-    @Column(name = "content_hash", length = 64)
-    private String contentHash;
 
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.NAMED_ENUM)

@@ -71,10 +71,6 @@ public class ConversationSession extends BaseEntity {
     @Builder.Default
     private Integer correctionsCount = 0;
 
-    @Column(name = "duration_seconds")
-    @Builder.Default
-    private Integer durationSeconds = 0;
-
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
 

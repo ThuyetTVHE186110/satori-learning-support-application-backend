@@ -68,7 +68,7 @@ spring:
             api-key: ${OPENAI_API_KEY:}
             chat:
                 options:
-                    model: gpt-4o
+                    model: gpt-4o-mini
                     temperature: 0.7
                     max-tokens: 4096
             embedding:
@@ -137,13 +137,6 @@ app:
         otp-expiration-minutes: ${OTP_EXPIRATION_MINUTES:10}
         # Activation token expiration time in hours
         activation-token-expiration-hours: ${ACTIVATION_TOKEN_EXPIRATION_HOURS:24}
-
-    # Google OAuth / Firebase Configuration
-    google:
-        firebase:
-            enabled: ${FIREBASE_ENABLED:false}
-            credentials-file: ${FIREBASE_CREDENTIALS_FILE:}
-            project-id: ${FIREBASE_PROJECT_ID:}
 
     # Push Notification Configuration (FCM)
     notification:

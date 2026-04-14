@@ -70,10 +70,6 @@ app:
         otp-expiration-minutes: 10
         activation-token-expiration-hours: 24
 
-    google:
-        firebase:
-            enabled: ${FIREBASE_ENABLED:false}
-
     email:
         enabled: ${EMAIL_ENABLED:true}
         resend-api-key: ${RESEND_API_KEY:}
@@ -93,7 +89,7 @@ curriculum-import:
     agentic-rag:
         embedding-enabled: ${RAG_EMBEDDING_ENABLED:true}
         validation-enabled: true
-        self-reflection-enabled: true
+        self-reflection-enabled: false
         grounding-enabled: true
         parallel-processing: true
         parallel-batch-size: 2

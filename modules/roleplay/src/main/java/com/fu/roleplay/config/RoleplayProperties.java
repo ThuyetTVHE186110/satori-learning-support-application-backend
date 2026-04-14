@@ -17,6 +17,9 @@ public class RoleplayProperties {
     private int maxMessages = 50;
     private int maxActiveSessions = 3;
 
+    /** Hours of inactivity after which an ACTIVE session is auto-abandoned. */
+    private int sessionInactivityHours = 24;
+
     private Scoring scoring = new Scoring();
 
     @PostConstruct

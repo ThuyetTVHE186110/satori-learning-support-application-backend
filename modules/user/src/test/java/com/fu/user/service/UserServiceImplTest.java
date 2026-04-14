@@ -101,7 +101,7 @@ class UserServiceImplTest {
                 .displayName("Johnny")
                 .role(UserRole.LEARNER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
+
                 .failedLoginAttempts(0)
                 .build();
         ReflectionTestUtils.setField(testLearner, "id", UUID.randomUUID());
@@ -114,7 +114,7 @@ class UserServiceImplTest {
                 .lastName("Smith")
                 .role(UserRole.TEACHER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
+
                 .build();
         ReflectionTestUtils.setField(testTeacher, "id", UUID.randomUUID());
 
@@ -126,7 +126,7 @@ class UserServiceImplTest {
                 .lastName("User")
                 .role(UserRole.CONTENT_MANAGER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
+
                 .build();
         ReflectionTestUtils.setField(testContentManager, "id", contentManagerId);
         // Test operation manager
@@ -137,7 +137,7 @@ class UserServiceImplTest {
                 .lastName("User")
                 .role(UserRole.OPERATION_MANAGER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
+
                 .build();
         ReflectionTestUtils.setField(testOperationManager, "id", operationManagerId);
         // Test admin
@@ -148,7 +148,7 @@ class UserServiceImplTest {
                 .lastName("User")
                 .role(UserRole.ADMIN)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
+
                 .build();
         ReflectionTestUtils.setField(testAdmin, "id", adminId);
 

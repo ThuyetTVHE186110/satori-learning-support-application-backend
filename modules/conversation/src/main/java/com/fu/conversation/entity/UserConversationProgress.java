@@ -5,7 +5,6 @@ import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -35,26 +34,6 @@ public class UserConversationProgress extends BaseEntity {
     @Column(name = "total_sessions", nullable = false)
     @Builder.Default
     private Integer totalSessions = 0;
-
-    @Column(name = "total_messages_sent", nullable = false)
-    @Builder.Default
-    private Integer totalMessagesSent = 0;
-
-    @Column(name = "best_fluency_score", precision = 5, scale = 2)
-    @Builder.Default
-    private BigDecimal bestFluencyScore = BigDecimal.ZERO;
-
-    @Column(name = "best_accuracy_score", precision = 5, scale = 2)
-    @Builder.Default
-    private BigDecimal bestAccuracyScore = BigDecimal.ZERO;
-
-    @Column(name = "best_vocabulary_score", precision = 5, scale = 2)
-    @Builder.Default
-    private BigDecimal bestVocabularyScore = BigDecimal.ZERO;
-
-    @Column(name = "best_overall_score", precision = 5, scale = 2)
-    @Builder.Default
-    private BigDecimal bestOverallScore = BigDecimal.ZERO;
 
     @Column(name = "last_practiced_at")
     private LocalDateTime lastPracticedAt;

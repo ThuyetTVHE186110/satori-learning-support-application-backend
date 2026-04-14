@@ -87,12 +87,6 @@ app:
         swagger:
             public: false
 
-    google:
-        firebase:
-            enabled: ${FIREBASE_ENABLED:false}
-            credentials-file: ${FIREBASE_CREDENTIALS_FILE:}
-            project-id: ${FIREBASE_PROJECT_ID:}
-
     notification:
         firebase:
             enabled: ${FCM_ENABLED:false}
@@ -156,7 +150,12 @@ curriculum-import:
     agentic-rag:
         embedding-enabled: ${RAG_EMBEDDING_ENABLED:true}
         validation-enabled: true
-        self-reflection-enabled: true
+        # Self-reflection disabled: truncates source to 4000 chars then fabricates
+        # "not in source" complaints, rejecting items grounding confirms at 100%.
+        # Additionally, reflection-weight is 0.00 so even when enabled the score
+        # is discarded — running it only wastes an LLM call per chunk.
+        # Re-enable together with reflection-weight > 0 once truncation bug is fixed.
+        self-reflection-enabled: false
         grounding-enabled: true
         parallel-processing: true
         parallel-batch-size: ${RAG_PARALLEL_BATCH_SIZE:2}

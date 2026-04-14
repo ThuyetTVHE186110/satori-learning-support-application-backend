@@ -3,7 +3,6 @@ package com.fu.monitoring.service.impl;
 import com.fu.assignment.repository.AssignmentRepository;
 import com.fu.common.exception.BusinessException;
 import com.fu.monitoring.dto.AdminUserStatsDTO;
-import com.fu.user.entity.AuthProvider;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
 import com.fu.user.repository.UserRepository;
@@ -58,8 +57,6 @@ class AdminUserServiceImplTest {
         when(userRepository.countByStatus(UserStatus.SUSPENDED)).thenReturn(2L, 5L);
         when(userRepository.countByStatus(UserStatus.INACTIVE)).thenReturn(2L);
 
-        when(userRepository.countByAuthProvider(AuthProvider.LOCAL)).thenReturn(14L);
-        when(userRepository.countByAuthProvider(AuthProvider.GOOGLE)).thenReturn(3L);
         when(userRepository.findGenderDistribution()).thenReturn(Arrays.asList(
                 new Object[]{"MALE", 8L},
                 new Object[]{null, 1L}
@@ -108,7 +105,6 @@ class AdminUserServiceImplTest {
     void getUserStatistics_shouldThrowWhenTrendDateTypeIsUnsupported() {
         when(userRepository.countByRole(any())).thenReturn(1L);
         when(userRepository.countByStatus(any())).thenReturn(1L);
-        when(userRepository.countByAuthProvider(any())).thenReturn(1L);
         when(userRepository.findGenderDistribution()).thenReturn(Collections.singletonList(new Object[]{"MALE", 1L}));
         when(userRepository.countNewUsersByDateRange(any(), any())).thenReturn(1L);
         when(userRepository.findNewUserTrendByDateRange(any(LocalDate.class), any(LocalDate.class))).thenReturn(
@@ -126,7 +122,6 @@ class AdminUserServiceImplTest {
 
         when(userRepository.countByRole(any())).thenReturn(1L);
         when(userRepository.countByStatus(any())).thenReturn(1L);
-        when(userRepository.countByAuthProvider(any())).thenReturn(1L);
         when(userRepository.findGenderDistribution()).thenReturn(Collections.singletonList(new Object[]{"MALE", 1L}));
         when(userRepository.countNewUsersByDateRange(any(), any())).thenReturn(1L, 1L, 1L);
         when(userRepository.findNewUserTrendByDateRange(any(LocalDate.class), any(LocalDate.class))).thenReturn(Arrays.asList(
@@ -153,9 +148,6 @@ class AdminUserServiceImplTest {
         when(userRepository.countByStatus(UserStatus.PENDING_ACTIVATION)).thenReturn(1L);
         when(userRepository.countByStatus(UserStatus.SUSPENDED)).thenReturn(1L, 1L);
         when(userRepository.countByStatus(UserStatus.INACTIVE)).thenReturn(1L);
-
-        when(userRepository.countByAuthProvider(AuthProvider.LOCAL)).thenReturn(3L);
-        when(userRepository.countByAuthProvider(AuthProvider.GOOGLE)).thenReturn(2L);
 
         when(userRepository.findGenderDistribution()).thenReturn(Collections.singletonList(new Object[]{null, null}));
         when(userRepository.countNewUsersByDateRange(any(), any())).thenReturn(1L, 1L, 1L);
