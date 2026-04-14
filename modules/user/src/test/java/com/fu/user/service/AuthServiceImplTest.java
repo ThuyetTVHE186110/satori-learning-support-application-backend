@@ -8,6 +8,7 @@ import com.fu.user.entity.*;
 import com.fu.user.repository.UserRepository;
 import com.fu.user.repository.UserSessionRepository;
 import com.fu.user.security.JwtService;
+import com.fu.user.config.SecurityProperties;
 import com.fu.user.service.impl.AuthServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -66,6 +67,9 @@ class AuthServiceImplTest {
     @Mock
     private ApplicationEventPublisher eventPublisher;
 
+    @Mock
+    private SecurityProperties securityProperties;
+
     @InjectMocks
     private AuthServiceImpl authService;
 
@@ -111,8 +115,9 @@ class AuthServiceImplTest {
                 .build();
         ReflectionTestUtils.setField(testSession, "id", UUID.randomUUID());
         
-        // Set security config to match production defaults
-        ReflectionTestUtils.setField(authService, "otpExpirationMinutes", 10);
+        // Set security config to match production defaults (lenient — only OTP/reset tests use these)
+        lenient().when(securityProperties.getOtpExpirationMinutes()).thenReturn(10);
+        lenient().when(securityProperties.getResetTokenExpirationMinutes()).thenReturn(5);
 
     }
 
