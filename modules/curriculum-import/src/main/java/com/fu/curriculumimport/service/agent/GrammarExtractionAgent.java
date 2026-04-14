@@ -3,6 +3,7 @@ package com.fu.curriculumimport.service.agent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.curriculumimport.config.AgenticRagProperties;
 import com.fu.curriculumimport.service.agent.prompt.GrammarPromptBuilder;
 import com.fu.curriculumimport.service.agent.prompt.MarkdownGrammarSplitter;
 import com.fu.curriculumimport.service.agent.prompt.MarkdownGrammarSplitter.GrammarSection;
@@ -44,18 +45,18 @@ import java.util.Map;
 @Slf4j
 public class GrammarExtractionAgent {
 
-    /** Model used for per-section extraction. */
-    private static final String PER_SECTION_MODEL = "gpt-4o";
-
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
     private final VisionPageExtractor visionPageExtractor;
+    private final AgenticRagProperties ragProperties;
 
     public GrammarExtractionAgent(OpenAiChatModel chatModel, ObjectMapper objectMapper,
-                                   VisionPageExtractor visionPageExtractor) {
+                                   VisionPageExtractor visionPageExtractor,
+                                   AgenticRagProperties ragProperties) {
         this.chatClient = ChatClient.builder(chatModel).build();
         this.objectMapper = objectMapper;
         this.visionPageExtractor = visionPageExtractor;
+        this.ragProperties = ragProperties;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -72,7 +73,7 @@ public class GrammarExtractionAgent {
         List<GrammarSection> sections = MarkdownGrammarSplitter.split(chunk.getContent());
         if (sections.size() >= 2) {
             log.info("Chunk {}: markdown has {} numbered sections — using per-section extraction ({})",
-                    chunk.getChunkIndex(), sections.size(), PER_SECTION_MODEL);
+                    chunk.getChunkIndex(), sections.size(), ragProperties.getExtractionModel());
             return extractPerSection(sections, chunk, jlptLevel, startTime);
         }
 
@@ -86,7 +87,7 @@ public class GrammarExtractionAgent {
                     : chunk.getContent().substring(0, Math.min(80, chunk.getContent().length()));
             ExtractionResult visionResult = visionPageExtractor.extractGrammar(
                     chunk.getPageImages(), jlptLevel, lessonTopic, chunk.getChunkIndex());
-            boolean visionAccepted = visionResult.getConfidence() >= VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD
+            boolean visionAccepted = visionResult.getConfidence() >= ragProperties.getVisionConfidenceThreshold()
                     && !visionResult.getGrammarPoints().isEmpty();
             if (visionAccepted) {
                 log.info("Chunk {}: vision extracted {} grammar items (confidence={})",
@@ -100,7 +101,7 @@ public class GrammarExtractionAgent {
             } else {
                 log.info("Chunk {}: vision confidence {} below threshold {}, falling back to text LLM",
                         chunk.getChunkIndex(), visionResult.getConfidence(),
-                        VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD);
+                        ragProperties.getVisionConfidenceThreshold());
             }
         }
 
@@ -119,7 +120,7 @@ public class GrammarExtractionAgent {
         List<GrammarSection> sections = MarkdownGrammarSplitter.split(chunk.getContent());
         if (sections.size() >= 2) {
             log.info("Chunk {}: re-extraction using per-section ({} sections, {})",
-                    chunk.getChunkIndex(), sections.size(), PER_SECTION_MODEL);
+                    chunk.getChunkIndex(), sections.size(), ragProperties.getExtractionModel());
             return extractPerSection(sections, chunk, jlptLevel, startTime);
         }
 
@@ -159,7 +160,7 @@ public class GrammarExtractionAgent {
                                 .system(GrammarPromptBuilder.SINGLE_SECTION_SYSTEM_PROMPT)
                                 .user(userPrompt)
                                 .options(OpenAiChatOptions.builder()
-                                        .model(PER_SECTION_MODEL)
+                                        .model(ragProperties.getExtractionModel())
                                         .temperature(0.0).seed(42)
                                         .maxTokens(4096)
                                         .build())
@@ -266,12 +267,6 @@ public class GrammarExtractionAgent {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private <T> T parseField(Map<String, Object> parsed, String field, TypeReference<T> type) {
-        try {
-            if (!parsed.containsKey(field)) return null;
-            String json = objectMapper.writeValueAsString(parsed.get(field));
-            return objectMapper.readValue(json, type);
-        } catch (JsonProcessingException e) {
-            return null;
-        }
+        return LlmResponseUtils.parseField(objectMapper, parsed, field, type);
     }
 }

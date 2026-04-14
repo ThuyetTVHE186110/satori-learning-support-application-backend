@@ -22,7 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.swing.text.DateFormatter;
+
 import java.io.InputStream;
 import java.security.SecureRandom;
 import java.text.SimpleDateFormat;
@@ -60,7 +60,7 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class UserServiceImpl implements UserService {
 
-    private static final String EMAIL_REGEX = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$";
+    private static final String EMAIL_REGEX = com.fu.common.constant.AppConstants.EMAIL_REGEX;
     // Phone — 10 digits only
     private static final String PHONE_REGEX = "^\\d{10}$";
     // Full name (Unicode letters, spaces, hyphens, apostrophes)
@@ -434,9 +434,9 @@ public class UserServiceImpl implements UserService {
         List<UserChangedFromImportResponse> updated = new ArrayList<>();
         List<ImportRowError> errors = new ArrayList<>();
 
-        //Size limit 5MB
+        //Size limit 20MB
         if (file.getSize() > 20 * 1024 * 1024) {
-            throw new BusinessException("FILE_TOO_LARGE", "Kích thước file vượt quá giới hạn 5MB");
+            throw new BusinessException("FILE_TOO_LARGE", "Kích thước file vượt quá giới hạn 20MB");
         }
 
         try (InputStream inputStream = file.getInputStream(); Workbook workbook = WorkbookFactory.create(inputStream)) {

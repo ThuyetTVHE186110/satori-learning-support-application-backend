@@ -139,6 +139,23 @@ public class AgenticRagProperties {
      */
     private double combinedReExtractionThreshold = 0.5;
 
+    // ==================== Model & Agent Configuration ====================
+
+    /** OpenAI model for per-section grammar/vocabulary extraction. */
+    private String extractionModel = "gpt-4o";
+
+    /** OpenAI model for vision-based page extraction. */
+    private String visionModel = "gpt-4o";
+
+    /** Minimum confidence for vision extraction results. */
+    private double visionConfidenceThreshold = 0.75;
+
+    /** Per-agent timeout in minutes (for individual extraction calls). */
+    private int agentTimeoutMinutes = 4;
+
+    /** Estimated cost per token in USD (for cost estimation display). */
+    private double costPerTokenUsd = 0.0000003;
+
     /**
      * Maximum concurrent LLM calls across all imports.
      * Acts as a global semaphore to prevent OpenAI rate limit exhaustion

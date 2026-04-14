@@ -114,7 +114,7 @@ public class CurriculumQueryTools {
 
         List<String> types = (contentTypes != null && !contentTypes.isEmpty())
                 ? contentTypes
-                : List.of("VOCABULARY", "GRAMMAR", "GRAMMAR_EXPLANATION", "DIALOG", "EXAMPLE");
+                : com.fu.common.constant.ContentTypeConstants.DEFAULT_CONTENT_TYPES;
 
         ChatbotFilter filter = ChatbotFilter.builder()
                 .courseId(courseId)

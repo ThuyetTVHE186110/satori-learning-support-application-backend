@@ -495,10 +495,10 @@ public class ExerciseGeneratorAgent {
         String optionsNote = switch (itemType) {
             case MULTIPLE_CHOICE -> "array 4 object {\"text\":\"...\",\"isCorrect\":true/false} — đúng 1, sai 3";
             case FILL_BLANK      -> "array {\"text\":\"...\",\"isCorrect\":true/false} — đúng 1, nhiễu tùy số từ phù hợp";
+            case TRANSLATION     -> "array 4 object {\"text\":\"...\",\"isCorrect\":true/false} — đúng 1, sai 3 (sai nhưng trông hợp lý)";
             case TRUE_FALSE      -> "array 2 object: [{\"text\":\"Đúng\",\"isCorrect\":X},{\"text\":\"Sai\",\"isCorrect\":Y}]";
             case SENTENCE_ORDER  -> "array object — mỗi object 1 token tiếng Nhật, TẤT CẢ isCorrect=false";
             case MATCHING        -> "[] — dùng trường \"pairs\" thay thế";
-            default              -> "[] (rỗng)";
         };
         String pairsNote = itemType == PracticeItemType.MATCHING
                 ? "array {\"left\":\"tiếng Nhật\",\"right\":\"tiếng Việt\"} — 4 cặp"

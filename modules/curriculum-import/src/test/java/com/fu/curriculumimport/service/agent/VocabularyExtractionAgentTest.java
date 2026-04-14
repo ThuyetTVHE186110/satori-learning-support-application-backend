@@ -5,6 +5,7 @@ import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
 import com.fu.curriculumimport.service.ingestion.MarkdownVocabParser;
 import com.fu.curriculumimport.service.ingestion.MnNTableParser;
+import com.fu.curriculumimport.config.AgenticRagProperties;
 import com.fu.curriculumimport.service.vision.VisionPageExtractor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -66,6 +67,9 @@ class VocabularyExtractionAgentTest {
     @Mock
     private MarkdownVocabParser markdownVocabParser;
 
+    @Mock
+    private AgenticRagProperties ragProperties;
+
     @Spy
     ObjectMapper objectMapper = new ObjectMapper();
 
@@ -73,7 +77,7 @@ class VocabularyExtractionAgentTest {
 
     @BeforeEach
     void setUp() {
-        agent = new VocabularyExtractionAgent(chatModel, objectMapper, visionPageExtractor, mnNTableParser, markdownVocabParser);
+        agent = new VocabularyExtractionAgent(chatModel, objectMapper, visionPageExtractor, mnNTableParser, markdownVocabParser, ragProperties);
     }
 
     // -------------------------------------------------------------------------

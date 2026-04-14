@@ -3,6 +3,7 @@ package com.fu.curriculumimport.service.agent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.curriculumimport.config.AgenticRagProperties;
 import com.fu.curriculumimport.service.agent.prompt.VocabularyPromptBuilder;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
@@ -52,16 +53,19 @@ public class VocabularyExtractionAgent {
     private final VisionPageExtractor visionPageExtractor;
     private final MnNTableParser mnNTableParser;
     private final MarkdownVocabParser markdownVocabParser;
+    private final AgenticRagProperties ragProperties;
 
     public VocabularyExtractionAgent(OpenAiChatModel chatModel, ObjectMapper objectMapper,
                                       VisionPageExtractor visionPageExtractor,
                                       MnNTableParser mnNTableParser,
-                                      MarkdownVocabParser markdownVocabParser) {
+                                      MarkdownVocabParser markdownVocabParser,
+                                      AgenticRagProperties ragProperties) {
         this.chatClient = ChatClient.builder(chatModel).build();
         this.objectMapper = objectMapper;
         this.visionPageExtractor = visionPageExtractor;
         this.mnNTableParser = mnNTableParser;
         this.markdownVocabParser = markdownVocabParser;
+        this.ragProperties = ragProperties;
     }
 
     // ── Public API ───────────────────────────────────────────────────────────
@@ -131,7 +135,7 @@ public class VocabularyExtractionAgent {
                     : chunk.getContent().substring(0, Math.min(80, chunk.getContent().length()));
             ExtractionResult visionResult = visionPageExtractor.extractVocabulary(
                     chunk.getPageImages(), jlptLevel, lessonTopic, chunk.getChunkIndex());
-            boolean visionAccepted = visionResult.getConfidence() >= VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD
+            boolean visionAccepted = visionResult.getConfidence() >= ragProperties.getVisionConfidenceThreshold()
                     && !visionResult.getVocabulary().isEmpty();
             if (visionAccepted) {
                 log.info("Chunk {}: vision extracted {} vocab items (confidence={})",
@@ -145,7 +149,7 @@ public class VocabularyExtractionAgent {
             } else {
                 log.info("Chunk {}: vision confidence {} below threshold {}, falling back to text LLM",
                         chunk.getChunkIndex(), visionResult.getConfidence(),
-                        VisionPageExtractor.VISION_CONFIDENCE_THRESHOLD);
+                        ragProperties.getVisionConfidenceThreshold());
             }
         }
 
@@ -374,12 +378,7 @@ public class VocabularyExtractionAgent {
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private <T> T parseField(Map<String, Object> parsed, String field, TypeReference<T> type) {
-        try {
-            if (!parsed.containsKey(field)) return null;
-            return objectMapper.readValue(objectMapper.writeValueAsString(parsed.get(field)), type);
-        } catch (JsonProcessingException e) {
-            return null;
-        }
+        return LlmResponseUtils.parseField(objectMapper, parsed, field, type);
     }
 
 }

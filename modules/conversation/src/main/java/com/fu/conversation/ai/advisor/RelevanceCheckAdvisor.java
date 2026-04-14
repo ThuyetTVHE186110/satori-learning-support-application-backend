@@ -138,6 +138,6 @@ public class RelevanceCheckAdvisor implements BaseAdvisor {
     }
 
     private String truncate(String text, int maxChars) {
-        return text.length() <= maxChars ? text : text.substring(0, maxChars) + "\n...[truncated]";
+        return com.fu.common.util.TextUtils.truncate(text, maxChars, "\n...[truncated]");
     }
 }

@@ -43,4 +43,10 @@ public class ChatProperties {
      * by the nightly cleanup scheduler.
      */
     private int sessionCleanupRetentionDays = 30;
+
+    /** Max messages to load from DB for conversation memory. */
+    private int maxDbMessages = 40;
+
+    /** SSE stream timeout in milliseconds. */
+    private long sseTimeoutMs = 60000;
 }
