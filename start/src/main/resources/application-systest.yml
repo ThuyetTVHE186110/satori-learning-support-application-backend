@@ -58,7 +58,7 @@ app:
             access-token-expiration-ms: 1800000
             refresh-token-expiration-ms: 604800000
         max-failed-attempts: 5
-        lock-duration-minutes: 30
+        lock-duration-minutes: 5
         otp-expiration-minutes: 10
         activation-token-expiration-hours: 24
 

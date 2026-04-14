@@ -4,6 +4,7 @@ import com.fu.infrastructure.event.PasswordChangedEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.infrastructure.email.EmailService;
+import com.fu.user.config.SecurityProperties;
 import com.fu.user.dto.auth.*;
 import com.fu.user.entity.*;
 import com.fu.user.repository.UserRepository;
@@ -14,7 +15,6 @@ import com.fu.user.service.LoginAttemptService;
 import com.fu.user.util.DeviceDetector;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -44,12 +44,10 @@ public class AuthServiceImpl implements AuthService {
     private final LoginAttemptService loginAttemptService;
     private final ApplicationEventPublisher eventPublisher;
 
-    @Value("${app.security.otp-expiration-minutes:1}")
-    private int otpExpirationMinutes;
-    private static final String EMAIL_REGEX = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$";
+    private final SecurityProperties securityProperties;
+    private static final String EMAIL_REGEX = com.fu.common.constant.AppConstants.EMAIL_REGEX;
     private static final String OTP_CHARACTERS = "0123456789";
     private static final int OTP_LENGTH = 6;
-    private static final int RESET_TOKEN_EXPIRATION_MINUTES = 5;
 
     // ==================== UC-06: Login by Email ====================
 
@@ -60,7 +58,7 @@ public class AuthServiceImpl implements AuthService {
         log.info("Login attempt for email: {}", request.getEmail());
         // Validate email format
         if (request.getEmail() == null || request.getEmail().isBlank() || !Pattern.matches(EMAIL_REGEX, trimedEmail)) {
-            throw new BusinessException("INVALID_INCREDENTIALS",
+            throw new BusinessException("INVALID_CREDENTIALS",
                     "Sai email hoặc mật khẩu. Hãy thử lại");
         }
 
@@ -97,7 +95,8 @@ public class AuthServiceImpl implements AuthService {
         if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(LocalDateTime.now())) {
             log.warn("Login failed - account locked until: {}", user.getLockedUntil());
             throw new BusinessException("ACCOUNT_LOCKED",
-                    "Tài khoản đã bị khóa tạm thời. Vui lòng thử lại sau");
+                    String.format("Tài khoản đã bị khóa tạm thời do nhập sai mật khẩu quá %d lần. Vui lòng thử lại sau %d phút.",
+                            securityProperties.getMaxFailedAttempts(), securityProperties.getLockDurationMinutes()));
         }
 
         // A6.3: Verify password
@@ -107,7 +106,8 @@ public class AuthServiceImpl implements AuthService {
             if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(LocalDateTime.now())) {
                 log.warn("Login failed - account just locked due to max attempts: {}", trimedEmail);
                 throw new BusinessException("ACCOUNT_LOCKED",
-                        "Tài khoản đã bị khóa tạm thời. Vui lòng thử lại sau");
+                        String.format("Tài khoản đã bị khóa tạm thời do nhập sai mật khẩu quá %d lần. Vui lòng thử lại sau %d phút.",
+                                securityProperties.getMaxFailedAttempts(), securityProperties.getLockDurationMinutes()));
             } else {
                 log.warn("Login failed - wrong password for: {}", trimedEmail);
                 throw new BusinessException("INVALID_CREDENTIALS",
@@ -148,7 +148,7 @@ public class AuthServiceImpl implements AuthService {
         // Generate OTP
         String otp = generateOTP();
         user.setPasswordResetToken(otp);
-        user.setPasswordResetTokenExpiresAt(LocalDateTime.now().plusMinutes(otpExpirationMinutes));
+        user.setPasswordResetTokenExpiresAt(LocalDateTime.now().plusMinutes(securityProperties.getOtpExpirationMinutes()));
         userRepository.save(user);
 
         // Send OTP via email
@@ -156,7 +156,7 @@ public class AuthServiceImpl implements AuthService {
                 user.getEmail(),
                 user.getFullName(),
                 otp,
-                otpExpirationMinutes);
+                securityProperties.getOtpExpirationMinutes());
         log.info("OTP sent to user: {}", user.getEmail());
     }
 
@@ -184,14 +184,14 @@ public class AuthServiceImpl implements AuthService {
         // Generate reset token (UUID-based for security)
         String resetToken = UUID.randomUUID().toString();
         user.setPasswordResetToken(resetToken);
-        user.setPasswordResetTokenExpiresAt(LocalDateTime.now().plusMinutes(RESET_TOKEN_EXPIRATION_MINUTES));
+        user.setPasswordResetTokenExpiresAt(LocalDateTime.now().plusMinutes(securityProperties.getResetTokenExpirationMinutes()));
         userRepository.save(user);
 
         log.info("OTP verified successfully for: {}", user.getEmail());
 
         return VerifyOtpResponse.builder()
                 .resetToken(resetToken)
-                .expiresInSeconds(RESET_TOKEN_EXPIRATION_MINUTES * 60)
+                .expiresInSeconds(securityProperties.getResetTokenExpirationMinutes() * 60)
                 .email(user.getEmail())
                 .build();
     }

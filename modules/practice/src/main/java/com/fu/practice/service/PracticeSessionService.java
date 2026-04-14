@@ -227,7 +227,6 @@ public class PracticeSessionService {
                 .collect(Collectors.toList());
     }
 
-    @SuppressWarnings("unchecked")
     private UUID extractId(Object item) {
         if (item instanceof Vocabulary v) return v.getId();
         if (item instanceof GrammarPoint g) return g.getId();
@@ -441,17 +440,6 @@ public class PracticeSessionService {
                 .masteryLevelAfter(masteryLevelAfter)
                 .entityJapanese(entityJapanese)
                 .build();
-    }
-
-    /**
-     * Context từ session cần thiết để persist kết quả câu trả lời.
-     */
-    public record SessionItemContext(
-            PracticeItem item,
-            int completedItemsSnapshot,
-            int totalItems,
-            PracticeSessionType sessionType
-    ) {
     }
 
     // ── Complete Session ──────────────────────────────────────────────────
@@ -1506,18 +1494,6 @@ public class PracticeSessionService {
         }
 
         progressRepository.save(progress);
-    }
-
-    /**
-     * Tính rolling average giữa giá trị cũ và mới (trọng số 70% cũ, 30% mới).
-     */
-    private BigDecimal rollingAverage(BigDecimal oldValue, BigDecimal newValue) {
-        if (oldValue == null || oldValue.compareTo(BigDecimal.ZERO) == 0) {
-            return newValue.setScale(2, RoundingMode.HALF_UP);
-        }
-        BigDecimal avg = oldValue.multiply(new BigDecimal("0.7"))
-                .add(newValue.multiply(new BigDecimal("0.3")));
-        return avg.setScale(2, RoundingMode.HALF_UP);
     }
 
     private String extractFeedbackSummary(String aiFeedbackJson) {

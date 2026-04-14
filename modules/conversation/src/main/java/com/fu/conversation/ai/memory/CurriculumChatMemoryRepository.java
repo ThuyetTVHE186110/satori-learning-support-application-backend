@@ -23,7 +23,7 @@ import java.util.UUID;
 /**
  * Spring AI {@link ChatMemoryRepository} backed by the chat_messages table.
  *
- * <p>Implements a token-aware sliding window: fetches up to {@value MAX_DB_MESSAGES}
+ * <p>Implements a token-aware sliding window: fetches up to {@code maxDbMessages}
  * messages newest-first, cuts when the token budget from {@code ChatProperties}
  * is exhausted, then returns in chronological order for the advisor to inject
  * into the prompt.
@@ -44,7 +44,6 @@ import java.util.UUID;
 @Slf4j
 public class CurriculumChatMemoryRepository implements ChatMemoryRepository {
 
-    private static final int MAX_DB_MESSAGES = 40;
 
     /**
      * Minimum number of messages dropped before injecting a scope anchor.
@@ -87,7 +86,7 @@ public class CurriculumChatMemoryRepository implements ChatMemoryRepository {
         try {
             UUID sessionId = UUID.fromString(conversationId);
             List<ChatMessage> rows = chatMessageRepository.findRecentBySessionId(
-                    sessionId, PageRequest.of(0, MAX_DB_MESSAGES));
+                    sessionId, PageRequest.of(0, chatProperties.getMaxDbMessages()));
 
             if (rows.isEmpty()) return List.of();
 

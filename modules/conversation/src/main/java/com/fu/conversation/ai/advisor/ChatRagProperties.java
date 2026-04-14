@@ -125,6 +125,12 @@ public class ChatRagProperties {
      */
     private boolean hybridEnabled = true;
 
+    /** Top-K results for vector retrieval. */
+    private int retrievalTopK = 8;
+
+    /** Minimum cosine similarity floor for retrieval (below this, results are discarded). */
+    private double retrievalSimilarityFloor = 0.30;
+
     /**
      * Enable HyDE (Hypothetical Document Embeddings) for LOOKUP and EXPLAIN intents.
      *

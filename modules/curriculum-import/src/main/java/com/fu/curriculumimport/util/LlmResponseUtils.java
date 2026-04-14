@@ -1,7 +1,12 @@
 package com.fu.curriculumimport.util;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.Map;
 
 /**
  * Shared utilities for LLM response processing across all agents.
@@ -162,6 +167,21 @@ public final class LlmResponseUtils {
         if (json.isEmpty()) return false;
         char last = json.charAt(json.length() - 1);
         return last == '}' || last == ']';
+    }
+
+    /**
+     * Extract a typed field from a parsed JSON map.
+     * Re-serializes the field value and deserializes into the target type.
+     */
+    public static <T> T parseField(ObjectMapper objectMapper, Map<String, Object> parsed,
+                                   String field, TypeReference<T> type) {
+        try {
+            if (!parsed.containsKey(field)) return null;
+            String json = objectMapper.writeValueAsString(parsed.get(field));
+            return objectMapper.readValue(json, type);
+        } catch (JsonProcessingException e) {
+            return null;
+        }
     }
 
     /**

@@ -12,7 +12,7 @@ import com.fu.achievement.service.StreakService;
 import com.fu.achievement.dto.response.UserAchievementResponse;
 import com.fu.achievement.dto.response.StreakNotificationResponse;
 import com.fu.achievement.enums.BadgeType;
-import com.fu.achievement.service.impl.StreakServiceImpl;
+import com.fu.achievement.service.StreakService;
 import com.fu.infrastructure.learner.LearnerProfile;
 import com.fu.infrastructure.learner.LearnerProfileProvider;
 import com.fu.infrastructure.event.RoleplaySessionCompletedEvent;
@@ -93,7 +93,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     private final ObjectMapper objectMapper;
     private final Executor roleplayTaskExecutor;
     private final AchievementService achievementService;
-    private final StreakServiceImpl streakService;
+    private final StreakService streakService;
     private final LearningLevelService learningLevelService;
     private final ApplicationEventPublisher eventPublisher;
     private final LearnerProfileProvider learnerProfileProvider;
@@ -121,7 +121,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             @Qualifier("roleplayTaskExecutor") Executor roleplayTaskExecutor,
             AchievementService achievementService,
             LearningLevelService learningLevelService,
-            StreakServiceImpl streakService,
+            StreakService streakService,
             ApplicationEventPublisher eventPublisher,
             LearnerProfileProvider learnerProfileProvider,
             com.fu.roleplay.evaluation.ErrorPatternAggregator errorPatternAggregator,
@@ -344,22 +344,19 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         if (audio == null || audio.isEmpty()) {
             throw new BusinessException("AUDIO_REQUIRED", "Audio file is required.");
         }
-        byte[] audioBytes = null;
-        String audioContentType = null;
-        if (audio != null && !audio.isEmpty()) {
-            long maxAudioSize = 10L * 1024 * 1024; // 10MB
-            if (audio.getSize() > maxAudioSize) {
-                throw new BusinessException("AUDIO_TOO_LARGE", "Audio file must not exceed 10MB");
-            }
-            audioContentType = audio.getContentType();
-            if (audioContentType != null && !audioContentType.startsWith("audio/")) {
-                throw new BusinessException("INVALID_AUDIO", "File must be an audio file");
-            }
-            try {
-                audioBytes = audio.getBytes();
-            } catch (Exception e) {
-                throw new BusinessException("AUDIO_READ_FAILED", "Failed to read audio file: " + e.getMessage());
-            }
+        long maxAudioSize = 10L * 1024 * 1024; // 10MB
+        if (audio.getSize() > maxAudioSize) {
+            throw new BusinessException("AUDIO_TOO_LARGE", "Audio file must not exceed 10MB");
+        }
+        String audioContentType = audio.getContentType();
+        if (audioContentType != null && !audioContentType.startsWith("audio/")) {
+            throw new BusinessException("INVALID_AUDIO", "File must be an audio file");
+        }
+        byte[] audioBytes;
+        try {
+            audioBytes = audio.getBytes();
+        } catch (Exception e) {
+            throw new BusinessException("AUDIO_READ_FAILED", "Failed to read audio file: " + e.getMessage());
         }
 
         // 2. Save user message (sequence number is safe under pessimistic lock)

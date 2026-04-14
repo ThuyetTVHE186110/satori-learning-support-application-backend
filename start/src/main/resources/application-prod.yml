@@ -75,7 +75,7 @@ app:
             access-token-expiration-ms: ${JWT_ACCESS_EXPIRATION:1800000}
             refresh-token-expiration-ms: ${JWT_REFRESH_EXPIRATION:604800000}
         max-failed-attempts: 5
-        lock-duration-minutes: 30
+        lock-duration-minutes: 5
 
         cors:
             # Must be set to actual frontend URL(s) in production.

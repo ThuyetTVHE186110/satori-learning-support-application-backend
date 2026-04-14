@@ -58,8 +58,6 @@ public class ContentValidationAgent {
     private static final Pattern ROMAJI = JapaneseTextPatterns.ROMAJI;
     private static final Pattern VALID_JLPT = JapaneseTextPatterns.VALID_JLPT;
 
-    private static final double DEFAULT_CONFIDENCE_THRESHOLD = 0.6;
-
     /**
      * Full 3-layer validation: Rule-Based + Self-Reflection + Grounding.
      *
