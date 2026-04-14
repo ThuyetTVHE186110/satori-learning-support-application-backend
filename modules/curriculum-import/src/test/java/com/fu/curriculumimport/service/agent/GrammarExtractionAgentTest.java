@@ -3,6 +3,7 @@ package com.fu.curriculumimport.service.agent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.curriculumimport.service.embedding.RagContext;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
+import com.fu.curriculumimport.config.AgenticRagProperties;
 import com.fu.curriculumimport.service.vision.VisionPageExtractor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -57,6 +58,9 @@ class GrammarExtractionAgentTest {
     @Mock
     private VisionPageExtractor visionPageExtractor;
 
+    @Mock
+    private AgenticRagProperties ragProperties;
+
     @Spy
     ObjectMapper objectMapper = new ObjectMapper();
 
@@ -64,7 +68,7 @@ class GrammarExtractionAgentTest {
 
     @BeforeEach
     void setUp() {
-        agent = new GrammarExtractionAgent(chatModel, objectMapper, visionPageExtractor);
+        agent = new GrammarExtractionAgent(chatModel, objectMapper, visionPageExtractor, ragProperties);
     }
 
     // -------------------------------------------------------------------------

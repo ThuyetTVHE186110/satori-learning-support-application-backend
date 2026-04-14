@@ -59,8 +59,6 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
     // Advisor execution order — lower = runs first in before(), last in after()
     private static final int MEMORY_ADVISOR_ORDER = 10;
 
-    /** SSE stream timeout — covers the longest expected LLM generation at max tokens. */
-    private static final long SSE_TIMEOUT_MS = 60_000L;
 
     private final ChatClient chatClient;
     /**
@@ -356,7 +354,7 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
         String systemPrompt   = buildBaseSystemPrompt(session);
         Map<String, Object> toolCtx = buildToolContext(session);
 
-        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
+        SseEmitter emitter = new SseEmitter(chatProperties.getSseTimeoutMs());
 
         final UUID lessonId = session.lessonId();
 
@@ -449,7 +447,7 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
             // 3. Block the executor thread until stream finishes or times out
             boolean completed;
             try {
-                completed = latch.await(SSE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                completed = latch.await(chatProperties.getSseTimeoutMs(), TimeUnit.MILLISECONDS);
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
                 sendErrorAndComplete(emitter, "Kết nối bị gián đoạn, vui lòng thử lại.");

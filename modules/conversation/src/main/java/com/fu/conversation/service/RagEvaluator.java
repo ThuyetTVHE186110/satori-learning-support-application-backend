@@ -1,6 +1,7 @@
 package com.fu.conversation.service;
 
 import com.fu.common.ai.PromptUtils;
+import com.fu.conversation.ai.advisor.ChatRagProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
@@ -42,7 +43,6 @@ import java.util.UUID;
 @Slf4j
 public class RagEvaluator {
 
-    private static final String EVAL_MODEL = "gpt-4o-mini";
     private static final int    EVAL_MAX_TOKENS = 256;
     private static final double WEIGHT_FAITHFULNESS       = 0.40;
     private static final double WEIGHT_CONTEXT_RELEVANCE  = 0.30;
@@ -50,10 +50,13 @@ public class RagEvaluator {
 
     private final JdbcTemplate     jdbcTemplate;
     private final ChatClient       evalClient;
+    private final ChatRagProperties chatRagProperties;
 
-    public RagEvaluator(JdbcTemplate jdbcTemplate, OpenAiChatModel chatModel) {
+    public RagEvaluator(JdbcTemplate jdbcTemplate, OpenAiChatModel chatModel,
+                         ChatRagProperties chatRagProperties) {
         this.jdbcTemplate = jdbcTemplate;
         this.evalClient = ChatClient.builder(chatModel).build();
+        this.chatRagProperties = chatRagProperties;
     }
 
     // ── Public API ─────────────────────────────────────────────────────────
@@ -94,7 +97,7 @@ public class RagEvaluator {
                     userQuestion, retrievedContext, aiResponse,
                     faithfulness, contextRelevance, answerRelevance, composite,
                     intent, retrievalStrategy, contextItemCount, maxSimilarity,
-                    EVAL_MODEL, null);
+                    chatRagProperties.getCheckModel(), null);
 
             log.debug("RAG eval session={} intent={} F={} CR={} AR={} composite={}",
                     sessionId, intent,
@@ -110,7 +113,7 @@ public class RagEvaluator {
                         userQuestion, retrievedContext, aiResponse,
                         null, null, null, null,
                         intent, retrievalStrategy, contextItemCount, maxSimilarity,
-                        EVAL_MODEL, e.getMessage());
+                        chatRagProperties.getCheckModel(), e.getMessage());
             } catch (Exception ignored) {
                 // Evaluation is best-effort; never propagate failures
             }
@@ -240,7 +243,7 @@ public class RagEvaluator {
             return evalClient.prompt()
                     .user(prompt)
                     .options(OpenAiChatOptions.builder()
-                            .model(EVAL_MODEL)
+                            .model(chatRagProperties.getCheckModel())
                             .maxTokens(EVAL_MAX_TOKENS)
                             .temperature(0.0)
                             .build())
@@ -272,7 +275,6 @@ public class RagEvaluator {
     }
 
     private String truncate(String text, int maxLen) {
-        if (text == null) return null;
-        return text.length() <= maxLen ? text : text.substring(0, maxLen);
+        return com.fu.common.util.TextUtils.truncate(text, maxLen);
     }
 }

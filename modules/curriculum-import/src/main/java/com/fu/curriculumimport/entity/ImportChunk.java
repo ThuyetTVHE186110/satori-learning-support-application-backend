@@ -81,9 +81,6 @@ public class ImportChunk extends BaseEntity {
     @Column(name = "extraction_confidence", precision = 3, scale = 2)
     private BigDecimal extractionConfidence;
 
-    @Column(name = "embedding_id")
-    private UUID embeddingId;
-
     @Column(name = "token_count")
     private Integer tokenCount;
 

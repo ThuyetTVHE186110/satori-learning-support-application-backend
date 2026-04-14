@@ -471,13 +471,13 @@ public class RetrievalAdvisor implements BaseAdvisor {
     private ChatbotFilter buildFilter(UUID courseId, UUID lessonId, List<String> preferredTypes) {
         List<String> types = (preferredTypes != null && !preferredTypes.isEmpty())
                 ? preferredTypes
-                : List.of("VOCABULARY", "GRAMMAR", "GRAMMAR_EXPLANATION", "DIALOG", "EXAMPLE");
+                : com.fu.common.constant.ContentTypeConstants.DEFAULT_CONTENT_TYPES;
         return ChatbotFilter.builder()
                 .courseId(courseId)
                 .lessonId(lessonId)
                 .contentTypes(types)
-                .similarityThreshold(0.30)
-                .topK(8)
+                .similarityThreshold(ragProperties.getRetrievalSimilarityFloor())
+                .topK(ragProperties.getRetrievalTopK())
                 .build();
     }
 
@@ -597,7 +597,7 @@ public class RetrievalAdvisor implements BaseAdvisor {
     }
 
     private String truncate(String text, int maxChars) {
-        return text.length() <= maxChars ? text : text.substring(0, maxChars) + "...";
+        return com.fu.common.util.TextUtils.truncate(text, maxChars, "...");
     }
 
     private UUID getUuidParam(ChatClientRequest request, String key) {

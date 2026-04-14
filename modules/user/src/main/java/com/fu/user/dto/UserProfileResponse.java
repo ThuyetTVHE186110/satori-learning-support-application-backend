@@ -1,6 +1,5 @@
 package com.fu.user.dto;
 
-import com.fu.user.entity.AuthProvider;
 import com.fu.user.entity.Gender;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
@@ -43,7 +42,6 @@ public class UserProfileResponse {
     // ── Account meta ────────────────────────────────────────────────────────
     private UserRole role;
     private UserStatus status;
-    private AuthProvider authProvider;
     private boolean emailVerified;
 
     // ── Timestamps ──────────────────────────────────────────────────────────

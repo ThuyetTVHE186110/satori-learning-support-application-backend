@@ -68,7 +68,7 @@ spring:
             api-key: ${OPENAI_API_KEY:}
             chat:
                 options:
-                    model: gpt-4o
+                    model: gpt-4o-mini
                     temperature: 0.7
                     max-tokens: 4096
             embedding:
@@ -131,19 +131,28 @@ app:
             public: ${SWAGGER_PUBLIC:true}
         # Max failed login attempts before account lock
         max-failed-attempts: ${MAX_FAILED_ATTEMPTS:5}
-        # Account lock duration in minutes
-        lock-duration-minutes: ${LOCK_DURATION_MINUTES:30}
+        # Account lock duration in minutes (reduced from 30 to 15 for better UX)
+        lock-duration-minutes: ${LOCK_DURATION_MINUTES:5}
         # OTP expiration time in minutes
         otp-expiration-minutes: ${OTP_EXPIRATION_MINUTES:10}
+        # Password reset token expiration in minutes
+        reset-token-expiration-minutes: ${RESET_TOKEN_EXPIRATION_MINUTES:5}
         # Activation token expiration time in hours
         activation-token-expiration-hours: ${ACTIVATION_TOKEN_EXPIRATION_HOURS:24}
-
-    # Google OAuth / Firebase Configuration
-    google:
-        firebase:
-            enabled: ${FIREBASE_ENABLED:false}
-            credentials-file: ${FIREBASE_CREDENTIALS_FILE:}
-            project-id: ${FIREBASE_PROJECT_ID:}
+        # Per-IP rate limits for public auth endpoints
+        rate-limits:
+            login:
+                max-requests: ${AUTH_RATE_LOGIN_MAX:10}
+                window-minutes: ${AUTH_RATE_LOGIN_WINDOW:1}
+            forgot-password:
+                max-requests: ${AUTH_RATE_FORGOT_MAX:3}
+                window-minutes: ${AUTH_RATE_FORGOT_WINDOW:10}
+            register:
+                max-requests: ${AUTH_RATE_REGISTER_MAX:5}
+                window-minutes: ${AUTH_RATE_REGISTER_WINDOW:1}
+            verify-otp:
+                max-requests: ${AUTH_RATE_OTP_MAX:5}
+                window-minutes: ${AUTH_RATE_OTP_WINDOW:5}
 
     # Push Notification Configuration (FCM)
     notification:
@@ -288,6 +297,40 @@ curriculum-import:
         # Combined score below this triggers re-extraction
         combined-re-extraction-threshold: ${RAG_COMBINED_RE_EXTRACTION_THRESHOLD:0.5}
 
+        # ===== Model & Agent Configuration =====
+        # OpenAI model for per-section grammar/vocabulary extraction
+        extraction-model: ${RAG_EXTRACTION_MODEL:gpt-4o}
+        # OpenAI model for vision-based page extraction
+        vision-model: ${RAG_VISION_MODEL:gpt-4o}
+        # Minimum confidence for vision extraction results
+        vision-confidence-threshold: ${RAG_VISION_CONFIDENCE:0.75}
+        # Per-agent timeout in minutes
+        agent-timeout-minutes: ${RAG_AGENT_TIMEOUT:4}
+        # Estimated cost per token in USD (for cost estimation display)
+        cost-per-token-usd: ${RAG_COST_PER_TOKEN:0.0000003}
+        # Max concurrent LLM calls across all imports
+        max-concurrent-llm-calls: ${RAG_MAX_CONCURRENT_LLM:6}
+        # Per-batch timeout in minutes for parallel chunk processing
+        batch-timeout-minutes: ${RAG_BATCH_TIMEOUT:15}
+        # Minutes an import can stay in processing state before being considered stuck
+        stuck-import-threshold-minutes: ${RAG_STUCK_THRESHOLD:120}
+
+# ==================== Practice Module Configuration ====================
+practice:
+    llm-timeout-seconds: ${PRACTICE_LLM_TIMEOUT:120}
+    rag-timeout-seconds: ${PRACTICE_RAG_TIMEOUT:3}
+    anti-repeat-window-hours: ${PRACTICE_ANTI_REPEAT_HOURS:24}
+    ema-alpha: ${PRACTICE_EMA_ALPHA:0.4}
+    initial-ema: ${PRACTICE_INITIAL_EMA:0.5}
+    mastery-thresholds: 0.40,0.70,0.90
+    mastery-weights:
+        accuracy: 0.30
+        ema: 0.50
+        streak: 0.20
+    score-tiers:
+        excellent: 80
+        good: 60
+
 # ==================== Conversation Module Configuration ====================
 conversation:
     chat:
@@ -303,6 +346,10 @@ conversation:
         rate-limit-max-requests: ${CHAT_RATE_LIMIT_MAX_REQUESTS:20}
         # Duration of the rate-limit window in minutes
         rate-limit-window-minutes: ${CHAT_RATE_LIMIT_WINDOW_MINUTES:1}
+        # Max messages to fetch from DB for conversation history
+        max-db-messages: ${CHAT_MAX_DB_MESSAGES:40}
+        # SSE timeout in milliseconds for streaming responses
+        sse-timeout-ms: ${CHAT_SSE_TIMEOUT_MS:60000}
         # ACTIVE sessions older than this are marked ABANDONED by the nightly cleanup scheduler
         session-cleanup-retention-days: ${CHAT_SESSION_CLEANUP_RETENTION_DAYS:30}
     rag:
@@ -335,6 +382,10 @@ conversation:
         # Enable hybrid retrieval (dense HNSW + sparse pg_trgm) with RRF fusion
         # Requires migration 49-bm25-hybrid-index.sql; disable if pg_trgm is not installed
         hybrid-enabled: ${CHAT_RAG_HYBRID_ENABLED:true}
+        # Top-K results for vector retrieval
+        retrieval-top-k: ${CHAT_RAG_RETRIEVAL_TOP_K:8}
+        # Minimum cosine similarity floor for retrieval (below this, results are discarded)
+        retrieval-similarity-floor: ${CHAT_RAG_RETRIEVAL_FLOOR:0.30}
         # Enable HyDE (Hypothetical Document Embeddings) for LOOKUP/EXPLAIN intents
         # Generates a short hypothetical curriculum entry before embedding → +5-15% cosine similarity
         hyde-enabled: ${CHAT_RAG_HYDE_ENABLED:true}
@@ -359,7 +410,24 @@ pronunciation:
 roleplay:
     max-messages: ${ROLEPLAY_MAX_MESSAGES:50}
     max-active-sessions: ${ROLEPLAY_MAX_ACTIVE_SESSIONS:3}
+    # AI model for roleplay conversation
+    model-name: ${ROLEPLAY_MODEL:gpt-4.1-mini}
+    # AI model for evaluation (mission + session)
+    evaluator-model: ${ROLEPLAY_EVALUATOR_MODEL:gpt-4.1-mini}
+    # Redis session TTL in hours
+    redis-session-ttl-hours: ${ROLEPLAY_REDIS_TTL:2}
+    # Max context messages for AI conversation
+    max-context-messages: ${ROLEPLAY_MAX_CONTEXT:20}
+    # Max messages for evaluation input
+    max-eval-messages: ${ROLEPLAY_MAX_EVAL:20}
+    # Max audio file size in MB
+    max-audio-size-mb: ${ROLEPLAY_MAX_AUDIO_MB:10}
     scoring:
         mission-weight: ${ROLEPLAY_MISSION_WEIGHT:0.35}
         pronunciation-weight: ${ROLEPLAY_PRONUNCIATION_WEIGHT:0.30}
         language-weight: ${ROLEPLAY_LANGUAGE_WEIGHT:0.35}
+    evaluation-weights:
+        accuracy: 0.30
+        pronunciation: 0.25
+        task-completion: 0.30
+        complexity: 0.15

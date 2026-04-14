@@ -68,7 +68,6 @@ public class ProfileServiceImpl implements ProfileService {
                 .gender(user.getGender())
                 .role(user.getRole())
                 .status(user.getStatus())
-                .authProvider(user.getAuthProvider())
                 .emailVerified(user.getEmailVerifiedAt() != null)
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())

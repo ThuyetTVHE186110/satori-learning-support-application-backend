@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.common.ai.PromptFragment;
 import com.fu.common.ai.PromptUtils;
+import com.fu.roleplay.config.RoleplayProperties;
 import com.fu.roleplay.entity.ConversationMessage;
 import com.fu.roleplay.entity.SessionMission;
 import lombok.extern.slf4j.Slf4j;
@@ -38,22 +39,22 @@ public class MissionEvaluatorAI {
             If they clearly accomplish the criteria, mark COMPLETED.
             """;
 
-    private static final String EVALUATOR_MODEL = "gpt-4.1-mini";
-    private static final int MAX_EVAL_MESSAGES = 20;
-
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
+    private final RoleplayProperties roleplayProperties;
 
-    public MissionEvaluatorAI(OpenAiChatModel chatModel, ObjectMapper objectMapper) {
+    public MissionEvaluatorAI(OpenAiChatModel chatModel, ObjectMapper objectMapper,
+                               RoleplayProperties roleplayProperties) {
         this.chatClient = ChatClient.builder(chatModel).build();
         this.objectMapper = objectMapper;
+        this.roleplayProperties = roleplayProperties;
     }
 
     public List<MissionProgress> evaluateProgress(List<ConversationMessage> history,
                                                    String latestMessage,
                                                    List<SessionMission> missions) {
         try {
-            List<ConversationMessage> recentHistory = PromptUtils.slidingTail(history, MAX_EVAL_MESSAGES);
+            List<ConversationMessage> recentHistory = PromptUtils.slidingTail(history, roleplayProperties.getMaxEvalMessages());
 
             StringBuilder userPrompt = new StringBuilder();
             userPrompt.append("CONVERSATION HISTORY:\n");
@@ -74,7 +75,7 @@ public class MissionEvaluatorAI {
             }
 
             String rawResponse = chatClient.prompt()
-                    .options(OpenAiChatOptions.builder().model(EVALUATOR_MODEL).build())
+                    .options(OpenAiChatOptions.builder().model(roleplayProperties.getEvaluatorModel()).build())
                     .system(MISSION_EVAL_SYSTEM_PROMPT)
                     .user(userPrompt.toString())
                     .call()

@@ -8,9 +8,8 @@ import com.fu.user.entity.*;
 import com.fu.user.repository.UserRepository;
 import com.fu.user.repository.UserSessionRepository;
 import com.fu.user.security.JwtService;
+import com.fu.user.config.SecurityProperties;
 import com.fu.user.service.impl.AuthServiceImpl;
-import com.google.firebase.auth.FirebaseAuth;
-import com.google.firebase.auth.FirebaseToken;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -41,7 +40,6 @@ import static org.mockito.Mockito.anyInt;
  * - UC-06: Login with email/password
  * - UC-07: Forgot password (send OTP)
  * - UC-08: Reset password and change password
- * - UC-09: Google authentication
  * - UC-10: Logout
  */
 @ExtendWith(MockitoExtension.class)
@@ -64,13 +62,13 @@ class AuthServiceImplTest {
     private EmailService emailService;
 
     @Mock
-    private FirebaseAuth firebaseAuth;
-
-    @Mock
     private LoginAttemptService loginAttemptService;
 
     @Mock
     private ApplicationEventPublisher eventPublisher;
+
+    @Mock
+    private SecurityProperties securityProperties;
 
     @InjectMocks
     private AuthServiceImpl authService;
@@ -99,7 +97,6 @@ class AuthServiceImplTest {
                 .displayName("Tester")
                 .role(UserRole.LEARNER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build();
         ReflectionTestUtils.setField(testUser, "id", userId);
@@ -118,11 +115,10 @@ class AuthServiceImplTest {
                 .build();
         ReflectionTestUtils.setField(testSession, "id", UUID.randomUUID());
         
-        // Set security config to match production defaults
-        ReflectionTestUtils.setField(authService, "otpExpirationMinutes", 10);
+        // Set security config to match production defaults (lenient — only OTP/reset tests use these)
+        lenient().when(securityProperties.getOtpExpirationMinutes()).thenReturn(10);
+        lenient().when(securityProperties.getResetTokenExpirationMinutes()).thenReturn(5);
 
-        // Inject Optional<FirebaseAuth> for Google auth tests
-        ReflectionTestUtils.setField(authService, "firebaseAuth", Optional.of(firebaseAuth));
     }
 
     @Nested
@@ -596,23 +592,6 @@ class AuthServiceImplTest {
                     anyInt());
         }
 
-        @Test
-        @DisplayName("Should silently handle Google auth user")
-        void shouldHandleGoogleAuthUserSilently() {
-            // Given
-            testUser.setAuthProvider(AuthProvider.GOOGLE);
-            testUser.setPasswordHash(null); // Google-only account
-            ForgotPasswordRequest request = new ForgotPasswordRequest();
-            request.setEmail("test@example.com");
-
-            given(userRepository.findActiveByEmail(request.getEmail())).willReturn(Optional.of(testUser));
-
-            // When/Then - Should not throw exception or send email
-            assertThatNoException().isThrownBy(() -> authService.forgotPassword(request));
-
-            verify(emailService, never()).sendPasswordResetOtp(anyString(), anyString(), anyString(),
-                    anyInt());
-        }
     }
 
     @Nested
@@ -855,24 +834,6 @@ class AuthServiceImplTest {
             verify(userRepository, never()).save(any(User.class));
         }
 
-        @Test
-        @DisplayName("Should reject change password for Google auth user without password")
-        void shouldRejectChangePasswordForGoogleUser() {
-            // Given
-            testUser.setAuthProvider(AuthProvider.GOOGLE);
-            testUser.setPasswordHash(null); // Google-only account
-            ChangePasswordRequest request = new ChangePasswordRequest();
-            request.setCurrentPassword("password");
-            request.setNewPassword("newPassword");
-
-            given(userRepository.findById(userId)).willReturn(Optional.of(testUser));
-
-            // When/Then
-            UUID currentSessionId = UUID.randomUUID();
-            assertThatThrownBy(() -> authService.changePassword(userId, request, currentSessionId))
-                    .isInstanceOf(BusinessException.class);
-        }
-
         // Java
         @Test
         @DisplayName("TC06: Should reject change password when new password matches current password")
@@ -954,79 +915,6 @@ class AuthServiceImplTest {
         }
     }
 
-
-    @Nested
-    @DisplayName("UC-09: Google Authentication Tests")
-    class GoogleAuthTests {
-
-        @Test
-        @DisplayName("Should login existing Google user successfully")
-        void shouldLoginExistingGoogleUser() throws Exception {
-            // Given
-            testUser.setAuthProvider(AuthProvider.GOOGLE);
-            testUser.setGoogleId("google-user-id");
-
-            GoogleLoginRequest request = new GoogleLoginRequest();
-            request.setIdToken("firebase-id-token");
-            request.setDeviceInfo(deviceInfo);
-
-            FirebaseToken mockToken = mock(FirebaseToken.class);
-            given(firebaseAuth.verifyIdToken(request.getIdToken())).willReturn(mockToken);
-            given(mockToken.getEmail()).willReturn("test@example.com");
-            given(mockToken.getUid()).willReturn("google-user-id");
-
-            given(userRepository.findByGoogleId("google-user-id")).willReturn(Optional.of(testUser));
-            given(jwtService.generateAccessToken(eq(testUser), any(UUID.class))).willReturn("access-token");
-            given(jwtService.generateRefreshToken(any(UUID.class))).willReturn("refresh-token");
-            given(sessionRepository.save(any(UserSession.class))).willReturn(testSession);
-
-            // When
-            LoginResponse result = authService.loginWithGoogle(request, "127.0.0.1", "Chrome");
-
-            // Then
-            assertThat(result).isNotNull();
-            assertThat(result.getAccessToken()).isNotNull();
-            verify(userRepository).save(any(User.class)); // Update lastLoginAt
-        }
-
-        @Test
-        @DisplayName("Should reject Google login for non-existent user")
-        void shouldRejectNonExistentGoogleUser() throws Exception {
-            // Given
-            GoogleLoginRequest request = new GoogleLoginRequest();
-            request.setIdToken("firebase-id-token");
-            request.setDeviceInfo(deviceInfo);
-
-            FirebaseToken mockToken = mock(FirebaseToken.class);
-            given(firebaseAuth.verifyIdToken(request.getIdToken())).willReturn(mockToken);
-            given(mockToken.getEmail()).willReturn("newuser@gmail.com");
-            given(mockToken.getUid()).willReturn("new-google-id");
-
-            given(userRepository.findByGoogleId("new-google-id")).willReturn(Optional.empty());
-            given(userRepository.findByEmail("newuser@gmail.com")).willReturn(Optional.empty());
-
-            // When/Then
-            assertThatThrownBy(() -> authService.loginWithGoogle(request, "127.0.0.1", "Chrome"))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("chưa được đăng ký");
-        }
-
-        @Test
-        @DisplayName("Should reject invalid Firebase token")
-        void shouldRejectInvalidFirebaseToken() throws Exception {
-            // Given
-            GoogleLoginRequest request = new GoogleLoginRequest();
-            request.setIdToken("invalid-token");
-            request.setDeviceInfo(deviceInfo);
-
-            given(firebaseAuth.verifyIdToken(request.getIdToken()))
-                    .willThrow(new RuntimeException("Invalid token"));
-
-            // When/Then
-            assertThatThrownBy(() -> authService.loginWithGoogle(request, "127.0.0.1", "Chrome"))
-                    .isInstanceOf(BusinessException.class);
-        }
-    }
 
     @Nested
     @DisplayName("UC-10: Logout Tests")

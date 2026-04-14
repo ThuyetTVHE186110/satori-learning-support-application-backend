@@ -11,4 +11,7 @@ public final class AppConstants {
     public static final String DEFAULT_SORT_DIRECTION = "asc";
 
     public static final int MAX_PAGE_SIZE = 100;
+
+    /** Standard email validation regex shared across modules. */
+    public static final String EMAIL_REGEX = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$";
 }

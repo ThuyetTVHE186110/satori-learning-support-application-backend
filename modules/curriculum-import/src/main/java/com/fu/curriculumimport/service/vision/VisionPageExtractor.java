@@ -2,6 +2,7 @@ package com.fu.curriculumimport.service.vision;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fu.curriculumimport.config.AgenticRagProperties;
 import com.fu.curriculumimport.service.agent.ExtractionResult;
 import com.fu.curriculumimport.util.LlmResponseUtils;
 import com.fu.curriculumimport.util.LlmStreamCollector;
@@ -38,26 +39,21 @@ import java.util.Map;
 @Slf4j
 public class VisionPageExtractor {
 
-    private static final String GPT4O_MODEL = "gpt-4o";
-
     /**
      * Maximum number of page images sent per API call.
      * A4 at 300 DPI encodes to ~200–500 KB JPEG; 4 pages ≈ 1–2 MB.
      */
     private static final int MAX_IMAGES_PER_CALL = 4;
 
-    /**
-     * Minimum confidence returned by vision extraction to accept the result
-     * without falling back to the text-based LLM path.
-     */
-    public static final double VISION_CONFIDENCE_THRESHOLD = 0.75;
-
     private final ChatClient gpt4oChatClient;
     private final ObjectMapper objectMapper;
+    private final AgenticRagProperties ragProperties;
 
-    public VisionPageExtractor(OpenAiChatModel gpt4oChatModel, ObjectMapper objectMapper) {
+    public VisionPageExtractor(OpenAiChatModel gpt4oChatModel, ObjectMapper objectMapper,
+                                AgenticRagProperties ragProperties) {
         this.gpt4oChatClient = ChatClient.builder(gpt4oChatModel).build();
         this.objectMapper    = objectMapper;
+        this.ragProperties   = ragProperties;
         log.info("VisionPageExtractor: provider = GPT-4o Vision");
     }
 
@@ -90,7 +86,7 @@ public class VisionPageExtractor {
                             .system(VisionExtractionPrompts.VOCABULARY_SYSTEM_PROMPT)
                             .messages(userMessage)
                             .options(OpenAiChatOptions.builder()
-                                    .model(GPT4O_MODEL)
+                                    .model(ragProperties.getVisionModel())
                                     .maxTokens(16384)
                                     .build())
                             .stream()
@@ -131,7 +127,7 @@ public class VisionPageExtractor {
                             .system(VisionExtractionPrompts.GRAMMAR_SYSTEM_PROMPT)
                             .messages(userMessage)
                             .options(OpenAiChatOptions.builder()
-                                    .model(GPT4O_MODEL)
+                                    .model(ragProperties.getVisionModel())
                                     .maxTokens(16384)
                                     .build())
                             .stream()
@@ -225,12 +221,7 @@ public class VisionPageExtractor {
     }
 
     private <T> T parseField(Map<String, Object> parsed, String field, TypeReference<T> type) {
-        try {
-            if (!parsed.containsKey(field)) return null;
-            return objectMapper.readValue(objectMapper.writeValueAsString(parsed.get(field)), type);
-        } catch (Exception e) {
-            return null;
-        }
+        return LlmResponseUtils.parseField(objectMapper, parsed, field, type);
     }
 
     private ExtractionResult emptyResult(int chunkIndex, long ms) {

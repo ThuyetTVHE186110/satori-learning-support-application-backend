@@ -9,11 +9,11 @@ import java.util.concurrent.Executor;
 
 @Configuration
 @EnableAsync
-public class AsyngConfig {
+public class AsyncConfig {
     @Bean(name = "mailExecutor")
     public Executor mailExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(5); // Chỉ cho phép 5 luồng gửi mail đồng thời
+        executor.setCorePoolSize(5);
         executor.setMaxPoolSize(10);
         executor.setQueueCapacity(500);
         executor.setThreadNamePrefix("MailThread-");
