@@ -1,0 +1,472 @@
+================================================================================
+SATORI LEARNING SYSTEM - COMPLETE MOCK DATA SUMMARY
+================================================================================
+Generated: April 8, 2026
+Total Data Sources: 9 SQL Files
+
+================================================================================
+1. CONVERSATION THEMES & TOPICS
+================================================================================
+
+THEME 1: DAILY LIFE IN JAPAN (Cuộc Sống Hàng Ngày tại Nhật Bản)
+  ID: a1000000-0000-0000-0000-000000000001
+  Category: daily_life | JLPT Level: N5 | Status: PUBLISHED
+  Description: Practice everyday conversations for living in Japan: greetings, dining, shopping, and making plans with friends.
+
+  Topics under this theme:
+    • Self Introduction (Tự Giới Thiệu)
+    • At a Restaurant (Tại Nhà Hàng) - 3 missions
+    • Shopping (Đi Mua Sắm) - 3 missions
+    • Making Plans (Lên Kế Hoạch Với Bạn Bè)
+    • Talking About Hobbies (Nói Về Sở Thích)
+    • At the Convenience Store (Tại Cửa Hàng Tiện Lợi)
+
+THEME 2: TRAVEL & SIGHTSEEING IN JAPAN (Du Lịch và Tham Quan tại Nhật Bản)
+  ID: a1000000-0000-0000-0000-000000000002
+  Category: travel | JLPT Level: N4 | Status: PUBLISHED
+  Description: Navigate Japan confidently: ask for directions, check into hotels, use public transport, and explore tourist spots.
+
+  Topics under this theme:
+    • Asking Directions (Hỏi Đường) - 3 missions
+    • At the Hotel (Tại Khách Sạn) - 3 missions
+    • At the Train Station (Tại Ga Xe Lửa)
+    • Buying Souvenirs (Mua Quà Lưu Niệm)
+
+THEME 3: WORK & STUDY (Công Việc và Học Tập)
+  ID: a1000000-0000-0000-0000-000000000003
+  Category: work | JLPT Level: N3 | Status: PUBLISHED
+  Description: Communicate professionally in a Japanese workplace or school: meetings, presentations, and academic discussions.
+
+  Topics under this theme:
+    • Job Interview (Phỏng Vấn Tuyển Dụng)
+    • Office Small Talk (Trò Chuyện Văn Phòng)
+
+THEME 4: HEALTH & MEDICAL (Sức Khỏe và Y Tế)
+  ID: a1000000-0000-0000-0000-000000000004
+  Category: health | JLPT Level: N4 | Status: PUBLISHED
+  Description: Handle health-related situations in Japan: visiting a doctor, describing symptoms, and buying medicine at a pharmacy.
+
+  Topics under this theme:
+    • At the Doctor (Tại Bệnh Viện)
+    • At the Pharmacy (Tại Hiệu Thuốc)
+
+TOTAL CONVERSATION MISSIONS:
+  - At a Restaurant: 3 missions (Greet & Get Seated, Order Food, Pay the Bill)
+  - Shopping: 3 missions (Ask About Items, Try On & Decide, Complete Purchase)
+  - Asking Directions: 3 missions (Approach & Ask, Understand Directions, Confirm & Thank)
+  - At the Hotel: 3 missions (Complete Check-in, Ask About Facilities, Report Room Issues)
+  - General Practice Topic (ID: 6fa528b5-efd6-40ef-9658-fc1e0ca2c9fe): 3 missions
+  - Other topics: Additional missions for various scenarios
+
+================================================================================
+2. CLASSES & COURSES
+================================================================================
+
+COURSE 1: Tiếng Nhật N5 cơ bản (Basic Japanese N5)
+  ID: d0000000-0000-0000-0000-000000000001
+  JLPT Level: N5 | Status: ACTIVE | Order Index: 1
+  Description: Khóa học tiếng Nhật trình độ N5 dành cho người mới bắt đầu.
+
+COURSE 2: Tiếng Nhật N4 nâng cao (Advanced Japanese N4)
+  ID: d0000000-0000-0000-0000-000000000002
+  JLPT Level: N4 | Status: ACTIVE | Order Index: 2
+  Description: Khóa học tiếng Nhật trình độ N4 dành cho người đã học N5.
+
+---
+
+ACTIVE CLASS: Lớp Tiếng Nhật N5 - Cấp tốc
+  ID: c0000000-0000-0000-0000-000000000001
+  Course: Tiếng Nhật N5 cơ bản | Max Students: 30
+  Status: ACTIVE
+  Description: Lớp học dành cho người mới bắt đầu, tập trung vào giao tiếp và JLPT N5.
+  Teacher: Tanaka Sensei (a0000000-0000-0000-0000-000000000003)
+  Students:
+    • learner1@test.satori.com (Nguyen Van A)
+    • learner2@test.satori.com (Tran Thi B)
+
+CLOSED CLASS: Lớp N4 - Khóa tháng 1 2026
+  ID: c0000000-0000-0000-0000-000000000002
+  Course: Tiếng Nhật N4 nâng cao | Max Students: 20
+  Status: CLOSED
+  Start Date: 30 days ago | End Date: 10 days ago
+  Description: Lớp học tiếng Nhật N4 đã kết thúc vào tháng 12 năm ngoái.
+  Teacher: Tanaka Sensei (a0000000-0000-0000-0000-000000000003)
+  Students (Historical):
+    • learner1@test.satori.com (Nguyen Van A)
+    • suspended@test.satori.com (Suspended User)
+    • inactive@test.satori.com (Inactive User)
+
+---
+
+LESSONS CREATED:
+  Lesson 1: Chào hỏi cơ bản (あいさつ)
+    ID: f0000000-0000-0000-0000-000000000001
+    Course: N5 Basic | Order: 1 | Status: PUBLISHED
+    Description: Các mẫu câu chào hỏi thông dụng trong tiếng Nhật.
+
+  Lesson 2: Giới thiệu bản thân (自己紹介)
+    ID: f0000000-0000-0000-0000-000000000002
+    Course: N5 Basic | Order: 2 | Status: PUBLISHED
+    Description: Cách giới thiệu tên, quốc tịch và nghề nghiệp.
+
+---
+
+VOCABULARY ITEMS LINKED TO LESSONS:
+  • おはよう (Chào buổi sáng) - N5 - Lesson 1
+  • わたし (Tôi - bản thân) - N5 - Lesson 2
+
+GRAMMAR POINTS LINKED TO LESSONS:
+  • ～は ～です (Là...) - N5 - Lesson 2
+    Usage: Cấu trúc câu khẳng định cơ bản nhất.
+
+================================================================================
+3. ASSIGNMENTS & QUIZZES
+================================================================================
+
+QUIZ 1: Kiểm tra Ngữ pháp N5 - Lần 1
+  ID: b0000000-0000-0000-0000-000000000001
+  Class: Lớp Tiếng Nhật N5
+  Type: QUIZ | Status: PUBLISHED | Due Date: CURRENT_TIMESTAMP + 14 days
+  Questions: 5
+    Q1: Reading - 「[食]{た}べる」 pronunciation? (Options: A/B/C)
+    Q2: Grammar - Particle usage for direct object (を, に, で)
+    Q3: Vocabulary - 日本料理 means?
+    Q4: Grammar - Correct morning greeting (おはようございます)
+    Q5: Grammar - Directional particle for どこ
+
+WRITING 1: Tự Giới Thiệu Bằng Tiếng Nhật
+  ID: b0000000-0000-0000-0000-000000000002
+  Class: Lớp Tiếng Nhật N5
+  Type: WRITING | Status: PUBLISHED
+  Description: Viết 100-150 từ giới thiệu bản thân bằng tiếng Nhật.
+
+QUIZ 2: Kiểm tra Ngữ pháp N5 - Lần 2
+  ID: b0000000-0000-0000-0000-000000000003
+  Class: Lớp Tiếng Nhật N5
+  Type: QUIZ | Status: PUBLISHED
+  Questions: Particle usage, adjectives, sentence patterns
+
+QUIZ 3: Kiểm tra Từ Vựng N5
+  ID: b0000000-0000-0000-0000-000000000004
+  Class: Lớp Tiếng Nhật N5
+  Type: QUIZ | Status: PUBLISHED
+
+QUIZ 4: Luyện Tập Hội Thoại N5
+  ID: b0000000-0000-0000-0000-000000000005
+  Class: Lớp Tiếng Nhật N5
+  Type: QUIZ | Status: PUBLISHED
+
+WRITING 2: Viết Về Kế Hoạch Cuối Tuần
+  ID: b0000000-0000-0000-0000-000000000006
+  Class: Lớp Tiếng Nhật N5
+  Type: WRITING | Status: PUBLISHED
+
+TRANSLATION 1: Dịch Từ Tiếng Anh Sang Tiếng Nhật
+  ID: b0000000-0000-0000-0000-000000000010
+  Class: Lớp Tiếng Nhật N5
+  Type: TRANSLATION | Status: PUBLISHED
+
+QUIZ 5: Kiểm tra Tính Từ N5
+  ID: b0000000-0000-0000-0000-000000000007
+  Class: Lớp Tiếng Nhật N5
+  Type: QUIZ | Status: PUBLISHED
+  Questions: 5
+    Q6: Adjective - [赤]{あか}い (Color: Red)
+    Q7: Opposite of [大]{おお}きい (Big) - [小]{ちい}さい (Small)
+    Q8: [楽]{たの}しい (Happy/Fun)
+    Q9: [忙]{いそが}しい (Busy)
+    Q10: [難]{むずか}しい (Difficult)
+
+QUIZ 6: Kiểm tra Ngữ Pháp N5 - Lần 3
+  ID: b0000000-0000-0000-0000-000000000008
+  Class: Lớp Tiếng Nhật N5
+  Type: QUIZ | Status: PUBLISHED
+
+WRITING 3: Viết Bài Nhật Ký Hàng Ngày
+  ID: b0000000-0000-0000-0000-000000000009
+  Class: Lớp Tiếng Nhật N5
+  Type: WRITING | Status: PUBLISHED
+
+---
+
+CLOSED CLASS ASSIGNMENTS (N4 Level):
+
+QUIZ 1 (CLOSED CLASS): Kiểm tra Ngữ pháp N4 - Tuần 1
+  ID: b0000000-0000-0000-0000-000000000011
+  Class: Lớp N4 - Khóa tháng 1 2026
+  Type: QUIZ | Status: CLOSED | Due Date: 60 days ago
+  Questions: 8
+    Q20: Grammar - Usage of ている (progressive aspect)
+    Q21: Adjectives - Comparative form of 速い
+    Q22: Grammar - Purpose of と思う
+    Q23: Grammar - When to use ～になる
+    Q24: Grammar - Usage of ～のに
+    Q25: Kanji - Reading of 学生
+    Q26: Vocabulary - Meaning of 約束
+    Q27: Grammar - Polite request form
+
+QUIZ 2 (CLOSED CLASS): Kiểm tra Ngữ pháp N4 - Tuần 2
+  ID: b0000000-0000-0000-0000-000000000012
+  Class: Lớp N4 - Khóa tháng 1 2026
+  Type: QUIZ | Status: CLOSED
+
+WRITING 1 (CLOSED CLASS): Bài Viết Hình Thức Thư Tín
+  ID: b0000000-0000-0000-0000-000000000013
+  Class: Lớp N4 - Khóa tháng 1 2026
+  Type: WRITING | Status: CLOSED
+
+TRANSLATION 1 (CLOSED CLASS): Dịch Bài Viết Tin Tức
+  ID: b0000000-0000-0000-0000-000000000014
+  Class: Lớp N4 - Khóa tháng 1 2026
+  Type: TRANSLATION | Status: CLOSED
+
+================================================================================
+4. LEARNING PREFERENCES
+================================================================================
+
+LEARNER 1: Nguyen Van A (learner1@test.satori.com)
+  ID: a0000000-0000-0000-0000-000000000004
+  Target JLPT Level: N5 (Beginner)
+  Daily Study Goal: 30 minutes
+  Preferred Study Time: Morning (08:00)
+  Learning Pace: Normal
+  Preferred Formality: Polite
+  Conversation Style: Practical
+  Preferred Topics: greetings, shopping, food, travel
+  Weak Points: Pronunciation (long vowels), Grammar (te-form)
+  Strong Points: Vocabulary (hiragana, katakana)
+  Streak Reminder: Enabled
+
+LEARNER 2: Tran Thi B (learner2@test.satori.com)
+  ID: a0000000-0000-0000-0000-000000000005
+  Target JLPT Level: N3 (Intermediate)
+  Daily Study Goal: 60 minutes
+  Preferred Study Time: Night (21:00)
+  Learning Pace: Fast
+  Preferred Formality: Formal
+  Conversation Style: Business
+  Preferred Topics: business, technology, culture, daily_life
+  Weak Points: Grammar (conditional forms), Kanji (N3 level)
+  Strong Points: Vocabulary (N4 level), Grammar (N4 level)
+  Streak Reminder: Enabled
+
+TEACHER: Tanaka Sensei (teacher@test.satori.com)
+  ID: a0000000-0000-0000-0000-000000000003
+  Target JLPT Level: N1 (Advanced)
+  Daily Study Goal: 90 minutes
+  Preferred Study Time: Evening (20:00)
+  Learning Pace: Fast
+  Preferred Formality: Formal
+  Conversation Style: Creative
+  Preferred Topics: literature, politics, science, business
+  Weak Points: Classical Japanese grammar
+  Strong Points: N1-N2 vocabulary, Pitch accent pronunciation
+  Streak Reminder: Disabled
+
+================================================================================
+5. BADGES & ACHIEVEMENT SYSTEM
+================================================================================
+
+BADGE DEFINITIONS (7 badges):
+
+Badge 1: First Step
+  ID: b0000000-0000-0000-0000-000000000001
+  Type: LEARNING_STREAK | Requirement: 1 day
+  EXP Reward: 10 | Status: ACTIVE
+  Description: Complete 1 day of learning / 完成1日の学習
+
+Badge 2: On Fire
+  ID: b0000000-0000-0000-0000-000000000002
+  Type: LEARNING_STREAK | Requirement: 3 days
+  EXP Reward: 25 | Status: ACTIVE
+  Description: Maintain 3-day learning streak / 3日間のストリークを継続
+
+Badge 3: Week Warrior
+  ID: b0000000-0000-0000-0000-000000000003
+  Type: LEARNING_STREAK | Requirement: 7 days
+  EXP Reward: 50 | Status: ACTIVE
+  Description: Maintain 7-day learning streak / 1週間のストリークを達成
+
+Badge 4: Speaking Beginner
+  ID: b0000000-0000-0000-0000-000000000004
+  Type: AI_SPEAKING_COUNT | Requirement: 5 sessions
+  EXP Reward: 20 | Status: ACTIVE
+  Description: Complete 5 AI speaking sessions / AI会話5セッション完了
+
+Badge 5: Practice Starter
+  ID: b0000000-0000-0000-0000-000000000005
+  Type: AI_PRACTICE_COUNT | Requirement: 10 sessions
+  EXP Reward: 30 | Status: ACTIVE
+  Description: Complete 10 AI practice sessions / AI練習10セッション完了
+
+Badge 6: Month Milestone
+  ID: c0000000-0000-0000-0000-000000000008
+  Type: LEARNING_STREAK | Requirement: 14 days
+  EXP Reward: 100 | Status: ACTIVE
+  Description: Achieve a 14-day learning streak
+
+Badge 7: Dedication
+  ID: c0000000-0000-0000-0000-000000000009
+  Type: LEARNING_STREAK | Requirement: 21 days
+  EXP Reward: 150 | Status: ACTIVE
+  Description: Complete 21 consecutive days of learning
+
+---
+
+LEARNER 1 STREAK HISTORY (7 days - 2026-04-01 to 2026-04-07):
+  Date        Streak Count  Activity Type     EXP Earned  Freeze Used
+  2026-04-01  Day 1         DAILY_LEARNING    60          No
+  2026-04-02  Day 2         DAILY_LEARNING    65          No
+  2026-04-03  Day 3         DAILY_LEARNING    70          No
+  2026-04-04  Day 4         DAILY_LEARNING    75          No
+  2026-04-05  Day 5         DAILY_LEARNING    80          No
+  2026-04-06  Day 6         DAILY_LEARNING    85          No
+  2026-04-07  Day 7         DAILY_LEARNING    90          No
+  Total EXP from streak: 525
+
+LEARNER 1 EARNED BADGES:
+  • First Step (1-day streak) - Earned on 2026-04-01
+  • On Fire (3-day streak) - Earned on 2026-04-03
+  • Week Warrior (7-day streak) - Earned on 2026-04-07
+
+---
+
+LEARNER 2 STREAK HISTORY (21 days - 2026-03-17 to 2026-04-07):
+  Week 1 (Foundation Phase):
+    2026-03-17  Day 1   DAILY_LEARNING    60   No
+    2026-03-18  Day 2   DAILY_LEARNING    65   No
+    2026-03-19  Day 3   DAILY_LEARNING    70   No
+    2026-03-20  Day 4   DAILY_LEARNING    75   No
+    2026-03-21  Day 5   DAILY_LEARNING    80   No
+    2026-03-22  Day 6   DAILY_LEARNING    85   No
+    2026-03-23  Day 7   DAILY_LEARNING    90   No
+
+  Week 2 (Growth Phase):
+    2026-03-24  Day 8   DAILY_LEARNING    95   No
+    2026-03-25  Day 9   DAILY_LEARNING    100  No
+    2026-03-26  Day 10  DAILY_LEARNING    105  No
+    2026-03-27  Day 11  DAILY_LEARNING    110  No
+    2026-03-28  Day 12  DAILY_LEARNING    110  No
+    2026-03-29  Day 13  DAILY_LEARNING    115  No
+    2026-03-30  Day 14  DAILY_LEARNING    120  No
+
+  Week 3 (Mastery Phase):
+    2026-03-31  Day 15  DAILY_LEARNING    120  No
+    2026-04-01  Day 16  DAILY_LEARNING    120  No
+    2026-04-02  Day 17  DAILY_LEARNING    120  No
+    2026-04-03  Day 18  DAILY_LEARNING    120  No
+    2026-04-04  Day 19  DAILY_LEARNING    120  No
+    2026-04-05  Day 20  DAILY_LEARNING    120  No
+    2026-04-07  Day 21  DAILY_LEARNING    120  No
+
+  Total EXP from streak: 2,245
+
+LEARNER 2 EARNED BADGES:
+  • First Step (1-day streak) - Earned on 2026-03-17
+  • On Fire (3-day streak) - Earned on 2026-03-19
+  • Week Warrior (7-day streak) - Earned on 2026-03-23
+  • Month Milestone (14-day streak) - Earned on 2026-03-30
+  • Dedication (21-day streak) - Earned on 2026-04-07
+  (Plus 3 additional activity-based badges from extended data)
+
+================================================================================
+6. TEACHER HISTORY
+================================================================================
+
+CURRENT TEACHER ASSIGNMENT:
+  ID: e0000000-0000-0000-0000-000000000001
+  Teacher: Tanaka Sensei (a0000000-0000-0000-0000-000000000003)
+  Class: Lớp Tiếng Nhật N5 - Cấp tốc (c0000000-0000-0000-0000-000000000001)
+  Assigned At: 2025-01-01
+  Released At: NULL (Currently Active)
+  Status: ACTIVE
+
+HISTORICAL TEACHER ASSIGNMENT:
+  ID: e0000000-0000-0000-0000-000000000002
+  Teacher: Tanaka Sensei (a0000000-0000-0000-0000-000000000003)
+  Class: Lớp Tiếng Nhật N5 - Cấp tốc
+  Assigned At: 2024-06-01
+  Released At: 2024-12-31
+  Status: HISTORICAL (Previous assignment)
+
+================================================================================
+7. MOCK VOCABULARY & GRAMMAR
+================================================================================
+
+VOCABULARY ITEMS (Sample):
+  • おはよう (Ohayou) - Morning greeting - N5
+  • わたし (Watashi) - I/Me - N5
+  • [食]{た}べる (Taberu) - To eat - N5
+  • 日本料理 (Nihon ryouri) - Japanese cuisine - N5
+  • [駅]{えき} (Eki) - Train station - N4
+  • [電車]{でんしゃ} (Densha) - Train - N4
+  • [約束]{やくそく} (Yakusoku) - Promise/Appointment - N4
+  • [学生]{がくせい} (Gakusei) - Student - N4
+  • [大]{おお}きい (Ookii) - Big - N5
+  • [小]{ちい}さい (Chiisai) - Small - N5
+  • [赤]{あか}い (Akai) - Red - N5
+  • [楽]{たの}しい (Tanoshii) - Fun/Happy - N5
+  • [忙]{いそ}がしい (Isogashii) - Busy - N5
+  • [難]{むずか}しい (Muzukashii) - Difficult - N5
+
+GRAMMAR POINTS (Sample):
+  • ～は ～です (Sentence pattern) - N5
+  • ～を ～します (Direct object marker) - N5
+  • ～へ (Direction marker) - N5
+  • ～ている (Progressive/Habitual) - N4
+  • ～になる (Change of state) - N4
+  • ～のに (Contrast/Purpose) - N4
+  • ～と思う (Think/Opinion) - N4
+  • ～ましょう (Suggestion) - N5
+  • ～ません (Negation) - N5
+  • ～ていただく (Request/Favor) - N3
+
+================================================================================
+8. SUMMARY STATISTICS
+================================================================================
+
+USER ACCOUNTS: 10 test users
+  - Admin: 1
+  - Content Manager: 1
+  - Operation Manager: 1
+  - Teacher: 1
+  - Learner (Active): 2
+  - Special Test Accounts: 4 (Suspended, Inactive, Pending, Locked)
+
+CONVERSATION THEMES: 4
+CONVERSATION TOPICS: 14+ (including subtopics)
+CONVERSATION MISSIONS: 15+
+
+COURSES: 2
+  - N5 Basic: 1 course, 1 active class, 2 lessons, 1 vocabulary, 1 grammar
+  - N4 Advanced: 1 course, 1 closed class
+
+CLASSES:
+  - Active Classes: 1 (with 2 active learners)
+  - Closed Classes: 1 (with 3 historical learners)
+
+ASSIGNMENTS:
+  - Active Assignments: 9 quizzes/writings in active class
+  - Closed Assignments: 4 assignments in closed class
+
+QUIZ QUESTIONS: 15+ questions across all assignments
+  - N5 Level: 10+ questions
+  - N4 Level: 8 questions
+
+BADGES: 7 badge definitions
+  - Streak Badges: 5 (1-day, 3-day, 7-day, 14-day, 21-day)
+  - Activity Badges: 2 (Speaking, Practice)
+
+LEARNER ACHIEVEMENTS:
+  - Learner 1 (Nguyen Van A): 7-day streak, 3 badges earned, 525 EXP
+  - Learner 2 (Tran Thi B): 21-day streak, 5+ badges earned, 2,245 EXP
+
+LEARNING PREFERENCES: 3 user profiles configured
+  - Learner 1: N5 Beginner (Morning, 30 min/day, Practical)
+  - Learner 2: N3 Intermediate (Night, 60 min/day, Business)
+  - Teacher: N1 Advanced (Evening, 90 min/day, Creative)
+
+================================================================================
+END OF MOCK DATA SUMMARY
+================================================================================
+
