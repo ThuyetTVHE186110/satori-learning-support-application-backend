@@ -46,12 +46,6 @@ public class AuthRateLimiter {
                 String.format("Quá nhiều yêu cầu đặt lại mật khẩu. Vui lòng thử lại sau %d phút.", rl.getWindowMinutes()));
     }
 
-    public void checkRegister(String ipAddress) {
-        SecurityProperties.RateLimit rl = securityProperties.getRateLimits().getRegister();
-        check("register", ipAddress, rl.getMaxRequests(), Duration.ofMinutes(rl.getWindowMinutes()),
-                String.format("Quá nhiều yêu cầu đăng ký. Vui lòng thử lại sau %d phút.", rl.getWindowMinutes()));
-    }
-
     public void checkVerifyOtp(String ipAddress) {
         SecurityProperties.RateLimit rl = securityProperties.getRateLimits().getVerifyOtp();
         check("verify-otp", ipAddress, rl.getMaxRequests(), Duration.ofMinutes(rl.getWindowMinutes()),
