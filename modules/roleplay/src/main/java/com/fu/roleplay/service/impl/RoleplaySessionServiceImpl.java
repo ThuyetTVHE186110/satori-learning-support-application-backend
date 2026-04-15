@@ -863,7 +863,12 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     public Page<SessionSummaryResponse> getSessionHistory(UUID userId, String status, Pageable pageable) {
         String normalizedStatus = null;
         if (status != null && !status.isBlank()) {
-            normalizedStatus = status.toUpperCase();
+            try {
+                normalizedStatus = ConversationSession.SessionStatus.valueOf(status.toUpperCase()).name();
+            } catch (IllegalArgumentException ex) {
+                throw new BusinessException("INVALID_PARAMETER",
+                        String.format("Invalid value for parameter 'status': '%s' is not a valid SessionStatus.", status));
+            }
         }
         return sessionRepository.findByUserIdAndSessionTypeAndOptionalStatus(
                         userId, ConversationSession.SessionType.ROLEPLAY.name(), normalizedStatus, pageable)

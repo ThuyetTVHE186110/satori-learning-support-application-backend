@@ -55,13 +55,9 @@ public class UserNotificationPreferences extends BaseEntity {
     @Builder.Default
     private Boolean achievementNotifications = true;
 
-    @Column(name = "social_notifications", nullable = false)
+    @Column(name = "class_notifications", nullable = false)
     @Builder.Default
-    private Boolean socialNotifications = true;
-
-    @Column(name = "marketing_notifications", nullable = false)
-    @Builder.Default
-    private Boolean marketingNotifications = false;
+    private Boolean classNotifications = true;
 
     // ── Quiet Hours ───────────────────────────────────────────────────────────
 
@@ -115,9 +111,7 @@ public class UserNotificationPreferences extends BaseEntity {
             case ASSIGNMENT_CREATED, ASSIGNMENT_DUE_SOON, ASSIGNMENT_OVERDUE,
                  ASSIGNMENT_GRADED, SUBMISSION_RECEIVED -> assignmentNotifications;
             case ACHIEVEMENT_UNLOCKED, LESSON_COMPLETE, PRACTICE_FEEDBACK_READY -> achievementNotifications;
-            case NEW_MESSAGE, ROLEPLAY_FEEDBACK, PRONUNCIATION_RESULT,
-                 CLASS_JOINED, CLASS_REMOVED, CLASS_ANNOUNCEMENT -> socialNotifications;
-            case NEW_CONTENT_AVAILABLE, SYSTEM_UPDATE -> marketingNotifications;
+            case CLASS_JOINED, CLASS_REMOVED, CLASS_ANNOUNCEMENT -> classNotifications;
             // Always-on: security + import status (manager workflow critical path)
             case ACCOUNT_SECURITY, PASSWORD_CHANGED, MAINTENANCE_NOTICE, WELCOME,
                  CURRICULUM_IMPORT_PENDING_APPROVAL, CURRICULUM_IMPORT_FAILED -> true;

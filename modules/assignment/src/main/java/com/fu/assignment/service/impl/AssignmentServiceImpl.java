@@ -31,6 +31,7 @@ import com.fu.clazz.repository.ClassTeacherHistoryRepository;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.infrastructure.cloudinary.CloudinaryService;
+import com.fu.infrastructure.email.EmailService;
 import com.fu.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,6 +45,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -75,6 +77,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     private final StreakService streakService;
     private final LearningLevelService learningLevelService;
     private final AchievementService achievementService;
+    private final EmailService emailService;
     private static final String SUBMISSION_IMAGE_FOLDER = "satori/assignment-submissions";
     private static final String SUBMISSION_FAILED_MSG = "Không thể lưu hoặc chấm điểm bài nộp.";
     private static final int MAX_SUBMISSION_IMAGES = 3;
@@ -117,6 +120,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         Assignment assignment;
         boolean isNewAssignment = (assignmentId == null);
         boolean hasSubmissions = false;
+        boolean isDraft = false;
 
         if (assignmentId == null) {
             if (classId != null) {
@@ -128,6 +132,9 @@ public class AssignmentServiceImpl implements AssignmentService {
             // -- UPDATE EXISTING ASSIGNMENT --
             assignment = findAssignmentOrThrow(assignmentId);
             verifyAssignmentAccess(assignment, teacherId);
+            if (assignment.getStatus() == AssignmentStatus.DRAFT) {
+                isDraft = true;
+            }
 
             if (assignment.getAssignmentType() != AssignmentType.QUIZ) {
                 throw new BusinessException("INVALID_TYPE", "Hàm saveFullQuiz chỉ dành cho bài tập dạng QUIZ.");
@@ -188,10 +195,19 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         scheduleManager.scheduleClosing(savedAssignment);
 
-        // If new assignment, bind it to the class target
+        // If new assignment, bind it to the class target and send email to learner
         if (isNewAssignment && classId != null) {
             AssignmentTarget target = AssignmentTarget.builder().assignmentId(finalAssignmentId).classId(classId).assignedBy(teacherId).assignedAt(LocalDateTime.now()).build();
             targetRepository.save(target);
+        }
+        if ((isNewAssignment && savedAssignment.getStatus() == AssignmentStatus.PUBLISHED) || (isDraft && request.getStatus() == AssignmentStatus.PUBLISHED)) {
+            // Send email notifications to all active learners in the class
+            try {
+                sendEmailsToClassMembers(assignment.getClassId(), savedAssignment.getTitle(), savedAssignment.getDueDate());
+            } catch (Exception e) {
+                log.error("Failed to send assignment notification emails to class {}: {}", classId, e.getMessage());
+                // Don't break the assignment creation flow
+            }
         }
 
         // -- SYNC QUESTIONS (only when no submissions) --
@@ -252,6 +268,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         Assignment assignment;
         boolean isNewAssignment = (assignmentId == null);
         boolean hasSubmissions = false;
+        boolean isDraft = false;
 
         if (assignmentId == null) {
             // -- CREATE NEW --
@@ -266,7 +283,9 @@ public class AssignmentServiceImpl implements AssignmentService {
             // -- UPDATE EXISTING --
             assignment = findAssignmentOrThrow(assignmentId);
             verifyAssignmentAccess(assignment, teacherId);
-
+            if (assignment.getStatus() == AssignmentStatus.DRAFT) {
+                isDraft = true;
+            }
             if (assignment.isQuiz()) {
                 throw new BusinessException("INVALID_TYPE", "Vui lòng sử dụng saveFullQuiz cho bài tập dạng QUIZ.");
             }
@@ -307,6 +326,15 @@ public class AssignmentServiceImpl implements AssignmentService {
             AssignmentTarget target = AssignmentTarget.builder().assignmentId(savedId).classId(classId).build();
             targetRepository.save(target);
         }
+        if ((isNewAssignment && savedAssignment.getStatus() == AssignmentStatus.PUBLISHED) || (isDraft && request.getStatus() == AssignmentStatus.PUBLISHED)) {
+            // Send email notifications to all active learners in the class
+            try {
+                sendEmailsToClassMembers(assignment.getClassId(), savedAssignment.getTitle(), savedAssignment.getDueDate());
+            } catch (Exception e) {
+                log.error("Failed to send assignment notification emails to class {}: {}", classId, e.getMessage());
+                // Don't break the assignment creation flow
+            }
+        }
 
         // Save or update writing content — only when no submissions
         if (!hasSubmissions) {
@@ -339,8 +367,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         boolean isCreator = false;
         if (assignment.getClassId() != null) {
             Clazz clazz = classRepository.findByIdAndNotDeleted(assignment.getClassId()).orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy lớp học"));
-            UUID currentTeacherId = classTeacherHistoryRepository.findCurrentTeacherIdByClassId(clazz.getId())
-                    .orElse(null);
+            UUID currentTeacherId = classTeacherHistoryRepository.findCurrentTeacherIdByClassId(clazz.getId()).orElse(null);
             if (currentTeacherId != null && currentTeacherId.equals(teacherId)) {
                 isClassTeacher = true;
             }
@@ -437,12 +464,10 @@ public class AssignmentServiceImpl implements AssignmentService {
     }
 
     @Override
-    public AssignmentClassStatisticsResponse getAssignmentStatisticsForClass(
-            UUID assignmentId, UUID classId, UUID teacherId) {
+    public AssignmentClassStatisticsResponse getAssignmentStatisticsForClass(UUID assignmentId, UUID classId, UUID teacherId) {
 
         // Verify assignment exists and is not deleted
-        Assignment assignment = assignmentRepository.findByIdAndNotDeleted(assignmentId)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy bài tập"));
+        Assignment assignment = assignmentRepository.findByIdAndNotDeleted(assignmentId).orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy bài tập"));
 
         // Verify assignment belongs to the specified class
         if (!classId.equals(assignment.getClassId())) {
@@ -450,8 +475,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         }
 
         // Verify teacher access
-        Clazz clazz = classRepository.findByIdAndNotDeleted(classId)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy lớp học"));
+        Clazz clazz = classRepository.findByIdAndNotDeleted(classId).orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy lớp học"));
         verifyTeacherAccess(clazz, teacherId);
 
         // Get total active students in class
@@ -470,18 +494,9 @@ public class AssignmentServiceImpl implements AssignmentService {
         }
 
         // Get assignment title
-        String title = assignmentRepository.getAssignmentTitleById(assignmentId)
-                .orElse("");
+        String title = assignmentRepository.getAssignmentTitleById(assignmentId).orElse("");
 
-        return AssignmentClassStatisticsResponse.builder()
-                .assignmentId(assignmentId)
-                .classId(classId)
-                .assignmentTitle(title)
-                .totalStudents(totalStudents)
-                .submittedCount(submittedCount)
-                .notSubmittedCount(notSubmittedCount)
-                .averageScore(averageScore)
-                .build();
+        return AssignmentClassStatisticsResponse.builder().assignmentId(assignmentId).classId(classId).assignmentTitle(title).totalStudents(totalStudents).submittedCount(submittedCount).notSubmittedCount(notSubmittedCount).averageScore(averageScore).build();
     }
 
     @Override
@@ -495,10 +510,7 @@ public class AssignmentServiceImpl implements AssignmentService {
 
     private Page<AssignmentSummaryResponse> populateTeacherSummaryResponses(Page<Assignment> assignments) {
         List<UUID> ids = assignments.getContent().stream().map(Assignment::getId).toList();
-        List<UUID> classIds = assignments.getContent().stream()
-                .map(Assignment::getClassId)
-                .filter(Objects::nonNull)
-                .distinct().toList();
+        List<UUID> classIds = assignments.getContent().stream().map(Assignment::getClassId).filter(Objects::nonNull).distinct().toList();
 
         Map<UUID, String> classNames = new HashMap<>();
         if (!classIds.isEmpty()) {
@@ -622,20 +634,12 @@ public class AssignmentServiceImpl implements AssignmentService {
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Override
-    public Page<SubmissionSummaryResponse> getSubmissionsByAssignment(
-            UUID assignmentId,
-            Pageable pageable,
-            UUID teacherId) {
+    public Page<SubmissionSummaryResponse> getSubmissionsByAssignment(UUID assignmentId, Pageable pageable, UUID teacherId) {
         return getSubmissionsByAssignment(assignmentId, null, null, pageable, teacherId);
     }
 
     @Override
-    public Page<SubmissionSummaryResponse> getSubmissionsByAssignment(
-            UUID assignmentId,
-            String keyword,
-            SubmissionStatus status,
-            Pageable pageable,
-            UUID teacherId) {
+    public Page<SubmissionSummaryResponse> getSubmissionsByAssignment(UUID assignmentId, String keyword, SubmissionStatus status, Pageable pageable, UUID teacherId) {
         Assignment assignment = findAssignmentOrThrow(assignmentId);
         verifyAssignmentAccess(assignment, teacherId);
 
@@ -644,73 +648,53 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         // Fetch ALL student IDs in the class (active AND removed members)
         List<ClassMember> allClassMembers = classMemberRepository.findAllByClassId(classId);
-        Map<UUID, ClassMember> memberMap = allClassMembers.stream()
-                .collect(Collectors.toMap(com.fu.clazz.entity.ClassMember::getUserId, m -> m));
-        List<UUID> allStudentIds = allClassMembers.stream()
-                .map(ClassMember::getUserId)
-                .toList();
+        Map<UUID, ClassMember> memberMap = allClassMembers.stream().collect(Collectors.toMap(com.fu.clazz.entity.ClassMember::getUserId, m -> m));
+        List<UUID> allStudentIds = allClassMembers.stream().map(ClassMember::getUserId).toList();
 
         // Fetch user information for all students
-        Map<UUID, com.fu.user.entity.User> userMap = userRepository.findAllById(allStudentIds).stream()
-                .collect(Collectors.toMap(com.fu.user.entity.User::getId, u -> u));
+        Map<UUID, com.fu.user.entity.User> userMap = userRepository.findAllById(allStudentIds).stream().collect(Collectors.toMap(com.fu.user.entity.User::getId, u -> u));
 
         // Fetch all submissions for this assignment
         List<AssignmentSubmission> submissions = submissionRepository.findByAssignmentId(assignmentId);
 
         // Create a map of userId -> latest submission
-        Map<UUID, AssignmentSubmission> submissionMap = submissions.stream()
-                .collect(Collectors.toMap(
-                        AssignmentSubmission::getUserId,
-                        s -> s,
-                        (existing, newer) -> newer.getAttemptNumber() > existing.getAttemptNumber() ? newer : existing
-                ));
+        Map<UUID, AssignmentSubmission> submissionMap = submissions.stream().collect(Collectors.toMap(AssignmentSubmission::getUserId, s -> s, (existing, newer) -> newer.getAttemptNumber() > existing.getAttemptNumber() ? newer : existing));
 
         // Combine all students with their submission status
-        List<SubmissionSummaryResponse> allResponses = allStudentIds.stream()
-                .map(studentId -> {
-                    AssignmentSubmission submission = submissionMap.get(studentId);
-                    SubmissionSummaryResponse response;
-                    ClassMember classMember = memberMap.get(studentId);
-                    boolean isRemoved = classMember != null && classMember.getRemovedAt() != null;
+        List<SubmissionSummaryResponse> allResponses = allStudentIds.stream().map(studentId -> {
+            AssignmentSubmission submission = submissionMap.get(studentId);
+            SubmissionSummaryResponse response;
+            ClassMember classMember = memberMap.get(studentId);
+            boolean isRemoved = classMember != null && classMember.getRemovedAt() != null;
 
-                    if (submission != null) {
-                        response = enrichSummaryResponse(submission);
-                    } else {
-                        // Create NOT_STARTED response for student without submission
-                        com.fu.user.entity.User user = userMap.get(studentId);
-                        if (user == null) {
-                            return null;
-                        }
-                        response = SubmissionSummaryResponse.builder()
-                                .id(null)
-                                .userFullName(user.getFullName())
-                                .status(SubmissionStatus.NOT_STARTED)
-                                .score(null)
-                                .submittedAt(null)
-                                .build();
-                    }
+            if (submission != null) {
+                response = enrichSummaryResponse(submission);
+            } else {
+                // Create NOT_STARTED response for student without submission
+                com.fu.user.entity.User user = userMap.get(studentId);
+                if (user == null) {
+                    return null;
+                }
+                response = SubmissionSummaryResponse.builder().id(null).userFullName(user.getFullName()).status(SubmissionStatus.NOT_STARTED).score(null).submittedAt(null).build();
+            }
 
-                    // Set the isRemovedLearner flag for both cases
-                    response.setIsRemovedLearner(isRemoved);
-                    return response;
-                })
-                .filter(Objects::nonNull)
-                .filter(r -> {
-                    // Apply keyword filter if provided
-                    if (keyword != null && !keyword.isBlank()) {
-                        String lowerKeyword = keyword.toLowerCase();
-                        return r.getUserFullName() != null && r.getUserFullName().toLowerCase().contains(lowerKeyword);
-                    }
-                    return true;
-                })
-                .filter(r -> {
-                    // Apply status filter if provided
-                    if (status != null) {
-                        return r.getStatus() == status;
-                    }
-                    return true;
-                })
-                .toList();
+            // Set the isRemovedLearner flag for both cases
+            response.setIsRemovedLearner(isRemoved);
+            return response;
+        }).filter(Objects::nonNull).filter(r -> {
+            // Apply keyword filter if provided
+            if (keyword != null && !keyword.isBlank()) {
+                String lowerKeyword = keyword.toLowerCase();
+                return r.getUserFullName() != null && r.getUserFullName().toLowerCase().contains(lowerKeyword);
+            }
+            return true;
+        }).filter(r -> {
+            // Apply status filter if provided
+            if (status != null) {
+                return r.getStatus() == status;
+            }
+            return true;
+        }).toList();
 
         // Apply manual pagination
         int start = (int) pageable.getOffset();
@@ -767,9 +751,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Override
-    public Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(
-            UUID learnerId, UUID classId, String title, AssignmentType type,
-            SubmissionStatus status, Pageable pageable) {
+    public Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, UUID classId, String title, AssignmentType type, SubmissionStatus status, Pageable pageable) {
 
         List<UUID> classIds;
 
@@ -785,8 +767,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         } else {
             // Specific classId provided: validate learner has access
             if (!isLearnerInClass(learnerId, classId)) {
-                log.warn("Learner {} attempted to access assignments from class {} but is not a member",
-                        learnerId, classId);
+                log.warn("Learner {} attempted to access assignments from class {} but is not a member", learnerId, classId);
                 return Page.empty(pageable);
             }
             classIds = List.of(classId);
@@ -796,8 +777,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         String typeStr = (type != null) ? type.name() : "";
         String statusStr = (status != null) ? status.name() : "";
 
-        Page<Assignment> assignments = assignmentRepository
-                .findLearnerAssignmentsSorted(learnerId, classIds, titleStr, typeStr, statusStr, pageable);
+        Page<Assignment> assignments = assignmentRepository.findLearnerAssignmentsSorted(learnerId, classIds, titleStr, typeStr, statusStr, pageable);
 
         return populateLearnerSummaryResponses(assignments, learnerId);
     }
@@ -818,10 +798,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         }
 
         // Filter for classes with ACTIVE status
-        List<Clazz> activeClasses = classRepository.findAllById(activeClassIds).stream()
-                .filter(clazz -> clazz.getStatus() == ClassStatus.ACTIVE)
-                .filter(clazz -> clazz.getDeletedAt() == null)
-                .toList();
+        List<Clazz> activeClasses = classRepository.findAllById(activeClassIds).stream().filter(clazz -> clazz.getStatus() == ClassStatus.ACTIVE).filter(clazz -> clazz.getDeletedAt() == null).toList();
 
         if (activeClasses.isEmpty()) {
             return Optional.empty();
@@ -829,8 +806,7 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         // Should only be one active class per learner (business rule)
         if (activeClasses.size() > 1) {
-            log.warn("Learner {} has multiple active classes: {}. Using first one.",
-                    learnerId, activeClasses.stream().map(Clazz::getId).toList());
+            log.warn("Learner {} has multiple active classes: {}. Using first one.", learnerId, activeClasses.stream().map(Clazz::getId).toList());
         }
 
         return Optional.of(activeClasses.get(0).getId());
@@ -946,8 +922,7 @@ public class AssignmentServiceImpl implements AssignmentService {
                 Integer score = submission.getScore() != null ? submission.getScore().intValue() : null;
                 expEarned = ActivityExpConfig.ActivityType.QUIZ_ASSIGNMENT.getExpReward(currentLevel, score);
                 learningLevelService.awardExpAndCheckLevelUp(learnerId, expEarned);
-                log.info("Awarded {} EXP for quiz completion to user {} (level {}, score {}%)",
-                        expEarned, learnerId, currentLevel, score);
+                log.info("Awarded {} EXP for quiz completion to user {} (level {}, score {}%)", expEarned, learnerId, currentLevel, score);
             } catch (Exception e) {
                 log.error("Error awarding EXP for quiz completion to user {}", learnerId, e);
                 // Continue even if EXP fails - don't break submission flow
@@ -956,11 +931,7 @@ public class AssignmentServiceImpl implements AssignmentService {
             // Retrieve badges earned during this quiz submission
             List<UserAchievementResponse> earnedBadges = Collections.emptyList();
             try {
-                earnedBadges = achievementService.getUserEarnedBadges(learnerId).stream()
-                        .filter(badge -> badge.getEarnedAt() != null
-                                && badge.getEarnedAt().isAfter(submission.getStartedAt())
-                                && badge.getEarnedAt().isBefore(submission.getSubmittedAt().plusSeconds(5)))
-                        .collect(Collectors.toList());
+                earnedBadges = achievementService.getUserEarnedBadges(learnerId).stream().filter(badge -> badge.getEarnedAt() != null && badge.getEarnedAt().isAfter(submission.getStartedAt()) && badge.getEarnedAt().isBefore(submission.getSubmittedAt().plusSeconds(5))).collect(Collectors.toList());
                 log.info("Retrieved {} earned badges for quiz submission by user {}", earnedBadges.size(), learnerId);
             } catch (Exception e) {
                 log.error("Error retrieving earned badges for quiz submission", e);
@@ -1037,8 +1008,7 @@ public class AssignmentServiceImpl implements AssignmentService {
                 int currentLevel = learningLevelService.getCurrentLevel(learnerId);
                 expEarned = ActivityExpConfig.ActivityType.WRITING_ASSIGNMENT.getExpReward(currentLevel, null);
                 learningLevelService.awardExpAndCheckLevelUp(learnerId, expEarned);
-                log.info("Awarded {} EXP for writing submission to user {} (level {}, score not yet graded)",
-                        expEarned, learnerId, currentLevel);
+                log.info("Awarded {} EXP for writing submission to user {} (level {}, score not yet graded)", expEarned, learnerId, currentLevel);
             } catch (Exception e) {
                 log.error("Error awarding EXP for writing submission to user {}", learnerId, e);
                 // Continue even if EXP fails - don't break submission flow
@@ -1047,11 +1017,7 @@ public class AssignmentServiceImpl implements AssignmentService {
             // Retrieve badges earned during this writing submission
             List<UserAchievementResponse> earnedBadges = Collections.emptyList();
             try {
-                earnedBadges = achievementService.getUserEarnedBadges(learnerId).stream()
-                        .filter(badge -> badge.getEarnedAt() != null
-                                && badge.getEarnedAt().isAfter(submission.getStartedAt())
-                                && badge.getEarnedAt().isBefore(submission.getSubmittedAt().plusSeconds(5)))
-                        .collect(Collectors.toList());
+                earnedBadges = achievementService.getUserEarnedBadges(learnerId).stream().filter(badge -> badge.getEarnedAt() != null && badge.getEarnedAt().isAfter(submission.getStartedAt()) && badge.getEarnedAt().isBefore(submission.getSubmittedAt().plusSeconds(5))).collect(Collectors.toList());
                 log.info("Retrieved {} earned badges for writing submission by user {}", earnedBadges.size(), learnerId);
             } catch (Exception e) {
                 log.error("Error retrieving earned badges for writing submission", e);
@@ -1158,8 +1124,7 @@ public class AssignmentServiceImpl implements AssignmentService {
 
     private void verifyTeacherAccess(Clazz clazz, UUID teacherId) {
         if (clazz == null) return;
-        UUID currentTeacherId = classTeacherHistoryRepository.findCurrentTeacherIdByClassId(clazz.getId())
-                .orElse(null);
+        UUID currentTeacherId = classTeacherHistoryRepository.findCurrentTeacherIdByClassId(clazz.getId()).orElse(null);
         if (!teacherId.equals(currentTeacherId)) {
             throw new BusinessException("ACCESS_DENIED", "Bạn không phải là giáo viên của lớp này.");
         }
@@ -1348,16 +1313,7 @@ public class AssignmentServiceImpl implements AssignmentService {
             int currentLevel = progressInfo.currentLevel();
             boolean actuallyLeveledUp = previousLevel < currentLevel;
 
-            LevelUpNotificationResponse levelUpInfo = LevelUpNotificationResponse.builder()
-                    .previousLevel(previousLevel)
-                    .newLevel(currentLevel)
-                    .expEarned(expEarned)
-                    .oldTotalExp(oldTotalExp)
-                    .totalExp(progressInfo.totalExp())
-                    .expToNextLevel(progressInfo.expToNextLevel())
-                    .progressPercentage(progressInfo.percentToNextLevel())
-                    .isLevelUp(actuallyLeveledUp)
-                    .build();
+            LevelUpNotificationResponse levelUpInfo = LevelUpNotificationResponse.builder().previousLevel(previousLevel).newLevel(currentLevel).expEarned(expEarned).oldTotalExp(oldTotalExp).totalExp(progressInfo.totalExp()).expToNextLevel(progressInfo.expToNextLevel()).progressPercentage(progressInfo.percentToNextLevel()).isLevelUp(actuallyLeveledUp).build();
             response.setLevelUpInfo(levelUpInfo);
         } catch (Exception e) {
             log.debug("Error retrieving level-up info for submission", e);
@@ -1432,15 +1388,7 @@ public class AssignmentServiceImpl implements AssignmentService {
      * Build a NOT_STARTED response for a student without a submission.
      */
     private SubmissionSummaryResponse getUserAndBuildNotStartedResponse(UUID userId) {
-        return userRepository.findById(userId).map(u ->
-                SubmissionSummaryResponse.builder()
-                        .id(null)
-                        .userFullName(u.getFullName())
-                        .status(SubmissionStatus.NOT_STARTED)
-                        .score(null)
-                        .submittedAt(null)
-                        .build()
-        ).orElse(null);
+        return userRepository.findById(userId).map(u -> SubmissionSummaryResponse.builder().id(null).userFullName(u.getFullName()).status(SubmissionStatus.NOT_STARTED).score(null).submittedAt(null).build()).orElse(null);
     }
 
     // ── Auto-Score for Quiz ───────────────────────────────────────────────────
@@ -1753,6 +1701,51 @@ public class AssignmentServiceImpl implements AssignmentService {
     @Override
     public WritingEvaluationResponse evaluateWriting(WritingEvaluationRequest request, MultipartFile[] images) {
         return aiGradingService.evaluateWriting(request, images);
+    }
+
+    private void sendEmailNewAssignment(String email, String fullName, String assignmentName, String className, String dueDate) {
+        emailService.sendNewAssignmentNotification(email, fullName, assignmentName, className, dueDate);
+    }
+
+    /**
+     * Send email notifications to all active learners in a class when a new assignment is created.
+     * Queries active class members (removedAt IS NULL), fetches user details, and sends personalized emails.
+     * Wrapped in try-catch to prevent email failures from breaking assignment creation.
+     */
+    private void sendEmailsToClassMembers(UUID classId, String assignmentTitle, LocalDateTime dueDate) {
+        try {
+            // Get all active user IDs in the class (removedAt IS NULL)
+            List<UUID> activeUserIds = classMemberRepository.findActiveUserIdsByClassId(classId);
+
+            if (activeUserIds.isEmpty()) {
+                log.info("No active learners in class {} to notify about assignment {}", classId, assignmentTitle);
+                return;
+            }
+
+            // Fetch User entities
+            List<com.fu.user.entity.User> users = userRepository.findAllById(activeUserIds);
+
+            // Get class name
+            String className = classRepository.findByIdAndNotDeleted(classId).map(Clazz::getName).orElse("Unknown Class");
+
+            // Send email to each active learner
+            int emailCount = 0;
+            for (com.fu.user.entity.User user : users) {
+                if (user.getEmail() == null || user.getEmail().isBlank()) {
+                    log.warn("User {} in class {} has no email address, skipping notification", user.getId(), classId);
+                    continue;
+                }
+
+                String fullName = user.getFullName() != null ? user.getFullName() : user.getDisplayName();
+                sendEmailNewAssignment(user.getEmail(), fullName, assignmentTitle, className, dueDate.toString());
+                emailCount++;
+            }
+
+            log.info("Assignment notification emails sent to {} active learners in class {} for assignment '{}'", emailCount, classId, assignmentTitle);
+        } catch (Exception e) {
+            log.error("Error sending assignment notification emails to class {}: {}", classId, e.getMessage(), e);
+            // Don't re-throw: email failures should not break assignment creation
+        }
     }
 }
 
