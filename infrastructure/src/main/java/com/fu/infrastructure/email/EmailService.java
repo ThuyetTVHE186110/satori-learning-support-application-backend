@@ -73,4 +73,6 @@ public interface EmailService {
      * @param userName user's display name
      */
     void sendPasswordChangedNotification(String to, String userName);
+
+    void sendEmailChangeNotification(String email, String fullName, String oldEmail);
 }

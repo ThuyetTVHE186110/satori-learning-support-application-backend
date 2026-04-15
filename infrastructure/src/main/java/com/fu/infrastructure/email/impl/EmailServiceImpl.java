@@ -135,4 +135,19 @@ public class EmailServiceImpl implements EmailService {
         sendTemplateEmail(to, subject, "password-changed", variables);
         log.info("Password changed notification sent to: {}", to);
     }
+
+    @Override
+    public void sendEmailChangeNotification(String email, String fullName, String oldEmail) {
+        String subject = "Email của bạn đã được thay đổi - Satori Learning";
+
+        Map<String, Object> variables = Map.of(
+                "fullName", fullName != null ? fullName : "ban",
+                "supportEmail", "support@satori-learning.com",
+                "oldEmail", oldEmail,
+                "newEmail", email
+        );
+
+        sendTemplateEmail(email, subject, "email-changed", variables);
+        log.info("Password changed notification sent to: {}", email);
+    }
 }
