@@ -11,6 +11,7 @@ import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -154,6 +155,21 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.NOT_FOUND)
                 .body(ApiResponse.error("NOT_FOUND", "Endpoint not found"));
+    }
+
+    /**
+     * Handles missing required query/form parameters — returns 400 with the parameter name
+     * instead of letting it fall through to the generic 500 handler.
+     */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingRequestParameter(
+            MissingServletRequestParameterException ex) {
+        String message = String.format("Required parameter '%s' (%s) is missing.",
+                ex.getParameterName(), ex.getParameterType());
+        log.warn("Missing request parameter: {}", message);
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.error("MISSING_PARAMETER", message));
     }
 
     @ExceptionHandler(Exception.class)

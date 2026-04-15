@@ -29,8 +29,7 @@ public class NotificationPreferencesResponse {
     private LocalTime dailyReminderTime;
     private Boolean assignmentNotifications;
     private Boolean achievementNotifications;
-    private Boolean socialNotifications;
-    private Boolean marketingNotifications;
+    private Boolean classNotifications;
     
     // Quiet hours
     private Boolean quietHoursEnabled;

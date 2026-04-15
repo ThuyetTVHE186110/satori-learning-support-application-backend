@@ -1081,8 +1081,10 @@ public class PracticeSessionService {
         }
 
         List<PracticeItem> items = itemRepository.findBySessionIdOrderByItemIndex(sessionId);
+        boolean sessionFinished = session.getStatus() == PracticeStatus.COMPLETED
+                || session.getStatus() == PracticeStatus.ABANDONED;
         return items.stream()
-                .map(this::toItemDetailResponse)
+                .map(item -> toItemDetailResponse(item, sessionFinished || item.getUserAnswer() != null))
                 .collect(Collectors.toList());
     }
 
@@ -1680,8 +1682,13 @@ public class PracticeSessionService {
                 .build();
     }
 
-    private PracticeItemDetailResponse toItemDetailResponse(PracticeItem item) {
-        List<OptionDto> options = parseOptionsForDisplay(item.getOptions(), true);
+    private PracticeItemDetailResponse toItemDetailResponse(PracticeItem item, boolean revealAnswer) {
+        // MATCHING exposes the pair map (correctAnswer) upfront so the frontend can
+        // validate drag-drop client-side — mirrors toItemResponse() contract on POST /sessions.
+        boolean isMatching = item.getItemType() == PracticeItemType.MATCHING;
+        boolean revealOptionsCorrect = revealAnswer || isMatching;
+        List<OptionDto> options = parseOptionsForDisplay(item.getOptions(), revealOptionsCorrect);
+        String correctAnswer = (revealAnswer || isMatching) ? item.getCorrectAnswer() : null;
         return PracticeItemDetailResponse.builder()
                 .itemId(item.getId())
                 .itemIndex(item.getItemIndex())
@@ -1689,13 +1696,13 @@ public class PracticeSessionService {
                 .question(item.getQuestion())
                 .questionJapanese(item.getQuestionJapanese())
                 .options(options)
-                .correctAnswer(item.getCorrectAnswer())
+                .correctAnswer(correctAnswer)
                 .userAnswer(item.getUserAnswer())
-                .isCorrect(item.getIsCorrect())
-                .score(item.getScore())
+                .isCorrect(revealAnswer ? item.getIsCorrect() : null)
+                .score(revealAnswer ? item.getScore() : 0)
                 .hint(item.getHint())
-                .explanation(item.getExplanation())
-                .aiFeedback(item.getAiFeedback())
+                .explanation(revealAnswer ? item.getExplanation() : null)
+                .aiFeedback(revealAnswer ? item.getAiFeedback() : null)
                 .refContentId(item.getRefContentId())
                 .refContentType(item.getRefContentType())
                 .build();

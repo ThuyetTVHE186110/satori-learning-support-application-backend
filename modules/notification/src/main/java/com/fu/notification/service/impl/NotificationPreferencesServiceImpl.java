@@ -58,11 +58,8 @@ public class NotificationPreferencesServiceImpl implements NotificationPreferenc
         if (request.getAchievementNotifications() != null) {
             prefs.setAchievementNotifications(request.getAchievementNotifications());
         }
-        if (request.getSocialNotifications() != null) {
-            prefs.setSocialNotifications(request.getSocialNotifications());
-        }
-        if (request.getMarketingNotifications() != null) {
-            prefs.setMarketingNotifications(request.getMarketingNotifications());
+        if (request.getClassNotifications() != null) {
+            prefs.setClassNotifications(request.getClassNotifications());
         }
         if (request.getQuietHoursEnabled() != null) {
             prefs.setQuietHoursEnabled(request.getQuietHoursEnabled());
@@ -122,8 +119,7 @@ public class NotificationPreferencesServiceImpl implements NotificationPreferenc
                 .dailyReminderTime(prefs.getDailyReminderTime())
                 .assignmentNotifications(prefs.getAssignmentNotifications())
                 .achievementNotifications(prefs.getAchievementNotifications())
-                .socialNotifications(prefs.getSocialNotifications())
-                .marketingNotifications(prefs.getMarketingNotifications())
+                .classNotifications(prefs.getClassNotifications())
                 .quietHoursEnabled(prefs.getQuietHoursEnabled())
                 .quietHoursStart(prefs.getQuietHoursStart())
                 .quietHoursEnd(prefs.getQuietHoursEnd())

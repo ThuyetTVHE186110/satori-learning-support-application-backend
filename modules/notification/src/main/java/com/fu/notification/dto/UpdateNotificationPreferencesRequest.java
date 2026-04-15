@@ -23,8 +23,7 @@ public class UpdateNotificationPreferencesRequest {
     private LocalTime dailyReminderTime;
     private Boolean assignmentNotifications;
     private Boolean achievementNotifications;
-    private Boolean socialNotifications;
-    private Boolean marketingNotifications;
+    private Boolean classNotifications;
     private Boolean quietHoursEnabled;
     private LocalTime quietHoursStart;
     private LocalTime quietHoursEnd;
