@@ -905,40 +905,7 @@ public class AssignmentServiceImpl implements AssignmentService {
             submissionRepository.save(submission);
             log.info("Learner {} submitted quiz {}, score={}", learnerId, submission.getAssignmentId(), BigDecimal.valueOf(scored.earnedPoints));
 
-            // Record daily activity for streak tracking
-            StreakNotificationResponse streakNotification = null;
-            try {
-                streakNotification = streakService.recordDailyActivity(learnerId, "ASSIGNMENT");
-            } catch (Exception e) {
-                log.error("Error recording daily activity for learner: {}", learnerId, e);
-            }
-
-            // Award direct EXP for quiz completion (with level tier + score bonus)
-            int expEarned = 0;
-            Integer oldTotalExp = null;
-            try {
-                oldTotalExp = learningLevelService.getTotalExp(learnerId);
-                int currentLevel = learningLevelService.getCurrentLevel(learnerId);
-                Integer score = submission.getScore() != null ? submission.getScore().intValue() : null;
-                expEarned = ActivityExpConfig.ActivityType.QUIZ_ASSIGNMENT.getExpReward(currentLevel, score);
-                learningLevelService.awardExpAndCheckLevelUp(learnerId, expEarned);
-                log.info("Awarded {} EXP for quiz completion to user {} (level {}, score {}%)", expEarned, learnerId, currentLevel, score);
-            } catch (Exception e) {
-                log.error("Error awarding EXP for quiz completion to user {}", learnerId, e);
-                // Continue even if EXP fails - don't break submission flow
-            }
-
-            // Retrieve badges earned during this quiz submission
-            List<UserAchievementResponse> earnedBadges = Collections.emptyList();
-            try {
-                earnedBadges = achievementService.getUserEarnedBadges(learnerId).stream().filter(badge -> badge.getEarnedAt() != null && badge.getEarnedAt().isAfter(submission.getStartedAt()) && badge.getEarnedAt().isBefore(submission.getSubmittedAt().plusSeconds(5))).collect(Collectors.toList());
-                log.info("Retrieved {} earned badges for quiz submission by user {}", earnedBadges.size(), learnerId);
-            } catch (Exception e) {
-                log.error("Error retrieving earned badges for quiz submission", e);
-                // Continue even if badge retrieval fails
-            }
-
-            return enrichSubmissionResponseForSubmit(submission, earnedBadges, expEarned, oldTotalExp, streakNotification);
+            return enrichSubmissionResponseForSubmit(submission);
         }
     }
 
@@ -992,39 +959,7 @@ public class AssignmentServiceImpl implements AssignmentService {
             submissionRepository.save(submission);
             log.info("Learner {} submitted writing for assignment {} (images: {})", learnerId, assignmentId, hasImages ? images.length : 0);
 
-            // Record daily activity for streak tracking (writing/translation submission)
-            StreakNotificationResponse streakNotification = null;
-            try {
-                streakNotification = streakService.recordDailyActivity(learnerId, "ASSIGNMENT");
-            } catch (Exception e) {
-                log.error("Error recording daily activity for learner: {}", learnerId, e);
-            }
-
-            // Award direct EXP for writing submission (no score yet - graded by teacher later)
-            int expEarned = 0;
-            Integer oldTotalExp = null;
-            try {
-                oldTotalExp = learningLevelService.getTotalExp(learnerId);
-                int currentLevel = learningLevelService.getCurrentLevel(learnerId);
-                expEarned = ActivityExpConfig.ActivityType.WRITING_ASSIGNMENT.getExpReward(currentLevel, null);
-                learningLevelService.awardExpAndCheckLevelUp(learnerId, expEarned);
-                log.info("Awarded {} EXP for writing submission to user {} (level {}, score not yet graded)", expEarned, learnerId, currentLevel);
-            } catch (Exception e) {
-                log.error("Error awarding EXP for writing submission to user {}", learnerId, e);
-                // Continue even if EXP fails - don't break submission flow
-            }
-
-            // Retrieve badges earned during this writing submission
-            List<UserAchievementResponse> earnedBadges = Collections.emptyList();
-            try {
-                earnedBadges = achievementService.getUserEarnedBadges(learnerId).stream().filter(badge -> badge.getEarnedAt() != null && badge.getEarnedAt().isAfter(submission.getStartedAt()) && badge.getEarnedAt().isBefore(submission.getSubmittedAt().plusSeconds(5))).collect(Collectors.toList());
-                log.info("Retrieved {} earned badges for writing submission by user {}", earnedBadges.size(), learnerId);
-            } catch (Exception e) {
-                log.error("Error retrieving earned badges for writing submission", e);
-                // Continue even if badge retrieval fails
-            }
-
-            return enrichSubmissionResponseForSubmit(submission, earnedBadges, expEarned, oldTotalExp, streakNotification);
+            return enrichSubmissionResponseForSubmit(submission);
         }
     }
 
@@ -1272,7 +1207,7 @@ public class AssignmentServiceImpl implements AssignmentService {
      * Enrich submission response for SUBMIT operations (POST endpoints)
      * Includes levelUp and badges - user just completed an action
      */
-    private SubmissionResponse enrichSubmissionResponseForSubmit(AssignmentSubmission s, List<UserAchievementResponse> earnedBadges, int expEarned, Integer oldTotalExp, StreakNotificationResponse streakNotification) {
+    private SubmissionResponse enrichSubmissionResponseForSubmit(AssignmentSubmission s) {
         SubmissionResponse response = mapper.toResponse(s);
         Assignment assignment = assignmentRepository.findByIdAndNotDeleted(s.getAssignmentId()).orElse(null);
         if (assignment != null) {
@@ -1289,35 +1224,6 @@ public class AssignmentServiceImpl implements AssignmentService {
         });
         // Parse imageUrls JSON string → List<String>
         response.setImageUrls(parseImageUrls(s.getImageUrls()));
-
-        // Add earned badges from this submission
-        if (earnedBadges != null && !earnedBadges.isEmpty()) {
-            response.setEarnedBadges(earnedBadges);
-        }
-
-        // Add streak notification (first activity of day indicator)
-        if (streakNotification != null) {
-            response.setStreakNotification(streakNotification);
-        }
-
-        // Add level-up information (only for submit operations)
-        try {
-            LearningLevelService.LevelProgressInfo progressInfo = learningLevelService.getProgressToNextLevel(s.getUserId());
-
-            // Calculate previous level from oldTotalExp
-            int previousLevel = 0;
-            if (oldTotalExp != null && oldTotalExp >= 0) {
-                previousLevel = learningLevelService.calculateLevelFromExp(oldTotalExp);
-            }
-
-            int currentLevel = progressInfo.currentLevel();
-            boolean actuallyLeveledUp = previousLevel < currentLevel;
-
-            LevelUpNotificationResponse levelUpInfo = LevelUpNotificationResponse.builder().previousLevel(previousLevel).newLevel(currentLevel).expEarned(expEarned).oldTotalExp(oldTotalExp).totalExp(progressInfo.totalExp()).expToNextLevel(progressInfo.expToNextLevel()).progressPercentage(progressInfo.percentToNextLevel()).isLevelUp(actuallyLeveledUp).build();
-            response.setLevelUpInfo(levelUpInfo);
-        } catch (Exception e) {
-            log.debug("Error retrieving level-up info for submission", e);
-        }
         return response;
     }
 
