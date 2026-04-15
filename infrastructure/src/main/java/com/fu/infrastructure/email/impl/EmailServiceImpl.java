@@ -95,6 +95,7 @@ public class EmailServiceImpl implements EmailService {
     @Async("mailExecutor")
     public void sendWelcomeEmailWithCredentials(String to, String userName, String email, String password) {
         String subject = "Chào mừng đến với Satori Learning - Thông tin đăng nhập";
+
         Map<String, Object> variables = Map.of(
                 "userName", userName != null ? userName : "ban",
                 "email", email,
@@ -149,5 +150,21 @@ public class EmailServiceImpl implements EmailService {
         );
         sendTemplateEmail(to, subject, "new-assignment-notification", variables);
         log.info("New assignment notification sent to: {}", to);
+    }
+
+    @Override
+    @Async("mailExecutor")
+    public void sendEmailChangeNotification(String email, String fullName, String oldEmail) {
+        String subject = "Email của bạn đã được thay đổi - Satori Learning";
+
+        Map<String, Object> variables = Map.of(
+                "fullName", fullName != null ? fullName : "ban",
+                "supportEmail", "support@satori-learning.com",
+                "oldEmail", oldEmail,
+                "newEmail", email
+        );
+
+        sendTemplateEmail(email, subject, "email-changed", variables);
+        log.info("Password changed notification sent to: {}", email);
     }
 }

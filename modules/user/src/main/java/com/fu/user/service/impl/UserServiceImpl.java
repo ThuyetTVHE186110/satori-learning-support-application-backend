@@ -217,6 +217,8 @@ public class UserServiceImpl implements UserService {
         log.info("Admin {} updating user with id: {}", updatedByUserId, id);
         // Find user based on updater role
         User user = findUserByIdIncludingDeleted(id);
+        String oldEmail = user.getEmail();
+        Boolean emailChanged = false;
         // Validate user is not deleted
         if (user.getDeletedAt() != null) {
             throw new BusinessException("USER_DELETED", "Không thể chỉnh sửa tài khoản đã bị xóa");
@@ -230,7 +232,9 @@ public class UserServiceImpl implements UserService {
                 throw new BusinessException("EXISTED_EMAIL", "Email này đã được sử dụng. Vui lòng sử dụng email khác.");
             }
             user.setEmail(request.getEmail().trim());
+            emailChanged = true;
         }
+
         // Update fields if provided
         if (request.getFirstName() != null) {
             user.setFirstName(request.getFirstName());
@@ -267,7 +271,9 @@ public class UserServiceImpl implements UserService {
         user.setUpdatedBy(updatedByUserId);
         User updatedUser = userRepository.save(user);
         log.info("User updated successfully with id: {}", id);
-
+        if(emailChanged){
+            sendEmailNotifyEmailChanged(updatedUser.getEmail(), updatedUser.getFullName(), oldEmail);
+        }
         return userMapper.toResponse(updatedUser);
     }
 
@@ -856,6 +862,9 @@ public class UserServiceImpl implements UserService {
         DataFormatter formatter = new DataFormatter();
         return formatter.formatCellValue(cell);
     }
+    private void sendEmailNotifyEmailChanged(String email, String fullName, String oldEmail) {
+        emailService.sendEmailChangeNotification(email, fullName, oldEmail);
 
+    }
 }
 

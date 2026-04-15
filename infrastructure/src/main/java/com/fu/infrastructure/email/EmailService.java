@@ -75,6 +75,8 @@ public interface EmailService {
      */
     void sendPasswordChangedNotification(String to, String userName);
 
+    void sendEmailChangeNotification(String email, String fullName, String oldEmail);
+
     /**
      * Send email after creating a new assignment to notify the user.
      * Contains:

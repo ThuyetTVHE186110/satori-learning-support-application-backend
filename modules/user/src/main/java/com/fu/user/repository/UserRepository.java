@@ -58,8 +58,8 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
      * Search users by keyword (name or email) with optional filters
      * Supports UC-01 alternatives: search, filter by role/status
      */
-    @Query("SELECT u FROM User u WHERE u.deletedAt IS NULL " +
-            "AND (:#{#keyword == null || #keyword.length() == 0} = true OR " +
+    @Query("SELECT u FROM User u WHERE  " +
+            "(:#{#keyword == null || #keyword.length() == 0} = true OR " +
             "     LOWER(u.firstName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
             "     LOWER(u.lastName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
             "     LOWER(u.displayName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
