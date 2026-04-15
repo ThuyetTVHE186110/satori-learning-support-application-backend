@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
+import java.time.LocalDate;
 import java.util.Map;
 
 /**
@@ -94,7 +95,6 @@ public class EmailServiceImpl implements EmailService {
     @Async("mailExecutor")
     public void sendWelcomeEmailWithCredentials(String to, String userName, String email, String password) {
         String subject = "Chào mừng đến với Satori Learning - Thông tin đăng nhập";
-
         Map<String, Object> variables = Map.of(
                 "userName", userName != null ? userName : "ban",
                 "email", email,
@@ -134,5 +134,20 @@ public class EmailServiceImpl implements EmailService {
 
         sendTemplateEmail(to, subject, "password-changed", variables);
         log.info("Password changed notification sent to: {}", to);
+    }
+
+    @Override
+    @Async("mailExecutor")
+    public void sendNewAssignmentNotification(String to, String userName, String assignmentTitle, String className, String dueDate) {
+        String subject = "Thông báo bài tập mới lớp " + className + "-SatoriNihongo";
+        Map<String, Object> variables = Map.of(
+                "userName", userName != null ? userName : "Bạn",
+                "assignmentTitle", assignmentTitle,
+                "className", className,
+                "dueDate", dueDate,
+                "baseUrl", baseUrl
+        );
+        sendTemplateEmail(to, subject, "new-assignment-notification", variables);
+        log.info("New assignment notification sent to: {}", to);
     }
 }
