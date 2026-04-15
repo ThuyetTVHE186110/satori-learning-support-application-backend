@@ -182,7 +182,7 @@ app:
 # ==================== Logging Configuration ====================
 logging:
     level:
-        root: INF
+        root: INFO
         com.fu: DEBUG
         org.springframework.data.redis: DEBUG
         # Suppress Hibernate SQL noise (scheduler polls, retry queries, etc.)
