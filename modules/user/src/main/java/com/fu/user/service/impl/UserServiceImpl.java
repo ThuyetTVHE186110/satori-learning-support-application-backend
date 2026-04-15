@@ -518,13 +518,13 @@ public class UserServiceImpl implements UserService {
                 String[] nameParts = rd.fullName().split("\\s+");
                 String lastName = nameParts[nameParts.length - 1];
                 String firstName = nameParts.length > 1 ? String.join(" ", Arrays.copyOf(nameParts, nameParts.length - 1)) : "";
-
+                LocalDate birthDay = rd.birthDay();
                 User user = existingByEmail.get(rd.email());
                 boolean isNewUser = (user == null);
                 UserChangedFromImportResponse userChangedFromImportResponse = null;
                 if (!isNewUser) {
                     // Existing user — update profile only
-                    if (!user.getFirstName().equals(firstName) || !user.getLastName().equals(lastName) || !user.getPhoneNumber().equals(rd.phone())) {
+                    if (!user.getFirstName().equals(firstName) || !user.getLastName().equals(lastName) || !user.getPhoneNumber().equals(rd.phone()) || (rd.birthDay != null && !user.getDateOfBirth().equals(rd.birthDay))) {
                         userChangedFromImportResponse = UserChangedFromImportResponse.builder().userId(user.getId()).newEmail(rd.email).oldEmail(user.getEmail()).oldDateOfBirth(user.getDateOfBirth()).newDateOfBirth(rd.birthDay).oldFullName(user.getFullName()).newFullName(rd.fullName).oldPhoneNumber(user.getPhoneNumber()).newPhoneNumber(rd.phone).build();
                         updated.add(userChangedFromImportResponse);
                     }
@@ -848,7 +848,7 @@ public class UserServiceImpl implements UserService {
             if (DateUtil.isCellDateFormatted(cell)) {
                 // Dùng SimpleDateFormat để ép kiểu Date thành chuỗi định dạng Việt Nam
                 // Đây là bước quan trọng nhất để xóa bỏ chuỗi "Sun Sep 12..."
-                return new java.text.SimpleDateFormat("dd/MM/yyyy").format(cell.getDateCellValue());
+                return new java.text.SimpleDateFormat("MM/dd/yyyy").format(cell.getDateCellValue());
             }
             // Trường hợp là số điện thoại hoặc số thường
             return String.format("%.0f", cell.getNumericCellValue());

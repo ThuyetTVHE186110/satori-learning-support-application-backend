@@ -2,13 +2,22 @@ package com.fu.clazz.service.impl;
 
 import com.fu.clazz.dto.request.AddMemberRequest;
 import com.fu.clazz.dto.request.AddMembersRequest;
+import com.fu.clazz.dto.request.ApproveImportClassesRequest;
 import com.fu.clazz.dto.request.CreateClassRequest;
 import com.fu.clazz.dto.request.UpdateClassRequest;
+import com.fu.clazz.dto.response.ClassImportError;
 import com.fu.clazz.dto.response.ClassMemberResponse;
+import com.fu.clazz.dto.response.ClassPreview;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
+import com.fu.clazz.dto.response.ImportClassesPreview;
+import com.fu.clazz.dto.response.ImportClassesResult;
 import com.fu.clazz.dto.response.LearnerClassResponse;
+import com.fu.clazz.dto.response.LearnerInfo;
 import com.fu.clazz.dto.response.TeacherClassHistoryResponse;
+import com.fu.clazz.utils.ClassExcelRow;
+import com.fu.clazz.utils.ExcelClassImportUtil;
+import com.fu.clazz.utils.LearnerExcelRow;
 import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.entity.ClassStatus;
 import com.fu.clazz.entity.ClassTeacherHistory;
@@ -38,14 +47,17 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -356,17 +368,17 @@ public class ClassServiceImpl implements ClassService {
                     .filter(u -> u.getDeletedAt() == null)
                     .orElseThrow(() -> new ResourceNotFoundException("User", "id", learnerId.toString()));
 
+            // Validate user has LEARNER role
+            if (user.getRole() != UserRole.LEARNER) {
+                throw new BusinessException("INVALID_MEMBER_ROLE",
+                        "Chỉ người dùng có vai trò HỌC VIÊN mới được thêm vào lớp học.");
+            }
             // Check status = INACTIVE
             if (user.getStatus() != UserStatus.INACTIVE) {
-                throw new BusinessException("INVALID_MEMBER_STATUS", 
+                throw new BusinessException("INVALID_MEMBER_STATUS",
                         "Học viên " + learnerId + " phải có trạng thái KHÔNG HOẠT ĐỘNG.");
             }
 
-            // Validate user has LEARNER role
-            if (user.getRole() != UserRole.LEARNER) {
-                throw new BusinessException("INVALID_MEMBER_ROLE", 
-                        "Chỉ người dùng có vai trò HỌC VIÊN mới được thêm vào lớp học.");
-            }
 
             // Check existing ClassMember
             Optional<ClassMember> existing = classMemberRepository.findByClassIdAndUserId(classId, learnerId);
@@ -646,6 +658,511 @@ public class ClassServiceImpl implements ClassService {
         }
         userRepository.save(learner);
         return response;
+    }
+
+    /**
+     * Step 1: Import classes from Excel file (Preview)
+     * Reads Excel file, validates data, and returns preview for client confirmation.
+     * 
+     * @param file Excel file (.xlsx or .xls)
+     * @param managerId ID of the manager performing import
+     * @return ImportClassesPreview containing validation results and data for step 2
+     * @throws IOException if file read fails
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public ImportClassesPreview importClassesFromExcel(MultipartFile file, UUID managerId) throws Exception {
+        log.info("Manager {} starting class import from Excel", managerId);
+
+        List<ClassExcelRow> excelRows = ExcelClassImportUtil.readClassesFromExcel(file);
+        Map<String, List<LearnerExcelRow>> learnersByClass = ExcelClassImportUtil.readLearnersDetailedFromExcel(file);
+
+        List<ClassImportError> errors = new ArrayList<>();
+        List<ClassPreview> validClasses = new ArrayList<>();
+        Set<String> seenClassNames = new HashSet<>();
+
+        int newClassCount = 0;
+        int updateClassCount = 0;
+        
+        // Step 1: Build map of learner email -> list of classes they appear in (for multi-class detection)
+        // Using case-insensitive class name matching
+        Map<String, Set<String>> learnerToClasses = new HashMap<>();
+        log.debug("Building learner-to-classes map from {} excel rows and learner data", excelRows.size());
+        log.debug("Learner data available for classes: {}", learnersByClass.keySet());
+        
+        for (ClassExcelRow excelRow : excelRows) {
+            if (excelRow.isEmpty()) continue;
+            
+            String className = excelRow.getName().trim();
+            
+            // Try to find learners for this class (case-insensitive)
+            List<LearnerExcelRow> learnerExcelRows = new ArrayList<>();
+            for (String key : learnersByClass.keySet()) {
+                if (key.equalsIgnoreCase(className)) {
+                    learnerExcelRows = learnersByClass.get(key);
+                    break;
+                }
+            }
+            
+            log.debug("Class '{}' has {} learners in import data", className, learnerExcelRows.size());
+            
+            for (LearnerExcelRow learnerExcelRow : learnerExcelRows) {
+                String learnerEmail = learnerExcelRow.getEmail().trim().toLowerCase();
+                learnerToClasses.computeIfAbsent(learnerEmail, k -> new HashSet<>()).add(className);
+            }
+        }
+        
+        // Identify learners in multiple classes within this batch
+        Set<String> learnersInMultipleClasses = learnerToClasses.entrySet().stream()
+                .filter(e -> e.getValue().size() > 1)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
+        
+        if (!learnersInMultipleClasses.isEmpty()) {
+            log.warn("Found {} learners in multiple classes within this import batch: {}", 
+                    learnersInMultipleClasses.size(), learnersInMultipleClasses);
+            learnersInMultipleClasses.forEach(email -> 
+                log.warn("  - {} appears in classes: {}", email, learnerToClasses.get(email))
+            );
+        }
+
+        for (ClassExcelRow excelRow : excelRows) {
+            if(excelRow.isEmpty()) {
+                continue; // Skip empty rows
+            }
+            // Validate row
+            Optional<ClassImportError> validationError = ExcelClassImportUtil.validateClassRow(excelRow);
+            if (validationError.isPresent()) {
+                errors.add(validationError.get());
+                continue;
+            }
+
+            String className = excelRow.getName().trim();
+
+            // Check for duplicates within batch
+            if (seenClassNames.contains(className)) {
+                errors.add(ClassImportError.builder()
+                        .rowNumber(excelRow.getRowNumber())
+                        .className(className)
+                        .errorMessage("Tên lớp bị trùng lặp trong file import này")
+                        .build());
+                continue;
+            }
+            seenClassNames.add(className);
+
+            // Find course by name
+            Course course = courseRepository.findByName(excelRow.getCourseName().trim()).orElse(null);
+            if (course == null) {
+                errors.add(ClassImportError.builder()
+                        .rowNumber(excelRow.getRowNumber())
+                        .className(className)
+                        .errorMessage("Không tìm thấy khóa học: " + excelRow.getCourseName())
+                        .build());
+                continue;
+            }
+
+            // Find teacher by email
+            User teacher = userRepository.findByEmail(excelRow.getTeacherEmail().trim()).orElse(null);
+            if (teacher == null || teacher.getRole() != UserRole.TEACHER) {
+                errors.add(ClassImportError.builder()
+                        .rowNumber(excelRow.getRowNumber())
+                        .className(className)
+                        .errorMessage("Giảng viên không tồn tại hoặc không có quyền TEACHER: " + excelRow.getTeacherEmail())
+                        .build());
+                continue;
+            }
+
+            // Determine type: NEW or UPDATE
+            boolean classExists = classRepository.existsByNameIgnoreCase(className);
+            Clazz existingClass = null;
+            if (classExists) {
+                updateClassCount++;
+                // Retrieve the actual class for learner membership checks
+                existingClass = classRepository.findByNameIgnoreCaseAndNotDeleted(className).orElse(null);
+            } else {
+                newClassCount++;
+            }
+
+            // Determine status based on startDate
+            ClassStatus status = ClassStatus.NOT_STARTED;
+            if (excelRow.getStartDate() != null && !excelRow.getStartDate().isAfter(LocalDate.now())) {
+                status = ClassStatus.ACTIVE;
+            }
+
+            // Build learner list with full details and validate
+            List<LearnerInfo> learnersToAdd = new ArrayList<>();
+            
+            // Find learners for this class (case-insensitive)
+            List<LearnerExcelRow> learnerExcelRows = new ArrayList<>();
+            for (String key : learnersByClass.keySet()) {
+                if (key.equalsIgnoreCase(className)) {
+                    learnerExcelRows = learnersByClass.get(key);
+                    break;
+                }
+            }
+            
+            for (LearnerExcelRow learnerExcelRow : learnerExcelRows) {
+                String learnerEmail = learnerExcelRow.getEmail().trim().toLowerCase();
+                
+                // Skip learners that are in multiple classes in this batch
+                if (learnersInMultipleClasses.contains(learnerEmail)) {
+                    errors.add(ClassImportError.builder()
+                            .rowNumber(excelRow.getRowNumber())
+                            .className(className)
+                            .errorMessage(String.format("Học sinh %s nằm ở nhiều lớp khác nhau trong file import, không thể thêm", learnerExcelRow.getEmail().trim()))
+                            .build());
+                    continue;
+                }
+                
+                User learner = userRepository.findByEmail(learnerEmail).orElse(null);
+                if (learner == null) {
+                    errors.add(ClassImportError.builder()
+                            .rowNumber(excelRow.getRowNumber())
+                            .className(className)
+                            .errorMessage("Học sinh không tồn tại: " + learnerExcelRow.getEmail())
+                            .build());
+                    continue;
+                }
+
+                // Validate learner not deleted
+                if (learner.getDeletedAt() != null) {
+                    errors.add(ClassImportError.builder()
+                            .rowNumber(excelRow.getRowNumber())
+                            .className(className)
+                            .errorMessage("Học sinh đã bị xóa: " + learnerExcelRow.getEmail())
+                            .build());
+                    continue;
+                }
+                
+                // For UPDATE classes: Skip learners already in this class
+                if (classExists && existingClass != null) {
+                    boolean alreadyInClass = classMemberRepository
+                        .findByClassIdAndUserId(existingClass.getId(), learner.getId())
+                        .map(member -> member.getRemovedAt() == null) // Check if not soft-deleted
+                        .orElse(false);
+                    
+                    if (alreadyInClass) {
+                        log.debug("Learner {} already in class {}, skipping", learner.getEmail(), className);
+                        continue;
+                    }
+                }
+                
+                String fullName = (learner.getFirstName() != null ? learner.getFirstName() : "") + 
+                                (learner.getLastName() != null ? " " + learner.getLastName() : "");
+                fullName = fullName.trim();
+                
+                LearnerInfo learnerInfo = LearnerInfo.builder()
+                        .id(learner.getId())
+                        .email(learner.getEmail())
+                        .fullName(!fullName.isEmpty() ? fullName : learnerExcelRow.getName())
+                        .dateOfBirth(learner.getDateOfBirth())
+                        .phoneNumber(learner.getPhoneNumber())
+                        .build();
+                learnersToAdd.add(learnerInfo);
+            }
+
+            // Validate max students not exceeded
+            // For UPDATE classes: Include existing members in the count
+            int totalLearnersAfterImport = learnersToAdd.size();
+            if (classExists && existingClass != null) {
+                long existingMemberCount = classMemberRepository.countActiveByClassId(existingClass.getId());
+                totalLearnersAfterImport += (int) existingMemberCount;
+                log.debug("Class {} UPDATE validation: existing={}, new={}, total={}, max={}", 
+                    className, existingMemberCount, learnersToAdd.size(), totalLearnersAfterImport, excelRow.getMaxStudents());
+            }
+            
+            Optional<ClassImportError> maxStudentsError = ExcelClassImportUtil.validateMaxStudentsNotExceeded(
+                    totalLearnersAfterImport, excelRow.getMaxStudents(), className, excelRow.getRowNumber());
+            if (maxStudentsError.isPresent()) {
+                errors.add(maxStudentsError.get());
+                continue;
+            }
+
+            // Create ClassPreview with both IDs and full details
+            ClassPreview preview = ClassPreview.builder()
+                    .name(className)
+                    .description(excelRow.getDescription())
+                    .courseId(course.getId())
+                    .courseName(course.getName())
+                    .teacherId(teacher.getId())
+                    .teacherName(excelRow.getTeacherName())
+                    .teacherEmail(teacher.getEmail())
+                    .startDate(excelRow.getStartDate())
+                    .status(status)
+                    .maxStudents(excelRow.getMaxStudents())
+                    .learnersToAdd(learnersToAdd)
+                    .build();
+
+            validClasses.add(preview);
+            log.debug("Valid class for import: {} ({})", className, classExists ? "UPDATE" : "NEW");
+        }
+
+        // Separate classes into CREATE and UPDATE lists
+        List<ClassPreview> createdClasses = new ArrayList<>();
+        List<ClassPreview> updatedClasses = new ArrayList<>();
+        for (ClassPreview preview : validClasses) {
+            if (classRepository.existsByNameIgnoreCase(preview.getName())) {
+                updatedClasses.add(preview);
+            } else {
+                createdClasses.add(preview);
+            }
+        }
+
+        ImportClassesPreview result = ImportClassesPreview.builder()
+                .totalRows(excelRows.size())
+                .validRows(validClasses.size())
+                .invalidRows(errors.size())
+                .newClasses(newClassCount)
+                .updateClasses(updateClassCount)
+                .createdClasses(createdClasses)
+                .updatedClasses(updatedClasses)
+                .errors(errors)
+                .build();
+
+        log.info("Class import preview complete: {} valid, {} errors, {} new, {} updates",
+                validClasses.size(), errors.size(), newClassCount, updateClassCount);
+
+        return result;
+    }
+
+    /**
+     * Step 2: Approve and confirm class import
+     * Creates new classes and updates existing ones based on preview data from Step 1.
+     * 
+     * @param request ApproveImportClassesRequest containing classes to create and update
+     * @param managerId ID of the manager confirming import
+     * @return ImportClassesResult with final counts
+     */
+    @Override
+    @Transactional
+    public ImportClassesResult approveImportClasses(ApproveImportClassesRequest request, UUID managerId) {
+        int totalRequested = (request.getClassesToCreate() != null ? request.getClassesToCreate().size() : 0) +
+                             (request.getClassesToUpdate() != null ? request.getClassesToUpdate().size() : 0);
+        log.info("Manager {} approving class import for {} classes", managerId, totalRequested);
+
+        List<ClassImportError> errors = new ArrayList<>();
+        int createdCount = 0;
+        int updatedCount = 0;
+
+        // Process classes to CREATE (NEW)
+        if (request.getClassesToCreate() != null) {
+            for (ClassPreview preview : request.getClassesToCreate()) {
+                try {
+                    // Create new class - use IDs from preview
+                    Clazz newClass = Clazz.builder()
+                            .name(preview.getName())
+                            .description(preview.getDescription())
+                            .courseId(preview.getCourseId())
+                            .startDate(preview.getStartDate())
+                            .status(preview.getStatus())
+                            .maxStudents(preview.getMaxStudents() != null ? preview.getMaxStudents() : 8)
+                            .build();
+
+                    Clazz savedClass = classRepository.save(newClass);
+                    log.debug("Created new class: {}", preview.getName());
+
+                    // Add learners to new class
+                    if (preview.getLearnersToAdd() != null) {
+                        int learnerRowNum = 0;
+                        for (LearnerInfo learnerInfo : preview.getLearnersToAdd()) {
+                            learnerRowNum++;
+                            
+                            // Validate learner before adding
+                            ClassImportError validationError = validateLearnerForImport(
+                                    learnerInfo, preview.getName(), learnerRowNum);
+                            
+                            if (validationError != null) {
+                                errors.add(validationError);
+                                continue; // Skip invalid learner
+                            }
+                            
+                            try {
+                                // Use learner ID directly from LearnerInfo
+                                ClassMember member = ClassMember.builder()
+                                        .classId(savedClass.getId())
+                                        .userId(learnerInfo.getId())
+                                        .joinedAt(LocalDateTime.now())
+                                        .build();
+                                classMemberRepository.save(member);
+                                
+                                // Update learner status to ACTIVE
+                                User learner = userRepository.findById(learnerInfo.getId()).get();
+                                learner.setStatus(UserStatus.ACTIVE);
+                                userRepository.save(learner);
+                                
+                            } catch (Exception e) {
+                                log.warn("Failed to add learner {} to class {}: {}", 
+                                        learnerInfo.getEmail(), preview.getName(), e.getMessage());
+                                errors.add(ClassImportError.builder()
+                                        .className(preview.getName())
+                                        .errorMessage(String.format("Lỗi thêm học viên %s: %s", 
+                                                learnerInfo.getEmail(), e.getMessage()))
+                                        .build());
+                            }
+                        }
+                    }
+
+                    createdCount++;
+
+                } catch (Exception e) {
+                    log.error("Error creating class {}: {}", preview.getName(), e.getMessage(), e);
+                }
+            }
+        }
+
+        // Process classes to UPDATE
+        if (request.getClassesToUpdate() != null) {
+            for (ClassPreview preview : request.getClassesToUpdate()) {
+                try {
+                    // Find existing class by name
+                    Clazz existingClass = classRepository.findAll().stream()
+                            .filter(c -> c.getName().equalsIgnoreCase(preview.getName()) && c.getDeletedAt() == null)
+                            .findFirst()
+                            .orElse(null);
+
+                    if (existingClass != null) {
+                        final Clazz finalExistingClass = existingClass;  // Make final for lambda
+                        
+                        // Update class fields - use IDs from preview
+                        existingClass.setDescription(preview.getDescription());
+                        existingClass.setCourseId(preview.getCourseId());
+                        existingClass.setStartDate(preview.getStartDate());
+                        existingClass.setStatus(preview.getStatus());
+
+                        classRepository.save(existingClass);
+                        log.debug("Updated existing class: {}", preview.getName());
+
+                        // Add new learners to existing class
+                        if (preview.getLearnersToAdd() != null) {
+                            int learnerRowNum = 0;
+                            for (LearnerInfo learnerInfo : preview.getLearnersToAdd()) {
+                                learnerRowNum++;
+                                
+                                // Validate learner before adding
+                                ClassImportError validationError = validateLearnerForImport(
+                                        learnerInfo, preview.getName(), learnerRowNum);
+                                
+                                if (validationError != null) {
+                                    errors.add(validationError);
+                                    continue; // Skip invalid learner
+                                }
+                                
+                                try {
+                                    // Use learner ID directly from LearnerInfo
+                                    final UUID learnerId = learnerInfo.getId();
+                                    Optional<ClassMember> existingMember = classMemberRepository.findAll().stream()
+                                            .filter(m -> m.getClassId().equals(finalExistingClass.getId()) &&
+                                                    m.getUserId().equals(learnerId))
+                                            .findFirst();
+
+                                    if (existingMember.isPresent()) {
+                                        ClassMember member = existingMember.get();
+                                        if (member.getRemovedAt() != null) {
+                                            member.setRemovedAt(null);  // re-join
+                                            classMemberRepository.save(member);
+                                        }
+                                    } else {
+                                        ClassMember newMember = ClassMember.builder()
+                                                .classId(finalExistingClass.getId())
+                                                .userId(learnerId)
+                                                .joinedAt(LocalDateTime.now())
+                                                .build();
+                                        classMemberRepository.save(newMember);
+                                    }
+                                    
+                                    // Update learner status to ACTIVE
+                                    User learner = userRepository.findById(learnerId).get();
+                                    learner.setStatus(UserStatus.ACTIVE);
+                                    userRepository.save(learner);
+                                    
+                                } catch (Exception e) {
+                                    log.warn("Failed to add learner {} to class {}: {}", 
+                                            learnerInfo.getEmail(), preview.getName(), e.getMessage());
+                                    errors.add(ClassImportError.builder()
+                                            .className(preview.getName())
+                                            .errorMessage(String.format("Lỗi thêm học viên %s: %s", 
+                                                    learnerInfo.getEmail(), e.getMessage()))
+                                            .build());
+                                }
+                            }
+                        }
+
+                        updatedCount++;
+                    }
+                } catch (Exception e) {
+                    log.error("Error updating class {}: {}", preview.getName(), e.getMessage(), e);
+                }
+            }
+        }
+
+        ImportClassesResult result = ImportClassesResult.builder()
+                .totalRows(totalRequested)
+                .createdCount(createdCount)
+                .updatedCount(updatedCount)
+                .failureCount(totalRequested - createdCount - updatedCount)
+                .errors(errors)
+                .build();
+
+        log.info("Class import approval complete: {} created, {} updated, {} failures",
+                createdCount, updatedCount, result.getFailureCount());
+
+        return result;
+    }
+
+    /**
+     * Validate learner during import approval
+     * Checks: role (must be LEARNER), status (must be INACTIVE), not already in another class
+     *
+     * @param learner LearnerInfo to validate
+     * @param className Name of class for error reporting
+     * @param rowNum Row number for error reporting
+     * @return ClassImportError if validation fails, null if passes
+     */
+    private ClassImportError validateLearnerForImport(LearnerInfo learner, String className, int rowNum) {
+        try {
+            // Fetch full user entity
+            User user = userRepository.findById(learner.getId())
+                    .orElseThrow(() -> new Exception("Học viên không tồn tại"));
+
+            // Check role - must be LEARNER
+            if (user.getRole() != UserRole.LEARNER) {
+                return ClassImportError.builder()
+                        .rowNumber(rowNum)
+                        .className(className)
+                        .errorMessage(String.format("Học viên %s phải có role LEARNER, hiện có: %s", 
+                                learner.getEmail(), user.getRole()))
+                        .build();
+            }
+
+            // Check status - must be INACTIVE
+            if (user.getStatus() != UserStatus.INACTIVE) {
+                return ClassImportError.builder()
+                        .rowNumber(rowNum)
+                        .className(className)
+                        .errorMessage(String.format("Chỉ có thể thêm học viên %s với status INACTIVE, hiện có: %s", 
+                                learner.getEmail(), user.getStatus()))
+                        .build();
+            }
+
+            // Check not in any other class
+            boolean inOtherClass = classMemberRepository.existsByUserIdAndRemovedAtNull(learner.getId());
+            if (inOtherClass) {
+                return ClassImportError.builder()
+                        .rowNumber(rowNum)
+                        .className(className)
+                        .errorMessage(String.format("Học viên %s đang ở trong lớp khác, không thể thêm", learner.getEmail()))
+                        .build();
+            }
+
+            return null; // No error - validation passed
+
+        } catch (Exception e) {
+            return ClassImportError.builder()
+                    .rowNumber(rowNum)
+                    .className(className)
+                    .errorMessage(String.format("Lỗi validate học viên %s: %s", learner.getEmail(), e.getMessage()))
+                    .build();
+        }
     }
 
     /**
