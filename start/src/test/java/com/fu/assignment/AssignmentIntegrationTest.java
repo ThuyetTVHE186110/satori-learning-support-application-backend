@@ -108,7 +108,7 @@ class AssignmentIntegrationTest {
                 .passwordHash(passwordEncoder.encode("ValidPass@1"))
                 .firstName("Test").lastName("Teacher")
                 .role(UserRole.TEACHER).status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL).failedLoginAttempts(0)
+                .failedLoginAttempts(0)
                 .build());
     }
 
@@ -118,7 +118,7 @@ class AssignmentIntegrationTest {
                 .passwordHash(passwordEncoder.encode("ValidPass@1"))
                 .firstName("Test").lastName("Learner")
                 .role(UserRole.LEARNER).status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL).failedLoginAttempts(0)
+                .failedLoginAttempts(0)
                 .build());
     }
 

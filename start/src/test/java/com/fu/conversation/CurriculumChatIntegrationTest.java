@@ -19,7 +19,6 @@ import com.fu.course.repository.CourseRepository;
 import com.fu.course.repository.LessonRepository;
 import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import com.fu.curriculumimport.service.embedding.RagContext;
-import com.fu.user.entity.AuthProvider;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
@@ -162,7 +161,6 @@ class CurriculumChatIntegrationTest {
                 .firstName("Test").lastName("Learner")
                 .role(UserRole.LEARNER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build());
     }
@@ -332,7 +330,6 @@ class CurriculumChatIntegrationTest {
                     .firstName("Test").lastName("Teacher")
                     .role(UserRole.TEACHER)
                     .status(UserStatus.ACTIVE)
-                    .authProvider(AuthProvider.LOCAL)
                     .failedLoginAttempts(0)
                     .build());
             String teacherToken = loginAndGetToken("teacher@test.com", "ValidPass@1");

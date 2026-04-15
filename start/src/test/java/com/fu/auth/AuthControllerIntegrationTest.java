@@ -82,7 +82,6 @@ class    AuthControllerIntegrationTest {
                 .lastName("Learner")
                 .role(UserRole.LEARNER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build());
     }
@@ -205,7 +204,6 @@ class    AuthControllerIntegrationTest {
                     .passwordHash(passwordEncoder.encode("ValidPass@1"))
                     .role(UserRole.LEARNER)
                     .status(UserStatus.SUSPENDED)
-                    .authProvider(AuthProvider.LOCAL)
                     .failedLoginAttempts(0)
                     .build());
 
@@ -239,7 +237,6 @@ class    AuthControllerIntegrationTest {
                     .passwordHash(passwordEncoder.encode("ValidPass@1"))
                     .role(UserRole.LEARNER)
                     .status(UserStatus.ACTIVE)
-                    .authProvider(AuthProvider.LOCAL)
                     .failedLoginAttempts(0)
                     .build());
             deleted.setDeletedAt(LocalDateTime.now().minusDays(1));
@@ -1020,7 +1017,6 @@ class    AuthControllerIntegrationTest {
                     .lastName("B")
                     .role(UserRole.LEARNER)
                     .status(UserStatus.ACTIVE)
-                    .authProvider(AuthProvider.LOCAL)
                     .failedLoginAttempts(0)
                     .build());
 

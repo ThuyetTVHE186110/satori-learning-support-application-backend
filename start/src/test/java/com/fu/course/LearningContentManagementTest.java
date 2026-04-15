@@ -16,7 +16,6 @@ import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import com.fu.curriculumimport.service.orchestrator.ImportOrchestrator;
 import com.fu.infrastructure.cloudinary.CloudinaryService;
 import com.fu.infrastructure.email.EmailService;
-import com.fu.user.entity.AuthProvider;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
@@ -69,11 +68,11 @@ class LearningContentManagementTest {
     @MockBean private EmbeddingService embeddingService;
 
     private User saveManager(String email) {
-        return userRepository.save(User.builder().email(email).passwordHash(passwordEncoder.encode("ValidPass@1")).firstName("Test").lastName("Manager").role(UserRole.CONTENT_MANAGER).status(UserStatus.ACTIVE).authProvider(AuthProvider.LOCAL).failedLoginAttempts(0).build());
+        return userRepository.save(User.builder().email(email).passwordHash(passwordEncoder.encode("ValidPass@1")).firstName("Test").lastName("Manager").role(UserRole.CONTENT_MANAGER).status(UserStatus.ACTIVE).failedLoginAttempts(0).build());
     }
 
     private User saveLearner(String email) {
-        return userRepository.save(User.builder().email(email).passwordHash(passwordEncoder.encode("ValidPass@1")).firstName("Test").lastName("Learner").role(UserRole.LEARNER).status(UserStatus.ACTIVE).authProvider(AuthProvider.LOCAL).failedLoginAttempts(0).build());
+        return userRepository.save(User.builder().email(email).passwordHash(passwordEncoder.encode("ValidPass@1")).firstName("Test").lastName("Learner").role(UserRole.LEARNER).status(UserStatus.ACTIVE).failedLoginAttempts(0).build());
     }
 
     private String loginAndGetToken(String email, String password) throws Exception {
@@ -301,7 +300,7 @@ class LearningContentManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("N5 Course");
 
-            MockMultipartFile pdf = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
+            MockMultipartFile pdf = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF-".getBytes());
 
             mockMvc.perform(multipart("/api/v1/manager/curriculum-imports")
                     .file(pdf)
@@ -332,7 +331,7 @@ class LearningContentManagementTest {
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("INVALID_FILE"))
-                    .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Chỉ chấp nhận các tệp PDF và PPTX. Loại MIME nhận được: text/plain, tên tệp: test.txt")));
+                    .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Chỉ chấp nhận các tệp PDF và PPTX. Tên tệp nhận được: test.txt")));
         }
 
         @Test
@@ -342,7 +341,7 @@ class LearningContentManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             Course course = saveCourse("Test Course");
 
-            MockMultipartFile bigPdf = new MockMultipartFile("file", "big.pdf", "application/pdf", "%PDF".getBytes()){
+            MockMultipartFile bigPdf = new MockMultipartFile("file", "big.pdf", "application/pdf", "%PDF-".getBytes()){
                 @Override public long getSize() { return 101L * 1024 * 1024; }
             };
 
@@ -622,8 +621,10 @@ class LearningContentManagementTest {
         void tc_lcm_vo_001() throws Exception {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            Course course = saveCourse("N5 Course");
+            Lesson lesson = saveLesson(course, "Lesson 1", 0);
 
-            String body = "{\"japaneseText\":\"猫\",\"jlptLevel\":\"N5\",\"meaningVi\":\"Con mèo\"}";
+            String body = String.format("{\"lessonId\":\"%s\",\"japaneseText\":\"猫\",\"jlptLevel\":\"N5\",\"meaningVi\":\"Con mèo\"}", lesson.getId());
 
             mockMvc.perform(post("/api/v1/manager/vocabulary").characterEncoding("UTF-8").contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
@@ -673,15 +674,17 @@ class LearningContentManagementTest {
         void tc_lcm_gr_001() throws Exception {
             saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
+            Course course = saveCourse("N5 Course");
+            Lesson lesson = saveLesson(course, "Lesson 1", 0);
 
-            String body = "{\"pattern\":\"〜てから\",\"jlptLevel\":\"N4\",\"meaningVi\":\"Sau khi...\"}";
+            String body = String.format("{\"lessonId\":\"%s\",\"pattern\":\"〜てから\",\"jlptLevel\":\"N5\",\"meaningVi\":\"Sau khi...\",\"detailedExplanation\":\"Used to indicate that one action happens after another.\"}", lesson.getId());
 
             mockMvc.perform(post("/api/v1/manager/grammar-points").characterEncoding("UTF-8").contentType(MediaType.APPLICATION_JSON).content(body).header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.id").exists())
                     .andExpect(jsonPath("$.data.pattern").value("〜てから"))
-                    .andExpect(jsonPath("$.data.jlptLevel").value("N4"))
+                    .andExpect(jsonPath("$.data.jlptLevel").value("N5"))
                     .andExpect(jsonPath("$.data.meaningVi").value("Sau khi..."))
                     .andExpect(jsonPath("$.data.createdAt").exists());
         }

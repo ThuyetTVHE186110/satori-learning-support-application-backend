@@ -1364,7 +1364,7 @@ class ClassServiceImplTest {
             verify(classRepository).save(clazzCaptor.capture());
             assertThat(clazzCaptor.getValue().getStatus()).isEqualTo(ClassStatus.CLOSED);
             assertThat(clazzCaptor.getValue().getEndDate()).isEqualTo(LocalDate.now());
-            verify(userRepository).updateStatusByUserIdIn(anyList(), eq(UserStatus.INACTIVE));
+            verify(userRepository).updateStatusByUserIdIn(anyList(), eq(UserStatus.INACTIVE), eq(UserRole.LEARNER));
         }
 
         @Test

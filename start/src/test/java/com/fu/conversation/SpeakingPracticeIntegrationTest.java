@@ -28,7 +28,6 @@ import com.fu.roleplay.repository.MessagePronunciationRepository;
 import com.fu.roleplay.repository.SessionMissionRepository;
 import com.fu.pronunciation.provider.PronunciationAssessmentProvider;
 import com.fu.pronunciation.dto.AssessmentResult;
-import com.fu.user.entity.AuthProvider;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
@@ -127,7 +126,6 @@ class SpeakingPracticeIntegrationTest {
                 .firstName("Test").lastName("Learner")
                 .role(UserRole.LEARNER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build());
     }
@@ -139,7 +137,6 @@ class SpeakingPracticeIntegrationTest {
                 .firstName("Test").lastName("Manager")
                 .role(UserRole.CONTENT_MANAGER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build());
     }
@@ -258,7 +255,6 @@ class SpeakingPracticeIntegrationTest {
                 .userId(userId)
                 .conversationId(conversationId)
                 .totalSessions(totalSessions)
-                .totalMessagesSent(0)
                 .lastPracticedAt(LocalDateTime.now())
                 .isCompleted(false)
                 .build());
@@ -846,15 +842,15 @@ class SpeakingPracticeIntegrationTest {
                     .progressPct(50)
                     .build());
 
-            when(sessionEvaluatorAI.evaluateSession(anyList()))
-                    .thenReturn(SessionEvaluationResponse.LanguageEvaluationDetail.builder()
-                            .fluencyScore(java.math.BigDecimal.valueOf(70))
-                            .accuracyScore(java.math.BigDecimal.valueOf(70))
-                            .vocabularyScore(java.math.BigDecimal.valueOf(70))
-                            .grammarScore(java.math.BigDecimal.valueOf(70))
-                            .strengths(List.of("Good"))
-                            .improvements(List.of("Improve"))
-                            .summary("Summary")
+            when(sessionEvaluatorAI.synthesize(any(), any(), any(), anyInt(), anyInt(), anyList(), any(), any(), anyString()))
+                    .thenReturn(SessionEvaluationResponse.QualitativeSummary.builder()
+                            .overallAssessment("Good performance")
+                            .jlptEstimate("N5")
+                            .accuracyFeedback("Accurate")
+                            .pronunciationFeedback("Clear")
+                            .taskCompletionFeedback("Completed")
+                            .complexityFeedback("Appropriate")
+                            .nextSteps(List.of("Continue practice"))
                             .build());
 
             mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{sessionId}/complete", session.getId())
@@ -2283,13 +2279,15 @@ class SpeakingPracticeIntegrationTest {
                              .header("Authorization", "Bearer " + token))
                      .andExpect(status().isOk());
 
-             when(sessionEvaluatorAI.evaluateSession(anyList()))
-                        .thenReturn(SessionEvaluationResponse.LanguageEvaluationDetail.builder()
-                                .summary("OK")
-                                .fluencyScore(BigDecimal.ONE)
-                                .accuracyScore(BigDecimal.ONE)
-                                .vocabularyScore(BigDecimal.ONE)
-                                .grammarScore(BigDecimal.ONE)
+             when(sessionEvaluatorAI.synthesize(any(), any(), any(), anyInt(), anyInt(), anyList(), any(), any(), anyString()))
+                        .thenReturn(SessionEvaluationResponse.QualitativeSummary.builder()
+                                .overallAssessment("Good performance")
+                                .jlptEstimate("N5")
+                                .accuracyFeedback("Accurate")
+                                .pronunciationFeedback("Clear")
+                                .taskCompletionFeedback("Completed")
+                                .complexityFeedback("Appropriate")
+                                .nextSteps(List.of("Continue practice"))
                                 .build());
 
                 mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{id}/complete", sessionId)
@@ -2618,15 +2616,15 @@ class SpeakingPracticeIntegrationTest {
                     .sequenceNumber(1)
                     .build());
 
-            when(sessionEvaluatorAI.evaluateSession(anyList()))
-                    .thenReturn(SessionEvaluationResponse.LanguageEvaluationDetail.builder()
-                            .fluencyScore(BigDecimal.ZERO)
-                            .accuracyScore(BigDecimal.ZERO)
-                            .vocabularyScore(BigDecimal.ZERO)
-                            .grammarScore(BigDecimal.ZERO)
-                            .strengths(List.of())
-                            .improvements(List.of("Không thể đánh giá phiên hội thoại này"))
-                            .summary("Đánh giá không khả dụng cho phiên hội thoại này.")
+            when(sessionEvaluatorAI.synthesize(any(), any(), any(), anyInt(), anyInt(), anyList(), any(), any(), anyString()))
+                    .thenReturn(SessionEvaluationResponse.QualitativeSummary.builder()
+                            .overallAssessment("Cannot assess this session")
+                            .jlptEstimate("Unknown")
+                            .accuracyFeedback("Không thể đánh giá phiên hội thoại này")
+                            .pronunciationFeedback("N/A")
+                            .taskCompletionFeedback("N/A")
+                            .complexityFeedback("N/A")
+                            .nextSteps(List.of())
                             .build());
 
             mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{sessionId}/complete", session.getId())
@@ -2934,13 +2932,15 @@ class SpeakingPracticeIntegrationTest {
                     .sequenceNumber(1)
                     .build());
 
-            when(sessionEvaluatorAI.evaluateSession(anyList()))
-                    .thenReturn(SessionEvaluationResponse.LanguageEvaluationDetail.builder()
-                            .summary("OK")
-                            .fluencyScore(BigDecimal.ONE)
-                            .accuracyScore(BigDecimal.ONE)
-                            .vocabularyScore(BigDecimal.ONE)
-                            .grammarScore(BigDecimal.ONE)
+            when(sessionEvaluatorAI.synthesize(any(), any(), any(), anyInt(), anyInt(), anyList(), any(), any(), anyString()))
+                    .thenReturn(SessionEvaluationResponse.QualitativeSummary.builder()
+                            .overallAssessment("Good performance")
+                            .jlptEstimate("N5")
+                            .accuracyFeedback("Accurate")
+                            .pronunciationFeedback("Clear")
+                            .taskCompletionFeedback("Completed")
+                            .complexityFeedback("Appropriate")
+                            .nextSteps(List.of("Continue practice"))
                             .build());
 
             int threadCount = 2;
@@ -2975,8 +2975,8 @@ class SpeakingPracticeIntegrationTest {
             assertThat(successCount).isEqualTo(1);
             assertThat(clientErrorCount).isEqualTo(1);
 
-            // Evaluator chỉ được gọi 1 lần
-            verify(sessionEvaluatorAI, times(1)).evaluateSession(anyList());
+            // Evaluator's synthesize should only be called once
+            verify(sessionEvaluatorAI, times(1)).synthesize(any(), any(), any(), anyInt(), anyInt(), anyList(), any(), any(), anyString());
         }
 
         @Test

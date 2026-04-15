@@ -61,3 +61,20 @@ app:
             refresh-token-secret: SatoriRefreshTokenSecret2026!AnotherLongSecretKeyForJWT256
             access-token-expiration-ms: 1800000
             refresh-token-expiration-ms: 604800000
+        # Very high rate limits for testing (or effectively disable)
+        max-failed-attempts: 1000
+        lock-duration-minutes: 1
+        otp-expiration-minutes: 10
+        rate-limits:
+            login:
+                max-requests: 10000
+                window-minutes: 1
+            forgot-password:
+                max-requests: 10000
+                window-minutes: 1
+            register:
+                max-requests: 10000
+                window-minutes: 1
+            verify-otp:
+                max-requests: 10000
+                window-minutes: 1

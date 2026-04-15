@@ -64,3 +64,16 @@ app:
         max-failed-attempts: 5
         lock-duration-minutes: 30
         otp-expiration-minutes: 10
+        rate-limits:
+            login:
+                max-requests: 10000
+                window-minutes: 1
+            forgot-password:
+                max-requests: 10000
+                window-minutes: 1
+            register:
+                max-requests: 10000
+                window-minutes: 1
+            verify-otp:
+                max-requests: 10000
+                window-minutes: 1

@@ -9,7 +9,6 @@ import com.fu.conversation.repository.ConversationTopicRepository;
 import com.fu.conversation.repository.ConversationMissionRepository;
 import com.fu.course.entity.Course;
 import com.fu.infrastructure.email.EmailService;
-import com.fu.user.entity.AuthProvider;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
@@ -62,7 +61,6 @@ class ConversationTopicManagementTest {
                 .firstName("Test").lastName("Manager")
                 .role(UserRole.CONTENT_MANAGER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build());
     }
@@ -74,7 +72,6 @@ class ConversationTopicManagementTest {
                 .firstName("Test").lastName("Learner")
                 .role(UserRole.LEARNER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build());
     }
@@ -86,7 +83,6 @@ class ConversationTopicManagementTest {
                 .firstName("Test").lastName("Teacher")
                 .role(UserRole.TEACHER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build());
     }
@@ -98,7 +94,6 @@ class ConversationTopicManagementTest {
                 .firstName("Test").lastName("Admin")
                 .role(UserRole.ADMIN)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build());
     }

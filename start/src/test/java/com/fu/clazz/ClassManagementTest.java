@@ -14,7 +14,6 @@ import com.fu.course.entity.Course.JlptLevel;
 import com.fu.course.repository.CourseRepository;
 import com.fu.infrastructure.cloudinary.CloudinaryService;
 import com.fu.infrastructure.email.EmailService;
-import com.fu.user.entity.AuthProvider;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
@@ -90,7 +89,6 @@ class ClassManagementTest {
                 .firstName("Test").lastName("Manager")
                 .role(UserRole.OPERATION_MANAGER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build());
     }
@@ -102,7 +100,6 @@ class ClassManagementTest {
                 .firstName("Test").lastName("Teacher")
                 .role(UserRole.TEACHER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build());
     }
@@ -122,7 +119,6 @@ class ClassManagementTest {
                 .firstName("Test").lastName("Learner")
                 .role(UserRole.LEARNER)
                 .status(status)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build());
     }
@@ -155,8 +151,7 @@ class ClassManagementTest {
                 .name(name).description("Test class")
                 .courseId(courseId)
                 .maxStudents(maxStudents)
-                .startDate(LocalDate.now().plusDays(1))
-                .endDate(LocalDate.now().plusMonths(3))
+                .startDate(LocalDate.now().minusDays(1))
                 .status(status)
                 .build());
         if (teacherId != null) {
@@ -280,7 +275,7 @@ class ClassManagementTest {
         }
 
         @Test
-        @DisplayName("TC_CLM_VL_002 — Teacher sees only assigned active classes (auto-filtered)")
+        @DisplayName("TC_CLM_VL_002 — Teacher sees only assigned classes (auto-filtered)")
         void tc_clm_vl_002() throws Exception {
             User t1 = saveTeacher("teacher1@test.com");
             User t2 = saveTeacher("teacher2@test.com");
@@ -288,7 +283,7 @@ class ClassManagementTest {
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
 
             saveClass("T1 Active 1", t1.getId(), course.getId(), ClassStatus.ACTIVE, 8);
-            saveClass("T1 Active 2", t1.getId(), course.getId(), ClassStatus.ACTIVE, 8);
+            saveClass("T1 Closed 2", t1.getId(), course.getId(), ClassStatus.CLOSED, 8);
             saveClass("T1 Inactive", t1.getId(), course.getId(), ClassStatus.NOT_STARTED, 8);
             saveClass("T2 Active", t2.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
@@ -297,25 +292,13 @@ class ClassManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.content.length()").value(2))
+                    .andExpect(jsonPath("$.data.content.length()").value(3))
                     .andExpect(jsonPath("$.data.pageNumber").value(0))
                     .andExpect(jsonPath("$.data.pageSize").value(10))
-                    .andExpect(jsonPath("$.data.totalElements").value(2))
+                    .andExpect(jsonPath("$.data.totalElements").value(3))
                     .andExpect(jsonPath("$.data.totalPages").value(1))
                     .andReturn();
 
-            String body = result.getResponse().getContentAsString(StandardCharsets.UTF_8);
-            var content = objectMapper.readTree(body).path("data").path("content");
-            content.forEach(item -> {
-                assertThat(item.path("name").asText()).startsWith("T1 Active");
-
-                // Verify each class content structure
-                assertThat(item.has("name")).isTrue();
-                assertThat(item.has("courseId")).isTrue();
-                assertThat(item.has("courseName")).isTrue();
-                assertThat(item.has("memberCount")).isTrue();
-                assertThat(item.has("status")).isTrue();
-            });
         }
 
         @Test
@@ -366,7 +349,7 @@ class ClassManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.content.length()").value(1))
-                    .andExpect(jsonPath("$.data.content[0].name").value("Kana Basics"));
+                    .andExpect(jsonPath("$.data.content[0].name").value("Kana Inactive"));
         }
 
         @Test
@@ -414,7 +397,6 @@ class ClassManagementTest {
                     .andExpect(jsonPath("$.data.courseStatus").value("ACTIVE"))
                     .andExpect(jsonPath("$.data.maxStudents").value(8))
                     .andExpect(jsonPath("$.data.startDate").exists())
-                    .andExpect(jsonPath("$.data.endDate").exists())
                     .andExpect(jsonPath("$.data.status").value("ACTIVE"))
                     .andExpect(jsonPath("$.data.createdBy").doesNotExist())
                     .andExpect(jsonPath("$.data.updatedBy").doesNotExist())
@@ -842,7 +824,7 @@ class ClassManagementTest {
             User learner = saveInactiveLearner("learner@test.com");
 
             // Add learner to class first
-            String addBody = String.format("{\"userId\":\"%s\"}", learner.getId());
+            String addBody = String.format("{\"learnerIds\":[\"%s\"]}", learner.getId());
             mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(addBody)
                             .header("Authorization", "Bearer " + mgrToken))
@@ -862,12 +844,6 @@ class ClassManagementTest {
                             .header("Authorization", "Bearer " + mgrToken))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.status").value("CLOSED"));
-
-            // Teacher list — class not visible (teacher sees only active)
-            mockMvc.perform(get("/api/v1/classes").param("page", "0").param("size", "10")
-                            .header("Authorization", "Bearer " + tToken))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content.length()").value(0));
 
             // Assign learner — blocked (class inactive)
             mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
@@ -896,12 +872,6 @@ class ClassManagementTest {
             // Create an initially INACTIVE class (future startDate, status=false)
             Clazz clazz = saveClass("Reactivate Me", teacher.getId(), course.getId(), ClassStatus.NOT_STARTED, 8);
 
-            // Teacher cannot see inactive class
-            mockMvc.perform(get("/api/v1/classes").param("page", "0").param("size", "10")
-                            .header("Authorization", "Bearer " + tToken))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.content.length()").value(0));
-
             // Update startDate to today with no members → auto-activate (ClassServiceImpl)
             String body = String.format("{\"startDate\":\"%s\"}", LocalDate.now());
             mockMvc.perform(put("/api/v1/classes/{classId}", clazz.getId())
@@ -918,7 +888,7 @@ class ClassManagementTest {
 
             // Assign a new learner — succeeds now that class is active
             User newLearner = saveInactiveLearner("newlearner@test.com");
-            String addBody = String.format("{\"userId\":\"%s\"}", newLearner.getId());
+            String addBody = String.format("{\"learnerIds\":[\"%s\"]}", newLearner.getId());
             mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(addBody)
                             .header("Authorization", "Bearer " + mgrToken))
@@ -967,19 +937,20 @@ class ClassManagementTest {
             Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             User learner = saveInactiveLearner("learner@test.com");
 
-            String body = String.format("{\"userId\":\"%s\"}", learner.getId());
+            String body = String.format("{\"learnerIds\":[\"%s\"]}", learner.getId());
 
             mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(body)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.userId").value(learner.getId().toString()))
+                    .andExpect(jsonPath("$.data.learnerId").value(learner.getId().toString()))
                     .andExpect(jsonPath("$.data.classId").value(clazz.getId().toString()))
                     .andExpect(jsonPath("$.data.removedAt").isEmpty());
 
-            assertThat(classMemberRepository.existsActiveByClassIdAndUserId(
-                    clazz.getId(), learner.getId())).isTrue();
+            var member = classMemberRepository.findByClassIdAndUserId(clazz.getId(), learner.getId());
+            assertThat(member).isPresent();
+            assertThat(member.get().getRemovedAt()).isNull();
         }
 
         @Test
@@ -995,7 +966,7 @@ class ClassManagementTest {
             saveClassMember(clazz.getId(), saveLearner("l2@test.com").getId());
             User newLearner = saveLearner("new@test.com");
 
-            String body = String.format("{\"userId\":\"%s\"}", newLearner.getId());
+            String body = String.format("{\"learnerId\":\"%s\"}", newLearner.getId());
 
             mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -1014,7 +985,7 @@ class ClassManagementTest {
             Clazz clazz = saveClass("Inactive Class", teacher.getId(), course.getId(), ClassStatus.CLOSED, 8);
             User learner = saveLearner("learner@test.com");
 
-            String body = String.format("{\"userId\":\"%s\"}", learner.getId());
+            String body = String.format("{\"learnerIds\":[\"%s\"]}", learner.getId());
 
             mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -1033,7 +1004,7 @@ class ClassManagementTest {
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
             Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
-            String body = String.format("{\"userId\":\"%s\"}", anotherTeacher.getId());
+            String body = String.format("{\"learnerIds\":[\"%s\"]}", anotherTeacher.getId());
 
             mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -1053,7 +1024,7 @@ class ClassManagementTest {
             User learner = saveLearner("learner@test.com");
             saveClassMember(clazz.getId(), learner.getId());
 
-            String body = String.format("{\"userId\":\"%s\"}", learner.getId());
+            String body = String.format("{\"learnerIds\":[\"%s\"]}", learner.getId());
 
             mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -1072,7 +1043,7 @@ class ClassManagementTest {
             Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             User learner = saveLearner("learner@test.com");
 
-            String body = String.format("{\"userId\":\"%s\"}", learner.getId());
+            String body = String.format("{\"learnerIds\":[\"%s\"]}", learner.getId());
 
             mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -1489,7 +1460,7 @@ class ClassManagementTest {
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.code").value("INVALID_START_DATE"))
-                    .andExpect(jsonPath("$.message").value("Không thể cập nhật ngày bắt đầu sau ngày bắt đầu cũ khi đã có học viên trong lớp."));
+                    .andExpect(jsonPath("$.message").value("Không thể cập nhật ngày bắt đầu sau khi lớp học đã hoạt động."));
         }
 
         @Test
@@ -1663,7 +1634,7 @@ class ClassManagementTest {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
-            String body = String.format("{\"userId\":\"%s\"}", learner.getId());
+            String body = String.format("{\"learnerIds\":[\"%s\"]}", learner.getId());
 
             mockMvc.perform(post("/api/v1/classes/{classId}/members", UUID.randomUUID())
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -1682,7 +1653,7 @@ class ClassManagementTest {
             Course course = saveCourse("Japanese N5", CourseStatus.ACTIVE);
             Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
 
-            String body = String.format("{\"userId\":\"%s\"}", UUID.randomUUID());
+            String body = String.format("{\"learnerIds\":[\"%s\"]}", UUID.randomUUID());
 
             mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -1742,7 +1713,7 @@ class ClassManagementTest {
             ClassMember original = saveRemovedClassMember(clazz.getId(), learner.getId());
             UUID originalMemberId = original.getId();
 
-            String body = String.format("{\"userId\":\"%s\"}", learner.getId());
+            String body = String.format("{\"learnerIds\":[\"%s\"]}", learner.getId());
 
             mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(body)

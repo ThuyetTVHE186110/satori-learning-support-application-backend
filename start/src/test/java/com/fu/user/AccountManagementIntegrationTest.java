@@ -5,7 +5,6 @@ import com.fu.infrastructure.email.EmailService;
 import com.fu.user.dto.*;
 import com.fu.user.dto.auth.LoginRequest;
 import com.fu.user.entity.User;
-import com.fu.user.entity.AuthProvider;
 import com.fu.user.entity.UserStatus;
 import com.fu.user.entity.UserRole;
 import com.fu.user.repository.UserRepository;
@@ -80,7 +79,6 @@ class AccountManagementIntegrationTest {
                 .lastName(role.name())
                 .role(role)
                 .status(status)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build());
     }
@@ -93,7 +91,6 @@ class AccountManagementIntegrationTest {
                 .lastName("Deleter")
                 .role(UserRole.ADMIN)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build());
 
@@ -104,7 +101,6 @@ class AccountManagementIntegrationTest {
                 .lastName(role.name())
                 .role(role)
                 .status(UserStatus.DELETED)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build();
         u = userRepository.save(u);
@@ -218,7 +214,6 @@ class AccountManagementIntegrationTest {
                     .lastName("Doe")
                     .role(UserRole.LEARNER)
                     .status(UserStatus.ACTIVE)
-                    .authProvider(AuthProvider.LOCAL)
                     .failedLoginAttempts(0)
                     .build());
             userRepository.save(User.builder()
@@ -228,7 +223,6 @@ class AccountManagementIntegrationTest {
                     .lastName("Smith")
                     .role(UserRole.TEACHER)
                     .status(UserStatus.ACTIVE)
-                    .authProvider(AuthProvider.LOCAL)
                     .failedLoginAttempts(0)
                     .build());
             buildAndSaveUser("other.user@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
@@ -520,7 +514,6 @@ class AccountManagementIntegrationTest {
                     .lastName("Name")
                     .role(UserRole.LEARNER)
                     .status(UserStatus.ACTIVE)
-                    .authProvider(AuthProvider.LOCAL)
                     .failedLoginAttempts(0)
                     .build());
 
@@ -633,8 +626,8 @@ class AccountManagementIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_AM_UPDATE_006 — Email is read-only, not be updated")
-        void tc_am_update_006_emailIsReadOnly() throws Exception {
+        @DisplayName("TC_AM_UPDATE_006 — Email can be updated")
+        void tc_am_update_006_emailCanBeUpdated() throws Exception {
             buildAndSaveUser("admin@test.com", UserRole.ADMIN, UserStatus.ACTIVE);
             User learner = buildAndSaveUser("learner@test.com", UserRole.LEARNER, UserStatus.ACTIVE);
             String token = loginAndGetToken("admin@test.com", "ValidPass@1");
@@ -651,12 +644,12 @@ class AccountManagementIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.firstName").value("Updated"))
-                    .andExpect(jsonPath("$.data.email").value("learner@test.com"));
+                    .andExpect(jsonPath("$.data.email").value("different@test.com"));
 
             // Verify email was not changed in database
             User updated = userRepository.findById(learner.getId()).orElseThrow();
             assertThat(updated.getFirstName()).isEqualTo("Updated");
-            assertThat(updated.getEmail()).isEqualTo("learner@test.com");
+            assertThat(updated.getEmail()).isEqualTo("different@test.com");
         }
 
         @Test

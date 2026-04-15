@@ -10,8 +10,8 @@ import com.fu.conversation.repository.ConversationRepository;
 import com.fu.conversation.repository.ConversationTopicRepository;
 import com.fu.conversation.repository.ConversationMissionRepository;
 import com.fu.course.entity.Course;
+import com.fu.course.repository.CourseRepository;
 import com.fu.infrastructure.email.EmailService;
-import com.fu.user.entity.AuthProvider;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
@@ -49,6 +49,8 @@ class ConversationManagementTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired private CourseRepository courseRepository;
+
     @Autowired
     private ConversationRepository conversationRepository;
 
@@ -82,7 +84,6 @@ class ConversationManagementTest {
                 .lastName("Manager")
                 .role(UserRole.CONTENT_MANAGER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build());
     }
@@ -95,7 +96,6 @@ class ConversationManagementTest {
                 .lastName("Learner")
                 .role(UserRole.LEARNER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build());
     }
@@ -153,8 +153,19 @@ class ConversationManagementTest {
                 .build());
     }
 
+    private Course saveCourse(String name, Course.JlptLevel level, Course.CourseStatus status) {
+        return courseRepository.save(Course.builder()
+                .name(name)
+                .description("Test description")
+                .jlptLevel(level)
+                .status(status)
+                .orderIndex(0)
+                .build());
+    }
+
     @AfterEach
     void tearDown() {
+        courseRepository.deleteAll();
         missionRepository.deleteAll();
         conversationRepository.deleteAll();
         topicRepository.deleteAll();
@@ -444,9 +455,10 @@ class ConversationManagementTest {
             User manager = saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             ConversationTopic topic = saveTopic("Restaurant");
-
+            Course course = saveCourse("Tiếng Nhật N5", Course.JlptLevel.N5, Course.CourseStatus.ACTIVE);
             String requestBody = objectMapper.writeValueAsString(CreateConversationRequest.builder()
                     .topicId(topic.getId())
+                            .courseId(course.getId())
                     .title("Ordering at Restaurant")
                     .titleJapanese("レストランで注文する")
                     .description("Learn how to order food at a restaurant")
@@ -454,7 +466,6 @@ class ConversationManagementTest {
                     .scenario("You are at a restaurant and want to order")  // ← BR-186: scenario required
                     .aiRole("Restaurant Staff (polite, helpful)")           // ← BR-186: aiRole required
                     .learnerRole("Customer")                                // ← BR-186: learnerRole required
-                    .jlptLevel(Course.JlptLevel.N2)
                     .difficultyScore(5)
                     .vocabularyHints("[\"予約\", \"テーブル\", \"人数\"]")
                     .grammarPoints("[\"〜ください\", \"〜たいです\"]")
@@ -1653,7 +1664,6 @@ class ConversationManagementTest {
                     .lastName("Teacher")
                     .role(UserRole.TEACHER)
                     .status(UserStatus.ACTIVE)
-                    .authProvider(AuthProvider.LOCAL)
                     .failedLoginAttempts(0)
                     .build());
             String token = loginAndGetToken("teacher@test.com", "ValidPass@1");
@@ -1676,7 +1686,6 @@ class ConversationManagementTest {
                     .lastName("Admin")
                     .role(UserRole.ADMIN)
                     .status(UserStatus.ACTIVE)
-                    .authProvider(AuthProvider.LOCAL)
                     .failedLoginAttempts(0)
                     .build());
             String token = loginAndGetToken("admin@test.com", "ValidPass@1");

@@ -9,7 +9,6 @@ import com.fu.course.repository.CourseRepository;
 import com.fu.course.repository.LessonRepository;
 import com.fu.infrastructure.cloudinary.CloudinaryService;
 import com.fu.infrastructure.email.EmailService;
-import com.fu.user.entity.AuthProvider;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
@@ -89,7 +88,6 @@ class CourseManagementTest {
                 .firstName("Test").lastName("Manager")
                 .role(UserRole.CONTENT_MANAGER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build());
     }
@@ -102,7 +100,6 @@ class CourseManagementTest {
                 .firstName("Test").lastName("Learner")
                 .role(UserRole.LEARNER)
                 .status(UserStatus.ACTIVE)
-                .authProvider(AuthProvider.LOCAL)
                 .failedLoginAttempts(0)
                 .build());
     }
