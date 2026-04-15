@@ -498,7 +498,7 @@ public class UserServiceImpl implements UserService {
                     LocalDate birthDate = null;
                     if (!birthDay.isBlank()) {
                         birthDate = LocalDate.parse(birthDay,
-                                DateTimeFormatter.ofPattern("[M][MM]/[d][dd]/uuuu")
+                                DateTimeFormatter.ofPattern("[d][dd]/[M][MM]/uuuu")
                                         .withResolverStyle(java.time.format.ResolverStyle.STRICT));
                     }
                     validRows.add(new RowData(i, rowNum, normalizedEmail, fullName.trim(), phoneNumber.trim(), birthDate, i == 0 ? UserRole.LEARNER : UserRole.TEACHER));
