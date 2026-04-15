@@ -2,6 +2,7 @@ package com.fu.clazz.controller;
 
 import com.fu.clazz.dto.request.AddMemberRequest;
 import com.fu.clazz.dto.request.AddMembersRequest;
+import com.fu.clazz.dto.request.ApproveImportClassesRequest;
 import com.fu.clazz.dto.request.CreateClassRequest;
 import com.fu.clazz.dto.request.UpdateClassRequest;
 import com.fu.clazz.dto.response.ClassMemberResponse;
@@ -9,16 +10,21 @@ import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
 import com.fu.clazz.dto.response.TeacherClassHistoryResponse;
 import com.fu.clazz.service.ClassService;
+import com.fu.common.exception.BusinessException;
 import com.fu.common.response.ApiResponse;
 import com.fu.common.response.PageResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -26,7 +32,9 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.UUID;
 import java.util.List;
 
@@ -314,6 +322,65 @@ public class ClassController {
                 : "Lấy lịch sử lớp học thành công.";
         return ResponseEntity.ok(ApiResponse.success(message, pageResponse));
     }
+    @PostMapping("/import")
+    @PreAuthorize("hasRole('OPERATION_MANAGER')")
+    public ResponseEntity<ApiResponse<?>> importClassesFromExcel(
+            @RequestParam("file") MultipartFile file,
+            @AuthenticationPrincipal UUID managerId) {
+        if (file.isEmpty()) {
+            throw new BusinessException("EMPTY_FILE", "File không được rỗng");
+        }
+        String filename = file.getOriginalFilename();
+        if (filename == null || (!filename.endsWith(".xlsx") && !filename.endsWith(".xls"))) {
+            throw new BusinessException("INVALID_FILE_TYPE", "Chỉ chấp nhận file Excel (.xlsx, .xls)");
+        }
+        try {
+            return ResponseEntity.ok(ApiResponse.success("Trích xuất dữ liệu từ file excel thành công.", 
+                    clazzService.importClassesFromExcel(file, managerId)));
+        } catch (Exception e) {
+            throw new BusinessException("FILE_READ_ERROR", "Lỗi khi đọc file Excel: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Step 2: Approve and confirm class import
+     * Creates new classes and updates existing ones based on preview data from step 1.
+     * Request contains separated lists: classesToCreate (NEW) and classesToUpdate (UPDATE).
+     * 
+     * POST /api/v1/classes/approve-import
+     */
+    @PostMapping("/approve-import")
+    @PreAuthorize("hasRole('OPERATION_MANAGER')")
+    public ResponseEntity<ApiResponse<?>> approveImportClasses(
+            @Valid @RequestBody com.fu.clazz.dto.request.ApproveImportClassesRequest request,
+            @AuthenticationPrincipal UUID managerId) {
+        int totalClasses = (request.getClassesToCreate() != null ? request.getClassesToCreate().size() : 0) +
+                          (request.getClassesToUpdate() != null ? request.getClassesToUpdate().size() : 0);
+        log.info("Manager {} approving import of {} classes", managerId, totalClasses);
+        return ResponseEntity.ok(ApiResponse.success("Nhập khẩu lớp học thành công.", 
+                clazzService.approveImportClasses(request, managerId)));
+    }
+
+    @GetMapping("/import/template")
+    public ResponseEntity downloadExcelTemplate() {
+        try {
+            // Đọc file từ thư mục src/main/resources/static/ hoặc bất kỳ đâu trong resources
+            Resource resource = new ClassPathResource("template/template.xlsx");
+
+            if (!resource.exists()) {
+                return ResponseEntity.notFound().build();
+            }
+
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + resource.getFilename() + "\"")
+                    .body(resource);
+
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.error("ERROR", "Lỗi khi tải xuống mẫu file excel."));
+        }
+    }
+
 
     // =====================================================
     // UTILITY
@@ -328,4 +395,5 @@ public class ClassController {
                 .map(GrantedAuthority::getAuthority)
                 .anyMatch(role -> role.equals("ROLE_OPERATION_MANAGER"));
     }
+
 }

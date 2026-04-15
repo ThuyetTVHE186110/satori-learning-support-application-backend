@@ -1014,17 +1014,17 @@ class UserServiceImplTest {
         }
 
         @Test
-        @DisplayName("UT-04: Email exists, no change in name/phone → updated==0 (not added to updated list)")
+        @DisplayName("UT-04: Email exists, no change in name/phone/birthday → updated==0 (not added to updated list)")
         void ut04_existingEmailNoChange() throws Exception {
             // TC: UT-04
             // "Nguyen Van A" → firstName="Nguyen Van", lastName="A"
             MultipartFile file = buildExcelFile(wb -> {
                 XSSFSheet s0 = wb.createSheet("Learners");
                 s0.createRow(0);
-                writeLearnerRow(s0, 1, "Nguyen Van A", "15/08/2000", "0123456789", "same@test.com");
+                writeLearnerRow(s0, 1, "Nguyen Van A", "09/12/2004", "0123456789", "same@test.com");
             });
             User existing = User.builder().email("same@test.com")
-                    .firstName("Nguyen Van").lastName("A").phoneNumber("0123456789").build();
+                    .firstName("Nguyen Van").lastName("A").phoneNumber("0123456789").dateOfBirth(LocalDate.of(2004,12,9)).build();
             given(userRepository.findByEmailIn(any(Set.class))).willReturn(List.of(existing));
 
             ImportUsersResult result = userService.importUsersFromExcel(file, adminId);
