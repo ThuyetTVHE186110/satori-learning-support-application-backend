@@ -32,9 +32,4 @@ public class UserFilterRequest {
      */
     private UserStatus status;
 
-    /**
-     * Include soft-deleted users (default: false)
-     */
-    @Builder.Default
-    private Boolean includeDeleted = false;
 }

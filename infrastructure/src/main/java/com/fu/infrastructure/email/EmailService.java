@@ -1,5 +1,6 @@
 package com.fu.infrastructure.email;
 
+import java.time.LocalDate;
 import java.util.Map;
 
 /**
@@ -73,4 +74,15 @@ public interface EmailService {
      * @param userName user's display name
      */
     void sendPasswordChangedNotification(String to, String userName);
+
+    void sendEmailChangeNotification(String email, String fullName, String oldEmail);
+
+    /**
+     * Send email after creating a new assignment to notify the user.
+     * Contains:
+     * - Assignment title
+     * - Class Name
+     * - Due date
+     */
+    void sendNewAssignmentNotification(String to, String userName, String assignmentTitle, String className, String dueDate);
 }

@@ -80,6 +80,12 @@ public interface CourseRepository extends JpaRepository<Course, UUID>, JpaSpecif
     boolean existsByNameIgnoreCase(@Param("name") String name);
 
     /**
+     * Find course by exact name (case-insensitive, excluding deleted)
+     */
+    @Query("SELECT c FROM Course c WHERE LOWER(c.name) = LOWER(:name) AND c.deletedAt IS NULL")
+    Optional<Course> findByName(@Param("name") String name);
+
+    /**
      * Check if course name exists excluding specific course ID
      */
     @Query("SELECT CASE WHEN COUNT(c) > 0 THEN true ELSE false END FROM Course c " +

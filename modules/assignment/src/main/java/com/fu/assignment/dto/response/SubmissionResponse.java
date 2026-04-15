@@ -53,17 +53,5 @@ public class SubmissionResponse {
     // Detailed feedback for quiz
     private List<QuizSubmissionDetailResponse> quizDetails;
 
-    /** Badges earned when submitting this assignment. */
-    @JsonProperty("newBadgesEarned")
-    private List<UserAchievementResponse> earnedBadges;
-
-    /** Level-up notification if user leveled up during submission. */
-    @JsonProperty("levelUp")
-    private LevelUpNotificationResponse levelUpInfo;
-
-    /** Streak notification indicating first activity of day. */
-    @JsonProperty("streakNotification")
-    private StreakNotificationResponse streakNotification;
-
     private LocalDateTime createdAt;
 }
