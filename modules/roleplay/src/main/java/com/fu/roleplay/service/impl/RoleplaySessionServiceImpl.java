@@ -389,6 +389,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         long startTime = System.currentTimeMillis();
 
         // Task A: Pronunciation assessment — fire-and-forget after tx commit
+        if (audioBytes != null && !pronunciationProvider.isAvailable()) {
+            log.warn("Pronunciation provider unavailable — audio from user {} in session {} will not be scored. " +
+                    "Check AZURE_SPEECH_ENABLED/AZURE_SPEECH_KEY or SPEECHSUPER_APP_KEY/SPEECHSUPER_SECRET_KEY env vars.",
+                    userId, sessionId);
+        }
         if (audioBytes != null && pronunciationProvider.isAvailable()) {
             final byte[] audioBytesRef = audioBytes;
             final String audioFormatRef = getAudioFormat(audioContentType);
