@@ -1,5 +1,6 @@
 package com.fu.conversation.controller;
 
+import com.fu.common.exception.BusinessException;
 import com.fu.common.response.ApiResponse;
 import com.fu.conversation.service.CurriculumChatService;
 import com.fu.conversation.dto.request.SendChatMessageRequest;
@@ -114,6 +115,12 @@ public class CurriculumChatController {
             @RequestParam(defaultValue = "50") int size,
             @AuthenticationPrincipal(expression = "id") UUID userId) {
 
+        if (page < 0) {
+            throw new BusinessException("INVALID_PAGE_NUMBER", "Số trang phải lớn hơn hoặc bằng 0.");
+        }
+        if (size <= 0) {
+            throw new BusinessException("INVALID_PAGE_SIZE", "Kích thước trang phải lớn hơn 0.");
+        }
         if (size > 100) size = 100; // Giới hạn tối đa 100 tin nhắn mỗi trang
         List<ChatHistoryItemResponse> history = chatService.getHistory(sessionId, userId, page, size);
         return ResponseEntity.ok(ApiResponse.success("Lấy lịch sử chat thành công.", history));
@@ -128,6 +135,12 @@ public class CurriculumChatController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
 
+        if (page < 0) {
+            throw new BusinessException("INVALID_PAGE_NUMBER", "Số trang phải lớn hơn hoặc bằng 0.");
+        }
+        if (size <= 0) {
+            throw new BusinessException("INVALID_PAGE_SIZE", "Kích thước trang phải lớn hơn 0.");
+        }
         if (size > 50) size = 50;
         Page<ChatSessionResponse> sessions = chatService.listSessions(userId, page, size);
         return ResponseEntity.ok(ApiResponse.success("Danh sách phiên chat.", sessions));
