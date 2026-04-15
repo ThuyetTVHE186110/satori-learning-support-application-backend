@@ -153,6 +153,7 @@ public class EmailServiceImpl implements EmailService {
     }
 
     @Override
+    @Async("mailExecutor")
     public void sendEmailChangeNotification(String email, String fullName, String oldEmail) {
         String subject = "Email của bạn đã được thay đổi - Satori Learning";
 
