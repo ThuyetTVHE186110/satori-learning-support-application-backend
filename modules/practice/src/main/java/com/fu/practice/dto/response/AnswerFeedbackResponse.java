@@ -23,8 +23,25 @@ public class AnswerFeedbackResponse {
     /** Nhận xét ngắn gọn bằng tiếng Việt. */
     private String feedback;
 
-    /** Đáp án đúng — chỉ reveal sau khi nộp. */
+    /**
+     * Đáp án đúng — chỉ reveal sau khi nộp.
+     * Với các dạng chọn option (MC, TRUE_FALSE, FILL_BLANK, TRANSLATION): là integer id.
+     * Với SENTENCE_ORDER: "0,1,2,3". Với MATCHING: "0:4,1:5". Dùng để highlight UI.
+     */
     private String correctAnswer;
+
+    /**
+     * Text đáp án đúng (resolved từ options) — để FE hiển thị trực tiếp không cần lookup.
+     * Ví dụ: "先生" với MC/FILL_BLANK, "Đúng" với TRUE_FALSE.
+     * null cho SENTENCE_ORDER / MATCHING (không có text đơn).
+     */
+    private String correctAnswerText;
+
+    /**
+     * Echo text đáp án user đã chọn (resolved từ options).
+     * null nếu không resolve được (user gửi sai format, legacy text-answer, v.v.).
+     */
+    private String userAnswerText;
 
     /** Giải thích chi tiết bằng tiếng Việt (từ AI hoặc rule-based). */
     private String explanation;

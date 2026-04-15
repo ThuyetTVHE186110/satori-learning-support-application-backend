@@ -44,26 +44,16 @@ public class AnswerEvaluatorAgent {
      */
     public EvaluationResult evaluate(PracticeItem item, String userAnswer) {
         return switch (item.getItemType()) {
-            case MULTIPLE_CHOICE, TRUE_FALSE -> evaluateByRule(item, userAnswer);
+            // Tất cả dạng chọn 1 option đều dùng index-based evaluation (integer ID).
+            // Legacy item với correctAnswer dạng text sẽ fallback về LLM trong evaluateSelection.
+            case MULTIPLE_CHOICE, TRUE_FALSE,
+                 FILL_BLANK, TRANSLATION     -> evaluateSelection(item, userAnswer);
             case MATCHING                    -> evaluateMatching(item, userAnswer);
-            // FILL_BLANK và TRANSLATION đều là chọn option → correctAnswer là ID integer
-            case FILL_BLANK, TRANSLATION     -> evaluateFillBlank(item, userAnswer);
             case SENTENCE_ORDER              -> evaluateSentenceOrder(item, userAnswer);
         };
     }
 
     // ── Rule-based evaluation ─────────────────────────────────────────────
-
-    private EvaluationResult evaluateByRule(PracticeItem item, String userAnswer) {
-        if (userAnswer == null || item.getCorrectAnswer() == null) {
-            return new EvaluationResult(false, 0, "Không thể đánh giá câu trả lời.", item.getCorrectAnswer());
-        }
-        boolean correct = userAnswer.trim().equalsIgnoreCase(item.getCorrectAnswer().trim());
-        String feedback = correct
-                ? "Chính xác!"
-                : "Đáp án đúng là: " + item.getCorrectAnswer();
-        return new EvaluationResult(correct, correct ? 100 : 0, feedback, correct ? null : item.getCorrectAnswer());
-    }
 
     /**
      * Đánh giá MATCHING: so sánh ánh xạ "leftId:rightId" do học viên gửi
@@ -119,18 +109,18 @@ public class AnswerEvaluatorAgent {
         return map;
     }
 
-    // ── Rule-based: FILL_BLANK ────────────────────────────────────────────
+    // ── Rule-based: single-option selection ───────────────────────────────
 
     /**
-     * Đánh giá FILL_BLANK bằng so sánh ID option.
+     * Đánh giá các dạng chọn 1 option: MULTIPLE_CHOICE, TRUE_FALSE, FILL_BLANK, TRANSLATION.
      *
-     * correctAnswer = index (id) của option đúng trong mảng sau shuffle (ví dụ: "2").
+     * correctAnswer = index (id) của option đúng trong mảng options đã shuffle (ví dụ: "2").
      * userAnswer    = id option user chọn (ví dụ: "2").
      * So sánh integer — không cần normalize string tiếng Nhật, không có encoding edge case.
      *
-     * Fallback về LLM nếu correctAnswer không phải số (item cũ hoặc LLM không trả về isCorrect).
+     * Fallback về LLM nếu correctAnswer không phải số (item legacy với correctAnswer dạng text).
      */
-    private EvaluationResult evaluateFillBlank(PracticeItem item, String userAnswer) {
+    private EvaluationResult evaluateSelection(PracticeItem item, String userAnswer) {
         String correct = item.getCorrectAnswer();
         if (correct == null || correct.isBlank()) {
             return evaluateByLlm(item, userAnswer);
@@ -146,7 +136,7 @@ public class AnswerEvaluatorAgent {
                     isCorrect ? null : correct);
         } catch (NumberFormatException e) {
             // correctAnswer là text (item legacy) → fallback LLM
-            log.debug("evaluateFillBlank: correctAnswer '{}' không phải ID, fallback LLM", correct);
+            log.debug("evaluateSelection: correctAnswer '{}' không phải ID, fallback LLM", correct);
             return evaluateByLlm(item, userAnswer);
         }
     }

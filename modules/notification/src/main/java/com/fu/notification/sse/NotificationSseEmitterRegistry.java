@@ -1,5 +1,7 @@
 package com.fu.notification.sse;
 
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -11,6 +13,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * In-memory registry of active SSE emitters keyed by userId.
@@ -31,8 +36,31 @@ public class NotificationSseEmitterRegistry {
     private final ConcurrentHashMap<UUID, CopyOnWriteArraySet<SseEmitter>> emitters =
             new ConcurrentHashMap<>();
 
-    /** SSE connection timeout: 5 minutes. Client should reconnect automatically. */
-    private static final long TIMEOUT_MS = 300_000L;
+    /** SSE connection timeout: 30 minutes. Client should reconnect automatically. */
+    private static final long TIMEOUT_MS = 1_800_000L;
+
+    /** Heartbeat interval: keep idle connections alive through reverse proxies (Cloudflare ~100s idle). */
+    private static final long HEARTBEAT_INTERVAL_SECONDS = 25L;
+
+    private ScheduledExecutorService heartbeatExecutor;
+
+    @PostConstruct
+    void startHeartbeat() {
+        heartbeatExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "sse-heartbeat");
+            t.setDaemon(true);
+            return t;
+        });
+        heartbeatExecutor.scheduleAtFixedRate(this::broadcastHeartbeat,
+                HEARTBEAT_INTERVAL_SECONDS, HEARTBEAT_INTERVAL_SECONDS, TimeUnit.SECONDS);
+    }
+
+    @PreDestroy
+    void stopHeartbeat() {
+        if (heartbeatExecutor != null) {
+            heartbeatExecutor.shutdownNow();
+        }
+    }
 
     /**
      * Opens a new SSE connection for the given user and registers cleanup handlers.
@@ -48,6 +76,13 @@ public class NotificationSseEmitterRegistry {
         emitter.onCompletion(cleanup);
         emitter.onTimeout(cleanup);
         emitter.onError(ex -> cleanup.run());
+
+        try {
+            emitter.send(SseEmitter.event().name("connected").data("ok"));
+        } catch (Exception ex) {
+            log.debug("SSE initial send failed for user {}: {}", userId, ex.getMessage());
+            cleanup.run();
+        }
 
         log.debug("SSE connection opened for user {}", userId);
         return emitter;
@@ -78,6 +113,21 @@ public class NotificationSseEmitterRegistry {
             }
         }
         dead.forEach(e -> remove(userId, e));
+    }
+
+    private void broadcastHeartbeat() {
+        for (var entry : emitters.entrySet()) {
+            UUID userId = entry.getKey();
+            List<SseEmitter> dead = new ArrayList<>();
+            for (SseEmitter emitter : entry.getValue()) {
+                try {
+                    emitter.send(SseEmitter.event().comment("keepalive"));
+                } catch (Exception ex) {
+                    dead.add(emitter);
+                }
+            }
+            dead.forEach(e -> remove(userId, e));
+        }
     }
 
     private void remove(UUID userId, SseEmitter emitter) {

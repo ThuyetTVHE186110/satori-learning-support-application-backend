@@ -147,9 +147,6 @@ app:
             forgot-password:
                 max-requests: ${AUTH_RATE_FORGOT_MAX:3}
                 window-minutes: ${AUTH_RATE_FORGOT_WINDOW:10}
-            register:
-                max-requests: ${AUTH_RATE_REGISTER_MAX:5}
-                window-minutes: ${AUTH_RATE_REGISTER_WINDOW:1}
             verify-otp:
                 max-requests: ${AUTH_RATE_OTP_MAX:5}
                 window-minutes: ${AUTH_RATE_OTP_WINDOW:5}
@@ -185,7 +182,7 @@ app:
 # ==================== Logging Configuration ====================
 logging:
     level:
-        root: INF
+        root: INFO
         com.fu: DEBUG
         org.springframework.data.redis: DEBUG
         # Suppress Hibernate SQL noise (scheduler polls, retry queries, etc.)
