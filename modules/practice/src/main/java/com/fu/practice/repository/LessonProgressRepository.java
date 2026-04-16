@@ -37,4 +37,27 @@ public interface LessonProgressRepository extends JpaRepository<LessonProgress, 
     List<LessonProgress> findByUserIdAndCourseId(
             @Param("userId") UUID userId,
             @Param("courseId") UUID courseId);
+
+    /**
+     * Bài học được luyện gần nhất của user — dùng cho chatbot trả lời
+     * "em đang học đến bài nào?". NULL lastPracticedAt xếp cuối.
+     */
+    Optional<LessonProgress> findTopByUserIdOrderByLastPracticedAtDesc(UUID userId);
+
+    /**
+     * Bài học được luyện gần nhất của user trong 1 khóa cụ thể.
+     * Native query vì LessonProgress không có trường courseId trực tiếp.
+     */
+    @Query(value = """
+            SELECT lp.* FROM practice.lesson_progress lp
+            JOIN learning_content.lessons l ON l.id = lp.lesson_id
+            WHERE lp.user_id = :userId
+              AND l.course_id = :courseId
+              AND l.deleted_at IS NULL
+            ORDER BY lp.last_practiced_at DESC NULLS LAST
+            LIMIT 1
+            """, nativeQuery = true)
+    Optional<LessonProgress> findTopByUserIdAndCourseIdOrderByLastPracticedAtDesc(
+            @Param("userId") UUID userId,
+            @Param("courseId") UUID courseId);
 }

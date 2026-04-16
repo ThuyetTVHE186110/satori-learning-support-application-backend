@@ -5,6 +5,8 @@ import com.fu.curriculumimport.service.StructuredCurriculumQueryService;
 import com.fu.curriculumimport.service.embedding.ChatbotFilter;
 import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import com.fu.curriculumimport.service.embedding.RagContext;
+import com.fu.infrastructure.learner.LearnerProgressProvider;
+import com.fu.infrastructure.learner.LearnerProgressSnapshot;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ToolContext;
@@ -17,6 +19,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -42,10 +45,13 @@ public class CurriculumQueryTools {
     /** ToolContext key for the lesson UUID (may be absent for course-level sessions). */
     public static final String CTX_COURSE_ID = "courseId";
     public static final String CTX_LESSON_ID = "lessonId";
+    /** ToolContext key for the authenticated learner — enables progress-aware tool calls. */
+    public static final String CTX_USER_ID   = "userId";
 
     private final EmbeddingService embeddingService;
     private final CurriculumStatsService statsService;
     private final StructuredCurriculumQueryService structuredQueryService;
+    private final LearnerProgressProvider learnerProgressProvider;
 
     /** Translates a Japanese query → Vietnamese for bilingual vector search expansion. */
     private final TranslationQueryTransformer jaToViTransformer;
@@ -56,10 +62,12 @@ public class CurriculumQueryTools {
     public CurriculumQueryTools(EmbeddingService embeddingService,
                                   CurriculumStatsService statsService,
                                   StructuredCurriculumQueryService structuredQueryService,
+                                  LearnerProgressProvider learnerProgressProvider,
                                   OpenAiChatModel chatModel) {
         this.embeddingService = embeddingService;
         this.statsService = statsService;
         this.structuredQueryService = structuredQueryService;
+        this.learnerProgressProvider = learnerProgressProvider;
 
         // Build a shared ChatClient.Builder for the TranslationQueryTransformers.
         // TranslationQueryTransformer makes a cheap single LLM call per translation.
@@ -246,6 +254,101 @@ public class CurriculumQueryTools {
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Returns the learner's practice progress snapshot: current lesson, mastery breakdown,
+     * weakest items, strongest items, recent activity.
+     *
+     * <p>The chatbot should call this tool ONLY when the user asks about their own
+     * progress, current lesson, weaknesses, or "em đang học đến đâu" style questions.
+     * For generic curriculum questions, prefer {@link #searchCurriculum} or
+     * {@link #queryStructuredData}.
+     */
+    @Tool(description =
+            "Lấy tiến độ luyện tập của chính người dùng: bài đang học, điểm mastery, "
+            + "từ/ngữ pháp yếu nhất, số phiên gần đây. "
+            + "CHỈ dùng khi user hỏi về bản thân (ví dụ: 'em đang học bài nào', "
+            + "'tiến độ của em thế nào', 'em còn yếu chỗ nào', 'điểm gần nhất của em'). "
+            + "KHÔNG dùng cho câu hỏi chung về giáo trình.")
+    public String getLearnerProgress(ToolContext toolContext) {
+        UUID userId = getUuid(toolContext, CTX_USER_ID);
+        if (userId == null) {
+            log.debug("getLearnerProgress: no userId in ToolContext — aborting");
+            return "Không xác định được người dùng từ phiên chat hiện tại.";
+        }
+        UUID courseId = getUuid(toolContext, CTX_COURSE_ID);
+
+        Optional<LearnerProgressSnapshot> snap = learnerProgressProvider.getProgress(userId, courseId);
+        if (snap.isEmpty() || !snap.get().hasAnyData()) {
+            return "Học viên chưa có dữ liệu luyện tập nào trong hệ thống.";
+        }
+        return formatProgress(snap.get());
+    }
+
+    private String formatProgress(LearnerProgressSnapshot s) {
+        StringBuilder sb = new StringBuilder();
+
+        LearnerProgressSnapshot.CurrentLessonInfo c = s.currentLesson();
+        if (c != null) {
+            sb.append("BÀI ĐANG HỌC: ");
+            if (c.title() != null) sb.append(c.title());
+            if (c.titleJapanese() != null && !c.titleJapanese().isBlank()) {
+                sb.append(" (").append(c.titleJapanese()).append(')');
+            }
+            if (c.orderIndex() != null) sb.append(" — bài số ").append(c.orderIndex());
+            sb.append('\n');
+            sb.append("  • Số phiên đã luyện: ").append(c.totalSessions())
+              .append(" | Điểm cao nhất: ").append(formatScore(c.bestScore()))
+              .append(" | Điểm gần nhất: ").append(formatScore(c.lastScore())).append('\n');
+            sb.append("  • Mastery từ vựng: ").append(formatScore(c.vocabMastery())).append("%")
+              .append(" | Mastery ngữ pháp: ").append(formatScore(c.grammarMastery())).append("%\n");
+            if (c.lastPracticedAt() != null) {
+                sb.append("  • Lần luyện gần nhất: ").append(c.lastPracticedAt()).append('\n');
+            }
+        } else {
+            sb.append("BÀI ĐANG HỌC: (chưa có bài nào được luyện)\n");
+        }
+
+        LearnerProgressSnapshot.CourseProgressInfo cp = s.courseProgress();
+        if (cp != null) {
+            sb.append('\n').append("TIẾN ĐỘ KHÓA HỌC: ")
+              .append(cp.lessonsStarted()).append("/").append(cp.totalLessons())
+              .append(" bài đã bắt đầu, ").append(cp.lessonsCompleted())
+              .append(" bài đã đạt chuẩn (≥70%)\n");
+            sb.append("  • Mastery TB từ vựng toàn khóa: ").append(formatScore(cp.avgVocabMastery())).append("%\n");
+            sb.append("  • Mastery TB ngữ pháp toàn khóa: ").append(formatScore(cp.avgGrammarMastery())).append("%\n");
+        }
+
+        List<LearnerProgressSnapshot.WeakItem> weak = s.weakItems();
+        if (weak != null && !weak.isEmpty()) {
+            sb.append('\n').append("YẾU NHẤT (cần luyện thêm):\n");
+            for (LearnerProgressSnapshot.WeakItem w : weak) {
+                sb.append("  - ").append(w.display())
+                  .append(" (").append("VOCABULARY".equals(w.entityType()) ? "từ vựng" : "ngữ pháp")
+                  .append(", mastery level ").append(w.masteryLevel()).append(")\n");
+            }
+        }
+
+        List<LearnerProgressSnapshot.StrongItem> strong = s.strongItems();
+        if (strong != null && !strong.isEmpty()) {
+            sb.append('\n').append("MẠNH NHẤT:\n");
+            for (LearnerProgressSnapshot.StrongItem st : strong) {
+                sb.append("  - ").append(st.display())
+                  .append(" (level ").append(st.masteryLevel()).append(")\n");
+            }
+        }
+
+        if (s.recentSessionsLast7d() > 0) {
+            sb.append('\n').append("HOẠT ĐỘNG 7 NGÀY QUA: ")
+              .append(s.recentSessionsLast7d()).append(" phiên đã hoàn thành\n");
+        }
+
+        return sb.toString();
+    }
+
+    private String formatScore(java.math.BigDecimal v) {
+        return v != null ? v.stripTrailingZeros().toPlainString() : "0";
     }
 
     // ── Lesson resolution ─────────────────────────────────────────────────────
