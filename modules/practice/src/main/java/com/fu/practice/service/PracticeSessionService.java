@@ -88,6 +88,18 @@ public class PracticeSessionService {
      * LLM call runs OUTSIDE the transaction to avoid holding a DB connection for 5-30 seconds.
      */
     public StartPracticeResponse startSession(UUID userId, StartPracticeRequest request) {
+        // Phase 0: Hard cap explicit selection — tổng (vocab + grammar) ≤ 20 items
+        // (chặn trước khi query DB / gọi LLM để tránh tốn token + chậm)
+        if (request.isExplicitMode()) {
+            int totalSelected =
+                    (request.getSelectedVocabIds()   != null ? request.getSelectedVocabIds().size()   : 0)
+                  + (request.getSelectedGrammarIds() != null ? request.getSelectedGrammarIds().size() : 0);
+            if (totalSelected > 20) {
+                throw new BusinessException("PRACTICE_SELECTION_TOO_LARGE",
+                        "Chọn tối đa 20 items mỗi phiên luyện tập. Bạn đã chọn " + totalSelected + ".");
+            }
+        }
+
         // Phase 1: Validate lesson + enrollment
         LessonContext lessonCtx = loadLessonContext(userId, request.getLessonId());
 
@@ -97,20 +109,24 @@ public class PracticeSessionService {
 
         // Phase 3: Xác định items sẽ luyện tập
         //
-        // Khi frontend gửi selectedIds (hasPool = true):
-        //   → dùng đúng những items đó (frontend đã giới hạn số lượng ≤ preset.itemCount)
+        // Explicit mode (hasPool=true):
+        //   → dùng đúng items frontend đã chọn, mỗi item 1 câu (tổng ≤ 20 đã check ở Phase 0)
         //
-        // Khi không có selectedIds (hasPool = false, auto mode):
-        //   → backend tự pick top preset.itemCount items, ưu tiên mastery thấp nhất
+        // Auto mode (hasPool=false):
+        //   → số câu = preset.itemCount; nếu pool nhỏ hơn, một số entity sẽ được hỏi nhiều lần
+        //     với QuestionDimension khác nhau. Cap tối đa: vocab 5 dim × pool, grammar 4 dim × pool.
         PracticePreset preset = request.getPreset() != null ? request.getPreset() : PracticePreset.STANDARD;
         boolean hasPool = request.isExplicitMode();
 
         List<Vocabulary>   selectedVocab;
         List<GrammarPoint> selectedGrammar;
         Map<UUID, ItemMastery> masteryMap = null; // reused from auto mode when possible
+        Map<UUID, Integer> repeatPlan = new LinkedHashMap<>(); // entityId → số câu cần sinh
+        int effectiveTarget;
+        boolean allowRepetition;
 
         if (hasPool) {
-            // Frontend đã pick đúng số lượng → dùng hết
+            // Explicit mode — mỗi entity xuất hiện đúng 1 lần
             Set<UUID> vocabSet = request.getSelectedVocabIds() != null
                     ? new HashSet<>(request.getSelectedVocabIds()) : Set.of();
             Set<UUID> grammarSet = request.getSelectedGrammarIds() != null
@@ -121,8 +137,12 @@ public class PracticeSessionService {
             selectedGrammar = allLessonGrammar.stream()
                     .filter(g -> grammarSet.contains(g.getId()))
                     .collect(Collectors.toList());
+            selectedVocab.forEach(v -> repeatPlan.put(v.getId(), 1));
+            selectedGrammar.forEach(g -> repeatPlan.put(g.getId(), 1));
+            effectiveTarget = selectedVocab.size() + selectedGrammar.size();
+            allowRepetition = false;
         } else {
-            // Auto mode: backend pick bằng mastery
+            // Auto mode: tính slot + repeatPlan
             List<Vocabulary> vocabPool = switch (request.getSessionType()) {
                 case GRAMMAR_DRILL -> List.of();
                 default            -> allLessonVocab;
@@ -131,26 +151,66 @@ public class PracticeSessionService {
                 case VOCAB_DRILL -> List.of();
                 default          -> allLessonGrammar;
             };
+            int vPoolSize = vocabPool.size();
+            int gPoolSize = grammarPool.size();
+            int vCap = vPoolSize * MAX_VOCAB_DIMENSIONS;
+            int gCap = gPoolSize * MAX_GRAMMAR_DIMENSIONS;
             int target = preset.getItemCount();
-            int total  = vocabPool.size() + grammarPool.size();
-            int vSlots = (total == 0) ? 0
-                    : switch (request.getSessionType()) {
-                        case VOCAB_DRILL   -> Math.min(target, vocabPool.size());
-                        case GRAMMAR_DRILL -> 0;
-                        default -> Math.min(                                   // MIXED: tỷ lệ
-                                (int) Math.round((double) vocabPool.size() / total * target),
-                                vocabPool.size());
-                    };
-            int gSlots = Math.min(target - vSlots, grammarPool.size());
+
+            // vSlots / gSlots KHÔNG bị clamp bởi poolSize — chỉ bởi pool*maxDim
+            int vSlots, gSlots;
+            switch (request.getSessionType()) {
+                case VOCAB_DRILL -> {
+                    vSlots = Math.min(target, vCap);
+                    gSlots = 0;
+                }
+                case GRAMMAR_DRILL -> {
+                    vSlots = 0;
+                    gSlots = Math.min(target, gCap);
+                }
+                default -> { // MIXED_LESSON
+                    int combinedCap = vCap + gCap;
+                    int mixTarget = Math.min(target, combinedCap);
+                    int totalPool = vPoolSize + gPoolSize;
+                    if (totalPool == 0) { vSlots = 0; gSlots = 0; }
+                    else {
+                        int vShare = (int) Math.round((double) vPoolSize / totalPool * mixTarget);
+                        vSlots = Math.min(vShare, vCap);
+                        gSlots = Math.min(mixTarget - vSlots, gCap);
+                        int leftover = mixTarget - vSlots - gSlots;
+                        if (leftover > 0) {
+                            vSlots += Math.min(leftover, vCap - vSlots);
+                        }
+                    }
+                }
+            }
+            effectiveTarget = vSlots + gSlots;
+            if (effectiveTarget < target) {
+                log.info("Auto mode capped: preset={} → effective={} (vPool={}, gPool={}, vCap={}, gCap={})",
+                        target, effectiveTarget, vPoolSize, gPoolSize, vCap, gCap);
+            }
 
             List<UUID> allPoolIds = new ArrayList<>();
             vocabPool.forEach(v -> allPoolIds.add(v.getId()));
             grammarPool.forEach(g -> allPoolIds.add(g.getId()));
             Map<UUID, ItemMastery> poolMastery = itemMasteryService.buildMasteryMap(userId, allPoolIds);
 
-            selectedVocab   = pickByMastery(vocabPool,   poolMastery, vSlots);
-            selectedGrammar = pickByMastery(grammarPool, poolMastery, gSlots);
-            masteryMap = poolMastery; // reuse — selected items are a subset of poolIds
+            // Chọn entities sẽ tham gia: top-N mastery thấp nhất (N = min(slots, poolSize))
+            selectedVocab   = pickByMastery(vocabPool,   poolMastery, Math.min(vSlots, vPoolSize));
+            selectedGrammar = pickByMastery(grammarPool, poolMastery, Math.min(gSlots, gPoolSize));
+
+            // Phân bổ slots thành repeatPlan — entity nào yếu hơn được thêm extra lần
+            if (vSlots > 0 && !selectedVocab.isEmpty()) {
+                List<UUID> vIds = selectedVocab.stream().map(Vocabulary::getId).collect(Collectors.toList());
+                repeatPlan.putAll(distributeRepeats(vIds, vSlots, MAX_VOCAB_DIMENSIONS));
+            }
+            if (gSlots > 0 && !selectedGrammar.isEmpty()) {
+                List<UUID> gIds = selectedGrammar.stream().map(GrammarPoint::getId).collect(Collectors.toList());
+                repeatPlan.putAll(distributeRepeats(gIds, gSlots, MAX_GRAMMAR_DIMENSIONS));
+            }
+
+            allowRepetition = vSlots > selectedVocab.size() || gSlots > selectedGrammar.size();
+            masteryMap = poolMastery;
         }
 
         if (selectedVocab.isEmpty() && selectedGrammar.isEmpty()) {
@@ -167,7 +227,7 @@ public class PracticeSessionService {
             masteryMap = itemMasteryService.buildMasteryMap(userId, selectedIds);
         }
 
-        int resolvedCount = selectedIds.size();
+        int resolvedCount = effectiveTarget;
 
         QuestionDimension sessionDimension = itemMasteryService.pickSessionDimension(
                 masteryMap, selectedIds, request.getSessionType());
@@ -191,7 +251,9 @@ public class PracticeSessionService {
                         hasPool,            // isExplicitMode = frontend đã cung cấp pool
                         prefs,
                         sessionDimension,
-                        masteryMap);
+                        masteryMap,
+                        allowRepetition,
+                        repeatPlan);
 
         // Phase 8: Persist
         UUID[] savedVocabIds   = selectedVocab.stream().map(Vocabulary::getId).toArray(UUID[]::new);
@@ -199,6 +261,34 @@ public class PracticeSessionService {
 
         return persistNewSession(userId, request, lessonCtx, allItems,
                 hasPool, savedVocabIds, savedGrammarIds, sessionDimension);
+    }
+
+    /**
+     * Số QuestionDimension khả dụng cho mỗi entity type — giới hạn số lần lặp tối đa.
+     * Vocab: MEANING, READING, USAGE, CONTEXT, ANTONYM_SYNONYM (5 góc).
+     * Grammar: IDENTIFICATION, FORMATION, USAGE, CONTRAST (4 góc).
+     */
+    private static final int MAX_VOCAB_DIMENSIONS   = 5;
+    private static final int MAX_GRAMMAR_DIMENSIONS = 4;
+
+    /**
+     * Phân bổ {@code slots} câu hỏi xuống các entity trong {@code entityIds} (đã sort theo
+     * mastery thấp → cao). Entity yếu hơn (đầu list) được ưu tiên thêm extra 1 câu.
+     *
+     * Bảo đảm tổng count ≤ slots và mỗi count ≤ maxReps (số dimension khả dụng).
+     * Caller đã cap slots ≤ entityIds.size() × maxReps trước khi gọi.
+     */
+    private Map<UUID, Integer> distributeRepeats(List<UUID> entityIds, int slots, int maxReps) {
+        Map<UUID, Integer> plan = new LinkedHashMap<>();
+        int pool = entityIds.size();
+        if (pool == 0 || slots <= 0) return plan;
+        int base = Math.min(slots / pool, maxReps);
+        int extras = Math.max(0, slots - base * pool);
+        for (int i = 0; i < pool; i++) {
+            int count = base + (i < extras && base + 1 <= maxReps ? 1 : 0);
+            if (count > 0) plan.put(entityIds.get(i), count);
+        }
+        return plan;
     }
 
     /**

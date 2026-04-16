@@ -620,6 +620,9 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
         if (session.lessonId() != null) {
             toolCtx.put(CurriculumQueryTools.CTX_LESSON_ID, session.lessonId());
         }
+        if (session.userId() != null) {
+            toolCtx.put(CurriculumQueryTools.CTX_USER_ID, session.userId());
+        }
         return toolCtx;
     }
 
