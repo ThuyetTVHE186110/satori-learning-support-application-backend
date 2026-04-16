@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -73,4 +74,13 @@ public interface ClassRepository extends JpaRepository<Clazz, UUID>, JpaSpecific
          * Check if course has active classes (non-deleted)
          */
         boolean existsByCourseIdAndStatusInAndDeletedAtIsNull(UUID courseId, java.util.Collection<ClassStatus> statuses);
+
+    Optional<Clazz> findByNameAndDeletedAtIsNull(String name);
+
+    /**
+     * Find class by name (case-insensitive, non-deleted)
+     * Used for retrieving class details during import
+     */
+    @Query("SELECT c FROM Clazz c WHERE LOWER(c.name) = LOWER(:name) AND c.deletedAt IS NULL")
+    Optional<Clazz> findByNameIgnoreCaseAndNotDeleted(@Param("name") String name);
 }

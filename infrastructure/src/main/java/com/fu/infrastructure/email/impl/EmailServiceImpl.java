@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
+import java.time.LocalDate;
 import java.util.Map;
 
 /**
@@ -134,5 +135,36 @@ public class EmailServiceImpl implements EmailService {
 
         sendTemplateEmail(to, subject, "password-changed", variables);
         log.info("Password changed notification sent to: {}", to);
+    }
+
+    @Override
+    @Async("mailExecutor")
+    public void sendNewAssignmentNotification(String to, String userName, String assignmentTitle, String className, String dueDate) {
+        String subject = "Thông báo bài tập mới lớp " + className + "-SatoriNihongo";
+        Map<String, Object> variables = Map.of(
+                "userName", userName != null ? userName : "Bạn",
+                "assignmentTitle", assignmentTitle,
+                "className", className,
+                "dueDate", dueDate,
+                "baseUrl", baseUrl
+        );
+        sendTemplateEmail(to, subject, "new-assignment-notification", variables);
+        log.info("New assignment notification sent to: {}", to);
+    }
+
+    @Override
+    @Async("mailExecutor")
+    public void sendEmailChangeNotification(String email, String fullName, String oldEmail) {
+        String subject = "Email của bạn đã được thay đổi - Satori Learning";
+
+        Map<String, Object> variables = Map.of(
+                "fullName", fullName != null ? fullName : "ban",
+                "supportEmail", "support@satori-learning.com",
+                "oldEmail", oldEmail,
+                "newEmail", email
+        );
+
+        sendTemplateEmail(email, subject, "email-changed", variables);
+        log.info("Password changed notification sent to: {}", email);
     }
 }

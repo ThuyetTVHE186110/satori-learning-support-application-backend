@@ -2,15 +2,20 @@ package com.fu.clazz.service;
 
 import com.fu.clazz.entity.ClassStatus;
 import com.fu.clazz.dto.request.AddMemberRequest;
+import com.fu.clazz.dto.request.AddMembersRequest;
+import com.fu.clazz.dto.request.ApproveImportClassesRequest;
 import com.fu.clazz.dto.request.CreateClassRequest;
 import com.fu.clazz.dto.request.UpdateClassRequest;
 import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
+import com.fu.clazz.dto.response.ImportClassesPreview;
+import com.fu.clazz.dto.response.ImportClassesResult;
 import com.fu.clazz.dto.response.LearnerClassResponse;
 import com.fu.clazz.dto.response.TeacherClassHistoryResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.UUID;
@@ -118,4 +123,26 @@ public interface ClassService {
      * @return paginated list of class information
      */
     Page<TeacherClassHistoryResponse> getTeacherClassHistory(UUID teacherId, Pageable pageable);
+
+    /**
+     * Step 1: Import classes from Excel file (Preview)
+     * Reads Excel file, validates data, and returns preview for client confirmation.
+     * Does not create anything - only validates and shows what would be created.
+     * 
+     * @param file Excel file (.xlsx or .xls)
+     * @param managerId ID of the manager performing import
+     * @return ImportClassesPreview containing validation results and data for step 2
+     * @throws Exception if file read fails
+     */
+    ImportClassesPreview importClassesFromExcel(MultipartFile file, UUID managerId) throws Exception;
+
+    /**
+     * Step 2: Approve and confirm class import
+     * Creates new classes and updates existing ones based on preview data from Step 1.
+     * 
+     * @param request ApproveImportClassesRequest containing classes to create
+     * @param managerId ID of the manager confirming import
+     * @return ImportClassesResult with final counts of created/updated/failed
+     */
+    ImportClassesResult approveImportClasses(ApproveImportClassesRequest request, UUID managerId);
 }

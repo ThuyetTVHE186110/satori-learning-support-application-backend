@@ -217,6 +217,8 @@ public class UserServiceImpl implements UserService {
         log.info("Admin {} updating user with id: {}", updatedByUserId, id);
         // Find user based on updater role
         User user = findUserByIdIncludingDeleted(id);
+        String oldEmail = user.getEmail();
+        Boolean emailChanged = false;
         // Validate user is not deleted
         if (user.getDeletedAt() != null) {
             throw new BusinessException("USER_DELETED", "Không thể chỉnh sửa tài khoản đã bị xóa");
@@ -230,7 +232,9 @@ public class UserServiceImpl implements UserService {
                 throw new BusinessException("EXISTED_EMAIL", "Email này đã được sử dụng. Vui lòng sử dụng email khác.");
             }
             user.setEmail(request.getEmail().trim());
+            emailChanged = true;
         }
+
         // Update fields if provided
         if (request.getFirstName() != null) {
             user.setFirstName(request.getFirstName());
@@ -267,7 +271,9 @@ public class UserServiceImpl implements UserService {
         user.setUpdatedBy(updatedByUserId);
         User updatedUser = userRepository.save(user);
         log.info("User updated successfully with id: {}", id);
-
+        if(emailChanged){
+            sendEmailNotifyEmailChanged(updatedUser.getEmail(), updatedUser.getFullName(), oldEmail);
+        }
         return userMapper.toResponse(updatedUser);
     }
 
@@ -512,13 +518,13 @@ public class UserServiceImpl implements UserService {
                 String[] nameParts = rd.fullName().split("\\s+");
                 String lastName = nameParts[nameParts.length - 1];
                 String firstName = nameParts.length > 1 ? String.join(" ", Arrays.copyOf(nameParts, nameParts.length - 1)) : "";
-
+                LocalDate birthDay = rd.birthDay();
                 User user = existingByEmail.get(rd.email());
                 boolean isNewUser = (user == null);
                 UserChangedFromImportResponse userChangedFromImportResponse = null;
                 if (!isNewUser) {
                     // Existing user — update profile only
-                    if (!user.getFirstName().equals(firstName) || !user.getLastName().equals(lastName) || !user.getPhoneNumber().equals(rd.phone())) {
+                    if (!user.getFirstName().equals(firstName) || !user.getLastName().equals(lastName) || !user.getPhoneNumber().equals(rd.phone()) || (rd.birthDay != null && !user.getDateOfBirth().equals(rd.birthDay))) {
                         userChangedFromImportResponse = UserChangedFromImportResponse.builder().userId(user.getId()).newEmail(rd.email).oldEmail(user.getEmail()).oldDateOfBirth(user.getDateOfBirth()).newDateOfBirth(rd.birthDay).oldFullName(user.getFullName()).newFullName(rd.fullName).oldPhoneNumber(user.getPhoneNumber()).newPhoneNumber(rd.phone).build();
                         updated.add(userChangedFromImportResponse);
                     }
@@ -842,7 +848,7 @@ public class UserServiceImpl implements UserService {
             if (DateUtil.isCellDateFormatted(cell)) {
                 // Dùng SimpleDateFormat để ép kiểu Date thành chuỗi định dạng Việt Nam
                 // Đây là bước quan trọng nhất để xóa bỏ chuỗi "Sun Sep 12..."
-                return new java.text.SimpleDateFormat("dd/MM/yyyy").format(cell.getDateCellValue());
+                return new java.text.SimpleDateFormat("MM/dd/yyyy").format(cell.getDateCellValue());
             }
             // Trường hợp là số điện thoại hoặc số thường
             return String.format("%.0f", cell.getNumericCellValue());
@@ -856,6 +862,9 @@ public class UserServiceImpl implements UserService {
         DataFormatter formatter = new DataFormatter();
         return formatter.formatCellValue(cell);
     }
+    private void sendEmailNotifyEmailChanged(String email, String fullName, String oldEmail) {
+        emailService.sendEmailChangeNotification(email, fullName, oldEmail);
 
+    }
 }
 
