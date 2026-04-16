@@ -356,16 +356,16 @@ public class ClassServiceImpl implements ClassService {
                     .filter(u -> u.getDeletedAt() == null)
                     .orElseThrow(() -> new ResourceNotFoundException("User", "id", learnerId.toString()));
 
+            // Validate user has LEARNER role
+            if (user.getRole() != UserRole.LEARNER) {
+                throw new BusinessException("INVALID_MEMBER_ROLE",
+                        "Chỉ người dùng có vai trò HỌC VIÊN mới được thêm vào lớp học.");
+            }
+
             // Check status = INACTIVE
             if (user.getStatus() != UserStatus.INACTIVE) {
                 throw new BusinessException("INVALID_MEMBER_STATUS", 
                         "Học viên " + learnerId + " phải có trạng thái KHÔNG HOẠT ĐỘNG.");
-            }
-
-            // Validate user has LEARNER role
-            if (user.getRole() != UserRole.LEARNER) {
-                throw new BusinessException("INVALID_MEMBER_ROLE", 
-                        "Chỉ người dùng có vai trò HỌC VIÊN mới được thêm vào lớp học.");
             }
 
             // Check existing ClassMember

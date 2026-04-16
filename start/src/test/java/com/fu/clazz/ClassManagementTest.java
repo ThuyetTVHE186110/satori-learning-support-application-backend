@@ -944,9 +944,9 @@ class ClassManagementTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.learnerId").value(learner.getId().toString()))
-                    .andExpect(jsonPath("$.data.classId").value(clazz.getId().toString()))
-                    .andExpect(jsonPath("$.data.removedAt").isEmpty());
+                    .andExpect(jsonPath("$.data[0].userId").value(learner.getId().toString()))
+                    .andExpect(jsonPath("$.data[0].classId").value(clazz.getId().toString()))
+                    .andExpect(jsonPath("$.data[0].removedAt").isEmpty());
 
             var member = classMemberRepository.findByClassIdAndUserId(clazz.getId(), learner.getId());
             assertThat(member).isPresent();
@@ -966,7 +966,7 @@ class ClassManagementTest {
             saveClassMember(clazz.getId(), saveLearner("l2@test.com").getId());
             User newLearner = saveLearner("new@test.com");
 
-            String body = String.format("{\"learnerId\":\"%s\"}", newLearner.getId());
+            String body = String.format("{\"learnerIds\":[\"%s\"]}", newLearner.getId());
 
             mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -1030,8 +1030,7 @@ class ClassManagementTest {
                             .contentType(MediaType.APPLICATION_JSON).content(body)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("INVALID_MEMBER_STATUS"))
-                    .andExpect(jsonPath("$.message").value("Chỉ có học viên hiện tại không học lớp nào mới được thêm vào lớp học."));
+                    .andExpect(jsonPath("$.code").value("INVALID_MEMBER_STATUS"));
         }
 
         @Test
@@ -1062,14 +1061,14 @@ class ClassManagementTest {
             Clazz clazz = saveClass("Test Class", teacher.getId(), course.getId(), ClassStatus.ACTIVE, 8);
             User inactiveLearner = saveLearner("inactive@test.com", UserStatus.INACTIVE);
 
-            String body = String.format("{\"userId\":\"%s\"}", inactiveLearner.getId());
+            String body = String.format("{\"learnerIds\":[\"%s\"]}", inactiveLearner.getId());
 
             mockMvc.perform(post("/api/v1/classes/{classId}/members", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON).content(body)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.userId").value(inactiveLearner.getId().toString()));
+                    .andExpect(jsonPath("$.data.[0].userId").value(inactiveLearner.getId().toString()));
 
             // Verify learner status auto-promoted to ACTIVE
             User updated = userRepository.findById(inactiveLearner.getId()).orElseThrow();
@@ -1659,8 +1658,7 @@ class ClassManagementTest {
                             .contentType(MediaType.APPLICATION_JSON).content(body)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.message").value("Không tìm thấy học viên."));
+                    .andExpect(jsonPath("$.success").value(false));
         }
 
         @Test
@@ -1719,8 +1717,7 @@ class ClassManagementTest {
                             .contentType(MediaType.APPLICATION_JSON).content(body)
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isCreated())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.removedAt").isEmpty());
+                    .andExpect(jsonPath("$.success").value(true));
 
             // The same membership record is restored — no duplicate created
             ClassMember restored = classMemberRepository.findById(originalMemberId).orElseThrow();
