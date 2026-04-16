@@ -26,6 +26,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -684,7 +685,8 @@ class ConversationTopicManagementTest {
 
             // Assert: createdAt not changed, only updatedAt changed
             ConversationTopic updated = topicRepository.findById(topic.getId()).orElseThrow();
-            assertThat(updated.getCreatedAt()).isEqualTo(createdAt);
+            assertThat(updated.getCreatedAt().truncatedTo(ChronoUnit.MICROS))
+                    .isEqualTo(createdAt.truncatedTo(ChronoUnit.MICROS));
             assertThat(updated.getCreatedBy()).isEqualTo(createdBy);
             assertThat(updated.getUpdatedAt()).isAfter(createdAt);
         }
@@ -895,3 +897,4 @@ class ConversationTopicManagementTest {
         }
     }
 }
+
