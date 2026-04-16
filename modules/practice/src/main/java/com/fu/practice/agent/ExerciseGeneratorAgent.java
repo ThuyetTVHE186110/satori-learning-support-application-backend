@@ -90,6 +90,9 @@ public class ExerciseGeneratorAgent {
      * @param prefs              learning preferences (nullable)
      * @param dimension          góc câu hỏi đã chọn qua mastery-weighted vote
      * @param masteryMap         map entityId → ItemMastery cho anti-repeat
+     * @param allowRepetition    true khi pool nhỏ hơn preset, một số entity phải lặp lại
+     *                           với dimension khác nhau (auto mode only)
+     * @param repeatPlan         map entityId → số câu cần sinh cho entity đó (≥ 1)
      */
     public List<GeneratedItem> generateItems(
             UUID lessonId,
@@ -105,7 +108,9 @@ public class ExerciseGeneratorAgent {
             boolean isExplicitMode,
             UserLearningPreferences prefs,
             QuestionDimension dimension,
-            Map<UUID, ItemMastery> masteryMap) {
+            Map<UUID, ItemMastery> masteryMap,
+            boolean allowRepetition,
+            Map<UUID, Integer> repeatPlan) {
 
         if ((selectedVocab == null || selectedVocab.isEmpty())
                 && (selectedGrammar == null || selectedGrammar.isEmpty())) {
@@ -126,16 +131,22 @@ public class ExerciseGeneratorAgent {
         // UUID short map: shortId (8 chars) → fullUUID — dùng để resolve refContentId sau khi parse
         Map<String, UUID> uuidShortMap = new LinkedHashMap<>();
 
-        // Build 8-block prompt một lần, dùng chung cho tất cả batch
+        // Build 9-block prompt một lần, dùng chung cho tất cả batch
         String contentBlock    = buildContentBlock(shuffledVocab, shuffledGrammar, uuidShortMap);
         String distractorBlock = buildDistractorBlock(allLessonVocab, shuffledVocab,
                                                        allLessonGrammar, shuffledGrammar,
                                                        isExplicitMode, courseId, lessonId);
         String profileBlock    = buildLearnerProfileBlock(prefs);
-        String dimensionBlock  = buildDimensionBlock(dimension, prefs);
+        // Khi lặp, dimension rotation block thay thế single-dim block.
+        String dimensionBlock  = allowRepetition
+                ? buildRotationDimensionBlock(prefs)
+                : buildDimensionBlock(dimension, prefs);
         String coverageBlock   = buildCoverageBlock(shuffledVocab, shuffledGrammar, isExplicitMode);
         String antiRepeatBlock = buildAntiRepeatBlock(masteryMap,
                                                        allIds(shuffledVocab, shuffledGrammar));
+        String repetitionBlock = allowRepetition
+                ? buildRepetitionBlock(repeatPlan, shuffledVocab, shuffledGrammar)
+                : "";
 
         // Phân bổ và tạo batch tasks
         Map<PracticeItemType, Integer> distribution = distributeCount(resolvedCount, resolvedTypes);
@@ -160,7 +171,7 @@ public class ExerciseGeneratorAgent {
                             task.batchSize(), sessionType, jlptLevel,
                             contentBlock, distractorBlock, profileBlock,
                             dimensionBlock, coverageBlock, antiRepeatBlock,
-                            task.itemType());
+                            repetitionBlock, task.itemType());
                     return new BatchResult(task.itemType(), task.batchIndex(), result);
                 }, taskExecutor))
                 .collect(Collectors.toList());
@@ -453,6 +464,85 @@ public class ExerciseGeneratorAgent {
                 + String.join("\n", lines) + "\n";
     }
 
+    /**
+     * Block 4b (repetition mode): khi pool nhỏ hơn preset, entity phải lặp → KHÔNG cố định
+     * 1 dimension cho cả session. Block này liệt kê tất cả dimension khả dụng và yêu cầu
+     * LLM luân phiên khi cùng 1 entity xuất hiện nhiều lần.
+     */
+    private String buildRotationDimensionBlock(UserLearningPreferences prefs) {
+        String topicCtx = (prefs != null && prefs.getPreferredTopics() != null
+                && prefs.getPreferredTopics().length > 0)
+                ? String.join(", ", prefs.getPreferredTopics())
+                : "hàng ngày";
+        return """
+                === GÓC CÂU HỎI: LUÂN PHIÊN (chế độ lặp) ===
+                Pool nhỏ hơn số câu hỏi cần sinh → một số entity lặp lại (xem phần "LẶP LẠI ENTITY" bên dưới).
+                Khi entity lặp, mỗi lần PHẢI dùng một góc (QuestionDimension) khác nhau.
+
+                GÓC KHẢ DỤNG CHO TỪ VỰNG:
+                  - MEANING: hỏi nghĩa VN ↔ JP (luân phiên 2 chiều)
+                  - READING: hỏi cách đọc / furigana / on-yomi / kun-yomi
+                  - USAGE: câu có ___ , chọn từ phù hợp (FILL_BLANK/SENTENCE_ORDER)
+                  - CONTEXT: đặt câu trong tình huống (%s) — mô phỏng hội thoại thực
+                  - ANTONYM_SYNONYM: từ trái nghĩa / đồng nghĩa / liên quan
+
+                GÓC KHẢ DỤNG CHO NGỮ PHÁP:
+                  - IDENTIFICATION: nhận diện câu đúng/sai dùng mẫu
+                  - FORMATION: chia động từ, biến thể (て形、た形、ない形)
+                  - USAGE: điền mẫu vào câu có chỗ trống
+                  - CONTRAST: phân biệt 2 mẫu dễ nhầm (chỉ nên dùng khi pool có ≥2 mẫu liên quan)
+                """.formatted(topicCtx);
+    }
+
+    /**
+     * Block 9 (repetition mode): liệt kê phân bổ số câu cho từng entity và nhấn mạnh rule
+     * "cùng entity → khác dimension".
+     */
+    private String buildRepetitionBlock(Map<UUID, Integer> repeatPlan,
+                                         List<Vocabulary> vocab,
+                                         List<GrammarPoint> grammar) {
+        if (repeatPlan == null || repeatPlan.isEmpty()) return "";
+
+        // Chỉ list những entity xuất hiện >= 2 lần — entity 1 câu không cần nhấn mạnh.
+        long repeatedCount = repeatPlan.values().stream().filter(c -> c > 1).count();
+        if (repeatedCount == 0) return "";
+
+        StringBuilder sb = new StringBuilder(
+                "=== LẶP LẠI ENTITY (BẮT BUỘC) ===\n"
+              + "Phân bổ số câu hỏi cho mỗi mục (mỗi lần lặp PHẢI dùng QuestionDimension khác):\n");
+
+        Map<UUID, String> vocabLabels = new HashMap<>();
+        for (Vocabulary v : vocab) {
+            vocabLabels.put(v.getId(), String.format("%s [%s] (Từ vựng)",
+                    v.getJapaneseText(),
+                    v.getReading() != null ? v.getReading() : ""));
+        }
+        Map<UUID, String> grammarLabels = new HashMap<>();
+        for (GrammarPoint g : grammar) {
+            grammarLabels.put(g.getId(), String.format("%s (Ngữ pháp)", g.getPattern()));
+        }
+
+        for (Map.Entry<UUID, Integer> e : repeatPlan.entrySet()) {
+            int count = e.getValue();
+            if (count <= 0) continue;
+            String shortId = shortId(e.getKey());
+            String label = vocabLabels.getOrDefault(e.getKey(),
+                    grammarLabels.getOrDefault(e.getKey(), "?"));
+            sb.append(String.format("  • [%s] %s — %d câu%s%n",
+                    shortId, label, count, count > 1 ? "  ← LẶP" : ""));
+        }
+
+        sb.append("""
+
+                QUY TẮC LẶP (tuyệt đối tuân thủ):
+                1. Entity xuất hiện N lần → N câu phải dùng N QuestionDimension KHÁC nhau.
+                2. Không được có 2 câu cùng cả (entity, dimension) — kể cả khác itemType.
+                3. Hãy cố thay đổi cả cách đặt câu (JP→VN ↔ VN→JP, fill-blank ↔ nhận diện, ...)
+                   để học viên không cảm thấy nhàm chán khi gặp lại entity.
+                """);
+        return sb.toString();
+    }
+
     // ── Single batch generation ────────────────────────────────────────────
 
     private static final String DIVERSITY_DIRECTIVE = """
@@ -467,7 +557,7 @@ public class ExerciseGeneratorAgent {
             int count, PracticeSessionType sessionType, String jlptLevel,
             String contentBlock, String distractorBlock, String profileBlock,
             String dimensionBlock, String coverageBlock, String antiRepeatBlock,
-            PracticeItemType itemType) {
+            String repetitionBlock, PracticeItemType itemType) {
 
         String prompt = contentBlock
                 + distractorBlock
@@ -475,6 +565,7 @@ public class ExerciseGeneratorAgent {
                 + dimensionBlock
                 + coverageBlock
                 + antiRepeatBlock
+                + repetitionBlock
                 + buildItemTypeSection(count, sessionType, jlptLevel, itemType)
                 + DIVERSITY_DIRECTIVE;
 
