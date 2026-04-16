@@ -14,6 +14,7 @@ import org.thymeleaf.context.Context;
 
 import java.time.LocalDate;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Implementation of EmailService using Resend HTTP API.
@@ -37,6 +38,10 @@ public class EmailServiceImpl implements EmailService {
     @Value("${app.email.enabled:true}")
     private boolean emailEnabled;
 
+    // Resend free tier: 2 req/sec. Keep ≥600 ms between sends to stay safely under the limit.
+    private static final long MIN_SEND_INTERVAL_MS = 600;
+    private final AtomicLong lastResendCallMs = new AtomicLong(0);
+
     @Override
     @Async
     public void sendSimpleEmail(String to, String subject, String text) {
@@ -53,7 +58,7 @@ public class EmailServiceImpl implements EmailService {
                     .text(text)
                     .build();
 
-            resend.emails().send(params);
+            sendThrottled(params);
             log.info("Simple email sent to: {}", to);
         } catch (ResendException e) {
             log.error("Failed to send simple email to: {}", to, e);
@@ -82,7 +87,7 @@ public class EmailServiceImpl implements EmailService {
                     .html(htmlContent)
                     .build();
 
-            resend.emails().send(params);
+            sendThrottled(params);
             log.info("Template email '{}' sent to: {}", templateName, to);
         } catch (ResendException e) {
             log.error("Failed to send template email to: {}", to, e);
@@ -166,5 +171,25 @@ public class EmailServiceImpl implements EmailService {
 
         sendTemplateEmail(email, subject, "email-changed", variables);
         log.info("Password changed notification sent to: {}", email);
+    }
+
+    /**
+     * Wraps every Resend API call with a minimum-interval guard.
+     * Resend allows 2 req/sec; sleeping ≥600 ms between sends keeps us safely under that limit
+     * regardless of how many async threads are dispatching emails concurrently.
+     */
+    private void sendThrottled(CreateEmailOptions params) throws ResendException {
+        long now = System.currentTimeMillis();
+        long last = lastResendCallMs.get();
+        long wait = MIN_SEND_INTERVAL_MS - (now - last);
+        if (wait > 0) {
+            try {
+                Thread.sleep(wait);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        lastResendCallMs.set(System.currentTimeMillis());
+        resend.emails().send(params);
     }
 }
