@@ -238,4 +238,10 @@ public class StreakServiceImpl implements StreakService {
         Integer streakCount = recentRecord.getStreakCount();
         return streakCount != null ? streakCount : 0;
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean hasActivityOnDate(UUID userId, LocalDate date) {
+        return streakHistoryRepository.hasActivityOnDate(userId, date);
+    }
 }

@@ -77,9 +77,9 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
                   -- 1. NOT_STARTED / IN_PROGRESS (Within deadline)
                   WHEN (sub.status IS NULL OR sub.status = 'IN_PROGRESS') AND a.due_date >= CURRENT_TIMESTAMP THEN 0
                   -- 2. OVERDUE (Explicit status OR past deadline and not submitted/graded)
-                  WHEN sub.status = 'OVERDUE' OR ((sub.status IS NULL OR sub.status = 'IN_PROGRESS') AND a.due_date < CURRENT_TIMESTAMP) THEN 1
+                  WHEN sub.status = 'OVERDUE' OR ((sub.status IS NULL OR sub.status = 'IN_PROGRESS') AND a.due_date < CURRENT_TIMESTAMP) THEN 2
                   -- 3. SUBMITTED / GRADED
-                  ELSE 2
+                  ELSE 1
               END ASC,
               CASE
                   -- Sorting within Group 0: Closest due date first (ASC)

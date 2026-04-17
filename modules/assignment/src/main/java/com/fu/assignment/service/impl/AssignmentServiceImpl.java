@@ -881,6 +881,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         // Resolve active submission by assignmentId and learnerId
         AssignmentSubmission submission = submissionRepository.findActiveByAssignmentIdAndUserId(assignmentId, learnerId).orElseThrow(() -> new BusinessException("NO_ACTIVE_SUBMISSION", "Không tìm thấy bài nộp đang làm. Vui lòng bắt đầu bài tập trước."));
 
+        log.info("Nop bai ne");
         Assignment assignment = findAssignmentOrThrow(assignmentId);
         if (!assignment.isQuiz()) {
             throw new BusinessException("INVALID_TYPE", "Vui lòng sử dụng submitWriting cho bài tập không phải dạng QUIZ.");
@@ -1395,11 +1396,6 @@ public class AssignmentServiceImpl implements AssignmentService {
     private void validateStatusTransition(Assignment assignment, AssignmentStatus newStatus, Integer questionCount) {
         AssignmentStatus current = assignment.getStatus();
         if (current == null || current == newStatus) return; // no change
-
-        // CLOSED is terminal — no transitions out
-        if (current == AssignmentStatus.CLOSED) {
-            throw new BusinessException("INVALID_STATUS_TRANSITION", "Bài tập đã đóng (CLOSED). Không thể chuyển sang trạng thái khác.");
-        }
 
         // PUBLISHED → DRAFT: blocked
         if (current == AssignmentStatus.PUBLISHED && newStatus == AssignmentStatus.DRAFT) {

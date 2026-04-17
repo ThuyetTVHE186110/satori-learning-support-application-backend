@@ -49,6 +49,7 @@ import com.fu.infrastructure.event.StudyMinutesRecordedEvent;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -79,6 +80,43 @@ public class PracticeSessionService {
     private final LearningLevelService learningLevelService;
     private final StreakService streakService;
     private final ApplicationEventPublisher eventPublisher;
+
+    /**
+     * ThreadLocal to store isFirstActivityOfDay flag by sessionId.
+     * Allows finishSession() to capture and store the flag for getSessionSummary() to retrieve.
+     * Scope: Single HTTP request lifetime.
+     */
+    private static final ThreadLocal<Map<UUID, Boolean>> firstActivityFlagBySession = 
+            ThreadLocal.withInitial(HashMap::new);
+
+    /**
+     * Store the isFirstActivityOfDay flag from streak notification.
+     * Called by finishSession() to capture the flag for getSessionSummary() to use.
+     */
+    private void storeFirstActivityFlag(UUID sessionId, boolean isFirstActivityOfDay) {
+        firstActivityFlagBySession.get().put(sessionId, isFirstActivityOfDay);
+    }
+
+    /**
+     * Retrieve the isFirstActivityOfDay flag for a session.
+     * Called by getSessionSummary() to get the flag stored by finishSession().
+     * Falls back to false if not found (safety).
+     */
+    private boolean getFirstActivityFlag(UUID sessionId) {
+        return firstActivityFlagBySession.get().getOrDefault(sessionId, false);
+    }
+
+    /**
+     * Clear ThreadLocal storage for a session.
+     * Should be called after getSessionSummary() completes to prevent memory leaks.
+     */
+    private void clearFirstActivityFlag(UUID sessionId) {
+        firstActivityFlagBySession.get().remove(sessionId);
+        // Optional: clear entire ThreadLocal if no more sessions
+        if (firstActivityFlagBySession.get().isEmpty()) {
+            firstActivityFlagBySession.remove();
+        }
+    }
 
     // ── Start Session ─────────────────────────────────────────────────────
 
@@ -644,7 +682,17 @@ public class PracticeSessionService {
             }
         }
         // ─────────────────────────────────────────────────────────────────────
-
+        // Record daily activity for streak tracking
+        // Capture the isFirstActivityOfDay flag from the response and store it for getSessionSummary()
+        try {
+            StreakNotificationResponse streakResponse = streakService.recordDailyActivity(session.getUserId(), "PRACTICE");
+            if (streakResponse != null && streakResponse.isFirstActivityToday()) {
+                storeFirstActivityFlag(session.getId(), true);
+                log.debug("Check flag: {} : {}",session.getId(),getFirstActivityFlag(session.getId()));
+            }
+        } catch (Exception e) {
+            log.error("Error recording daily activity for learner: {}", session.getUserId(), e);
+        }
         // Award direct EXP for practice completion (with level tier + score bonus)
         try {
             int currentLevel = learningLevelService.getCurrentLevel(session.getUserId());
@@ -800,14 +848,25 @@ public class PracticeSessionService {
         }
 
         // Fetch streak info (read-only) if session is completed
-        StreakNotificationResponse streakNotification = null;
+        com.fu.achievement.dto.response.StreakNotificationResponse streakNotification = null;
         if (session.getStatus() == PracticeStatus.COMPLETED) {
-            log.info("Tracking daily activity for practice done.");
-            // Record daily activity for streak tracking
             try {
-                streakNotification = streakService.recordDailyActivity(session.getUserId(), "PRACTICE");
+                // Retrieve the isFirstActivityOfDay flag stored by finishSession()
+                boolean isFirstActivityToday = getFirstActivityFlag(sessionId);
+                streakNotification = streakService.getUserStatsInfo(userId)
+                        .map(stats -> com.fu.achievement.dto.response.StreakNotificationResponse.builder()
+                                .isFirstActivityToday(isFirstActivityToday)
+                                .currentStreak(stats.getCurrentStreak())
+                                .longestStreak(stats.getLongestStreak())
+                                .build())
+                        .orElse(null);
+                log.debug("Tracking daily activity: {}", isFirstActivityToday);
+                log.debug("SessionID: {}",sessionId);
             } catch (Exception e) {
-                log.error("Error recording daily activity for learner: {}", session.getUserId(), e);
+                log.debug("Error retrieving streak info for session summary", e);
+            } finally {
+                // Clean up ThreadLocal to prevent memory leaks
+                clearFirstActivityFlag(sessionId);
             }
         }
 
