@@ -271,7 +271,7 @@ public class UserServiceImpl implements UserService {
         user.setUpdatedBy(updatedByUserId);
         User updatedUser = userRepository.save(user);
         log.info("User updated successfully with id: {}", id);
-        if(emailChanged){
+        if (emailChanged) {
             sendEmailNotifyEmailChanged(updatedUser.getEmail(), updatedUser.getFullName(), oldEmail);
         }
         return userMapper.toResponse(updatedUser);
@@ -846,9 +846,13 @@ public class UserServiceImpl implements UserService {
 
         if (cell.getCellType() == CellType.NUMERIC) {
             if (DateUtil.isCellDateFormatted(cell)) {
-                // Dùng SimpleDateFormat để ép kiểu Date thành chuỗi định dạng Việt Nam
-                // Đây là bước quan trọng nhất để xóa bỏ chuỗi "Sun Sep 12..."
-                return new java.text.SimpleDateFormat("MM/dd/yyyy").format(cell.getDateCellValue());
+                LocalDateTime dateTime = cell.getLocalDateTimeCellValue();
+                // 1. Define the pattern
+                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+                // 2. Format the LocalDateTime object
+                String formattedDate = dateTime.format(formatter);
+                log.debug("Formatted Date: {}", formattedDate);
+                return formattedDate;
             }
             // Trường hợp là số điện thoại hoặc số thường
             return String.format("%.0f", cell.getNumericCellValue());
@@ -862,6 +866,7 @@ public class UserServiceImpl implements UserService {
         DataFormatter formatter = new DataFormatter();
         return formatter.formatCellValue(cell);
     }
+
     private void sendEmailNotifyEmailChanged(String email, String fullName, String oldEmail) {
         emailService.sendEmailChangeNotification(email, fullName, oldEmail);
 
