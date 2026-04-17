@@ -881,14 +881,12 @@ public class AssignmentServiceImpl implements AssignmentService {
         // Resolve active submission by assignmentId and learnerId
         AssignmentSubmission submission = submissionRepository.findActiveByAssignmentIdAndUserId(assignmentId, learnerId).orElseThrow(() -> new BusinessException("NO_ACTIVE_SUBMISSION", "Không tìm thấy bài nộp đang làm. Vui lòng bắt đầu bài tập trước."));
 
-        log.info("Nop bai ne");
         Assignment assignment = findAssignmentOrThrow(assignmentId);
         if (!assignment.isQuiz()) {
             throw new BusinessException("INVALID_TYPE", "Vui lòng sử dụng submitWriting cho bài tập không phải dạng QUIZ.");
         }
         if (assignment.getDueDate().isBefore(LocalDateTime.now())) {
-            submission.setAnswers(request.getAnswers());
-            submission.setSubmittedAt(LocalDateTime.now());
+            submission.setAnswers("[]");
             submissionService.markSubmissionAsOverdueAndSave(submission.getId());
             throw new BusinessException("PAST_DUE", "Bài tập này đã hết hạn nộp.");
         } else {
