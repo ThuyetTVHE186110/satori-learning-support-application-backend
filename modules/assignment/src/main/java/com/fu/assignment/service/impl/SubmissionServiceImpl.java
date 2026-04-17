@@ -26,6 +26,7 @@ public class SubmissionServiceImpl implements SubmissionService {
         log.info("Forcefully marking submission {} as OVERDUE in a REQUIRES_NEW transaction", submissionId);
         submissionRepository.findById(submissionId).ifPresent(submission -> {
             submission.setStatus(SubmissionStatus.OVERDUE);
+            submission.setSubmittedAt(LocalDateTime.now());
             submission.setUpdatedAt(LocalDateTime.now());
             submissionRepository.save(submission);
         });
