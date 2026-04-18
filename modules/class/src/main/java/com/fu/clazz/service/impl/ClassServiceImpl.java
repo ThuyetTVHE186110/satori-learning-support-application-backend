@@ -251,7 +251,7 @@ public class ClassServiceImpl implements ClassService {
         org.springframework.data.jpa.domain.Specification<Clazz> spec = org.springframework.data.jpa.domain.Specification.where(ClassSpecification.isNotDeleted()).and(ClassSpecification.hasKeyword(keyword)).and(ClassSpecification.hasTeacherId(teacherId)).and(ClassSpecification.hasCourseId(courseId)).and(ClassSpecification.hasStatus(status));
 
         Page<Clazz> classPage = classRepository.findAll(spec, pageable);
-        
+
         // If no status filter and pageable has no sort, apply custom status priority sorting
         if (status == null && !pageable.getSort().isSorted()) {
             List<Clazz> sortedClasses = classPage.getContent().stream()
@@ -259,7 +259,7 @@ public class ClassServiceImpl implements ClassService {
                         // Priority order: ACTIVE (0) > NOT_STARTED (1) > CLOSED (2)
                         int priority1 = getStatusPriority(c1.getStatus());
                         int priority2 = getStatusPriority(c2.getStatus());
-                        
+
                         if (priority1 != priority2) {
                             return Integer.compare(priority1, priority2);
                         }
@@ -267,17 +267,17 @@ public class ClassServiceImpl implements ClassService {
                         return c2.getCreatedAt().compareTo(c1.getCreatedAt());
                     })
                     .toList();
-            
+
             return new org.springframework.data.domain.PageImpl<>(
                     sortedClasses.stream().map(this::toSummaryWithMemberCount).toList(),
                     pageable,
                     classPage.getTotalElements()
             );
         }
-        
+
         return classPage.map(this::toSummaryWithMemberCount);
     }
-    
+
     /**
      * Get status priority for sorting (lower = higher priority)
      * Order: ACTIVE (0) > NOT_STARTED (1) > CLOSED (2)
@@ -386,7 +386,7 @@ public class ClassServiceImpl implements ClassService {
                 ClassMember member = existing.get();
                 if (member.isActive()) {
                     // Already an active member
-                    throw new BusinessException("MEMBER_ALREADY_EXISTS", 
+                    throw new BusinessException("MEMBER_ALREADY_EXISTS",
                             "Học viên " + learnerId + " đã là thành viên của lớp này.");
                 }
                 // Store for restoration
@@ -398,9 +398,9 @@ public class ClassServiceImpl implements ClassService {
 
         // 5. Check capacity: currentCount + new learners > maxStudents?
         if (currentMemberCount + learnerIds.size() > clazz.getMaxStudents()) {
-            throw new BusinessException("CLASS_FULL", 
-                    "Vượt quá sức chứa: lớp có " + currentMemberCount + " học viên, tối đa là " 
-                    + clazz.getMaxStudents() + ", không thể thêm " + learnerIds.size() + ".");
+            throw new BusinessException("CLASS_FULL",
+                    "Vượt quá sức chứa: lớp có " + currentMemberCount + " học viên, tối đa là "
+                            + clazz.getMaxStudents() + ", không thể thêm " + learnerIds.size() + ".");
         }
 
         // 6. Add/restore all members (transactional)
@@ -539,10 +539,10 @@ public class ClassServiceImpl implements ClassService {
                 throw new BusinessException("INVALID_FILTER_CLASS", "Lớp lọc phải có trạng thái CLOSED.");
             }
         }
-        
+
         List<UUID> excludedIds = classMemberRepository.findUserIdsInActiveClasses();
         Page<User> usersPage = userRepository.findEligibleLearnersForClass(keyword, excludedIds, pageable);
-        
+
         List<com.fu.user.dto.UserResponse> responses = usersPage.getContent().stream()
                 .map(user -> com.fu.user.dto.UserResponse.builder()
                         .id(user.getId())
@@ -561,7 +561,7 @@ public class ClassServiceImpl implements ClassService {
                         .lastLoginAt(user.getLastLoginAt())
                         .build())
                 .toList();
-        
+
         // If filterByClassId is provided, filter by membership in that class
         if (filterByClassId != null) {
             List<UUID> filterClassMemberIds = classMemberRepository.findUserIdsByClosedClass(filterByClassId);
@@ -569,7 +569,7 @@ public class ClassServiceImpl implements ClassService {
                     .filter(response -> filterClassMemberIds.contains(response.getId()))
                     .toList();
         }
-        
+
         return new PageImpl<>(responses, pageable, responses.size());
     }
 
@@ -663,8 +663,8 @@ public class ClassServiceImpl implements ClassService {
     /**
      * Step 1: Import classes from Excel file (Preview)
      * Reads Excel file, validates data, and returns preview for client confirmation.
-     * 
-     * @param file Excel file (.xlsx or .xls)
+     *
+     * @param file      Excel file (.xlsx or .xls)
      * @param managerId ID of the manager performing import
      * @return ImportClassesPreview containing validation results and data for step 2
      * @throws IOException if file read fails
@@ -683,18 +683,18 @@ public class ClassServiceImpl implements ClassService {
 
         int newClassCount = 0;
         int updateClassCount = 0;
-        
+
         // Step 1: Build map of learner email -> list of classes they appear in (for multi-class detection)
         // Using case-insensitive class name matching
         Map<String, Set<String>> learnerToClasses = new HashMap<>();
         log.debug("Building learner-to-classes map from {} excel rows and learner data", excelRows.size());
         log.debug("Learner data available for classes: {}", learnersByClass.keySet());
-        
+
         for (ClassExcelRow excelRow : excelRows) {
             if (excelRow.isEmpty()) continue;
-            
+
             String className = excelRow.getName().trim();
-            
+
             // Try to find learners for this class (case-insensitive)
             List<LearnerExcelRow> learnerExcelRows = new ArrayList<>();
             for (String key : learnersByClass.keySet()) {
@@ -703,31 +703,31 @@ public class ClassServiceImpl implements ClassService {
                     break;
                 }
             }
-            
+
             log.debug("Class '{}' has {} learners in import data", className, learnerExcelRows.size());
-            
+
             for (LearnerExcelRow learnerExcelRow : learnerExcelRows) {
                 String learnerEmail = learnerExcelRow.getEmail().trim().toLowerCase();
                 learnerToClasses.computeIfAbsent(learnerEmail, k -> new HashSet<>()).add(className);
             }
         }
-        
+
         // Identify learners in multiple classes within this batch
         Set<String> learnersInMultipleClasses = learnerToClasses.entrySet().stream()
                 .filter(e -> e.getValue().size() > 1)
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toSet());
-        
+
         if (!learnersInMultipleClasses.isEmpty()) {
-            log.warn("Found {} learners in multiple classes within this import batch: {}", 
+            log.warn("Found {} learners in multiple classes within this import batch: {}",
                     learnersInMultipleClasses.size(), learnersInMultipleClasses);
-            learnersInMultipleClasses.forEach(email -> 
-                log.warn("  - {} appears in classes: {}", email, learnerToClasses.get(email))
+            learnersInMultipleClasses.forEach(email ->
+                    log.warn("  - {} appears in classes: {}", email, learnerToClasses.get(email))
             );
         }
 
         for (ClassExcelRow excelRow : excelRows) {
-            if(excelRow.isEmpty()) {
+            if (excelRow.isEmpty()) {
                 continue; // Skip empty rows
             }
             // Validate row
@@ -791,7 +791,7 @@ public class ClassServiceImpl implements ClassService {
 
             // Build learner list with full details and validate
             List<LearnerInfo> learnersToAdd = new ArrayList<>();
-            
+
             // Find learners for this class (case-insensitive)
             List<LearnerExcelRow> learnerExcelRows = new ArrayList<>();
             for (String key : learnersByClass.keySet()) {
@@ -800,10 +800,10 @@ public class ClassServiceImpl implements ClassService {
                     break;
                 }
             }
-            
+
             for (LearnerExcelRow learnerExcelRow : learnerExcelRows) {
                 String learnerEmail = learnerExcelRow.getEmail().trim().toLowerCase();
-                
+
                 // Skip learners that are in multiple classes in this batch
                 if (learnersInMultipleClasses.contains(learnerEmail)) {
                     errors.add(ClassImportError.builder()
@@ -813,7 +813,7 @@ public class ClassServiceImpl implements ClassService {
                             .build());
                     continue;
                 }
-                
+
                 User learner = userRepository.findByEmail(learnerEmail).orElse(null);
                 if (learner == null) {
                     errors.add(ClassImportError.builder()
@@ -833,24 +833,24 @@ public class ClassServiceImpl implements ClassService {
                             .build());
                     continue;
                 }
-                
+
                 // For UPDATE classes: Skip learners already in this class
                 if (classExists && existingClass != null) {
                     boolean alreadyInClass = classMemberRepository
-                        .findByClassIdAndUserId(existingClass.getId(), learner.getId())
-                        .map(member -> member.getRemovedAt() == null) // Check if not soft-deleted
-                        .orElse(false);
-                    
+                            .findByClassIdAndUserId(existingClass.getId(), learner.getId())
+                            .map(member -> member.getRemovedAt() == null) // Check if not soft-deleted
+                            .orElse(false);
+
                     if (alreadyInClass) {
                         log.debug("Learner {} already in class {}, skipping", learner.getEmail(), className);
                         continue;
                     }
                 }
-                
-                String fullName = (learner.getFirstName() != null ? learner.getFirstName() : "") + 
-                                (learner.getLastName() != null ? " " + learner.getLastName() : "");
+
+                String fullName = (learner.getFirstName() != null ? learner.getFirstName() : "") +
+                        (learner.getLastName() != null ? " " + learner.getLastName() : "");
                 fullName = fullName.trim();
-                
+
                 LearnerInfo learnerInfo = LearnerInfo.builder()
                         .id(learner.getId())
                         .email(learner.getEmail())
@@ -867,10 +867,10 @@ public class ClassServiceImpl implements ClassService {
             if (classExists && existingClass != null) {
                 long existingMemberCount = classMemberRepository.countActiveByClassId(existingClass.getId());
                 totalLearnersAfterImport += (int) existingMemberCount;
-                log.debug("Class {} UPDATE validation: existing={}, new={}, total={}, max={}", 
-                    className, existingMemberCount, learnersToAdd.size(), totalLearnersAfterImport, excelRow.getMaxStudents());
+                log.debug("Class {} UPDATE validation: existing={}, new={}, total={}, max={}",
+                        className, existingMemberCount, learnersToAdd.size(), totalLearnersAfterImport, excelRow.getMaxStudents());
             }
-            
+
             Optional<ClassImportError> maxStudentsError = ExcelClassImportUtil.validateMaxStudentsNotExceeded(
                     totalLearnersAfterImport, excelRow.getMaxStudents(), className, excelRow.getRowNumber());
             if (maxStudentsError.isPresent()) {
@@ -928,8 +928,8 @@ public class ClassServiceImpl implements ClassService {
     /**
      * Step 2: Approve and confirm class import
      * Creates new classes and updates existing ones based on preview data from Step 1.
-     * 
-     * @param request ApproveImportClassesRequest containing classes to create and update
+     *
+     * @param request   ApproveImportClassesRequest containing classes to create and update
      * @param managerId ID of the manager confirming import
      * @return ImportClassesResult with final counts
      */
@@ -937,7 +937,7 @@ public class ClassServiceImpl implements ClassService {
     @Transactional
     public ImportClassesResult approveImportClasses(ApproveImportClassesRequest request, UUID managerId) {
         int totalRequested = (request.getClassesToCreate() != null ? request.getClassesToCreate().size() : 0) +
-                             (request.getClassesToUpdate() != null ? request.getClassesToUpdate().size() : 0);
+                (request.getClassesToUpdate() != null ? request.getClassesToUpdate().size() : 0);
         log.info("Manager {} approving class import for {} classes", managerId, totalRequested);
 
         List<ClassImportError> errors = new ArrayList<>();
@@ -960,22 +960,41 @@ public class ClassServiceImpl implements ClassService {
 
                     Clazz savedClass = classRepository.save(newClass);
                     log.debug("Created new class: {}", preview.getName());
-
+                    //If teacher is changing, add new ClassTeacherHistory record
+                    //Check if teacher is different from current teacher
+                    try {
+                        if (preview.getTeacherId() != null) {
+                            ClassTeacherHistory classTeacherHistory = ClassTeacherHistory.builder()
+                                    .classId(savedClass.getId())
+                                    .teacherId(preview.getTeacherId())
+                                    .assignedAt(LocalDate.now())
+                                    .build();
+                            classTeacherHistoryRepository.save(classTeacherHistory);
+                        }
+                    } catch (Exception e) {
+                        log.warn("Failed to assign teacher {} to class {}: {}",
+                                preview.getTeacherEmail(), preview.getName(), e.getMessage());
+                        errors.add(ClassImportError.builder()
+                                .className(preview.getName())
+                                .errorMessage(String.format("Lỗi gán giảng viên %s: %s",
+                                        preview.getTeacherEmail(), e.getMessage()))
+                                .build());
+                    }
                     // Add learners to new class
                     if (preview.getLearnersToAdd() != null) {
                         int learnerRowNum = 0;
                         for (LearnerInfo learnerInfo : preview.getLearnersToAdd()) {
                             learnerRowNum++;
-                            
+
                             // Validate learner before adding
                             ClassImportError validationError = validateLearnerForImport(
                                     learnerInfo, preview.getName(), learnerRowNum);
-                            
+
                             if (validationError != null) {
                                 errors.add(validationError);
                                 continue; // Skip invalid learner
                             }
-                            
+
                             try {
                                 // Use learner ID directly from LearnerInfo
                                 ClassMember member = ClassMember.builder()
@@ -984,18 +1003,18 @@ public class ClassServiceImpl implements ClassService {
                                         .joinedAt(LocalDateTime.now())
                                         .build();
                                 classMemberRepository.save(member);
-                                
+
                                 // Update learner status to ACTIVE
                                 User learner = userRepository.findById(learnerInfo.getId()).get();
                                 learner.setStatus(UserStatus.ACTIVE);
                                 userRepository.save(learner);
-                                
+
                             } catch (Exception e) {
-                                log.warn("Failed to add learner {} to class {}: {}", 
+                                log.warn("Failed to add learner {} to class {}: {}",
                                         learnerInfo.getEmail(), preview.getName(), e.getMessage());
                                 errors.add(ClassImportError.builder()
                                         .className(preview.getName())
-                                        .errorMessage(String.format("Lỗi thêm học viên %s: %s", 
+                                        .errorMessage(String.format("Lỗi thêm học viên %s: %s",
                                                 learnerInfo.getEmail(), e.getMessage()))
                                         .build());
                             }
@@ -1022,7 +1041,7 @@ public class ClassServiceImpl implements ClassService {
 
                     if (existingClass != null) {
                         final Clazz finalExistingClass = existingClass;  // Make final for lambda
-                        
+
                         // Update class fields - use IDs from preview
                         existingClass.setDescription(preview.getDescription());
                         existingClass.setCourseId(preview.getCourseId());
@@ -1031,22 +1050,45 @@ public class ClassServiceImpl implements ClassService {
 
                         classRepository.save(existingClass);
                         log.debug("Updated existing class: {}", preview.getName());
-
+                        //If teacher is changing, add new ClassTeacherHistory record
+                        //Check if teacher is different from current teacher
+                        try {
+                            UUID currentTeacherId = classTeacherHistoryRepository.findCurrentTeacherIdByClassId(finalExistingClass.getId()).orElse(null);
+                            if (preview.getTeacherId() != null && currentTeacherId == null || !currentTeacherId.equals(preview.getTeacherId())) {
+                                ClassTeacherHistory classTeacherHistory = ClassTeacherHistory.builder()
+                                        .classId(finalExistingClass.getId())
+                                        .teacherId(preview.getTeacherId())
+                                        .assignedAt(LocalDate.now())
+                                        .build();
+                                ClassTeacherHistory oldTeacherHistory = classTeacherHistoryRepository.findActiveByClassIdAndTeacherId(finalExistingClass.getId(), currentTeacherId).orElse(null);
+                                oldTeacherHistory.setReleasedAt(LocalDate.now());
+                                classTeacherHistoryRepository.save(oldTeacherHistory);
+                                classTeacherHistoryRepository.save(classTeacherHistory);
+                            }
+                        } catch (Exception e) {
+                            log.warn("Failed to assign teacher {} to class {}: {}",
+                                    preview.getTeacherEmail(), preview.getName(), e.getMessage());
+                            errors.add(ClassImportError.builder()
+                                    .className(preview.getName())
+                                    .errorMessage(String.format("Lỗi gán giảng viên %s: %s",
+                                            preview.getTeacherEmail(), e.getMessage()))
+                                    .build());
+                        }
                         // Add new learners to existing class
                         if (preview.getLearnersToAdd() != null) {
                             int learnerRowNum = 0;
                             for (LearnerInfo learnerInfo : preview.getLearnersToAdd()) {
                                 learnerRowNum++;
-                                
+
                                 // Validate learner before adding
                                 ClassImportError validationError = validateLearnerForImport(
                                         learnerInfo, preview.getName(), learnerRowNum);
-                                
+
                                 if (validationError != null) {
                                     errors.add(validationError);
                                     continue; // Skip invalid learner
                                 }
-                                
+
                                 try {
                                     // Use learner ID directly from LearnerInfo
                                     final UUID learnerId = learnerInfo.getId();
@@ -1069,18 +1111,18 @@ public class ClassServiceImpl implements ClassService {
                                                 .build();
                                         classMemberRepository.save(newMember);
                                     }
-                                    
+
                                     // Update learner status to ACTIVE
                                     User learner = userRepository.findById(learnerId).get();
                                     learner.setStatus(UserStatus.ACTIVE);
                                     userRepository.save(learner);
-                                    
+
                                 } catch (Exception e) {
-                                    log.warn("Failed to add learner {} to class {}: {}", 
+                                    log.warn("Failed to add learner {} to class {}: {}",
                                             learnerInfo.getEmail(), preview.getName(), e.getMessage());
                                     errors.add(ClassImportError.builder()
                                             .className(preview.getName())
-                                            .errorMessage(String.format("Lỗi thêm học viên %s: %s", 
+                                            .errorMessage(String.format("Lỗi thêm học viên %s: %s",
                                                     learnerInfo.getEmail(), e.getMessage()))
                                             .build());
                                 }
@@ -1113,9 +1155,9 @@ public class ClassServiceImpl implements ClassService {
      * Validate learner during import approval
      * Checks: role (must be LEARNER), status (must be INACTIVE), not already in another class
      *
-     * @param learner LearnerInfo to validate
+     * @param learner   LearnerInfo to validate
      * @param className Name of class for error reporting
-     * @param rowNum Row number for error reporting
+     * @param rowNum    Row number for error reporting
      * @return ClassImportError if validation fails, null if passes
      */
     private ClassImportError validateLearnerForImport(LearnerInfo learner, String className, int rowNum) {
@@ -1129,7 +1171,7 @@ public class ClassServiceImpl implements ClassService {
                 return ClassImportError.builder()
                         .rowNumber(rowNum)
                         .className(className)
-                        .errorMessage(String.format("Học viên %s phải có role LEARNER, hiện có: %s", 
+                        .errorMessage(String.format("Học viên %s phải có role LEARNER, hiện có: %s",
                                 learner.getEmail(), user.getRole()))
                         .build();
             }
@@ -1139,7 +1181,7 @@ public class ClassServiceImpl implements ClassService {
                 return ClassImportError.builder()
                         .rowNumber(rowNum)
                         .className(className)
-                        .errorMessage(String.format("Chỉ có thể thêm học viên %s với status INACTIVE, hiện có: %s", 
+                        .errorMessage(String.format("Chỉ có thể thêm học viên %s với status INACTIVE, hiện có: %s",
                                 learner.getEmail(), user.getStatus()))
                         .build();
             }
@@ -1258,7 +1300,7 @@ public class ClassServiceImpl implements ClassService {
                     }
 
                     TeacherClassHistoryResponse response = classMapper.toTeacherClassHistoryResponse(clazz);
-                    
+
                     // Enrich with course info
                     if (clazz.getCourseId() != null) {
                         courseRepository.findById(clazz.getCourseId()).ifPresent(course -> {
