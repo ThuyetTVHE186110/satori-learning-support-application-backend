@@ -41,4 +41,10 @@ public class PracticeItemResponse {
      * Key = id của option bên LEFT, Value = id của option bên RIGHT tương ứng.
      */
     private Map<Integer, Integer> correctMapping;
+
+    /** ID của vocab/grammar mà câu hỏi này đang ôn — cho phép FE hiển thị "đang ôn từ X". */
+    private UUID refContentId;
+
+    /** "VOCABULARY" hoặc "GRAMMAR". */
+    private String refContentType;
 }

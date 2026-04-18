@@ -70,3 +70,4 @@ release.properties
 *.json
  environment/secrets/
 /.local.github/
+**/docs

@@ -30,8 +30,11 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class StructuredCurriculumQueryService {
 
-    private static final int DEFAULT_LIMIT = 20;
-    private static final int MAX_LIMIT      = 50;
+    // Lesson scope is bounded naturally (~40-80 vocab, ~10 grammar per lesson) — safe to return all.
+    // Course scope can be ~1000+ items; cap to protect LLM context window and output cost.
+    private static final int LESSON_SAFETY_CAP = 300;
+    private static final int COURSE_DEFAULT_LIMIT = 50;
+    private static final int COURSE_MAX_LIMIT    = 100;
 
     private final VocabularyRepository   vocabularyRepository;
     private final GrammarPointRepository grammarPointRepository;
@@ -59,7 +62,7 @@ public class StructuredCurriculumQueryService {
     @Transactional(readOnly = true)
     public StructuredResult queryVocabulary(UUID courseId, UUID lessonId,
                                             String keyword, int limit) {
-        int cap = Math.min(limit <= 0 ? DEFAULT_LIMIT : limit, MAX_LIMIT);
+        int cap = resolveCap(lessonId != null, limit);
         try {
             if (keyword != null && !keyword.isBlank()) {
                 // Keyword search: scope to lesson/course first, then filter by keyword in-memory.
@@ -76,7 +79,7 @@ public class StructuredCurriculumQueryService {
                     return new StructuredResult(matched.stream().map(this::formatVocab).toList(),
                             matched.size());
                 } else if (courseId != null) {
-                    var page = vocabularyRepository.findByCourseId(courseId, PageRequest.of(0, MAX_LIMIT));
+                    var page = vocabularyRepository.findByCourseId(courseId, PageRequest.of(0, COURSE_MAX_LIMIT));
                     List<Vocabulary> matched = page.getContent().stream()
                             .filter(v -> matchesVocabKeyword(v, kw))
                             .limit(cap).toList();
@@ -128,7 +131,7 @@ public class StructuredCurriculumQueryService {
     @Transactional(readOnly = true)
     public StructuredResult queryGrammar(UUID courseId, UUID lessonId,
                                          String keyword, int limit) {
-        int cap = Math.min(limit <= 0 ? DEFAULT_LIMIT : limit, MAX_LIMIT);
+        int cap = resolveCap(lessonId != null, limit);
         try {
             if (keyword != null && !keyword.isBlank()) {
                 String kw = keyword.toLowerCase();
@@ -142,7 +145,7 @@ public class StructuredCurriculumQueryService {
                     return new StructuredResult(matched.stream().map(this::formatGrammar).toList(),
                             matched.size());
                 } else if (courseId != null) {
-                    var page = grammarPointRepository.findByCourseId(courseId, PageRequest.of(0, MAX_LIMIT));
+                    var page = grammarPointRepository.findByCourseId(courseId, PageRequest.of(0, COURSE_MAX_LIMIT));
                     List<GrammarPoint> matched = page.getContent().stream()
                             .filter(g -> matchesGrammarKeyword(g, kw))
                             .limit(cap).toList();
@@ -178,6 +181,17 @@ public class StructuredCurriculumQueryService {
             log.error("queryGrammar failed: {}", e.getMessage(), e);
             return new StructuredResult(List.of(), 0);
         }
+    }
+
+    /**
+     * Lesson scope → return all (capped only by LESSON_SAFETY_CAP to guard against unexpected data).
+     * Course scope → cap by LLM-provided limit clamped to [1, COURSE_MAX_LIMIT], default COURSE_DEFAULT_LIMIT.
+     */
+    private int resolveCap(boolean lessonScoped, int limit) {
+        if (lessonScoped) {
+            return limit > 0 ? Math.min(limit, LESSON_SAFETY_CAP) : LESSON_SAFETY_CAP;
+        }
+        return limit > 0 ? Math.min(limit, COURSE_MAX_LIMIT) : COURSE_DEFAULT_LIMIT;
     }
 
     // ── Formatters ──────────────────────────────────────────────────────────

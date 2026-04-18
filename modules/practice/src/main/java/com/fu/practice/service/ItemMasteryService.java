@@ -1,11 +1,14 @@
 package com.fu.practice.service;
 
+import com.fu.course.repository.GrammarPointRepository;
+import com.fu.course.repository.VocabularyRepository;
 import com.fu.practice.entity.ItemMastery;
 import com.fu.practice.entity.PracticeSessionType;
 import com.fu.practice.entity.QuestionDimension;
 import com.fu.practice.repository.ItemMasteryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +32,11 @@ import static com.fu.practice.entity.QuestionDimension.*;
 public class ItemMasteryService {
 
     private final ItemMasteryRepository masteryRepository;
+    private final VocabularyRepository vocabularyRepository;
+    private final GrammarPointRepository grammarPointRepository;
+
+    @Value("${practice.mastery.strict-type:true}")
+    private boolean strictTypeCheck;
 
     // ── Upsert after answer ────────────────────────────────────────────────
 
@@ -36,11 +44,18 @@ public class ItemMasteryService {
      * Cập nhật hoặc tạo mới ItemMastery sau khi học viên trả lời 1 câu hỏi.
      * Gọi từ PracticeSessionService.persistAnswerResult() trong write transaction.
      *
-     * @return MasteryUpdateResult chứa levelBefore/levelAfter để set vào AnswerFeedbackResponse
+     * @return MasteryUpdateResult chứa levelBefore/levelAfter để set vào AnswerFeedbackResponse;
+     *         null khi strict check phát hiện entityType không khớp bảng nguồn (skip ghi mastery).
      */
     @Transactional
     public MasteryUpdateResult upsert(UUID userId, UUID entityId,
                                       String entityType, boolean isCorrect) {
+        if (strictTypeCheck && !entityTypeMatchesSource(entityId, entityType)) {
+            log.error("Reject mastery upsert: user={} entity={} declaredType={} does not match source table",
+                    userId, entityId, entityType);
+            return null;
+        }
+
         ItemMastery mastery = masteryRepository
                 .findByUserIdAndEntityIdAndEntityType(userId, entityId, entityType)
                 .orElseGet(() -> ItemMastery.builder()
@@ -58,6 +73,20 @@ public class ItemMasteryService {
 
         return new MasteryUpdateResult(entityId, entityType,
                 levelBefore, mastery.getMasteryLevel());
+    }
+
+    /**
+     * Verify that the declared entityType matches the actual source table the UUID
+     * lives in. Guards against LLM type hallucinations that would create phantom
+     * cross-type mastery rows and blow up buildMasteryMap.
+     */
+    private boolean entityTypeMatchesSource(UUID entityId, String entityType) {
+        if (entityId == null || entityType == null) return false;
+        return switch (entityType) {
+            case "VOCABULARY" -> vocabularyRepository.existsById(entityId);
+            case "GRAMMAR"    -> grammarPointRepository.existsById(entityId);
+            default           -> false;
+        };
     }
 
     // ── Update dimension after session ────────────────────────────────────
@@ -152,7 +181,15 @@ public class ItemMasteryService {
         if (entityIds == null || entityIds.isEmpty()) return Map.of();
         return masteryRepository.findByUserIdAndEntityIdIn(userId, entityIds)
                 .stream()
-                .collect(Collectors.toMap(ItemMastery::getEntityId, m -> m));
+                .collect(Collectors.toMap(
+                        ItemMastery::getEntityId,
+                        m -> m,
+                        (a, b) -> {
+                            log.warn("Duplicate ItemMastery for user={} entity={} types=[{},{}] — keeping first; dedupe migration pending",
+                                    a.getUserId(), a.getEntityId(),
+                                    a.getEntityType(), b.getEntityType());
+                            return a;
+                        }));
     }
 
     /**
