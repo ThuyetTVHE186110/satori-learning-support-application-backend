@@ -122,10 +122,10 @@ public class EmbeddingService {
 
             // Build WHERE clause động theo filter
             StringBuilder where = new StringBuilder(
-                    "WHERE 1 - (embedding <=> ?::vector) > ?");
+                    "WHERE 1 - (ce.embedding <=> ?::vector) > ?");
             List<Object> params = new ArrayList<>();
-            params.add(vectorStr);   // ?#1 → SELECT 1 - (embedding <=> ?::vector)
-            params.add(vectorStr);   // ?#2 → WHERE  (embedding <=> ?::vector)
+            params.add(vectorStr);   // ?#1 → SELECT 1 - (ce.embedding <=> ?::vector)
+            params.add(vectorStr);   // ?#2 → WHERE  (ce.embedding <=> ?::vector)
             params.add(filter.getSimilarityThreshold()); // ?#3 → WHERE > ?
 
             // Filter theo lesson_id / course_id.
@@ -133,10 +133,10 @@ public class EmbeddingService {
             // course embeddings that happened to lack a lesson_id, including content from other
             // lessons, which poisoned lesson-scoped retrieval results.
             if (filter.getLessonId() != null) {
-                where.append(" AND metadata->>'lesson_id' = ?");
+                where.append(" AND ce.metadata->>'lesson_id' = ?");
                 params.add(filter.getLessonId().toString());
             } else if (filter.getCourseId() != null) {
-                where.append(" AND metadata->>'course_id' = ?");
+                where.append(" AND ce.metadata->>'course_id' = ?");
                 params.add(filter.getCourseId().toString());
             }
 
@@ -147,26 +147,36 @@ public class EmbeddingService {
                 String placeholders = filter.getContentTypes().stream()
                         .map(t -> "?")
                         .collect(Collectors.joining(", "));
-                where.append(" AND content_type IN (").append(placeholders).append(")");
+                where.append(" AND ce.content_type IN (").append(placeholders).append(")");
                 params.addAll(filter.getContentTypes());
             }
 
             // Filter theo jlpt_level — hỗ trợ cả 2 key (legacy metadata dùng camelCase)
             if (filter.getJlptLevel() != null && !filter.getJlptLevel().isBlank()) {
-                where.append(" AND (metadata->>'jlpt_level' = ? OR metadata->>'jlptLevel' = ?)");
+                where.append(" AND (ce.metadata->>'jlpt_level' = ? OR ce.metadata->>'jlptLevel' = ?)");
                 params.add(filter.getJlptLevel());
                 params.add(filter.getJlptLevel());
             }
+
+            // Lesson publish gate: embeddings that reference a lesson are only returned when that
+            // lesson is PUBLISHED and not soft-deleted. This is the RAG-side mirror of the reject/
+            // rollback flow which soft-deletes lessons but preserves embeddings — the deleted
+            // lesson's embeddings remain in the table but are hidden from learner/teacher queries.
+            // Embeddings without lesson_id (course-level content) bypass this gate.
+            where.append(" AND (ce.metadata->>'lesson_id' IS NULL"
+                    + " OR (l.deleted_at IS NULL AND l.status = 'PUBLISHED'))");
 
             // ORDER BY và LIMIT
             params.add(vectorStr);
             params.add(filter.getTopK());
 
-            String sql = "SELECT content_id, content_type, text_content, metadata, "
-                    + "1 - (embedding <=> ?::vector) AS similarity "
-                    + "FROM progress.content_embeddings "
+            String sql = "SELECT ce.content_id, ce.content_type, ce.text_content, ce.metadata, "
+                    + "1 - (ce.embedding <=> ?::vector) AS similarity "
+                    + "FROM progress.content_embeddings ce "
+                    + "LEFT JOIN learning_content.lessons l "
+                    + "  ON (ce.metadata->>'lesson_id')::uuid = l.id "
                     + where
-                    + " ORDER BY embedding <=> ?::vector LIMIT ?";
+                    + " ORDER BY ce.embedding <=> ?::vector LIMIT ?";
 
             List<RagContext.SimilarItem> items = jdbcTemplate.query(
                     sql,
@@ -233,14 +243,11 @@ public class EmbeddingService {
         try {
             ContentCount result = queryCount(courseId, lessonId);
 
-            // Fallback: if lessonId-scoped count returns 0 for both types, some embeddings
-            // may have been stored without lesson_id (common for GRAMMAR/VOCABULARY chunks
-            // that were processed before the lesson-id pipeline fix). In that case, fall
-            // back to course-level count so the user still gets a meaningful answer.
-            if (lessonId != null && result.vocabularyCount() == 0 && result.grammarCount() == 0) {
-                log.debug("countContent: lesson-scoped count returned 0 — falling back to course scope");
-                result = queryCount(courseId, null);
-            }
+            // Lesson-scoped count of 0 no longer auto-falls back to course scope.
+            // Reason: the filter now gates on lesson.status=PUBLISHED, so a DRAFT lesson
+            // correctly returns 0 and the fallback would leak the whole course count to a
+            // learner who asked about that specific lesson. The legacy fallback was meant
+            // for pre-lesson-id embeddings; we accept losing it in exchange for not leaking.
 
             log.debug("countContent: vocab={}, grammar={} (lessonId={}, courseId={})",
                     result.vocabularyCount(), result.grammarCount(), lessonId, courseId);
@@ -284,21 +291,27 @@ public class EmbeddingService {
 
     private ContentCount queryCount(UUID courseId, UUID lessonId) {
         StringBuilder where = new StringBuilder(
-                "WHERE content_type IN ('VOCABULARY', 'GRAMMAR')");
+                "WHERE ce.content_type IN ('VOCABULARY', 'GRAMMAR')");
         List<Object> params = new ArrayList<>();
 
         if (lessonId != null) {
-            where.append(" AND metadata->>'lesson_id' = ?");
+            where.append(" AND ce.metadata->>'lesson_id' = ?");
             params.add(lessonId.toString());
         } else if (courseId != null) {
-            where.append(" AND metadata->>'course_id' = ?");
+            where.append(" AND ce.metadata->>'course_id' = ?");
             params.add(courseId.toString());
         }
 
-        String sql = "SELECT content_type, COUNT(*) AS cnt "
-                + "FROM progress.content_embeddings "
+        // Lesson publish gate — mirrors retrieveContext(). See that method for rationale.
+        where.append(" AND (ce.metadata->>'lesson_id' IS NULL"
+                + " OR (l.deleted_at IS NULL AND l.status = 'PUBLISHED'))");
+
+        String sql = "SELECT ce.content_type, COUNT(*) AS cnt "
+                + "FROM progress.content_embeddings ce "
+                + "LEFT JOIN learning_content.lessons l "
+                + "  ON (ce.metadata->>'lesson_id')::uuid = l.id "
                 + where
-                + " GROUP BY content_type";
+                + " GROUP BY ce.content_type";
 
         int vocab = 0, grammar = 0;
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, params.toArray());
@@ -472,30 +485,36 @@ public class EmbeddingService {
         try {
             String escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
             String pattern = "%" + escaped + "%";
-            StringBuilder where = new StringBuilder("WHERE text_content ILIKE ?");
+            StringBuilder where = new StringBuilder("WHERE ce.text_content ILIKE ?");
             List<Object> params = new ArrayList<>();
-            params.add(keyword);  // ?#1 — word_similarity(?, text_content) in SELECT
+            params.add(keyword);  // ?#1 — word_similarity(?, ce.text_content) in SELECT
             params.add(pattern);  // ?#2 — ILIKE ?
 
             if (filter.getLessonId() != null) {
-                where.append(" AND metadata->>'lesson_id' = ?");
+                where.append(" AND ce.metadata->>'lesson_id' = ?");
                 params.add(filter.getLessonId().toString());
             } else if (filter.getCourseId() != null) {
-                where.append(" AND metadata->>'course_id' = ?");
+                where.append(" AND ce.metadata->>'course_id' = ?");
                 params.add(filter.getCourseId().toString());
             }
 
             if (filter.getContentTypes() != null && !filter.getContentTypes().isEmpty()) {
                 String placeholders = filter.getContentTypes().stream()
                         .map(t -> "?").collect(Collectors.joining(", "));
-                where.append(" AND content_type IN (").append(placeholders).append(")");
+                where.append(" AND ce.content_type IN (").append(placeholders).append(")");
                 params.addAll(filter.getContentTypes());
             }
 
+            // Lesson publish gate — mirrors retrieveContext(). See that method for rationale.
+            where.append(" AND (ce.metadata->>'lesson_id' IS NULL"
+                    + " OR (l.deleted_at IS NULL AND l.status = 'PUBLISHED'))");
+
             params.add(filter.getTopK());  // LIMIT
 
-            String sql = "SELECT content_id, word_similarity(?, text_content) AS sparse_score "
-                    + "FROM progress.content_embeddings "
+            String sql = "SELECT ce.content_id, word_similarity(?, ce.text_content) AS sparse_score "
+                    + "FROM progress.content_embeddings ce "
+                    + "LEFT JOIN learning_content.lessons l "
+                    + "  ON (ce.metadata->>'lesson_id')::uuid = l.id "
                     + where
                     + " ORDER BY sparse_score DESC LIMIT ?";
 
@@ -570,27 +589,33 @@ public class EmbeddingService {
             List<Object> params = new ArrayList<>();
 
             if (filter.getLessonId() != null) {
-                where.append(" AND metadata->>'lesson_id' = ?");
+                where.append(" AND ce.metadata->>'lesson_id' = ?");
                 params.add(filter.getLessonId().toString());
             } else {
-                where.append(" AND metadata->>'course_id' = ?");
+                where.append(" AND ce.metadata->>'course_id' = ?");
                 params.add(filter.getCourseId().toString());
             }
 
             if (filter.getContentTypes() != null && !filter.getContentTypes().isEmpty()) {
                 String placeholders = filter.getContentTypes().stream()
                         .map(t -> "?").collect(Collectors.joining(", "));
-                where.append(" AND content_type IN (").append(placeholders).append(")");
+                where.append(" AND ce.content_type IN (").append(placeholders).append(")");
                 params.addAll(filter.getContentTypes());
             }
+
+            // Lesson publish gate — mirrors retrieveContext(). See that method for rationale.
+            where.append(" AND (ce.metadata->>'lesson_id' IS NULL"
+                    + " OR (l.deleted_at IS NULL AND l.status = 'PUBLISHED'))");
 
             // Order by curriculum sequence when available, else insertion order (id)
             params.add(filter.getTopK());
 
-            String sql = "SELECT content_id, content_type, text_content, metadata, 1.0 AS similarity "
-                    + "FROM progress.content_embeddings "
+            String sql = "SELECT ce.content_id, ce.content_type, ce.text_content, ce.metadata, 1.0 AS similarity "
+                    + "FROM progress.content_embeddings ce "
+                    + "LEFT JOIN learning_content.lessons l "
+                    + "  ON (ce.metadata->>'lesson_id')::uuid = l.id "
                     + where
-                    + " ORDER BY (CASE WHEN metadata->>'order_index' ~ '^[0-9]+$' THEN (metadata->>'order_index')::int ELSE 2147483647 END) ASC, id "
+                    + " ORDER BY (CASE WHEN ce.metadata->>'order_index' ~ '^[0-9]+$' THEN (ce.metadata->>'order_index')::int ELSE 2147483647 END) ASC, ce.id "
                     + "LIMIT ?";
 
             List<RagContext.SimilarItem> items = jdbcTemplate.query(
@@ -960,35 +985,6 @@ public class EmbeddingService {
         } catch (Exception e) {
             log.warn("Failed to delete embedding for {} {}: {}", contentType, entityId, e.getMessage());
         }
-    }
-
-    /**
-     * Purge all embeddings created by a specific import.
-     * Used during rollback to clean up RAG context from a reverted import.
-     *
-     * @param importId the import whose embeddings should be deleted
-     * @return number of embeddings deleted
-     */
-    /**
-     * Purge all embeddings created by a specific import.
-     * Used during reject/rollback to clean up RAG context.
-     *
-     * IMPORTANT: This method intentionally propagates exceptions so that the
-     * caller (reject/rollback) can fail atomically. Swallowing exceptions here
-     * would leave orphaned embeddings that the chatbot continues to serve from
-     * a rejected import — a data consistency violation.
-     *
-     * @param importId the import whose embeddings should be deleted
-     * @return number of embeddings deleted
-     * @throws org.springframework.dao.DataAccessException if the delete fails
-     */
-    public int purgeEmbeddingsByImportId(UUID importId) {
-        int deleted = jdbcTemplate.update(
-                "DELETE FROM progress.content_embeddings WHERE import_id = ?",
-                importId
-        );
-        log.info("Purged {} embeddings for rolled-back import {}", deleted, importId);
-        return deleted;
     }
 
     /**

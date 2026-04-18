@@ -55,7 +55,9 @@ public class SessionEvaluatorAI {
             RULES:
             - Be honest. If error rate > 40%, do NOT say "doing well" or use vague praise.
             - Every feedback field MUST cite specific data (error count, word, grammar point).
-            - accuracyFeedback MUST name the dominant error type.
+            - accuracyFeedback MUST name the dominant error type AND quote at least one concrete
+              error using the format: "bạn đã viết '<WRONG>' thay vì '<CORRECT>'". Never swap the
+              two sides — WRONG is what the learner said, CORRECT is the target form.
             - complexityFeedback MUST reference the JLPT distribution numbers.
             - nextSteps MUST be actionable: name specific grammar points, vocabulary sets, or drill types.
             """;
@@ -138,10 +140,14 @@ public class SessionEvaluatorAI {
                 sb.append(type.name()).append(": ").append(count).append(", "));
         sb.append("\n");
         if (!errorBreakdown.topExamples().isEmpty()) {
-            sb.append("- Top errors:\n");
+            sb.append("- Top errors (format: WRONG → CORRECT). The left side is what the learner said incorrectly; the right side is the correct form:\n");
             for (var ex : errorBreakdown.topExamples()) {
-                sb.append("  - ").append(ex.original()).append(" → ").append(ex.corrected())
-                  .append(" [").append(ex.errorType().name()).append("]\n");
+                sb.append("  - WRONG=\"").append(ex.original()).append("\" CORRECT=\"").append(ex.corrected()).append("\"")
+                  .append(" type=").append(ex.errorType().name());
+                if (ex.explanation() != null && !ex.explanation().isBlank()) {
+                    sb.append(" explanation=\"").append(ex.explanation()).append("\"");
+                }
+                sb.append("\n");
             }
         }
 

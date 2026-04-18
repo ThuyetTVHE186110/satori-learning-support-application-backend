@@ -496,10 +496,9 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
         }
 
         persistenceService.softDeleteLessonsByImportId(importId, managerId);
-        embeddingService.purgeEmbeddingsByImportId(importId);
         importEntity.markCancelled();
         importRepository.save(importEntity);
-        log.info("Import {} rejected and marked CANCELLED; lessons soft-deleted, embeddings purged", importId);
+        log.info("Import {} rejected and marked CANCELLED; lessons soft-deleted, embeddings preserved (gated by lesson.status=PUBLISHED at retrieval)", importId);
 
         CurriculumImportResponse response = importMapper.toResponse(importEntity);
         enrichWithCourseName(response, importEntity.getCourseId());
@@ -518,16 +517,11 @@ public class CurriculumImportServiceImpl implements CurriculumImportService {
                             + importEntity.getStatus());
         }
 
-        // 1. Soft-delete lessons + clean up join tables
         persistenceService.softDeleteLessonsByImportId(importId, managerId);
 
-        // 2. Purge embeddings created by this import
-        embeddingService.purgeEmbeddingsByImportId(importId);
-
-        // 3. Mark as rolled back
         importEntity.markRolledBack();
         importRepository.save(importEntity);
-        log.info("Import {} rolled back: lessons soft-deleted, embeddings purged", importId);
+        log.info("Import {} rolled back: lessons soft-deleted, embeddings preserved (gated by lesson.status=PUBLISHED at retrieval)", importId);
 
         CurriculumImportResponse response = importMapper.toResponse(importEntity);
         enrichWithCourseName(response, importEntity.getCourseId());

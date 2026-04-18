@@ -545,11 +545,13 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 ? pronunciationSummary.getAverageOverall()
                 : BigDecimal.ZERO;
 
-        // 4. TASK COMPLETION — binary per mission for scoring (progress % kept for real-time UX only)
+        // 4. TASK COMPLETION — weighted by progressPct so partial progress (e.g. 80%) counts
         long completedMissionCount = sessionMissions.stream()
                 .filter(m -> m.getStatus() == SessionMission.MissionStatus.COMPLETED).count();
         BigDecimal taskCompletionScore = sessionMissions.isEmpty() ? null :
-                BigDecimal.valueOf(completedMissionCount * 100.0 / sessionMissions.size())
+                BigDecimal.valueOf(sessionMissions.stream()
+                                .mapToInt(m -> m.getProgressPct() != null ? m.getProgressPct() : 0)
+                                .average().orElse(0.0))
                         .setScale(2, RoundingMode.HALF_UP);
 
         // 5. COMPLEXITY — from vocabulary data (NO LLM)
@@ -597,6 +599,13 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             feedbackNode.put("version", 2);
             feedbackNode.set("qualitativeSummary", objectMapper.valueToTree(qualitativeSummary));
             feedbackNode.set("errorBreakdown", objectMapper.valueToTree(errorBreakdown.errorCountsAsStringMap()));
+            feedbackNode.set("topCorrections", objectMapper.valueToTree(errorBreakdown.topExamples().stream()
+                    .map(ex -> Map.of(
+                            "original", ex.original() != null ? ex.original() : "",
+                            "corrected", ex.corrected() != null ? ex.corrected() : "",
+                            "explanation", ex.explanation() != null ? ex.explanation() : "",
+                            "errorType", ex.errorType().name()))
+                    .collect(Collectors.toList())));
             if (pronunciationSummary != null) {
                 feedbackNode.set("pronunciationSummary", objectMapper.valueToTree(pronunciationSummary));
             }
@@ -719,6 +728,15 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             log.error("Error retrieving level-up info for session summary", e);
         }
         // Build new v2 dimension objects
+        List<SessionEvaluationResponse.CorrectionExample> topCorrections = errorBreakdown.topExamples().stream()
+                .map(ex -> SessionEvaluationResponse.CorrectionExample.builder()
+                        .original(ex.original())
+                        .corrected(ex.corrected())
+                        .explanation(ex.explanation())
+                        .errorType(ex.errorType().name())
+                        .build())
+                .collect(Collectors.toList());
+
         SessionEvaluationResponse.AccuracyDimension accuracyDimension =
                 SessionEvaluationResponse.AccuracyDimension.builder()
                         .score(errorBreakdown.accuracyScore())
@@ -726,6 +744,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                         .userMessageCount(errorBreakdown.userMessageCount())
                         .errorRate(errorBreakdown.errorRate())
                         .errorBreakdown(errorBreakdown.errorCountsAsStringMap())
+                        .topCorrections(topCorrections)
                         .feedback(qualitativeSummary.getAccuracyFeedback())
                         .build();
 
@@ -902,6 +921,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         SessionEvaluationResponse.LanguageEvaluationDetail languageEval = null;
         Map<String, Integer> errorBreakdownMap = null;
         Map<String, BigDecimal> jlptDistributionMap = null;
+        List<SessionEvaluationResponse.CorrectionExample> topCorrectionsList = null;
 
         String feedbackJson = session.getFeedback();
         if (feedbackJson != null && !feedbackJson.equals("{}")) {
@@ -924,6 +944,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                             feedbackNode.get("jlptDistribution"),
                             new com.fasterxml.jackson.core.type.TypeReference<Map<String, BigDecimal>>() {});
                 }
+                if (feedbackNode.has("topCorrections")) {
+                    topCorrectionsList = objectMapper.convertValue(
+                            feedbackNode.get("topCorrections"),
+                            new com.fasterxml.jackson.core.type.TypeReference<List<SessionEvaluationResponse.CorrectionExample>>() {});
+                }
                 // Legacy v1 fallback
                 if (feedbackNode.has("languageEvaluation")) {
                     languageEval = objectMapper.treeToValue(
@@ -945,6 +970,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             accuracyDimension = SessionEvaluationResponse.AccuracyDimension.builder()
                     .score(session.getAccuracyScore())
                     .errorBreakdown(errorBreakdownMap)
+                    .topCorrections(topCorrectionsList)
                     .feedback(qualitativeSummary != null ? qualitativeSummary.getAccuracyFeedback() : null)
                     .build();
         }
