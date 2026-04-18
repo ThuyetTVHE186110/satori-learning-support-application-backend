@@ -42,8 +42,8 @@ public class ExcelClassImportUtil {
 
     // Date formatters - support both Vietnamese (DD/MM/YYYY) and ISO (yyyy-MM-dd) formats
     private static final DateTimeFormatter[] DATE_FORMATTERS = {
-        DateTimeFormatter.ofPattern("dd/MM/yyyy"),  // Vietnamese format (25/12/2003)
-        DateTimeFormatter.ofPattern("yyyy-MM-dd")   // ISO format
+        DateTimeFormatter.ofPattern("[d][dd]/[M][MM]/yyyy"),  // Vietnamese format (25/12/2003)
+        DateTimeFormatter.ofPattern("yyyy-MM[M]-dd[d]")   // ISO format
     };
 
     /**
