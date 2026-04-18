@@ -35,8 +35,8 @@ import java.util.UUID;
     name = "item_mastery",
     schema = "practice",
     uniqueConstraints = @UniqueConstraint(
-        name = "uq_item_mastery",
-        columnNames = {"user_id", "entity_id", "entity_type"}
+        name = "uq_item_mastery_user_entity",
+        columnNames = {"user_id", "entity_id"}
     ),
     indexes = {
         @Index(name = "idx_item_mastery_user",        columnList = "user_id"),

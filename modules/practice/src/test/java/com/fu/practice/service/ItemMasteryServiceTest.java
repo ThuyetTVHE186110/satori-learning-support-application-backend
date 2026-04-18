@@ -1,5 +1,7 @@
 package com.fu.practice.service;
 
+import com.fu.course.repository.GrammarPointRepository;
+import com.fu.course.repository.VocabularyRepository;
 import com.fu.practice.entity.ItemMastery;
 import com.fu.practice.entity.PracticeSessionType;
 import com.fu.practice.entity.QuestionDimension;
@@ -35,6 +37,8 @@ import static org.mockito.Mockito.*;
 class ItemMasteryServiceTest {
 
     @Mock private ItemMasteryRepository masteryRepository;
+    @Mock private VocabularyRepository vocabularyRepository;
+    @Mock private GrammarPointRepository grammarPointRepository;
     @InjectMocks private ItemMasteryService itemMasteryService;
 
     @Captor private ArgumentCaptor<ItemMastery> masteryCaptor;
@@ -438,6 +442,58 @@ class ItemMasteryServiceTest {
 
             // Assert
             assertThat(result).isCloseTo(100.0, within(0.001));
+        }
+    }
+
+    // ── Regression: duplicate entity_id + strict type ─────────────────────
+
+    @Nested
+    @DisplayName("Duplicate entity_id / strict type checks (Model A)")
+    class ModelARegression {
+
+        @Test
+        @DisplayName("buildMasteryMap — 2 rows cùng entity_id khác type → merge, không throw")
+        void buildMasteryMapDedupesDuplicateEntityIds() {
+            UUID dupId = UUID.fromString("8e0ac522-e473-4ade-8fb1-c2a5d446cb22");
+            ItemMastery vocabRow   = buildMastery(dupId, "VOCABULARY", 2);
+            ItemMastery grammarRow = buildMastery(dupId, "GRAMMAR", 1);
+            given(masteryRepository.findByUserIdAndEntityIdIn(eq(USER_ID), any()))
+                    .willReturn(List.of(vocabRow, grammarRow));
+
+            Map<UUID, ItemMastery> map = itemMasteryService.buildMasteryMap(USER_ID, List.of(dupId));
+
+            assertThat(map).hasSize(1).containsKey(dupId);
+        }
+
+        @Test
+        @DisplayName("upsert — strictType ON, type không khớp bảng nguồn → trả null, không save")
+        void upsertRejectsWhenTypeDoesNotMatchSource() {
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    itemMasteryService, "strictTypeCheck", true);
+            given(vocabularyRepository.existsById(ENTITY_ID)).willReturn(false);
+
+            ItemMasteryService.MasteryUpdateResult result =
+                    itemMasteryService.upsert(USER_ID, ENTITY_ID, "VOCABULARY", true);
+
+            assertThat(result).isNull();
+            verify(masteryRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("upsert — strictType ON, type khớp bảng nguồn → save bình thường")
+        void upsertProceedsWhenTypeMatchesSource() {
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    itemMasteryService, "strictTypeCheck", true);
+            given(vocabularyRepository.existsById(ENTITY_ID)).willReturn(true);
+            given(masteryRepository.findByUserIdAndEntityIdAndEntityType(USER_ID, ENTITY_ID, "VOCABULARY"))
+                    .willReturn(Optional.empty());
+            given(masteryRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+
+            ItemMasteryService.MasteryUpdateResult result =
+                    itemMasteryService.upsert(USER_ID, ENTITY_ID, "VOCABULARY", true);
+
+            assertThat(result).isNotNull();
+            verify(masteryRepository).save(any());
         }
     }
 
