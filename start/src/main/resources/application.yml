@@ -386,6 +386,23 @@ conversation:
         # Enable HyDE (Hypothetical Document Embeddings) for LOOKUP/EXPLAIN intents
         # Generates a short hypothetical curriculum entry before embedding → +5-15% cosine similarity
         hyde-enabled: ${CHAT_RAG_HYDE_ENABLED:true}
+    intent-router:
+        # Outermost advisor (order=5) — short-circuits off-topic queries via semantic
+        # similarity against curated exemplars. Replaces the legacy regex-based
+        # DomainScopeAdvisor. When disabled, the router no-ops and every query passes.
+        enabled: ${CHAT_INTENT_ROUTER_ENABLED:true}
+        # Minimum cosine similarity the best off-topic exemplar must hit before the
+        # router will even consider refusing. Below this, the query resembles nothing
+        # in the exemplar set — fail open rather than guess.
+        min-off-topic-score: ${CHAT_INTENT_ROUTER_MIN_OFFTOPIC:0.50}
+        # Required gap between the top off-topic and in-scope scores. Lesson-range
+        # queries ("bài 1 + 2 có gì") sit very close to math exemplars in embedding
+        # space, so a non-trivial margin is needed to tell them apart.
+        margin: ${CHAT_INTENT_ROUTER_MARGIN:0.05}
+        # LRU cache size for repeated queries (0 disables caching).
+        cache-size: ${CHAT_INTENT_ROUTER_CACHE:256}
+        # Classpath resource holding the curated exemplar set.
+        exemplar-resource: ${CHAT_INTENT_ROUTER_EXEMPLARS:intent-exemplars.yml}
 
 # ==================== Pronunciation Assessment ====================
 # Provider priority: Azure > SpeechSuper (auto-selected by CompositePronunciationProvider)

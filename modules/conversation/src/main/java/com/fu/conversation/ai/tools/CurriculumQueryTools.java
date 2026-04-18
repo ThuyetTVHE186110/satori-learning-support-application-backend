@@ -257,6 +257,38 @@ public class CurriculumQueryTools {
     }
 
     /**
+     * Short-circuits the chat with a canned refusal for questions outside the
+     * Japanese-learning domain.
+     *
+     * <p><b>Why forced tool-call instead of prose refusal:</b> GPT-4o-mini only
+     * partially honors "do not answer off-topic" instructions in the system prompt
+     * (it answers the off-topic question and <em>then</em> appends a scope note).
+     * Tool-selection compliance is materially higher — the LLM either calls this
+     * tool or it doesn't, with no in-between state.
+     *
+     * <p>{@code returnDirect = true} makes Spring AI's {@code ToolCallingManager}
+     * return this string directly to the caller, skipping the follow-up LLM call
+     * that would otherwise regenerate the assistant message from the tool output.
+     */
+    @Tool(description =
+            "BẮT BUỘC gọi khi câu hỏi KHÔNG thuộc phạm vi học tiếng Nhật / giáo trình. "
+            + "Các chủ đề cần gọi tool này: toán học (1+1, phép tính), lập trình (code, "
+            + "thuật toán), nấu ăn, chính trị, y tế, tình cảm cá nhân, ngôn ngữ khác "
+            + "(trừ khi so sánh để giải thích tiếng Nhật), hoặc yêu cầu tạo nội dung "
+            + "không liên quan học tập. "
+            + "KHÔNG TỰ TRẢ LỜI các câu hỏi đó — phải gọi tool này thay vì viết câu trả lời.",
+            returnDirect = true)
+    public String refuseOffTopic(
+            @ToolParam(description =
+                    "Chủ đề ngoài phạm vi đã phát hiện, viết ngắn bằng tiếng Việt "
+                    + "(ví dụ: 'toán học', 'lập trình', 'nấu ăn').")
+            String topic) {
+        log.info("refuseOffTopic invoked: topic='{}'", topic);
+        return "Mình chỉ hỗ trợ câu hỏi về tiếng Nhật và nội dung giáo trình. "
+             + "Bạn có câu hỏi nào về bài học không?";
+    }
+
+    /**
      * Returns the learner's practice progress snapshot: current lesson, mastery breakdown,
      * weakest items, strongest items, recent activity.
      *
