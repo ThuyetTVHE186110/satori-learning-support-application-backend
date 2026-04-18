@@ -80,4 +80,22 @@ public interface UserStatsRepository extends JpaRepository<UserStats, UUID> {
      */
     @Query("SELECT us.streakFreezeCount FROM UserStats us WHERE us.userId = :userId")
     Integer getFreezeCount(@Param("userId") UUID userId);
+
+    /**
+     * Atomic UPSERT operation: Insert new UserStats if not exists, otherwise update timestamp.
+     * Uses PostgreSQL INSERT ... ON CONFLICT DO UPDATE to prevent race conditions.
+     * Prevents DataIntegrityViolationException when multiple concurrent requests try to create UserStats for the same user.
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(nativeQuery = true, value = """
+            INSERT INTO gamification.user_stats 
+            (id, user_id, total_exp, current_level, exp_to_next_level, coins, 
+             current_streak, longest_streak, streak_freeze_count, study_date, studied_minutes_today, 
+             created_at, updated_at)
+            VALUES 
+            (:id, :userId, 0, 1, 100, 0, 0, 0, 0, CURRENT_DATE, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id) 
+            DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+            """)
+    void upsertUserStats(@Param("id") UUID id, @Param("userId") UUID userId);
 }
