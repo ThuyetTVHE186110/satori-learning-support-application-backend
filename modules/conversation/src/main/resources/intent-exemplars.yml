@@ -1,0 +1,116 @@
+# Curated exemplars for semantic intent routing.
+#
+# The IntentClassifier embeds every string below once at startup, then for
+# each incoming user query it computes cosine similarity against all exemplars
+# and aggregates the per-category top-1 score. If the best off-topic category
+# beats the best in-scope category by more than the configured margin, the
+# query is short-circuited with a canned refusal.
+#
+# Rules when curating:
+#   • Keep each list tight (15–25 items) — more exemplars = more noise, not more accuracy.
+#   • Include multilingual variants (VI / JA / EN) because users mix freely.
+#   • "in-scope" exemplars are the guard-rails that keep legitimate Japanese-learning
+#     queries from being misclassified (especially lesson-range queries like "bài 1 + 2").
+#   • Do NOT add a catch-all "off_topic_other" — it drifts toward matching anything.
+
+off-topic:
+  math:
+    - "1+1 bằng mấy"
+    - "1+1=?"
+    - "tính 123 + 456"
+    - "3 * 4 bằng bao nhiêu"
+    - "12×5 = ?"
+    - "100 chia 4"
+    - "giải phương trình x^2 + 3x + 2 = 0"
+    - "căn bậc hai của 144"
+    - "tính đạo hàm của x^2"
+    - "what is 2 plus 2"
+    - "solve 5x = 25"
+    - "tính tích phân"
+    - "diện tích hình tròn"
+    - "ma trận nghịch đảo"
+    - "phần trăm của 30 trên 200"
+  coding:
+    - "viết hàm Python tính giai thừa"
+    - "code Python cho tôi xem"
+    - "làm sao để fix lỗi NullPointerException"
+    - "viết class Java"
+    - "giải thích thuật toán quicksort"
+    - "how to write a for loop in JavaScript"
+    - "debug this SQL query"
+    - "viết hàm tính fibonacci"
+    - "React component props là gì"
+    - "sự khác nhau giữa == và === trong JavaScript"
+    - "docker compose lỗi port"
+    - "git rebase vs merge"
+  cooking:
+    - "công thức nấu phở"
+    - "làm bánh mì tại nhà"
+    - "nấu ăn món gì ngon"
+    - "cách làm bún bò Huế"
+    - "recipe for chocolate cake"
+    - "cách pha cà phê phin"
+    - "thực đơn giảm cân"
+  personal:
+    - "bạn tên là gì"
+    - "ai là người tạo ra bạn"
+    - "bạn bao nhiêu tuổi"
+    - "kể chuyện cười cho tôi nghe"
+    - "tư vấn tình yêu"
+    - "dự đoán tương lai cho tôi"
+    - "bạn có người yêu chưa"
+    - "thời tiết hôm nay thế nào"
+    - "tin tức mới nhất là gì"
+    - "chính trị thế giới"
+    - "how tall are you"
+
+in-scope:
+  vocabulary:
+    - "食べる nghĩa là gì"
+    - "từ 勉強 đọc thế nào"
+    - "nghĩa của từ ありがとう"
+    - "cách đọc kanji 学校"
+    - "từ vựng bài 5"
+    - "liệt kê từ vựng bài 1"
+    - "từ đồng nghĩa của 大きい"
+    - "từ trái nghĩa của 好き"
+    - "furigana của 日本語 là gì"
+    - "katakana của word là gì"
+    - "what does tabemasu mean"
+    - "tìm từ có nghĩa 'ăn'"
+    - "bài 1 + 2 có từ vựng gì"
+    - "so sánh từ vựng bài 1 và bài 2"
+    - "kanji 先生 đọc ra sao"
+  grammar:
+    - "ngữ pháp ～ている dùng thế nào"
+    - "so sánh て-form và た-form"
+    - "cách chia động từ nhóm 1"
+    - "giải thích cấu trúc ～なければならない"
+    - "ngữ pháp bài 3"
+    - "sự khác nhau giữa は và が"
+    - "điểm ngữ pháp trong bài 1-3"
+    - "mẫu câu ～たことがある"
+    - "thể bị động trong tiếng Nhật"
+    - "how to use ～ないで"
+    - "ngữ pháp bài 10 - 15"
+    - "N5 grammar list"
+  meta:
+    - "bạn hỗ trợ gì"
+    - "bạn có thông tin gì về giáo trình"
+    - "có bao nhiêu từ vựng trong khóa học này"
+    - "có bao nhiêu bài học"
+    - "tổng số ngữ pháp là bao nhiêu"
+    - "giáo trình này dạy những gì"
+    - "khóa học N5 có mấy bài"
+    - "nội dung bài 1 + 2 là gì"
+    - "nội dung bài 1-2 có gì"
+    - "chào bạn"
+    - "こんにちは"
+    - "hello, can you help me with Japanese"
+  example:
+    - "cho ví dụ với từ 食べる"
+    - "hội thoại trong bài 5"
+    - "đưa ra câu mẫu với ～ている"
+    - "example sentences for tabemasu"
+    - "bài 3 có hội thoại gì"
+    - "tình huống ở nhà hàng bằng tiếng Nhật"
