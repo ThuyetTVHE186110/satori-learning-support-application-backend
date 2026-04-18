@@ -886,8 +886,7 @@ public class AssignmentServiceImpl implements AssignmentService {
             throw new BusinessException("INVALID_TYPE", "Vui lòng sử dụng submitWriting cho bài tập không phải dạng QUIZ.");
         }
         if (assignment.getDueDate().isBefore(LocalDateTime.now())) {
-            submission.setAnswers(request.getAnswers());
-            submission.setSubmittedAt(LocalDateTime.now());
+            submission.setAnswers("[]");
             submissionService.markSubmissionAsOverdueAndSave(submission.getId());
             throw new BusinessException("PAST_DUE", "Bài tập này đã hết hạn nộp.");
         } else {
@@ -1395,11 +1394,6 @@ public class AssignmentServiceImpl implements AssignmentService {
     private void validateStatusTransition(Assignment assignment, AssignmentStatus newStatus, Integer questionCount) {
         AssignmentStatus current = assignment.getStatus();
         if (current == null || current == newStatus) return; // no change
-
-        // CLOSED is terminal — no transitions out
-        if (current == AssignmentStatus.CLOSED) {
-            throw new BusinessException("INVALID_STATUS_TRANSITION", "Bài tập đã đóng (CLOSED). Không thể chuyển sang trạng thái khác.");
-        }
 
         // PUBLISHED → DRAFT: blocked
         if (current == AssignmentStatus.PUBLISHED && newStatus == AssignmentStatus.DRAFT) {

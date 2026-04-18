@@ -3,6 +3,7 @@ package com.fu.achievement.service;
 import com.fu.achievement.dto.response.BadgeResponse;
 import com.fu.achievement.dto.response.StreakNotificationResponse;
 import com.fu.achievement.entity.UserStats;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import java.util.Optional;
@@ -86,4 +87,14 @@ public interface StreakService {
      * @return Current streak count from most recent streak history record, or 0 if no records exist
      */
     int getCurrentStreakFromHistory(UUID userId);
+
+    /**
+     * Check if user has any activity recorded for a specific date.
+     * Safe read-only query that can be called from any transaction context.
+     * 
+     * @param userId User ID
+     * @param date Date to check for activity
+     * @return true if user has at least one activity on the given date, false otherwise
+     */
+    boolean hasActivityOnDate(UUID userId, LocalDate date);
 }
