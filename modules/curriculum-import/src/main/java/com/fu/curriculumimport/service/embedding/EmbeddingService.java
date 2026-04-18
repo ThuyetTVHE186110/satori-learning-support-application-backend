@@ -289,6 +289,28 @@ public class EmbeddingService {
         return null;
     }
 
+    /**
+     * List the published lesson numbers (order_index) in a course.
+     * Used by the chatbot tool layer to produce explicit "Bài X không tồn tại, các bài hiện có: ..."
+     * error messages instead of silently falling back to a different scope.
+     *
+     * Filters to PUBLISHED lessons only — matches what a learner can actually retrieve via RAG.
+     */
+    public List<Integer> listAvailableLessonNumbers(UUID courseId) {
+        if (courseId == null) return List.of();
+        try {
+            return lessonRepository.findPublishedByCourseId(courseId).stream()
+                    .map(com.fu.course.entity.Lesson::getOrderIndex)
+                    .filter(java.util.Objects::nonNull)
+                    .distinct()
+                    .sorted()
+                    .toList();
+        } catch (Exception e) {
+            log.warn("listAvailableLessonNumbers failed: courseId={}: {}", courseId, e.getMessage());
+            return List.of();
+        }
+    }
+
     private ContentCount queryCount(UUID courseId, UUID lessonId) {
         StringBuilder where = new StringBuilder(
                 "WHERE ce.content_type IN ('VOCABULARY', 'GRAMMAR')");

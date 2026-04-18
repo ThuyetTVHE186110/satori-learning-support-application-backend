@@ -129,10 +129,12 @@ public class ExerciseGeneratorAgent {
         Collections.shuffle(shuffledGrammar);
 
         // UUID short map: shortId (8 chars) → fullUUID — dùng để resolve refContentId sau khi parse
+        // Pre-populate from TẤT CẢ entity để post-processing resolve được bất kỳ subset nào.
         Map<String, UUID> uuidShortMap = new LinkedHashMap<>();
+        for (Vocabulary v : shuffledVocab) uuidShortMap.put(shortId(v.getId()), v.getId());
+        for (GrammarPoint g : shuffledGrammar) uuidShortMap.put(shortId(g.getId()), g.getId());
 
-        // Build 9-block prompt một lần, dùng chung cho tất cả batch
-        String contentBlock    = buildContentBlock(shuffledVocab, shuffledGrammar, uuidShortMap);
+        // Shared blocks (không phụ thuộc entity subset)
         String distractorBlock = buildDistractorBlock(allLessonVocab, shuffledVocab,
                                                        allLessonGrammar, shuffledGrammar,
                                                        isExplicitMode, courseId, lessonId);
@@ -141,7 +143,6 @@ public class ExerciseGeneratorAgent {
         String dimensionBlock  = allowRepetition
                 ? buildRotationDimensionBlock(prefs)
                 : buildDimensionBlock(dimension, prefs);
-        String coverageBlock   = buildCoverageBlock(shuffledVocab, shuffledGrammar, isExplicitMode);
         String antiRepeatBlock = buildAntiRepeatBlock(masteryMap,
                                                        allIds(shuffledVocab, shuffledGrammar));
         String repetitionBlock = allowRepetition
@@ -154,14 +155,43 @@ public class ExerciseGeneratorAgent {
         Map<PracticeItemType, Integer> distribution = distributeCount(resolvedCount, resolvedTypes);
         List<PracticeItemType> distinctTypes = resolvedTypes.stream().distinct().collect(Collectors.toList());
 
+        // Chuẩn bị entity list cho partitioning ở explicit mode:
+        // combined = vocab + grammar (theo thứ tự đã shuffle). Từ batch sẽ lấy slice xoay vòng
+        // để KHÔNG có 2 batch nào cùng prompt về cùng subset → tránh duplicate câu hỏi.
+        List<Object> combinedEntities = new ArrayList<>();
+        combinedEntities.addAll(shuffledVocab);
+        combinedEntities.addAll(shuffledGrammar);
+        final boolean partitionEntities = isExplicitMode && !combinedEntities.isEmpty();
+
         List<BatchTask> tasks = new ArrayList<>();
+        int sliceCursor = 0;
         for (PracticeItemType itemType : distinctTypes) {
             int typeCount = distribution.getOrDefault(itemType, 0);
             int cap = maxPerCall(itemType);
             int offset = 0, batchIdx = 0;
             while (offset < typeCount) {
                 int batchSize = Math.min(cap, typeCount - offset);
-                tasks.add(new BatchTask(itemType, batchIdx++, batchSize));
+                List<Vocabulary> bv = shuffledVocab;
+                List<GrammarPoint> bg = shuffledGrammar;
+                if (partitionEntities) {
+                    // MATCHING cần ≥4 entity/item để tạo pairs → nhân 4.
+                    int sliceSize = itemType == PracticeItemType.MATCHING
+                            ? Math.max(4, batchSize * 4)
+                            : Math.max(1, batchSize);
+                    sliceSize = Math.min(sliceSize, combinedEntities.size());
+                    List<Object> slice = new ArrayList<>(sliceSize);
+                    for (int i = 0; i < sliceSize; i++) {
+                        slice.add(combinedEntities.get((sliceCursor + i) % combinedEntities.size()));
+                    }
+                    sliceCursor = (sliceCursor + batchSize) % combinedEntities.size();
+                    bv = new ArrayList<>();
+                    bg = new ArrayList<>();
+                    for (Object e : slice) {
+                        if (e instanceof Vocabulary v) bv.add(v);
+                        else if (e instanceof GrammarPoint g) bg.add(g);
+                    }
+                }
+                tasks.add(new BatchTask(itemType, batchIdx++, batchSize, bv, bg));
                 offset += batchSize;
             }
         }
@@ -169,10 +199,12 @@ public class ExerciseGeneratorAgent {
         // Chạy tất cả batch song song
         List<CompletableFuture<BatchResult>> futures = tasks.stream()
                 .map(task -> CompletableFuture.supplyAsync(() -> {
+                    String batchContent  = buildContentBlock(task.batchVocab(), task.batchGrammar(), uuidShortMap);
+                    String batchCoverage = buildCoverageBlock(task.batchVocab(), task.batchGrammar(), isExplicitMode);
                     List<GeneratedItem> result = generateSingleBatch(
                             task.batchSize(), sessionType, jlptLevel,
-                            contentBlock, distractorBlock, profileBlock,
-                            dimensionBlock, coverageBlock, antiRepeatBlock,
+                            batchContent, distractorBlock, profileBlock,
+                            dimensionBlock, batchCoverage, antiRepeatBlock,
                             repetitionBlock, task.itemType());
                     return new BatchResult(task.itemType(), task.batchIndex(), result);
                 }, taskExecutor))
@@ -226,10 +258,12 @@ public class ExerciseGeneratorAgent {
             int retryBatchSize = Math.min(shortfall, maxPerCall(retryType));
             log.info("Retrying LLM for {} shortfall items (type={})", retryBatchSize, retryType);
             try {
+                String retryContent  = buildContentBlock(shuffledVocab, shuffledGrammar, uuidShortMap);
+                String retryCoverage = buildCoverageBlock(shuffledVocab, shuffledGrammar, isExplicitMode);
                 List<GeneratedItem> retryItems = generateSingleBatch(
                         retryBatchSize, sessionType, jlptLevel,
-                        contentBlock, distractorBlock, profileBlock,
-                        dimensionBlock, coverageBlock, antiRepeatBlock,
+                        retryContent, distractorBlock, profileBlock,
+                        dimensionBlock, retryCoverage, antiRepeatBlock,
                         repetitionBlock, retryType);
                 if (retryItems != null) {
                     applyQualityFilter(retryItems);
@@ -751,12 +785,13 @@ public class ExerciseGeneratorAgent {
                                            List<Vocabulary> vocab,
                                            List<GrammarPoint> grammar,
                                            Map<String, UUID> uuidShortMap) {
+        Set<UUID> vocabIds   = vocab.stream().map(Vocabulary::getId).collect(Collectors.toSet());
+        Set<UUID> grammarIds = grammar.stream().map(GrammarPoint::getId).collect(Collectors.toSet());
+
         for (GeneratedItem item : items) {
             if (item.getRefContentId() != null) {
-                // Thử resolve shortId → fullUUID
                 UUID full = uuidShortMap.get(item.getRefContentId().replace("-", ""));
                 if (full == null) {
-                    // LLM có thể đã trả về dạng partial UUID — tìm match
                     final String refId = item.getRefContentId();
                     full = uuidShortMap.entrySet().stream()
                             .filter(e -> e.getValue().toString().contains(refId)
@@ -766,8 +801,29 @@ public class ExerciseGeneratorAgent {
                 }
                 if (full != null) {
                     item.setRefContentId(full.toString());
+                    // Source-of-truth override: entity_type must match the list the UUID
+                    // actually came from, never trust LLM's refContentType.
+                    String truthType = vocabIds.contains(full) ? "VOCABULARY"
+                                     : grammarIds.contains(full) ? "GRAMMAR"
+                                     : null;
+                    if (truthType == null) {
+                        log.warn("Drop refContentId {}: UUID not in vocab/grammar pool (LLM hallucination)", full);
+                        item.setRefContentId(null);
+                        item.setRefContentType(null);
+                    } else {
+                        String llmType = item.getRefContentType();
+                        if (llmType != null && !truthType.equals(llmType)) {
+                            log.info("Override refContentType: id={} llm={} truth={}", full, llmType, truthType);
+                        }
+                        item.setRefContentType(truthType);
+                    }
+                } else {
+                    // Unresolvable — drop ref so mastery isn't poisoned.
+                    log.warn("Drop refContentId {}: cannot resolve to a lesson entity", item.getRefContentId());
+                    item.setRefContentId(null);
+                    item.setRefContentType(null);
                 }
-                continue; // LLM đã điền, dù có thể sai — fuzzy sẽ overwrite nếu null
+                continue;
             }
 
             // Fuzzy fallback: tìm trong question text
@@ -1282,7 +1338,8 @@ public class ExerciseGeneratorAgent {
                 @JsonProperty("right") String right) {}
     }
 
-    private record BatchTask(PracticeItemType itemType, int batchIndex, int batchSize) {}
+    private record BatchTask(PracticeItemType itemType, int batchIndex, int batchSize,
+                              List<Vocabulary> batchVocab, List<GrammarPoint> batchGrammar) {}
     private record BatchResult(PracticeItemType itemType, int batchIndex,
                                 List<GeneratedItem> items) {}
 

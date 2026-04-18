@@ -526,8 +526,10 @@ public class PracticeSessionService {
             try {
                 ItemMasteryService.MasteryUpdateResult masteryResult = itemMasteryService.upsert(
                         userId, item.getRefContentId(), item.getRefContentType(), result.isCorrect());
-                masteryLevelBefore = masteryResult.levelBefore();
-                masteryLevelAfter = masteryResult.levelAfter();
+                if (masteryResult != null) {
+                    masteryLevelBefore = masteryResult.levelBefore();
+                    masteryLevelAfter = masteryResult.levelAfter();
+                }
 
                 // Fetch Japanese text for display
                 if ("VOCABULARY".equals(item.getRefContentType())) {
@@ -1754,6 +1756,8 @@ public class PracticeSessionService {
                 .hint(item.getHint())
                 .options(options)
                 .correctMapping(correctMapping)
+                .refContentId(item.getRefContentId())
+                .refContentType(item.getRefContentType())
                 .build();
     }
 
