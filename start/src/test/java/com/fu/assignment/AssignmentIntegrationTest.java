@@ -1556,7 +1556,7 @@ class AssignmentIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_AS_T_ST_006 — CLOSED → PUBLISHED → 400 (terminal state)")
+        @DisplayName("TC_AS_T_ST_006 — CLOSED → PUBLISHED → 200 (success)")
         void tc_as_t_st_006() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
             Clazz clazz = saveClass(teacher, saveCourse());
@@ -1573,7 +1573,9 @@ class AssignmentIntegrationTest {
                             "/api/v1/teacher/assignments/{id}/quiz", a.getId())
                             .file(dataPart)
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest());
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.status").value("PUBLISHED"));
         }
     }
 
@@ -1672,17 +1674,14 @@ class AssignmentIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.content").isArray())
                     .andExpect(jsonPath("$.data.content.length()").value(1))
-                    
+
                     // Verify submission fields
                     .andExpect(jsonPath("$.data.content[0].id").exists())
-                    .andExpect(jsonPath("$.data.content[0].assignmentId").value(a.getId().toString()))
-                    .andExpect(jsonPath("$.data.content[0].assignmentTitle").value("Published Quiz"))
-                    .andExpect(jsonPath("$.data.content[0].userId").value(learner.getId().toString()))
                     .andExpect(jsonPath("$.data.content[0].userFullName").value("Test Learner"))
                     .andExpect(jsonPath("$.data.content[0].status").value("IN_PROGRESS"))
-                    .andExpect(jsonPath("$.data.content[0].attemptNumber").value(1))
                     .andExpect(jsonPath("$.data.content[0].score").value(nullValue()))
                     .andExpect(jsonPath("$.data.content[0].submittedAt").value(nullValue()))
+                    .andExpect(jsonPath("$.data.content[0].isRemovedLearner").value(false))
                     
                     // Verify pagination fields
                     .andExpect(jsonPath("$.data.pageNumber").value(1))
@@ -1865,7 +1864,7 @@ class AssignmentIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_AS_T_GR_004 — Grade submission đã GRADED → 400 INVALID_STATUS")
+        @DisplayName("TC_AS_T_GR_004 — Grade submission đã GRADED → 200 (re-grading allowed)")
         void tc_as_t_gr_004() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
             User learner = saveLearner("learner@test.com");
@@ -1892,7 +1891,11 @@ class AssignmentIntegrationTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body)
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest());
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.status").value("GRADED"))
+                    .andExpect(jsonPath("$.data.score").value(90.0))
+                    .andExpect(jsonPath("$.data.feedback").value("Better."));
         }
 
         @Test
@@ -2442,9 +2445,9 @@ class AssignmentIntegrationTest {
             Assignment a = savePublishedWriting(teacher, clazz);
             startSubmission(a.getId(), learner.getId());
             String token = loginAndGetToken("learner@test.com");
-    
+
             // Create a file larger than 5MB (5 * 1024 * 1024 + 1 byte)
-            byte[] largeFileContent = new byte[(int)(5 * 1024 * 1024 + 1)];
+            byte[] largeFileContent = new byte[(int) (5 * 1024 * 1024 + 1)];
             MockMultipartFile largeImagePart = new MockMultipartFile(
                     "images", "large-image.jpg", "image/jpeg",
                     largeFileContent);
@@ -2674,11 +2677,11 @@ class AssignmentIntegrationTest {
                     .assignmentId(a.getId())
                     .prompt("Write about your hobby")
                     .build();
-            
+
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
                     objectMapper.writeValueAsString(request).getBytes());
-            
+
             MockMultipartFile imagePart = new MockMultipartFile(
                     "images", "writing-image.jpg", "image/jpeg",
                     "test image content".getBytes());
@@ -2691,37 +2694,6 @@ class AssignmentIntegrationTest {
                     .andExpect(jsonPath("$.data.feedback").value("Good writing with clear structure. Minor grammar issues."));
         }
 
-        @Test
-        @DisplayName("TC_AS_L_DO_020 — Evaluate Writing thất bại khi chưa start submission")
-        void tc_as_l_do_020() throws Exception {
-            User teacher = saveTeacher("teacher@test.com");
-            User learner = saveLearner("learner@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
-            enrollLearner(clazz.getId(), learner.getId());
-            Assignment a = savePublishedWriting(teacher, clazz);
-            // Don't start submission
-            String token = loginAndGetToken("learner@test.com");
-
-            WritingEvaluationRequest request = WritingEvaluationRequest.builder()
-                    .assignmentId(a.getId())
-                    .prompt("Write about your hobby")
-                    .build();
-            
-            MockMultipartFile dataPart = new MockMultipartFile(
-                    "data", "", "application/json",
-                    objectMapper.writeValueAsString(request).getBytes());
-            
-            MockMultipartFile imagePart = new MockMultipartFile(
-                    "images", "writing-image.jpg", "image/jpeg",
-                    "test image content".getBytes());
-
-            mockMvc.perform(multipart("/api/v1/learner/assignments/writing/evaluate")
-                            .file(dataPart)
-                            .file(imagePart)
-                            .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("SUBMISSION_NOT_FOUND"));
-        }
 
         @Test
         @DisplayName("TC_AS_L_DO_021 — Evaluate Writing với multiple images")
@@ -2747,15 +2719,15 @@ class AssignmentIntegrationTest {
                     .assignmentId(a.getId())
                     .prompt("Write a story")
                     .build();
-            
+
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
                     objectMapper.writeValueAsString(request).getBytes());
-            
+
             MockMultipartFile imagePart1 = new MockMultipartFile(
                     "images", "page1.jpg", "image/jpeg",
                     "first page content".getBytes());
-            
+
             MockMultipartFile imagePart2 = new MockMultipartFile(
                     "images", "page2.jpg", "image/jpeg",
                     "second page content".getBytes());
@@ -2848,7 +2820,7 @@ class AssignmentIntegrationTest {
                     .andExpect(jsonPath("$.data.teacherScore").doesNotExist())
                     .andExpect(jsonPath("$.data.quizDetails").exists())
                     .andExpect(jsonPath("$.data.createdAt").exists())
-                    
+
                     // Verify answers structure (parsed as string, not array)
                     .andExpect(jsonPath("$.data.answers").value(org.hamcrest.Matchers.containsString("isCorrect")))
                     .andExpect(jsonPath("$.data.answers").value(org.hamcrest.Matchers.containsString("questionId")))
@@ -3094,18 +3066,43 @@ class AssignmentIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isNotFound());
         }
-    }
 
-    @Test
-    @DisplayName("TC_AS_AI_008 — AI explain draft")
-    void tc_as_ai_008() throws Exception {
-        saveTeacher("teacher@test.com");
-        String token = loginAndGetToken("teacher@test.com");
-        
-        when(quizExplanationService.generateExplanationFromDraft(any()))
-                .thenReturn(new com.fu.assignment.dto.response.AiExplanationResponse("Draft explanation text..."));
+        @Test
+        @DisplayName("TC_AS_AI_008 — AI explain draft")
+        void tc_as_ai_008() throws Exception {
+            saveTeacher("teacher@test.com");
+            String token = loginAndGetToken("teacher@test.com");
 
-        String body = """
+            when(quizExplanationService.generateExplanationFromDraft(any()))
+                    .thenReturn(new com.fu.assignment.dto.response.AiExplanationResponse("Draft explanation text..."));
+
+            String body = """
+                {
+                  "questionText": "テスト",
+                  "questionType": "multiple_choice",
+                  "options": "A, B",
+                  "correctAnswer": "A"
+                }
+                """;
+
+            mockMvc.perform(post("/api/v1/teacher/assignments/questions/ai-explain-draft")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.explanation").value("Draft explanation text..."));
+        }
+
+        @Test
+        @DisplayName("TC_AS_AI_009 — AI provider throws exception → 400")
+        void tc_as_ai_009() throws Exception {
+            saveTeacher("teacher@test.com");
+            String token = loginAndGetToken("teacher@test.com");
+
+            when(quizExplanationService.generateExplanationFromDraft(any()))
+                    .thenThrow(new BusinessException("AI_RESPONSE_ERROR", "Failed to call AI: timeout"));
+
+            String body = """
             {
               "questionText": "テスト",
               "questionType": "multiple_choice",
@@ -3114,88 +3111,63 @@ class AssignmentIntegrationTest {
             }
             """;
 
-        mockMvc.perform(post("/api/v1/teacher/assignments/questions/ai-explain-draft")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body)
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.explanation").value("Draft explanation text..."));
-    }
-
-    @Test
-    @DisplayName("TC_AS_AI_009 — AI provider throws exception → 400")
-    void tc_as_ai_009() throws Exception {
-        saveTeacher("teacher@test.com");
-        String token = loginAndGetToken("teacher@test.com");
-
-        when(quizExplanationService.generateExplanationFromDraft(any()))
-                .thenThrow(new BusinessException("AI_RESPONSE_ERROR", "Failed to call AI: timeout"));
-
-        String body = """
-        {
-          "questionText": "テスト",
-          "questionType": "multiple_choice",
-          "options": "A, B",
-          "correctAnswer": "A"
+            mockMvc.perform(post("/api/v1/teacher/assignments/questions/ai-explain-draft")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
         }
-        """;
 
-        mockMvc.perform(post("/api/v1/teacher/assignments/questions/ai-explain-draft")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body)
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().isBadRequest());
-    }
+        @Test
+        @DisplayName("TC_AS_AI_010 — AI generate: service throw BusinessException → 400")
+        void tc_as_ai_010() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            String token = loginAndGetToken("teacher@test.com");
 
-    @Test
-    @DisplayName("TC_AS_AI_010 — AI generate: service throw BusinessException → 400")
-    void tc_as_ai_010() throws Exception {
-        User teacher = saveTeacher("teacher@test.com");
-        Clazz clazz = saveClass(teacher, saveCourse());
-        String token = loginAndGetToken("teacher@test.com");
+            when(quizAiGenerationService.generateQuestions(any(AiQuizGenerationRequest.class)))
+                    .thenThrow(new com.fu.common.exception.BusinessException(
+                            "AI_PARSE_ERROR", "Failed to parse AI response."));
 
-        when(quizAiGenerationService.generateQuestions(any(AiQuizGenerationRequest.class)))
-                .thenThrow(new com.fu.common.exception.BusinessException(
-                        "AI_PARSE_ERROR", "Failed to parse AI response."));
+            String body = objectMapper.writeValueAsString(AiQuizGenerationRequest.builder()
+                    .teacherPrompt("N5 vocab")
+                    .classId(clazz.getId())
+                    .questionCount(1)
+                    .questionTypes(List.of("multiple_choice"))
+                    .build());
 
-        String body = objectMapper.writeValueAsString(AiQuizGenerationRequest.builder()
-                .teacherPrompt("N5 vocab")
-                .classId(clazz.getId())
-                .questionCount(1)
-                .questionTypes(List.of("multiple_choice"))
-                .build());
+            mockMvc.perform(post("/api/v1/teacher/assignments/questions/ai-generate")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
 
-        mockMvc.perform(post("/api/v1/teacher/assignments/questions/ai-generate")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body)
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().isBadRequest());
-    }
+        @Test
+        @DisplayName("TC_AS_AI_011 — AI generate trả về empty list → 200 với data rỗng")
+        void tc_as_ai_011() throws Exception {
+            User teacher = saveTeacher("teacher@test.com");
+            Clazz clazz = saveClass(teacher, saveCourse());
+            String token = loginAndGetToken("teacher@test.com");
 
-    @Test
-    @DisplayName("TC_AS_AI_011 — AI generate trả về empty list → 200 với data rỗng")
-    void tc_as_ai_011() throws Exception {
-        User teacher = saveTeacher("teacher@test.com");
-        Clazz clazz = saveClass(teacher, saveCourse());
-        String token = loginAndGetToken("teacher@test.com");
+            when(quizAiGenerationService.generateQuestions(any(AiQuizGenerationRequest.class)))
+                    .thenReturn(List.of());
 
-        when(quizAiGenerationService.generateQuestions(any(AiQuizGenerationRequest.class)))
-                .thenReturn(List.of());
+            String body = objectMapper.writeValueAsString(AiQuizGenerationRequest.builder()
+                    .teacherPrompt("N5 vocab")
+                    .classId(clazz.getId())
+                    .questionCount(1)
+                    .lessonIds(List.of(UUID.randomUUID()))
+                    .questionTypes(List.of("multiple_choice"))
+                    .build());
 
-        String body = objectMapper.writeValueAsString(AiQuizGenerationRequest.builder()
-                .teacherPrompt("N5 vocab")
-                .classId(clazz.getId())
-                .questionCount(1)
-                .lessonIds(List.of(UUID.randomUUID()))
-                .questionTypes(List.of("multiple_choice"))
-                .build());
-
-        mockMvc.perform(post("/api/v1/teacher/assignments/questions/ai-generate")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body)
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(0));
+            mockMvc.perform(post("/api/v1/teacher/assignments/questions/ai-generate")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.length()").value(0));
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════════

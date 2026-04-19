@@ -811,6 +811,8 @@ class SpeakingPracticeIntegrationTest {
             mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", sessionId)
                             .file(new org.springframework.mock.web.MockMultipartFile(
                                     "message", "message", "application/json", messageJson.getBytes()))
+                            .file(new org.springframework.mock.web.MockMultipartFile(
+                                    "audio", "audio.mp3", "audio/mpeg", new byte[100]))
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.messages").exists())
@@ -857,16 +859,13 @@ class SpeakingPracticeIntegrationTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.sessionId").value(session.getId().toString()))
-                    .andExpect(jsonPath("$.data.languageEvaluation").exists())
-                    .andExpect(jsonPath("$.data.languageEvaluation.summary").value("Summary"))
-                    .andExpect(jsonPath("$.data.languageEvaluation.fluencyScore").value(70))
-                    .andExpect(jsonPath("$.data.languageEvaluation.accuracyScore").value(70))
-                    .andExpect(jsonPath("$.data.languageEvaluation.vocabularyScore").value(70))
-                    .andExpect(jsonPath("$.data.languageEvaluation.grammarScore").value(70))
-                    .andExpect(jsonPath("$.data.languageEvaluation.strengths").exists())
-                    .andExpect(jsonPath("$.data.languageEvaluation.strengths").isArray())
-                    .andExpect(jsonPath("$.data.languageEvaluation.improvements").exists())
-                    .andExpect(jsonPath("$.data.languageEvaluation.improvements").isArray());
+                    .andExpect(jsonPath("$.data.accuracy").exists())
+                    .andExpect(jsonPath("$.data.pronunciation").exists())
+                    .andExpect(jsonPath("$.data.taskCompletion").exists())
+                    .andExpect(jsonPath("$.data.complexity").exists())
+                    .andExpect(jsonPath("$.data.qualitativeSummary").exists())
+                    .andExpect(jsonPath("$.data.qualitativeSummary.overallAssessment").value("Good performance"))
+                    .andExpect(jsonPath("$.data.qualitativeSummary.jlptEstimate").value("N5"));
 
             ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
             assertThat(updated.getStatus()).isEqualTo(ConversationSession.SessionStatus.COMPLETED);
@@ -1208,6 +1207,8 @@ class SpeakingPracticeIntegrationTest {
             mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", sessionId)
                             .file(new org.springframework.mock.web.MockMultipartFile(
                                     "message", "message", "application/json", messageJson.getBytes()))
+                            .file(new org.springframework.mock.web.MockMultipartFile(
+                                    "audio", "audio.mp3", "audio/mpeg", new byte[100]))
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.missions.length()").value(1));
@@ -1267,6 +1268,8 @@ class SpeakingPracticeIntegrationTest {
             mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", sessionId)
                             .file(new org.springframework.mock.web.MockMultipartFile(
                                     "message", "message", "application/json", messageJson.getBytes()))
+                            .file(new org.springframework.mock.web.MockMultipartFile(
+                                    "audio", "audio.mp3", "audio/mpeg", new byte[100]))
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk());
 
@@ -1518,7 +1521,7 @@ class SpeakingPracticeIntegrationTest {
         }
 
         @Test
-        @DisplayName("TC_SP_CT_034 — free-talk session limit reached returns 400")
+        @DisplayName("TC_SP_CT_034 — free-talk session limit reached returns 409")
         void tc_sp_ct_034() throws Exception {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
@@ -1533,7 +1536,7 @@ class SpeakingPracticeIntegrationTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body)
                             .header("Authorization", "Bearer " + token))
-                    .andExpect(status().isBadRequest());
+                    .andExpect(status().isConflict());
         }
 
         @Test
@@ -2096,6 +2099,8 @@ class SpeakingPracticeIntegrationTest {
 
              mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{id}/messages", session.getId())
                              .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                             .file(new org.springframework.mock.web.MockMultipartFile(
+                                     "audio", "audio.mp3", "audio/mpeg", new byte[100]))
                              .header("Authorization", "Bearer " + token))
                      .andExpect(status().isOk())
                      .andExpect(jsonPath("$.success").value(true));
@@ -2276,6 +2281,8 @@ class SpeakingPracticeIntegrationTest {
              mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", sessionId)
                              .file(new org.springframework.mock.web.MockMultipartFile(
                                      "message", "message", "application/json", messageJson.getBytes()))
+                             .file(new org.springframework.mock.web.MockMultipartFile(
+                                     "audio", "audio.mp3", "audio/mpeg", new byte[100]))
                              .header("Authorization", "Bearer " + token))
                      .andExpect(status().isOk());
 
@@ -2413,6 +2420,8 @@ class SpeakingPracticeIntegrationTest {
 
              mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{id}/messages", session.getId())
                              .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                             .file(new org.springframework.mock.web.MockMultipartFile(
+                                     "audio", "audio.mp3", "audio/mpeg", new byte[100]))
                              .header("Authorization", "Bearer " + token))
                      .andExpect(status().isOk());
 
@@ -2463,6 +2472,8 @@ class SpeakingPracticeIntegrationTest {
 
             mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", session.getId())
                             .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                            .file(new org.springframework.mock.web.MockMultipartFile(
+                                    "audio", "audio.mp3", "audio/mpeg", new byte[100]))
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.messages[0].japaneseContent", anyOf(
@@ -2500,6 +2511,8 @@ class SpeakingPracticeIntegrationTest {
 
             mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", session.getId())
                             .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                            .file(new org.springframework.mock.web.MockMultipartFile(
+                                    "audio", "audio.mp3", "audio/mpeg", new byte[100]))
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.messages[0].japaneseContent", anyOf(
@@ -2540,6 +2553,8 @@ class SpeakingPracticeIntegrationTest {
 
             mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{sessionId}/messages", session.getId())
                             .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                            .file(new org.springframework.mock.web.MockMultipartFile(
+                                    "audio", "audio.mp3", "audio/mpeg", new byte[100]))
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk());
 
@@ -2630,7 +2645,8 @@ class SpeakingPracticeIntegrationTest {
             mockMvc.perform(post("/api/v1/learner/roleplay/sessions/{sessionId}/complete", session.getId())
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.languageEvaluation.summary", is("Đánh giá không khả dụng cho phiên hội thoại này.")));
+                    .andExpect(jsonPath("$.data.qualitativeSummary.overallAssessment").value("Cannot assess this session"))
+                    .andExpect(jsonPath("$.data.qualitativeSummary.accuracyFeedback").value("Không thể đánh giá phiên hội thoại này"));
 
             // The fallback evaluation is saved successfully, so the session is marked as COMPLETED
             ConversationSession updated = sessionRepository.findById(session.getId()).orElseThrow();
@@ -2837,6 +2853,8 @@ class SpeakingPracticeIntegrationTest {
                     latch.await();
                     return mockMvc.perform(multipart("/api/v1/learner/roleplay/sessions/{id}/messages", session.getId())
                                     .file(new MockMultipartFile("message", "message", "application/json", messageJson.getBytes()))
+                                    .file(new org.springframework.mock.web.MockMultipartFile(
+                                            "audio", "audio.mp3", "audio/mpeg", new byte[100]))
                                     .header("Authorization", "Bearer " + token))
                             .andReturn();
                 }));

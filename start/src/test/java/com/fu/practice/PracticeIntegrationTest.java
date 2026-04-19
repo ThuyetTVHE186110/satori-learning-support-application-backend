@@ -251,7 +251,8 @@ class PracticeIntegrationTest {
         when(exerciseGeneratorAgent.generateItems(
                 any(), any(), any(), anyInt(), any(), any(),
                 anyList(), anyList(), anyList(), anyList(),
-                anyBoolean(), any(), any(), any()))
+                anyBoolean(), any(), any(), anyMap(),
+                anyBoolean(), anyMap()))
                 .thenReturn(items);
     }
 
@@ -781,7 +782,8 @@ class PracticeIntegrationTest {
             when(exerciseGeneratorAgent.generateItems(
                     any(), any(), any(), anyInt(), any(), any(),
                     anyList(), anyList(), anyList(), anyList(),
-                    anyBoolean(), any(), any(), any()))
+                    anyBoolean(), any(), any(), anyMap(),
+                    anyBoolean(), anyMap()))
                     .thenReturn(List.of(item));
 
             String body = objectMapper.writeValueAsString(StartPracticeRequest.builder()
