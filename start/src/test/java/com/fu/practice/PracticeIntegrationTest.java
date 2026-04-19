@@ -36,6 +36,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -820,7 +821,7 @@ class PracticeIntegrationTest {
         @DisplayName("TC_PIF_002 — TRUE_FALSE: exactly 2 options ('Đúng'/'Sai'), isCorrect=null before submit")
         void tc_pif_002_trueFalse_format() throws Exception {
             MvcResult result = startSessionWith("TRUE_FALSE");
-            var firstItem = objectMapper.readTree(result.getResponse().getContentAsString())
+            var firstItem = objectMapper.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8))
                     .path("data").path("items").get(0);
 
             assertThat(firstItem.path("itemType").asText()).isEqualTo("TRUE_FALSE");
@@ -928,7 +929,7 @@ class PracticeIntegrationTest {
                             .content(body))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data.isCorrect").value(true))
+                    .andExpect(jsonPath("$.data.correct").value(true))
                     .andExpect(jsonPath("$.data.score").value(100))
                     .andExpect(jsonPath("$.data.correctAnswerText").isNotEmpty())
                     .andExpect(jsonPath("$.data.sessionCompleted").value(false)); // 1/2 done
@@ -949,7 +950,7 @@ class PracticeIntegrationTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.isCorrect").value(false))
+                    .andExpect(jsonPath("$.data.correct").value(false))
                     .andExpect(jsonPath("$.data.score").value(0))
                     .andExpect(jsonPath("$.data.correctAnswer").isNotEmpty()) // revealed after submit
                     .andExpect(jsonPath("$.data.explanation").isNotEmpty());
@@ -1085,9 +1086,13 @@ class PracticeIntegrationTest {
             UUID itemId = UUID.fromString(objectMapper.readTree(startResult.getResponse().getContentAsString())
                     .path("data").path("items").get(0).path("id").asText());
 
+            // Get correct answer from database (not exposed in API response)
+            PracticeItem item = practiceItemRepository.findById(itemId).orElseThrow();
+            String correctAnswer = item.getCorrectAnswer();
+
             // Submit the correct answer
             String submitBody = objectMapper.writeValueAsString(
-                    SubmitAnswerRequest.builder().userAnswer("0").build());
+                    SubmitAnswerRequest.builder().userAnswer(correctAnswer).build());
             mockMvc.perform(post("/api/v1/learner/practice/sessions/{sessionId}/items/{itemId}/answer",
                             sessionId, itemId)
                             .header("Authorization", "Bearer " + learnerToken)
