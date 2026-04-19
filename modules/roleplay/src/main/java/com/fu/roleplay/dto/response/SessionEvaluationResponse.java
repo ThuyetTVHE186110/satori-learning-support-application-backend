@@ -77,7 +77,19 @@ public class SessionEvaluationResponse {
         private int userMessageCount;
         private BigDecimal errorRate;
         private Map<String, Integer> errorBreakdown;
+        private List<CorrectionExample> topCorrections;
         private String feedback;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class CorrectionExample {
+        private String original;
+        private String corrected;
+        private String explanation;
+        private String errorType;
     }
 
     @Data

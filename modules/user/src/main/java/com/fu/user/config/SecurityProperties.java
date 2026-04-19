@@ -41,7 +41,6 @@ public class SecurityProperties {
     public static class RateLimits {
         private RateLimit login = new RateLimit(10, 1);
         private RateLimit forgotPassword = new RateLimit(3, 10);
-        private RateLimit register = new RateLimit(5, 1);
         private RateLimit verifyOtp = new RateLimit(5, 5);
     }
 

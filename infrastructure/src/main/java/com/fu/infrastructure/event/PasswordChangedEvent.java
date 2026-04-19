@@ -7,7 +7,7 @@ import java.util.UUID;
 
 /**
  * Event fired when a user changes their password.
- * Triggers security notification.
+ * Triggers security notification.aỹ
  */
 @Getter
 public class PasswordChangedEvent extends ApplicationEvent {

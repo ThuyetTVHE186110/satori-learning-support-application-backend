@@ -24,8 +24,8 @@ import java.util.UUID;
  *
  * EXPLICIT SELECTION MODE (có ít nhất 1 trong 2 list):
  *   - Học viên tự chọn từng vocab/grammar muốn luyện
- *   - Số câu hỏi = tổng số items được chọn (tối đa 20)
- *   - Nếu chọn > 20 items: hệ thống ưu tiên items có mastery_level thấp nhất
+ *   - Số câu hỏi = tổng số items được chọn
+ *   - Tổng (vocab + grammar) tối đa 20 items — nếu vượt, service từ chối request
  *   - preset bị bỏ qua
  */
 @Data
@@ -59,14 +59,14 @@ public class StartPracticeRequest {
      * Explicit selection: UUIDs của Vocabulary items muốn luyện.
      * Null/rỗng = auto mode (dùng tất cả vocab của bài học).
      */
-    @Size(max = 50, message = "Chọn tối đa 50 từ vựng mỗi lần.")
+    @Size(max = 20, message = "Chọn tối đa 20 từ vựng mỗi lần.")
     private List<UUID> selectedVocabIds;
 
     /**
      * Explicit selection: UUIDs của GrammarPoint items muốn luyện.
      * Null/rỗng = auto mode (dùng tất cả ngữ pháp của bài học).
      */
-    @Size(max = 30, message = "Chọn tối đa 30 mẫu ngữ pháp mỗi lần.")
+    @Size(max = 20, message = "Chọn tối đa 20 mẫu ngữ pháp mỗi lần.")
     private List<UUID> selectedGrammarIds;
 
     /** Convenience: kiểm tra có phải explicit mode không. */

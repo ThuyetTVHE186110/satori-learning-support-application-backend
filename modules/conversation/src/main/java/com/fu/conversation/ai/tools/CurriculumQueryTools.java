@@ -5,6 +5,8 @@ import com.fu.curriculumimport.service.StructuredCurriculumQueryService;
 import com.fu.curriculumimport.service.embedding.ChatbotFilter;
 import com.fu.curriculumimport.service.embedding.EmbeddingService;
 import com.fu.curriculumimport.service.embedding.RagContext;
+import com.fu.infrastructure.learner.LearnerProgressProvider;
+import com.fu.infrastructure.learner.LearnerProgressSnapshot;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ToolContext;
@@ -17,6 +19,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -42,10 +45,13 @@ public class CurriculumQueryTools {
     /** ToolContext key for the lesson UUID (may be absent for course-level sessions). */
     public static final String CTX_COURSE_ID = "courseId";
     public static final String CTX_LESSON_ID = "lessonId";
+    /** ToolContext key for the authenticated learner — enables progress-aware tool calls. */
+    public static final String CTX_USER_ID   = "userId";
 
     private final EmbeddingService embeddingService;
     private final CurriculumStatsService statsService;
     private final StructuredCurriculumQueryService structuredQueryService;
+    private final LearnerProgressProvider learnerProgressProvider;
 
     /** Translates a Japanese query → Vietnamese for bilingual vector search expansion. */
     private final TranslationQueryTransformer jaToViTransformer;
@@ -56,10 +62,12 @@ public class CurriculumQueryTools {
     public CurriculumQueryTools(EmbeddingService embeddingService,
                                   CurriculumStatsService statsService,
                                   StructuredCurriculumQueryService structuredQueryService,
+                                  LearnerProgressProvider learnerProgressProvider,
                                   OpenAiChatModel chatModel) {
         this.embeddingService = embeddingService;
         this.statsService = statsService;
         this.structuredQueryService = structuredQueryService;
+        this.learnerProgressProvider = learnerProgressProvider;
 
         // Build a shared ChatClient.Builder for the TranslationQueryTransformers.
         // TranslationQueryTransformer makes a cheap single LLM call per translation.
@@ -110,7 +118,13 @@ public class CurriculumQueryTools {
         }
 
         UUID courseId = getUuid(toolContext, CTX_COURSE_ID);
-        UUID lessonId = resolveLesson(toolContext, courseId, lessonNumber);
+        LessonResolution lr = resolveLesson(toolContext, courseId, lessonNumber);
+        if (lr instanceof LessonResolution.Invalid inv) {
+            log.info("searchCurriculum: invalid lessonNumber={} (available={})",
+                    inv.requestedNumber(), inv.availableNumbers());
+            return invalidLessonMessage(inv);
+        }
+        UUID lessonId = lessonIdOf(lr);
 
         List<String> types = (contentTypes != null && !contentTypes.isEmpty())
                 ? contentTypes
@@ -132,10 +146,11 @@ public class CurriculumQueryTools {
         log.debug("searchCurriculum: query='{}' translated='{}' types={} → {} results",
                 query, translated, types, rag.getSimilarItems().size());
 
+        String scope = scopeLabel(lr);
         if (!rag.hasContext()) {
-            return "Không tìm thấy nội dung phù hợp trong giáo trình cho: \"" + query + "\"";
+            return scope + " Không tìm thấy nội dung phù hợp trong giáo trình cho: \"" + query + "\"";
         }
-        return formatResults(rag);
+        return scope + "\n" + formatResults(rag);
     }
 
     /**
@@ -155,18 +170,22 @@ public class CurriculumQueryTools {
             Integer lessonNumber,
             ToolContext toolContext) {
         UUID courseId = getUuid(toolContext, CTX_COURSE_ID);
-        UUID lessonId = resolveLesson(toolContext, courseId, lessonNumber);
+        LessonResolution lr = resolveLesson(toolContext, courseId, lessonNumber);
+        if (lr instanceof LessonResolution.Invalid inv) {
+            log.info("countContent: invalid lessonNumber={} (available={})",
+                    inv.requestedNumber(), inv.availableNumbers());
+            return invalidLessonMessage(inv);
+        }
+        UUID lessonId = lessonIdOf(lr);
 
         CurriculumStatsService.ContentCount count = statsService.countContent(courseId, lessonId);
-        String scope = (lessonNumber != null)
-                ? "Bài " + lessonNumber
-                : (lessonId != null ? "bài học này" : "toàn khóa học");
+        String scope = scopeLabel(lr);
 
         log.debug("countContent: scope={} lessonId={} vocab={} grammar={}",
                 scope, lessonId, count.vocabularyCount(), count.grammarCount());
 
-        return "scope=" + scope
-                + " | vocabulary=" + count.vocabularyCount()
+        return scope
+                + " vocabulary=" + count.vocabularyCount()
                 + " | grammar_points=" + count.grammarCount();
     }
 
@@ -186,8 +205,10 @@ public class CurriculumQueryTools {
     @Tool(description =
             "Truy vấn danh sách từ vựng hoặc điểm ngữ pháp từ cơ sở dữ liệu giáo trình. "
             + "Dùng khi user muốn liệt kê TẤT CẢ từ vựng/ngữ pháp của một bài học, "
-            + "hoặc tìm kiếm theo từ khóa cụ thể trong danh sách (ví dụ: 'tìm từ có nghĩa ăn', "
-            + "'ngữ pháp nào chứa て form'). "
+            + "hoặc tìm kiếm theo từ khóa là CHUỖI CON CHÍNH XÁC xuất hiện trong tên từ / cách đọc / nghĩa "
+            + "(ví dụ: 'tìm từ có nghĩa ăn', 'ngữ pháp nào chứa て form'). "
+            + "KHÔNG dùng cho chủ đề ngữ nghĩa rộng như 'nghề nghiệp', 'gia đình', 'thời tiết', "
+            + "'động vật' — các trường hợp này gọi searchCurriculum để tìm theo ngữ nghĩa. "
             + "KHÔNG dùng cho câu hỏi về cách dùng hay giải thích — dùng searchCurriculum cho đó.")
     public String queryStructuredData(
             @ToolParam(description =
@@ -201,13 +222,22 @@ public class CurriculumQueryTools {
                     "Số thứ tự bài học (ví dụ: 1 cho 'Bài 1'). "
                     + "Null để truy vấn toàn khóa học hoặc khi session đã gắn với bài cụ thể.")
             Integer lessonNumber,
-            @ToolParam(description = "Số lượng kết quả tối đa cần trả về (mặc định 20, tối đa 50)")
+            @ToolParam(description =
+                    "Số lượng kết quả tối đa. Null khi muốn lấy TOÀN BỘ của một bài học "
+                    + "(lesson scope trả đầy đủ, giới hạn an toàn 300). "
+                    + "Ở phạm vi toàn khóa: mặc định 50, tối đa 100.")
             Integer limit,
             ToolContext toolContext) {
 
         UUID courseId = getUuid(toolContext, CTX_COURSE_ID);
-        UUID lessonId = resolveLesson(toolContext, courseId, lessonNumber);
-        int cap = (limit != null && limit > 0) ? limit : 20;
+        LessonResolution lr = resolveLesson(toolContext, courseId, lessonNumber);
+        if (lr instanceof LessonResolution.Invalid inv) {
+            log.info("queryStructuredData: invalid lessonNumber={} (available={})",
+                    inv.requestedNumber(), inv.availableNumbers());
+            return invalidLessonMessage(inv);
+        }
+        UUID lessonId = lessonIdOf(lr);
+        int cap = (limit != null && limit > 0) ? limit : 0;
 
         boolean isVocab = !"GRAMMAR".equalsIgnoreCase(dataType);
         StructuredCurriculumQueryService.StructuredResult result = isVocab
@@ -217,18 +247,17 @@ public class CurriculumQueryTools {
         log.debug("queryStructuredData: type={} keyword='{}' lessonId={} → {} rows (total={})",
                 dataType, keyword, lessonId, result.rows().size(), result.totalCount());
 
+        String scopeLabel = scopeLabel(lr);
         if (result.isEmpty()) {
-            String scope = lessonNumber != null ? "Bài " + lessonNumber : "khóa học hiện tại";
             String typeName = isVocab ? "từ vựng" : "điểm ngữ pháp";
-            return "Không tìm thấy " + typeName + " nào"
+            return scopeLabel + " Không tìm thấy " + typeName + " nào"
                     + (keyword != null && !keyword.isBlank() ? " khớp với \"" + keyword + "\"" : "")
-                    + " trong " + scope + ".";
+                    + ".";
         }
 
         StringBuilder sb = new StringBuilder();
         String typeName = isVocab ? "Từ vựng" : "Ngữ pháp";
-        String scope = lessonId != null ? " (bài học)" : " (khóa học)";
-        sb.append(typeName).append(scope).append(" — ").append(result.rows().size());
+        sb.append(scopeLabel).append(' ').append(typeName).append(" — ").append(result.rows().size());
         if (result.totalCount() > result.rows().size()) {
             sb.append('/').append(result.totalCount()).append(" (đã giới hạn)");
         }
@@ -248,26 +277,212 @@ public class CurriculumQueryTools {
         return sb.toString();
     }
 
+    /**
+     * Short-circuits the chat with a canned refusal for questions outside the
+     * Japanese-learning domain.
+     *
+     * <p><b>Why forced tool-call instead of prose refusal:</b> GPT-4o-mini only
+     * partially honors "do not answer off-topic" instructions in the system prompt
+     * (it answers the off-topic question and <em>then</em> appends a scope note).
+     * Tool-selection compliance is materially higher — the LLM either calls this
+     * tool or it doesn't, with no in-between state.
+     *
+     * <p>{@code returnDirect = true} makes Spring AI's {@code ToolCallingManager}
+     * return this string directly to the caller, skipping the follow-up LLM call
+     * that would otherwise regenerate the assistant message from the tool output.
+     */
+    @Tool(description =
+            "BẮT BUỘC gọi khi câu hỏi KHÔNG thuộc phạm vi học tiếng Nhật / giáo trình. "
+            + "Các chủ đề cần gọi tool này: toán học (1+1, phép tính), lập trình (code, "
+            + "thuật toán), nấu ăn, chính trị, y tế, tình cảm cá nhân, ngôn ngữ khác "
+            + "(trừ khi so sánh để giải thích tiếng Nhật), hoặc yêu cầu tạo nội dung "
+            + "không liên quan học tập. "
+            + "KHÔNG TỰ TRẢ LỜI các câu hỏi đó — phải gọi tool này thay vì viết câu trả lời.",
+            returnDirect = true)
+    public String refuseOffTopic(
+            @ToolParam(description =
+                    "Chủ đề ngoài phạm vi đã phát hiện, viết ngắn bằng tiếng Việt "
+                    + "(ví dụ: 'toán học', 'lập trình', 'nấu ăn').")
+            String topic) {
+        log.info("refuseOffTopic invoked: topic='{}'", topic);
+        return "Mình chỉ hỗ trợ câu hỏi về tiếng Nhật và nội dung giáo trình. "
+             + "Bạn có câu hỏi nào về bài học không?";
+    }
+
+    /**
+     * Returns the learner's practice progress snapshot: current lesson, mastery breakdown,
+     * weakest items, strongest items, recent activity.
+     *
+     * <p>The chatbot should call this tool ONLY when the user asks about their own
+     * progress, current lesson, weaknesses, or "em đang học đến đâu" style questions.
+     * For generic curriculum questions, prefer {@link #searchCurriculum} or
+     * {@link #queryStructuredData}.
+     */
+    @Tool(description =
+            "Lấy tiến độ luyện tập của chính người dùng: bài đang học, điểm mastery, "
+            + "từ/ngữ pháp yếu nhất, số phiên gần đây. "
+            + "CHỈ dùng khi user hỏi về bản thân (ví dụ: 'em đang học bài nào', "
+            + "'tiến độ của em thế nào', 'em còn yếu chỗ nào', 'điểm gần nhất của em'). "
+            + "KHÔNG dùng cho câu hỏi chung về giáo trình.")
+    public String getLearnerProgress(ToolContext toolContext) {
+        UUID userId = getUuid(toolContext, CTX_USER_ID);
+        if (userId == null) {
+            log.debug("getLearnerProgress: no userId in ToolContext — aborting");
+            return "Không xác định được người dùng từ phiên chat hiện tại.";
+        }
+        UUID courseId = getUuid(toolContext, CTX_COURSE_ID);
+
+        Optional<LearnerProgressSnapshot> snap = learnerProgressProvider.getProgress(userId, courseId);
+        if (snap.isEmpty() || !snap.get().hasAnyData()) {
+            return "Học viên chưa có dữ liệu luyện tập nào trong hệ thống.";
+        }
+        return formatProgress(snap.get());
+    }
+
+    private String formatProgress(LearnerProgressSnapshot s) {
+        StringBuilder sb = new StringBuilder();
+
+        LearnerProgressSnapshot.CurrentLessonInfo c = s.currentLesson();
+        if (c != null) {
+            sb.append("BÀI ĐANG HỌC: ");
+            if (c.title() != null) sb.append(c.title());
+            if (c.titleJapanese() != null && !c.titleJapanese().isBlank()) {
+                sb.append(" (").append(c.titleJapanese()).append(')');
+            }
+            if (c.orderIndex() != null) sb.append(" — bài số ").append(c.orderIndex());
+            sb.append('\n');
+            sb.append("  • Số phiên đã luyện: ").append(c.totalSessions())
+              .append(" | Điểm cao nhất: ").append(formatScore(c.bestScore()))
+              .append(" | Điểm gần nhất: ").append(formatScore(c.lastScore())).append('\n');
+            sb.append("  • Mastery từ vựng: ").append(formatScore(c.vocabMastery())).append("%")
+              .append(" | Mastery ngữ pháp: ").append(formatScore(c.grammarMastery())).append("%\n");
+            if (c.lastPracticedAt() != null) {
+                sb.append("  • Lần luyện gần nhất: ").append(c.lastPracticedAt()).append('\n');
+            }
+        } else {
+            sb.append("BÀI ĐANG HỌC: (chưa có bài nào được luyện)\n");
+        }
+
+        LearnerProgressSnapshot.CourseProgressInfo cp = s.courseProgress();
+        if (cp != null) {
+            sb.append('\n').append("TIẾN ĐỘ KHÓA HỌC: ")
+              .append(cp.lessonsStarted()).append("/").append(cp.totalLessons())
+              .append(" bài đã bắt đầu, ").append(cp.lessonsCompleted())
+              .append(" bài đã đạt chuẩn (≥70%)\n");
+            sb.append("  • Mastery TB từ vựng toàn khóa: ").append(formatScore(cp.avgVocabMastery())).append("%\n");
+            sb.append("  • Mastery TB ngữ pháp toàn khóa: ").append(formatScore(cp.avgGrammarMastery())).append("%\n");
+        }
+
+        List<LearnerProgressSnapshot.WeakItem> weak = s.weakItems();
+        if (weak != null && !weak.isEmpty()) {
+            sb.append('\n').append("YẾU NHẤT (cần luyện thêm):\n");
+            for (LearnerProgressSnapshot.WeakItem w : weak) {
+                sb.append("  - ").append(w.display())
+                  .append(" (").append("VOCABULARY".equals(w.entityType()) ? "từ vựng" : "ngữ pháp")
+                  .append(", mastery level ").append(w.masteryLevel()).append(")\n");
+            }
+        }
+
+        List<LearnerProgressSnapshot.StrongItem> strong = s.strongItems();
+        if (strong != null && !strong.isEmpty()) {
+            sb.append('\n').append("MẠNH NHẤT:\n");
+            for (LearnerProgressSnapshot.StrongItem st : strong) {
+                sb.append("  - ").append(st.display())
+                  .append(" (level ").append(st.masteryLevel()).append(")\n");
+            }
+        }
+
+        if (s.recentSessionsLast7d() > 0) {
+            sb.append('\n').append("HOẠT ĐỘNG 7 NGÀY QUA: ")
+              .append(s.recentSessionsLast7d()).append(" phiên đã hoàn thành\n");
+        }
+
+        return sb.toString();
+    }
+
+    private String formatScore(java.math.BigDecimal v) {
+        return v != null ? v.stripTrailingZeros().toPlainString() : "0";
+    }
+
     // ── Lesson resolution ─────────────────────────────────────────────────────
 
     /**
-     * Resolve the effective lessonId to use for a tool call.
+     * Discriminated outcome of resolving a caller-supplied lesson reference.
      *
-     * Priority:
-     *   1. Explicit lessonNumber from the LLM — resolves via entity table (most recent import)
-     *   2. Session-level lessonId from ToolContext (set when user started a lesson-scoped session)
-     *   3. null → course-level scope
+     * <p>The critical case is {@link Invalid} — returned when the user explicitly requested
+     * a lesson number that doesn't exist. Without this case, a silent fallback to the
+     * session lessonId would cause the LLM to narrate on data from a different lesson
+     * than the user asked about (hallucination by scope substitution).
      */
-    private UUID resolveLesson(ToolContext toolContext, UUID courseId, Integer lessonNumber) {
+    private sealed interface LessonResolution {
+        /** User passed a valid lessonNumber; we know both the UUID and the number. */
+        record Resolved(UUID lessonId, int lessonNumber) implements LessonResolution {}
+        /** User passed a lessonNumber that doesn't resolve to any published lesson. */
+        record Invalid(int requestedNumber, List<Integer> availableNumbers) implements LessonResolution {}
+        /** No explicit number; the session is scoped to a lesson whose number we don't know here. */
+        record SessionScope(UUID lessonId) implements LessonResolution {}
+        /** No explicit number and no session lesson — fall back to course-wide scope. */
+        record CourseScope() implements LessonResolution {}
+    }
+
+    /**
+     * Resolve the effective scope for a tool call.
+     *
+     * <p>Priority:
+     * <ol>
+     *   <li>Explicit {@code lessonNumber} from the LLM → {@link LessonResolution.Resolved}
+     *       if it maps to a lesson, otherwise {@link LessonResolution.Invalid} (never fall
+     *       back silently — that caused hallucinations on Q11/Q28/Q149).</li>
+     *   <li>Session-level lessonId from {@link ToolContext} → {@link LessonResolution.SessionScope}.</li>
+     *   <li>Neither → {@link LessonResolution.CourseScope}.</li>
+     * </ol>
+     */
+    private LessonResolution resolveLesson(ToolContext toolContext, UUID courseId, Integer lessonNumber) {
         if (lessonNumber != null && courseId != null) {
             UUID resolved = embeddingService.resolveLessonByNumber(courseId, lessonNumber);
             if (resolved != null) {
-                log.debug("Resolved lessonNumber={} → lessonId={}", lessonNumber, resolved);
-                return resolved;
+                return new LessonResolution.Resolved(resolved, lessonNumber);
             }
-            log.debug("lessonNumber={} not found, falling back to session lessonId", lessonNumber);
+            List<Integer> available = embeddingService.listAvailableLessonNumbers(courseId);
+            return new LessonResolution.Invalid(lessonNumber, available);
         }
-        return getUuid(toolContext, CTX_LESSON_ID);
+        UUID sessionLessonId = getUuid(toolContext, CTX_LESSON_ID);
+        if (sessionLessonId != null) {
+            return new LessonResolution.SessionScope(sessionLessonId);
+        }
+        return new LessonResolution.CourseScope();
+    }
+
+    /** Extract the effective lessonId (null for course scope). Never call on {@link LessonResolution.Invalid}. */
+    private UUID lessonIdOf(LessonResolution r) {
+        return switch (r) {
+            case LessonResolution.Resolved rr    -> rr.lessonId();
+            case LessonResolution.SessionScope s -> s.lessonId();
+            case LessonResolution.CourseScope c  -> null;
+            case LessonResolution.Invalid i      -> null;
+        };
+    }
+
+    /** Scope prefix prepended to successful tool output so the LLM narrates the correct scope. */
+    private String scopeLabel(LessonResolution r) {
+        return switch (r) {
+            case LessonResolution.Resolved rr    -> "[Bài " + rr.lessonNumber() + "]";
+            case LessonResolution.SessionScope s -> "[Bài học hiện tại]";
+            case LessonResolution.CourseScope c  -> "[Toàn khóa học]";
+            case LessonResolution.Invalid i      -> "";
+        };
+    }
+
+    private String invalidLessonMessage(LessonResolution.Invalid inv) {
+        if (inv.availableNumbers().isEmpty()) {
+            return "Bài " + inv.requestedNumber() + " không tồn tại trong khóa học này. "
+                 + "Khóa học hiện chưa có bài học nào được công bố.";
+        }
+        String list = inv.availableNumbers().stream()
+                .map(String::valueOf)
+                .collect(Collectors.joining(", "));
+        return "Bài " + inv.requestedNumber() + " không tồn tại trong khóa học này. "
+             + "Các bài hiện có: " + list + ".";
     }
 
     // ── Bilingual query expansion ──────────────────────────────────────────────

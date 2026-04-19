@@ -90,6 +90,9 @@ public class ExerciseGeneratorAgent {
      * @param prefs              learning preferences (nullable)
      * @param dimension          góc câu hỏi đã chọn qua mastery-weighted vote
      * @param masteryMap         map entityId → ItemMastery cho anti-repeat
+     * @param allowRepetition    true khi pool nhỏ hơn preset, một số entity phải lặp lại
+     *                           với dimension khác nhau (auto mode only)
+     * @param repeatPlan         map entityId → số câu cần sinh cho entity đó (≥ 1)
      */
     public List<GeneratedItem> generateItems(
             UUID lessonId,
@@ -105,7 +108,9 @@ public class ExerciseGeneratorAgent {
             boolean isExplicitMode,
             UserLearningPreferences prefs,
             QuestionDimension dimension,
-            Map<UUID, ItemMastery> masteryMap) {
+            Map<UUID, ItemMastery> masteryMap,
+            boolean allowRepetition,
+            Map<UUID, Integer> repeatPlan) {
 
         if ((selectedVocab == null || selectedVocab.isEmpty())
                 && (selectedGrammar == null || selectedGrammar.isEmpty())) {
@@ -124,31 +129,69 @@ public class ExerciseGeneratorAgent {
         Collections.shuffle(shuffledGrammar);
 
         // UUID short map: shortId (8 chars) → fullUUID — dùng để resolve refContentId sau khi parse
+        // Pre-populate from TẤT CẢ entity để post-processing resolve được bất kỳ subset nào.
         Map<String, UUID> uuidShortMap = new LinkedHashMap<>();
+        for (Vocabulary v : shuffledVocab) uuidShortMap.put(shortId(v.getId()), v.getId());
+        for (GrammarPoint g : shuffledGrammar) uuidShortMap.put(shortId(g.getId()), g.getId());
 
-        // Build 8-block prompt một lần, dùng chung cho tất cả batch
-        String contentBlock    = buildContentBlock(shuffledVocab, shuffledGrammar, uuidShortMap);
+        // Shared blocks (không phụ thuộc entity subset)
         String distractorBlock = buildDistractorBlock(allLessonVocab, shuffledVocab,
                                                        allLessonGrammar, shuffledGrammar,
                                                        isExplicitMode, courseId, lessonId);
         String profileBlock    = buildLearnerProfileBlock(prefs);
-        String dimensionBlock  = buildDimensionBlock(dimension, prefs);
-        String coverageBlock   = buildCoverageBlock(shuffledVocab, shuffledGrammar, isExplicitMode);
+        // Khi lặp, dimension rotation block thay thế single-dim block.
+        String dimensionBlock  = allowRepetition
+                ? buildRotationDimensionBlock(prefs)
+                : buildDimensionBlock(dimension, prefs);
         String antiRepeatBlock = buildAntiRepeatBlock(masteryMap,
                                                        allIds(shuffledVocab, shuffledGrammar));
+        String repetitionBlock = allowRepetition
+                ? buildRepetitionBlock(repeatPlan, shuffledVocab, shuffledGrammar)
+                : "";
+
+        final int targetCount = resolvedCount;
 
         // Phân bổ và tạo batch tasks
         Map<PracticeItemType, Integer> distribution = distributeCount(resolvedCount, resolvedTypes);
         List<PracticeItemType> distinctTypes = resolvedTypes.stream().distinct().collect(Collectors.toList());
 
+        // Chuẩn bị entity list cho partitioning ở explicit mode:
+        // combined = vocab + grammar (theo thứ tự đã shuffle). Từ batch sẽ lấy slice xoay vòng
+        // để KHÔNG có 2 batch nào cùng prompt về cùng subset → tránh duplicate câu hỏi.
+        List<Object> combinedEntities = new ArrayList<>();
+        combinedEntities.addAll(shuffledVocab);
+        combinedEntities.addAll(shuffledGrammar);
+        final boolean partitionEntities = isExplicitMode && !combinedEntities.isEmpty();
+
         List<BatchTask> tasks = new ArrayList<>();
+        int sliceCursor = 0;
         for (PracticeItemType itemType : distinctTypes) {
             int typeCount = distribution.getOrDefault(itemType, 0);
             int cap = maxPerCall(itemType);
             int offset = 0, batchIdx = 0;
             while (offset < typeCount) {
                 int batchSize = Math.min(cap, typeCount - offset);
-                tasks.add(new BatchTask(itemType, batchIdx++, batchSize));
+                List<Vocabulary> bv = shuffledVocab;
+                List<GrammarPoint> bg = shuffledGrammar;
+                if (partitionEntities) {
+                    // MATCHING cần ≥4 entity/item để tạo pairs → nhân 4.
+                    int sliceSize = itemType == PracticeItemType.MATCHING
+                            ? Math.max(4, batchSize * 4)
+                            : Math.max(1, batchSize);
+                    sliceSize = Math.min(sliceSize, combinedEntities.size());
+                    List<Object> slice = new ArrayList<>(sliceSize);
+                    for (int i = 0; i < sliceSize; i++) {
+                        slice.add(combinedEntities.get((sliceCursor + i) % combinedEntities.size()));
+                    }
+                    sliceCursor = (sliceCursor + batchSize) % combinedEntities.size();
+                    bv = new ArrayList<>();
+                    bg = new ArrayList<>();
+                    for (Object e : slice) {
+                        if (e instanceof Vocabulary v) bv.add(v);
+                        else if (e instanceof GrammarPoint g) bg.add(g);
+                    }
+                }
+                tasks.add(new BatchTask(itemType, batchIdx++, batchSize, bv, bg));
                 offset += batchSize;
             }
         }
@@ -156,11 +199,13 @@ public class ExerciseGeneratorAgent {
         // Chạy tất cả batch song song
         List<CompletableFuture<BatchResult>> futures = tasks.stream()
                 .map(task -> CompletableFuture.supplyAsync(() -> {
+                    String batchContent  = buildContentBlock(task.batchVocab(), task.batchGrammar(), uuidShortMap);
+                    String batchCoverage = buildCoverageBlock(task.batchVocab(), task.batchGrammar(), isExplicitMode);
                     List<GeneratedItem> result = generateSingleBatch(
                             task.batchSize(), sessionType, jlptLevel,
-                            contentBlock, distractorBlock, profileBlock,
-                            dimensionBlock, coverageBlock, antiRepeatBlock,
-                            task.itemType());
+                            batchContent, distractorBlock, profileBlock,
+                            dimensionBlock, batchCoverage, antiRepeatBlock,
+                            repetitionBlock, task.itemType());
                     return new BatchResult(task.itemType(), task.batchIndex(), result);
                 }, taskExecutor))
                 .collect(Collectors.toList());
@@ -196,11 +241,47 @@ public class ExerciseGeneratorAgent {
             if (!merged.isEmpty()) byType.put(t, merged);
         }
 
-        List<GeneratedItem> items = interleaveItems(byType, resolvedTypes, resolvedCount);
+        List<GeneratedItem> items = interleaveItems(byType, resolvedTypes, targetCount);
+
+        // Defensive quality filter — drop items with placeholder leak or
+        // obvious Japanese grammar errors (LLM occasionally produces these).
+        int dropped = applyQualityFilter(items);
+        if (dropped > 0) {
+            log.info("Quality filter dropped {}/{} items (target={})", dropped, dropped + items.size(), targetCount);
+        }
+
+        // Retry once to fill shortfall caused by quality-filter drops.
+        // Cheaper than over-generation: pays extra cost only when actually needed.
+        int shortfall = targetCount - items.size();
+        if (shortfall > 0 && !distinctTypes.isEmpty()) {
+            PracticeItemType retryType = distinctTypes.get(0);
+            int retryBatchSize = Math.min(shortfall, maxPerCall(retryType));
+            log.info("Retrying LLM for {} shortfall items (type={})", retryBatchSize, retryType);
+            try {
+                String retryContent  = buildContentBlock(shuffledVocab, shuffledGrammar, uuidShortMap);
+                String retryCoverage = buildCoverageBlock(shuffledVocab, shuffledGrammar, isExplicitMode);
+                List<GeneratedItem> retryItems = generateSingleBatch(
+                        retryBatchSize, sessionType, jlptLevel,
+                        retryContent, distractorBlock, profileBlock,
+                        dimensionBlock, retryCoverage, antiRepeatBlock,
+                        repetitionBlock, retryType);
+                if (retryItems != null) {
+                    applyQualityFilter(retryItems);
+                    items.addAll(retryItems);
+                }
+            } catch (Exception e) {
+                log.warn("Retry batch failed (accepting shortfall): {}", e.getMessage());
+            }
+        }
 
         if (items.isEmpty()) {
             throw new BusinessException("PRACTICE_GENERATION_FAILED",
                     "Không thể sinh câu hỏi luyện tập. Vui lòng thử lại sau.");
+        }
+
+        // Cap at target count in case retry delivered more than requested.
+        if (items.size() > targetCount) {
+            items = new ArrayList<>(items.subList(0, targetCount));
         }
 
         // Post-process: resolve shortId → fullUUID + fuzzy fallback
@@ -453,6 +534,85 @@ public class ExerciseGeneratorAgent {
                 + String.join("\n", lines) + "\n";
     }
 
+    /**
+     * Block 4b (repetition mode): khi pool nhỏ hơn preset, entity phải lặp → KHÔNG cố định
+     * 1 dimension cho cả session. Block này liệt kê tất cả dimension khả dụng và yêu cầu
+     * LLM luân phiên khi cùng 1 entity xuất hiện nhiều lần.
+     */
+    private String buildRotationDimensionBlock(UserLearningPreferences prefs) {
+        String topicCtx = (prefs != null && prefs.getPreferredTopics() != null
+                && prefs.getPreferredTopics().length > 0)
+                ? String.join(", ", prefs.getPreferredTopics())
+                : "hàng ngày";
+        return """
+                === GÓC CÂU HỎI: LUÂN PHIÊN (chế độ lặp) ===
+                Pool nhỏ hơn số câu hỏi cần sinh → một số entity lặp lại (xem phần "LẶP LẠI ENTITY" bên dưới).
+                Khi entity lặp, mỗi lần PHẢI dùng một góc (QuestionDimension) khác nhau.
+
+                GÓC KHẢ DỤNG CHO TỪ VỰNG:
+                  - MEANING: hỏi nghĩa VN ↔ JP (luân phiên 2 chiều)
+                  - READING: hỏi cách đọc / furigana / on-yomi / kun-yomi
+                  - USAGE: câu có ___ , chọn từ phù hợp (FILL_BLANK/SENTENCE_ORDER)
+                  - CONTEXT: đặt câu trong tình huống (%s) — mô phỏng hội thoại thực
+                  - ANTONYM_SYNONYM: từ trái nghĩa / đồng nghĩa / liên quan
+
+                GÓC KHẢ DỤNG CHO NGỮ PHÁP:
+                  - IDENTIFICATION: nhận diện câu đúng/sai dùng mẫu
+                  - FORMATION: chia động từ, biến thể (て形、た形、ない形)
+                  - USAGE: điền mẫu vào câu có chỗ trống
+                  - CONTRAST: phân biệt 2 mẫu dễ nhầm (chỉ nên dùng khi pool có ≥2 mẫu liên quan)
+                """.formatted(topicCtx);
+    }
+
+    /**
+     * Block 9 (repetition mode): liệt kê phân bổ số câu cho từng entity và nhấn mạnh rule
+     * "cùng entity → khác dimension".
+     */
+    private String buildRepetitionBlock(Map<UUID, Integer> repeatPlan,
+                                         List<Vocabulary> vocab,
+                                         List<GrammarPoint> grammar) {
+        if (repeatPlan == null || repeatPlan.isEmpty()) return "";
+
+        // Chỉ list những entity xuất hiện >= 2 lần — entity 1 câu không cần nhấn mạnh.
+        long repeatedCount = repeatPlan.values().stream().filter(c -> c > 1).count();
+        if (repeatedCount == 0) return "";
+
+        StringBuilder sb = new StringBuilder(
+                "=== LẶP LẠI ENTITY (BẮT BUỘC) ===\n"
+              + "Phân bổ số câu hỏi cho mỗi mục (mỗi lần lặp PHẢI dùng QuestionDimension khác):\n");
+
+        Map<UUID, String> vocabLabels = new HashMap<>();
+        for (Vocabulary v : vocab) {
+            vocabLabels.put(v.getId(), String.format("%s [%s] (Từ vựng)",
+                    v.getJapaneseText(),
+                    v.getReading() != null ? v.getReading() : ""));
+        }
+        Map<UUID, String> grammarLabels = new HashMap<>();
+        for (GrammarPoint g : grammar) {
+            grammarLabels.put(g.getId(), String.format("%s (Ngữ pháp)", g.getPattern()));
+        }
+
+        for (Map.Entry<UUID, Integer> e : repeatPlan.entrySet()) {
+            int count = e.getValue();
+            if (count <= 0) continue;
+            String shortId = shortId(e.getKey());
+            String label = vocabLabels.getOrDefault(e.getKey(),
+                    grammarLabels.getOrDefault(e.getKey(), "?"));
+            sb.append(String.format("  • [%s] %s — %d câu%s%n",
+                    shortId, label, count, count > 1 ? "  ← LẶP" : ""));
+        }
+
+        sb.append("""
+
+                QUY TẮC LẶP (tuyệt đối tuân thủ):
+                1. Entity xuất hiện N lần → N câu phải dùng N QuestionDimension KHÁC nhau.
+                2. Không được có 2 câu cùng cả (entity, dimension) — kể cả khác itemType.
+                3. Hãy cố thay đổi cả cách đặt câu (JP→VN ↔ VN→JP, fill-blank ↔ nhận diện, ...)
+                   để học viên không cảm thấy nhàm chán khi gặp lại entity.
+                """);
+        return sb.toString();
+    }
+
     // ── Single batch generation ────────────────────────────────────────────
 
     private static final String DIVERSITY_DIRECTIVE = """
@@ -467,7 +627,7 @@ public class ExerciseGeneratorAgent {
             int count, PracticeSessionType sessionType, String jlptLevel,
             String contentBlock, String distractorBlock, String profileBlock,
             String dimensionBlock, String coverageBlock, String antiRepeatBlock,
-            PracticeItemType itemType) {
+            String repetitionBlock, PracticeItemType itemType) {
 
         String prompt = contentBlock
                 + distractorBlock
@@ -475,6 +635,7 @@ public class ExerciseGeneratorAgent {
                 + dimensionBlock
                 + coverageBlock
                 + antiRepeatBlock
+                + repetitionBlock
                 + buildItemTypeSection(count, sessionType, jlptLevel, itemType)
                 + DIVERSITY_DIRECTIVE;
 
@@ -493,15 +654,16 @@ public class ExerciseGeneratorAgent {
                                          String jlptLevel, PracticeItemType itemType) {
         String rule = describeTypeRule(itemType);
         String optionsNote = switch (itemType) {
-            case MULTIPLE_CHOICE -> "array 4 object {\"text\":\"...\",\"isCorrect\":true/false} — đúng 1, sai 3";
-            case FILL_BLANK      -> "array {\"text\":\"...\",\"isCorrect\":true/false} — đúng 1, nhiễu tùy số từ phù hợp";
-            case TRANSLATION     -> "array 4 object {\"text\":\"...\",\"isCorrect\":true/false} — đúng 1, sai 3 (sai nhưng trông hợp lý)";
-            case TRUE_FALSE      -> "array 2 object: [{\"text\":\"Đúng\",\"isCorrect\":X},{\"text\":\"Sai\",\"isCorrect\":Y}]";
-            case SENTENCE_ORDER  -> "array object — mỗi object 1 token tiếng Nhật, TẤT CẢ isCorrect=false";
+            case MULTIPLE_CHOICE -> "ĐÚNG 4 object {\"text\":\"...\",\"isCorrect\":true/false} — 1 đúng, 3 sai cùng POS";
+            case FILL_BLANK      -> "ĐÚNG 4 object {\"text\":\"...\",\"isCorrect\":true/false} — 1 đúng, 3 nhiễu cùng loại từ";
+            case TRANSLATION     -> "ĐÚNG 4 object {\"text\":\"...\",\"isCorrect\":true/false} — 1 đúng, 3 sai nhưng hợp lệ về cú pháp";
+            case TRUE_FALSE      -> "ĐÚNG 2 object theo thứ tự: [{\"text\":\"Đúng\",\"isCorrect\":X},{\"text\":\"Sai\",\"isCorrect\":Y}]";
+            case SENTENCE_ORDER  -> "4-7 object {\"text\":\"<1 TOKEN tiếng Nhật>\",\"isCorrect\":false} — "
+                    + "key BẮT BUỘC là \"text\" (KHÔNG \"token\"/\"word\"/\"value\"), TẤT CẢ isCorrect=false";
             case MATCHING        -> "[] — dùng trường \"pairs\" thay thế";
         };
         String pairsNote = itemType == PracticeItemType.MATCHING
-                ? "array {\"left\":\"tiếng Nhật\",\"right\":\"tiếng Việt\"} — 4 cặp"
+                ? "ĐÚNG 4 object {\"left\":\"<JP>\",\"right\":\"<VN>\"} — cùng domain (vocab HOẶC grammar)"
                 : "null";
         String level = jlptLevel != null ? jlptLevel : "N5";
 
@@ -511,18 +673,35 @@ public class ExerciseGeneratorAgent {
                 + "Dạng câu hỏi: CHỈ sinh dạng " + itemType.name()
                 + " — itemType của MỌI câu PHẢI là \"" + itemType.name() + "\"\n\n"
                 + "QUY TẮC CHO DẠNG " + itemType.name() + ":\n" + rule + "\n\n"
+                + CLEAN_SOURCE_DIRECTIVE + "\n"
                 + "CẤU TRÚC JSON mỗi phần tử:\n"
                 + "- \"itemType\"        : \"" + itemType.name() + "\"\n"
-                + "- \"question\"        : câu hỏi / yêu cầu\n"
-                + "- \"questionJapanese\": câu tiếng Nhật (null nếu không cần)\n"
+                + "- \"question\"        : câu hỏi / yêu cầu — KHÔNG rỗng, KHÔNG chứa \"~\".\n"
+                + "- \"questionJapanese\": câu tiếng Nhật (null nếu không cần).\n"
                 + "- \"options\"         : " + optionsNote + "\n"
                 + "- \"pairs\"           : " + pairsNote + "\n"
-                + "- \"correctAnswer\"   : đáp án đúng dạng string (null nếu MATCHING)\n"
-                + "- \"hint\"            : gợi ý ngắn (null nếu không có)\n"
-                + "- \"explanation\"     : giải thích tại sao đúng, bằng tiếng Việt\n"
-                + "- \"refContentId\"    : shortId [xxxxxxxx] của từ/ngữ pháp đang hỏi — BẮT BUỘC\n"
-                + "- \"refContentType\"  : \"VOCABULARY\" hoặc \"GRAMMAR\"\n";
+                + "- \"correctAnswer\"   : đáp án đúng dạng string (null nếu MATCHING).\n"
+                + "- \"hint\"            : gợi ý ngắn, null nếu không có.\n"
+                + "- \"explanation\"     : giải thích ngắn tại sao đáp án đúng, bằng tiếng Việt.\n"
+                + "- \"refContentId\"    : shortId [xxxxxxxx] của từ/ngữ pháp đang hỏi — BẮT BUỘC.\n"
+                + "- \"refContentType\"  : \"VOCABULARY\" hoặc \"GRAMMAR\".\n";
     }
+
+    /**
+     * Universal directive to fix "tilde placeholder leak" from vocab data (entries like
+     * "この ~" / "~ này") that previously leaked into generated options.
+     * LLM must either resolve placeholders with a concrete noun OR drop the entity.
+     */
+    private static final String CLEAN_SOURCE_DIRECTIVE = """
+            === LÀM SẠCH DỮ LIỆU NGUỒN (BẮT BUỘC) ===
+            Nguồn vocab đôi khi chứa ký tự placeholder như "~" hoặc "..." (VD: "この ~" = "cái này ~").
+            Khi tạo câu hỏi:
+              • TUYỆT ĐỐI KHÔNG để ký tự "~" hoặc "..." xuất hiện trong question, options, pairs, hay correctAnswer.
+              • Nếu entity gốc có "~": thay bằng 1 danh từ/từ cụ thể phù hợp ngữ cảnh
+                (VD: "この ~" → "この本" / "このペン"; nghĩa: "cái này ~" → "cuốn sách này" / "cây bút này").
+              • Nếu không thay được hợp lý → CHỌN ENTITY KHÁC từ pool vocab/grammar.
+              • KHÔNG trả về option/pair để trống, KHÔNG dùng "N/A" / "-" / "null".
+            """;
 
     private String buildSimpleRetryPrompt(int count, PracticeSessionType sessionType,
                                            String jlptLevel, String contentBlock,
@@ -543,16 +722,76 @@ public class ExerciseGeneratorAgent {
      * 1. Map shortId → fullUUID nếu LLM điền đúng shortId
      * 2. Fuzzy fallback: tìm japaneseText / pattern xuất hiện trong question
      */
+    /**
+     * Drops low-quality items in-place and returns how many were removed.
+     * Combines placeholder-leak and Japanese-grammar checks so the retry path
+     * can reuse the exact same predicates as the main pipeline.
+     */
+    private static int applyQualityFilter(List<GeneratedItem> items) {
+        if (items == null || items.isEmpty()) return 0;
+        int before = items.size();
+        items.removeIf(it -> {
+            if (hasPlaceholderLeak(it)) {
+                log.warn("Drop item: placeholder leak in options/pairs");
+                return true;
+            }
+            if (hasJapaneseGrammarError(it)) {
+                log.warn("Drop item: Japanese grammar error (pronoun+の or determiner+particle)");
+                return true;
+            }
+            return false;
+        });
+        return before - items.size();
+    }
+
+    private static boolean hasPlaceholderLeak(GeneratedItem item) {
+        if (containsPlaceholder(item.getCorrectAnswer())) return true;
+        if (item.getOptions() != null) {
+            for (GeneratedItem.OptionItem opt : item.getOptions()) {
+                if (opt != null && containsPlaceholder(opt.text())) return true;
+            }
+        }
+        if (item.getPairs() != null) {
+            for (GeneratedItem.MatchingPair p : item.getPairs()) {
+                if (p == null) continue;
+                if (containsPlaceholder(p.left()) || containsPlaceholder(p.right())) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsPlaceholder(String s) {
+        return s != null && (s.contains("~") || s.contains("..."));
+    }
+
+    /** Delegates to {@link JapaneseGrammarValidator} across all JP-bearing fields. */
+    private static boolean hasJapaneseGrammarError(GeneratedItem item) {
+        if (JapaneseGrammarValidator.hasGrammarError(item.getCorrectAnswer())) return true;
+        if (JapaneseGrammarValidator.hasGrammarError(item.getQuestionJapanese())) return true;
+        if (item.getOptions() != null) {
+            for (GeneratedItem.OptionItem opt : item.getOptions()) {
+                if (opt != null && JapaneseGrammarValidator.hasGrammarError(opt.text())) return true;
+            }
+        }
+        if (item.getPairs() != null) {
+            for (GeneratedItem.MatchingPair p : item.getPairs()) {
+                if (p != null && JapaneseGrammarValidator.hasGrammarError(p.left())) return true;
+            }
+        }
+        return false;
+    }
+
     private void postProcessRefContentIds(List<GeneratedItem> items,
                                            List<Vocabulary> vocab,
                                            List<GrammarPoint> grammar,
                                            Map<String, UUID> uuidShortMap) {
+        Set<UUID> vocabIds   = vocab.stream().map(Vocabulary::getId).collect(Collectors.toSet());
+        Set<UUID> grammarIds = grammar.stream().map(GrammarPoint::getId).collect(Collectors.toSet());
+
         for (GeneratedItem item : items) {
             if (item.getRefContentId() != null) {
-                // Thử resolve shortId → fullUUID
                 UUID full = uuidShortMap.get(item.getRefContentId().replace("-", ""));
                 if (full == null) {
-                    // LLM có thể đã trả về dạng partial UUID — tìm match
                     final String refId = item.getRefContentId();
                     full = uuidShortMap.entrySet().stream()
                             .filter(e -> e.getValue().toString().contains(refId)
@@ -562,8 +801,29 @@ public class ExerciseGeneratorAgent {
                 }
                 if (full != null) {
                     item.setRefContentId(full.toString());
+                    // Source-of-truth override: entity_type must match the list the UUID
+                    // actually came from, never trust LLM's refContentType.
+                    String truthType = vocabIds.contains(full) ? "VOCABULARY"
+                                     : grammarIds.contains(full) ? "GRAMMAR"
+                                     : null;
+                    if (truthType == null) {
+                        log.warn("Drop refContentId {}: UUID not in vocab/grammar pool (LLM hallucination)", full);
+                        item.setRefContentId(null);
+                        item.setRefContentType(null);
+                    } else {
+                        String llmType = item.getRefContentType();
+                        if (llmType != null && !truthType.equals(llmType)) {
+                            log.info("Override refContentType: id={} llm={} truth={}", full, llmType, truthType);
+                        }
+                        item.setRefContentType(truthType);
+                    }
+                } else {
+                    // Unresolvable — drop ref so mastery isn't poisoned.
+                    log.warn("Drop refContentId {}: cannot resolve to a lesson entity", item.getRefContentId());
+                    item.setRefContentId(null);
+                    item.setRefContentType(null);
                 }
-                continue; // LLM đã điền, dù có thể sai — fuzzy sẽ overwrite nếu null
+                continue;
             }
 
             // Fuzzy fallback: tìm trong question text
@@ -722,29 +982,237 @@ public class ExerciseGeneratorAgent {
 
     private String describeTypeRule(PracticeItemType type) {
         return switch (type) {
-            case MULTIPLE_CHOICE ->
-                    "question = câu hỏi. options = 4 object {text,isCorrect}: đúng 1, sai 3. " +
-                    "correctAnswer = text của đáp án đúng.";
-            case FILL_BLANK ->
-                    "question = câu tiếng Nhật có ___ cần điền. " +
-                    "options = array {text, isCorrect}: đúng 1, còn lại là từ nhiễu cùng loại. " +
-                    "correctAnswer = từ cần điền.";
-            case TRANSLATION ->
-                    "question = câu tiếng Nhật cần dịch (hoặc ngược lại). " +
-                    "options = 4 object {text,isCorrect}: đúng 1, sai 3 (sai nhưng trông hợp lý). " +
-                    "correctAnswer = bản dịch đúng.";
-            case SENTENCE_ORDER ->
-                    "question = câu tiếng Việt tham chiếu. " +
-                    "options = từng TOKEN tiếng Nhật, TẤT CẢ isCorrect=false. " +
-                    "correctAnswer = câu Nhật đúng thứ tự.";
-            case MATCHING ->
-                    "Dùng trường \"pairs\" (KHÔNG dùng options). " +
-                    "pairs = 4 cặp {\"left\":\"tiếng Nhật\",\"right\":\"tiếng Việt\"}. " +
-                    "options = []. correctAnswer = null.";
-            case TRUE_FALSE ->
-                    "question = phát biểu về từ/ngữ pháp. " +
-                    "options = [{\"text\":\"Đúng\",\"isCorrect\":X},{\"text\":\"Sai\",\"isCorrect\":Y}]. " +
-                    "correctAnswer = \"Đúng\" hoặc \"Sai\".";
+            case MULTIPLE_CHOICE -> """
+                    MỤC TIÊU: Kiểm tra hiểu biết về từ/ngữ pháp (nghĩa, cách dùng, cách đọc).
+
+                    CẤU TRÚC:
+                      • question     : câu hỏi rõ ràng, KHÔNG để trống.
+                      • options      : ĐÚNG 4 object — {"text":"...","isCorrect":true/false}.
+                                       ĐÚNG 1 option có isCorrect=true, 3 option còn lại isCorrect=false.
+                                       Cả 4 distractors PHẢI CÙNG LOẠI TỪ (POS) với đáp án đúng
+                                       — KHÔNG trộn danh từ với đại từ, không trộn động từ với tính từ,
+                                       không trộn trợ từ với danh từ.
+                      • correctAnswer: STRING — SAO NGUYÊN VĂN giá trị "text" của option có isCorrect=true.
+
+                    GOOD EXAMPLE:
+                      {"itemType":"MULTIPLE_CHOICE","question":"Từ nào có nghĩa là 'giáo viên'?",
+                       "options":[{"text":"先生","isCorrect":true},{"text":"学生","isCorrect":false},
+                                  {"text":"医者","isCorrect":false},{"text":"社員","isCorrect":false}],
+                       "correctAnswer":"先生"}
+
+                    BAD EXAMPLE (TRÁNH):
+                      ❌ distractors khác POS (VD: trộn 'これ/それ/あれ' với '本') — học viên loại ngay.
+                      ❌ distractors trùng nghĩa với nhau — không còn là câu hỏi phân biệt.""";
+
+            case FILL_BLANK -> """
+                    MỤC TIÊU: Học viên điền đúng từ/trợ từ/mẫu ngữ pháp vào chỗ trống.
+
+                    CẤU TRÚC:
+                      • question     : câu tiếng Nhật có CHÍNH XÁC 1 chỗ "___" (3 dấu gạch dưới).
+                                       TUYỆT ĐỐI KHÔNG có >1 chỗ trống, KHÔNG dùng ký tự khác
+                                       (không 【…】, không 「___」, không ( ___ )).
+                      • options      : ĐÚNG 4 object {"text":"...","isCorrect":true/false} — isCorrect=true ĐÚNG 1.
+                                       Cả 4 option PHẢI HỢP LỆ VỀ NGỮ PHÁP khi điền vào vị trí ___
+                                       (cùng loại từ / cùng chức năng cú pháp với đáp án đúng).
+                                       Chỉ 1 option đúng về NGHĨA trong ngữ cảnh câu; 3 option còn lại
+                                       sai về nghĩa nhưng vẫn "đọc được" về cú pháp.
+                      • correctAnswer: STRING — đúng giá trị "text" của option có isCorrect=true.
+
+                    GOOD EXAMPLE:
+                      {"itemType":"FILL_BLANK","question":"私___学生です。",
+                       "options":[{"text":"は","isCorrect":true},{"text":"を","isCorrect":false},
+                                  {"text":"が","isCorrect":false},{"text":"に","isCorrect":false}],
+                       "correctAnswer":"は"}
+
+                    BAD EXAMPLE (TRÁNH):
+                      ❌ options chỉ có 2-3 phần tử — BẮT BUỘC đúng 4.
+                      ❌ nhiều chỗ "___" trong 1 câu — chỉ đúng 1.
+                      ❌ 2 options cùng đúng (VD: "これ" và "それ" khi ngữ cảnh mơ hồ về vị trí người nói).""";
+
+            case TRANSLATION -> """
+                    MỤC TIÊU: Học viên chọn bản dịch đúng từ ngôn ngữ này sang ngôn ngữ kia.
+
+                    CẤU TRÚC — CHỌN 1 TRONG 2 CHIỀU (luân phiên ~50/50 trong session):
+
+                      CHIỀU A (JP→VN):
+                        question         : câu TIẾNG NHẬT cần dịch.
+                        questionJapanese : null (question đã là tiếng Nhật).
+                        options          : ĐÚNG 4 bản dịch TIẾNG VIỆT {"text":"...","isCorrect":...}.
+
+                      CHIỀU B (VN→JP):
+                        question         : câu TIẾNG VIỆT cần dịch.
+                        questionJapanese : null (options đã là tiếng Nhật).
+                        options          : ĐÚNG 4 bản dịch TIẾNG NHẬT {"text":"...","isCorrect":...}.
+
+                    Trong cả 2 chiều:
+                      • ĐÚNG 1 option isCorrect=true.
+                      • 3 distractors là bản dịch HỢP LÝ về cú pháp (đúng loại câu, đúng thời)
+                        nhưng SAI về nghĩa (VD: thay chủ ngữ, đổi vật được nhắc tới, đổi thì, đổi số lượng).
+                      • KHÔNG dùng "N/A", câu bỏ lửng, "..." ở giữa câu.
+                      • correctAnswer: STRING — đúng giá trị "text" của option có isCorrect=true.
+
+                    GOOD EXAMPLE (JP→VN):
+                      {"itemType":"TRANSLATION","question":"これは本です。",
+                       "options":[{"text":"Đây là quyển sách.","isCorrect":true},
+                                  {"text":"Đó là quyển vở.","isCorrect":false},
+                                  {"text":"Kia là tờ báo.","isCorrect":false},
+                                  {"text":"Đây là cây bút.","isCorrect":false}],
+                       "correctAnswer":"Đây là quyển sách."}
+
+                    BAD EXAMPLE (TRÁNH):
+                      ❌ question tiếng Nhật + options cũng tiếng Nhật (đó là MULTIPLE_CHOICE, không phải TRANSLATION).
+                      ❌ option chứa "~" hoặc placeholder (VD: "cái ~ này") — dịch phải HOÀN CHỈNH.""";
+
+            case SENTENCE_ORDER -> """
+                    MỤC TIÊU: Học viên sắp xếp các TOKEN tiếng Nhật theo đúng thứ tự để tạo thành 1 câu hoàn chỉnh.
+
+                    QUY TẮC VÀNG (KHÔNG THƯƠNG LƯỢNG):
+                      ⚡ options = CHÍNH XÁC CÁC TOKEN CỦA CÂU ĐÚNG, SẮP XẾP THEO ĐÚNG THỨ TỰ ngữ pháp.
+                      ⚡ KHÔNG THÊM distractor / từ thừa / từ dự phòng. Mọi token PHẢI XUẤT HIỆN trong câu đúng.
+                      ⚡ Ghép nối options[0].text + options[1].text + ... + options[N-1].text (không dấu cách)
+                         PHẢI BẰNG correctAnswer chính xác ký tự.
+                      (Frontend sẽ tự shuffle hiển thị; backend dùng thứ tự LLM trả về làm ground truth.)
+
+                    CẤU TRÚC:
+                      • question         : câu TIẾNG VIỆT tương ứng (để học viên biết nên sắp xếp thế nào).
+                      • questionJapanese : null.
+                      • options          : ARRAY 4-7 object; MỖI object = 1 TOKEN TỐI THIỂU tiếng Nhật.
+                                           Format: {"text":"<token>","isCorrect":false} — TẤT CẢ isCorrect=false.
+                                           Key CHÍNH XÁC là "text" (KHÔNG "token"/"word"/"value").
+                      • correctAnswer    : STRING — câu tiếng Nhật HOÀN CHỈNH (= nối tất cả options theo thứ tự,
+                                           KHÔNG dấu cách giữa các tokens).
+
+                    ĐỊNH NGHĨA TOKEN (BẮT BUỘC TÁCH NHỎ ĐẾN MỨC NÀY, KHÔNG GỘP):
+                      ✓ Trợ từ 1 ký tự đứng RIÊNG: は / が / を / に / で / と / も / の / か / へ / や.
+                      ✓ Trợ từ 2 ký tự đứng RIÊNG: から / まで / より / には / では / でも / とか.
+                      ✓ Đại từ đứng RIÊNG: 私 / あなた / これ / それ / あれ / この / その / あの / どれ.
+                      ✓ Danh từ đơn: 先生 / 学生 / 本 / 学校 / 日本語 / ペン / 雑誌 (kanji+kana trong CÙNG 1 từ OK).
+                      ✓ Động từ (đã chia xong): 食べます / 行きました / 飲む / 勉強して / あります.
+                      ✓ Tính từ: おいしい / しずか / きれい / 新しい.
+                      ✓ Cụm ngữ pháp cố định KHÔNG thể tách: のです / でしょう / ください / ましょう / です / だ.
+
+                    CẤM TUYỆT ĐỐI (vi phạm = item BỊ LỖI SCORING):
+                      ❌ KHÔNG thêm DISTRACTOR. SAI: options=[これ,は,辞書,です,本]  ← "本" không thuộc câu đúng.
+                      ❌ KHÔNG gộp đại từ + trợ từ. SAI: "これは" → PHẢI "これ"+"は". SAI: "私は" → PHẢI "私"+"は".
+                      ❌ KHÔNG gộp danh từ + trợ từ. SAI: "本を" → PHẢI "本"+"を". SAI: "学校に" → PHẢI "学校"+"に".
+                      ❌ KHÔNG gộp cả câu: "これは本です" là CÂU, không phải token.
+                      ❌ KHÔNG có dấu cách / khoảng trắng bên trong 1 token.
+                      ❌ KHÔNG chứa ký tự "~" / "…" / placeholder.
+
+                    ⚠ CHỈ THỊ ĐẠI TỪ vs ĐỊNH TỪ (LỖI THƯỜNG GẶP — TRÁNH):
+                      この / その / あの / どの  = ĐỊNH TỪ ("this X / that X / which X") — LUÔN đứng TRƯỚC DANH TỪ.
+                        → TUYỆT ĐỐI KHÔNG đứng một mình trước "は". SAI: "そのは本です".
+                        → Đúng: "その本は..." / "その雑誌は..." (kèm danh từ).
+                      これ / それ / あれ / どれ  = ĐẠI TỪ ("this one / that one / which one") — đứng MỘT MÌNH được.
+                        → Đúng: "これは本です" / "それは雑誌です".
+
+                      Khi dịch "Cái này/đó/kia là X" → DÙNG ĐẠI TỪ (これ/それ/あれ), KHÔNG dùng định từ (この/その/あの).
+                      Khi dịch "X này/đó/kia là Y" → DÙNG ĐỊNH TỪ + DANH TỪ (この本/その雑誌/...) rồi mới は.
+
+                    GOOD EXAMPLE 1 (câu ngắn — 4 tokens):
+                      {"itemType":"SENTENCE_ORDER","question":"Đây là từ điển.",
+                       "options":[{"text":"これ","isCorrect":false},{"text":"は","isCorrect":false},
+                                  {"text":"辞書","isCorrect":false},{"text":"です","isCorrect":false}],
+                       "correctAnswer":"これは辞書です"}
+
+                    GOOD EXAMPLE 2 (câu có động từ — 6 tokens):
+                      {"itemType":"SENTENCE_ORDER","question":"Tôi đến trường bằng xe buýt.",
+                       "options":[{"text":"私","isCorrect":false},{"text":"は","isCorrect":false},
+                                  {"text":"バス","isCorrect":false},{"text":"で","isCorrect":false},
+                                  {"text":"学校","isCorrect":false},{"text":"に","isCorrect":false},
+                                  {"text":"行きます","isCorrect":false}],
+                       "correctAnswer":"私はバスで学校に行きます"}
+
+                    BAD EXAMPLE — các options SAI (TRÁNH):
+                      ❌ [{"text":"これは"},{"text":"辞書"},{"text":"です"},{"text":"本"}]
+                         → Lý do: gộp "これは" (phải tách) + thêm "本" là distractor (không thuộc câu).
+                      ❌ [{"text":"私は学生です"}]
+                         → Lý do: cả câu làm 1 token.
+                      ❌ [{"text":"私は"},{"text":"学生です"}]
+                         → Lý do: 2 tokens quá lớn, bỏ qua cơ hội học particle.""";
+
+            case MATCHING -> """
+                    MỤC TIÊU: Học viên nối từ/mẫu tiếng Nhật với nghĩa tiếng Việt tương ứng.
+
+                    CẤU TRÚC:
+                      • question     : chỉ dẫn bằng tiếng Việt (VD: "Nối các từ với nghĩa tương ứng").
+                      • options      : []  (dùng "pairs" thay thế — TUYỆT ĐỐI KHÔNG điền gì vào options).
+                      • pairs        : ĐÚNG 4 object — {"left":"<JP>","right":"<VN>"}.
+                                        "left"  : từ/mẫu tiếng Nhật, PHẢI là form hoàn chỉnh,
+                                                  KHÔNG chứa "~" / "..." / "X" / "［…］" dưới BẤT KỲ hình thức nào.
+                                        "right" : nghĩa tiếng Việt NGẮN GỌN, trực tiếp, KHÔNG dùng "~" / "...".
+                                        CÙNG DOMAIN: 4 cặp đều là từ vựng HOẶC đều là ngữ pháp, KHÔNG trộn.
+                      • correctAnswer: null.
+
+                    ⚡ XỬ LÝ PLACEHOLDER "~" KHI MATCHING NGỮ PHÁP (BẮT BUỘC):
+                      Mẫu ngữ pháp trong source thường có "~" (VD: "~は~です", "~を~ます", "この ~").
+                      Trước khi đưa vào "left", BẮT BUỘC thực hiện 1 trong 2 cách:
+
+                        CÁCH A — Thay "~" bằng danh từ/động từ cụ thể, tạo câu ví dụ hoàn chỉnh:
+                          "~は~です"    → "私は学生です"
+                          "~を食べます" → "りんごを食べます"
+                          "この ~"      → "この本"
+                          "~ます"       → "食べます"
+
+                        CÁCH B — Rút gọn về phần grammar core (particle/đuôi), KHÔNG "~":
+                          "~は~です" → "は...です" ❌ (vẫn có "...") → KHÔNG dùng cách này nếu phải giữ "~/...".
+                          Chỉ dùng khi có thể rút về 1 token thuần (VD: "~ます" → "ます" — OK).
+
+                      "right" (nghĩa tiếng Việt) PHẢI tương ứng với form đã resolve ở "left":
+                        "私は学生です" ↔ "Tôi là học sinh"  ✓
+                        "この本"       ↔ "cuốn sách này"    ✓
+                      KHÔNG dùng "~ này" / "X này" / "cái này ~" ở bên right.
+
+                    GOOD EXAMPLE 1 (vocab thuần):
+                      {"itemType":"MATCHING","question":"Nối từ tiếng Nhật với nghĩa tiếng Việt.",
+                       "options":[], "correctAnswer":null,
+                       "pairs":[{"left":"先生","right":"giáo viên"},
+                                {"left":"学生","right":"học sinh"},
+                                {"left":"医者","right":"bác sĩ"},
+                                {"left":"会社員","right":"nhân viên công ty"}]}
+
+                    GOOD EXAMPLE 2 (ngữ pháp — placeholder đã resolve):
+                      {"itemType":"MATCHING","question":"Nối câu tiếng Nhật với nghĩa tiếng Việt.",
+                       "options":[], "correctAnswer":null,
+                       "pairs":[{"left":"私は学生です","right":"Tôi là học sinh"},
+                                {"left":"これは本です","right":"Đây là cuốn sách"},
+                                {"left":"それはペンです","right":"Đó là cây bút"},
+                                {"left":"あれは車です","right":"Kia là chiếc xe"}]}
+
+                    BAD EXAMPLE (TRÁNH):
+                      ❌ left: "この ~" / right: "~ này"         — placeholder "~" chưa resolve.
+                      ❌ left: "~は~です" / right: "X là Y"      — placeholder chưa resolve ở cả 2 bên.
+                      ❌ left: "この本" / right: "~ này"         — right còn "~" dù left đã sạch.
+                      ❌ right: "cái này, đây" vs "cái đó, đó"   — 2 nghĩa quá gần, khó phân biệt.
+                      ❌ trộn vocab + grammar trong 1 câu MATCHING.""";
+
+            case TRUE_FALSE -> """
+                    MỤC TIÊU: Học viên phán đoán 1 phát biểu về từ/ngữ pháp đúng hay sai.
+
+                    CẤU TRÚC:
+                      • question     : PHÁT BIỂU (declarative, KHÔNG phải câu hỏi) về 1 từ/mẫu cụ thể.
+                                       Phát biểu PHẢI có đủ thông tin để phán đoán rõ ràng
+                                       (nghĩa, cách đọc, hoặc ngữ cảnh dùng).
+                      • options      : ĐÚNG 2 object theo thứ tự cố định —
+                                       [{"text":"Đúng","isCorrect":X},{"text":"Sai","isCorrect":Y}]
+                                       với X+Y=1 (một true, một false).
+                      • correctAnswer: "Đúng" HOẶC "Sai" — viết đúng có dấu, KHÔNG "True"/"False"/"TRUE"/"FALSE".
+
+                    QUY TẮC CHẤT LƯỢNG:
+                      ✓ Nếu phát biểu SAI → sai ở 1 chi tiết CỤ THỂ dễ xác minh (sai nghĩa, sai cách đọc,
+                        sai ngữ cảnh, sai thời của động từ...).
+                      ✗ KHÔNG tạo phát biểu mập mờ "có thể đúng có thể sai tùy ngữ cảnh".
+                      ✗ KHÔNG dùng phủ định kép ("Không phải là không có nghĩa...") — gây rối.
+
+                    GOOD EXAMPLE (Đúng):
+                      {"itemType":"TRUE_FALSE","question":"「先生」 có nghĩa là 'giáo viên' trong tiếng Việt.",
+                       "options":[{"text":"Đúng","isCorrect":true},{"text":"Sai","isCorrect":false}],
+                       "correctAnswer":"Đúng"}
+
+                    GOOD EXAMPLE (Sai):
+                      {"itemType":"TRUE_FALSE","question":"Cách đọc của 「学校」 là 「がくえん」.",
+                       "options":[{"text":"Đúng","isCorrect":false},{"text":"Sai","isCorrect":true}],
+                       "correctAnswer":"Sai"}""";
         };
     }
 
@@ -870,12 +1338,20 @@ public class ExerciseGeneratorAgent {
                 @JsonProperty("right") String right) {}
     }
 
-    private record BatchTask(PracticeItemType itemType, int batchIndex, int batchSize) {}
+    private record BatchTask(PracticeItemType itemType, int batchIndex, int batchSize,
+                              List<Vocabulary> batchVocab, List<GrammarPoint> batchGrammar) {}
     private record BatchResult(PracticeItemType itemType, int batchIndex,
                                 List<GeneratedItem> items) {}
 
     public static class OptionItemDeserializer extends StdDeserializer<GeneratedItem.OptionItem> {
         public OptionItemDeserializer() { super(GeneratedItem.OptionItem.class); }
+
+        // Accept common alternate keys the LLM may emit in place of "text"
+        // (especially for SENTENCE_ORDER tokens where the schema is easy to deviate from).
+        private static final Set<String> TEXT_ALIASES = Set.of(
+                "text", "token", "word", "value", "option", "content", "label",
+                "jp", "japanese", "ja"
+        );
 
         @Override
         public GeneratedItem.OptionItem deserialize(JsonParser p,
@@ -884,16 +1360,28 @@ public class ExerciseGeneratorAgent {
                 return new GeneratedItem.OptionItem(p.getText(), false);
             }
             String text = null;
+            String fallbackText = null;
             boolean isCorrect = false;
             while (p.nextToken() != JsonToken.END_OBJECT) {
                 String field = p.currentName();
                 p.nextToken();
-                switch (field) {
-                    case "text"      -> text = p.getText();
-                    case "isCorrect" -> isCorrect = p.getBooleanValue();
-                    default          -> p.skipChildren();
+                if ("isCorrect".equals(field)) {
+                    isCorrect = p.getBooleanValue();
+                } else if ("text".equals(field)) {
+                    if (p.currentToken() == JsonToken.VALUE_STRING) text = p.getText();
+                } else if (TEXT_ALIASES.contains(field)) {
+                    if (text == null && p.currentToken() == JsonToken.VALUE_STRING) {
+                        text = p.getText();
+                    } else {
+                        p.skipChildren();
+                    }
+                } else if (p.currentToken() == JsonToken.VALUE_STRING && fallbackText == null) {
+                    fallbackText = p.getText();
+                } else {
+                    p.skipChildren();
                 }
             }
+            if (text == null) text = fallbackText;
             return new GeneratedItem.OptionItem(text, isCorrect);
         }
     }

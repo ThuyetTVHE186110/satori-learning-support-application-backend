@@ -6,6 +6,7 @@ import com.fu.infrastructure.event.ConversationSessionCompletedEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.conversation.ai.advisor.GroundingAdvisor;
+import com.fu.conversation.ai.advisor.IntentRouterAdvisor;
 import com.fu.conversation.ai.advisor.RelevanceCheckAdvisor;
 import com.fu.conversation.ai.advisor.RetrievalAdvisor;
 import com.fu.conversation.ai.memory.CurriculumChatMemoryRepository;
@@ -91,6 +92,7 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
                                       ChatProperties chatProperties,
                                       ChatRateLimiter chatRateLimiter,
                                       CurriculumChatMemoryRepository chatMemoryRepository,
+                                      IntentRouterAdvisor intentRouterAdvisor,
                                       RetrievalAdvisor retrievalAdvisor,
                                       RelevanceCheckAdvisor relevanceCheckAdvisor,
                                       GroundingAdvisor groundingAdvisor,
@@ -127,15 +129,20 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
                 .order(MEMORY_ADVISOR_ORDER)
                 .build();
 
-        // ── Custom RAG advisor chain (Self-RAG + CRAG):
-        //    RetrievalAdvisor (100) → RelevanceCheckAdvisor (200) → GroundingAdvisor (300)
+        // ── Custom RAG advisor chain:
+        //    IntentRouter(5) → Memory(10) → Retrieval(100) → Relevance(200) → Grounding(300)
+        //    IntentRouterAdvisor sits outermost and short-circuits queries classified as
+        //    off-topic (math / coding / cooking / personal) via semantic similarity
+        //    against a curated exemplar set — before any downstream LLM / retrieval cost.
         this.chatClient = ChatClient.builder(chatModel)
-                .defaultAdvisors(memoryAdvisor, retrievalAdvisor, relevanceCheckAdvisor, groundingAdvisor)
+                .defaultAdvisors(intentRouterAdvisor, memoryAdvisor, retrievalAdvisor,
+                        relevanceCheckAdvisor, groundingAdvisor)
                 .build();
 
         // ── Streaming client — no GroundingAdvisor (see field Javadoc for rationale) ──
         this.streamingChatClient = ChatClient.builder(chatModel)
-                .defaultAdvisors(memoryAdvisor, retrievalAdvisor, relevanceCheckAdvisor)
+                .defaultAdvisors(intentRouterAdvisor, memoryAdvisor, retrievalAdvisor,
+                        relevanceCheckAdvisor)
                 .build();
 
         // ── Lightweight client for async title generation (no advisors, no RAG) ──
@@ -619,6 +626,9 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
         toolCtx.put(CurriculumQueryTools.CTX_COURSE_ID, session.courseId());
         if (session.lessonId() != null) {
             toolCtx.put(CurriculumQueryTools.CTX_LESSON_ID, session.lessonId());
+        }
+        if (session.userId() != null) {
+            toolCtx.put(CurriculumQueryTools.CTX_USER_ID, session.userId());
         }
         return toolCtx;
     }

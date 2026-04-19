@@ -130,21 +130,20 @@ public class StreakServiceImpl implements StreakService {
     @Override
     @Transactional
     public UserStats getUserStats(UUID userId) {
+        // First, try to find existing record
+        Optional<UserStats> existing = userStatsRepository.findByUserId(userId);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+        
+        // Atomic UPSERT: Insert if not exists (prevents race condition from concurrent requests)
+        UUID statsId = UUID.randomUUID();
+        userStatsRepository.upsertUserStats(statsId, userId);
+        log.info("Created new UserStats record for user: {} (id: {})", userId, statsId);
+        
+        // Fetch the inserted/existing record
         return userStatsRepository.findByUserId(userId)
-                .orElseGet(() -> {
-                    UserStats newStats = UserStats.builder()
-                            .userId(userId)
-                            .totalExp(0)
-                            .currentLevel(1)
-                            .expToNextLevel(100)
-                            .coins(0)
-                            .currentStreak(0)
-                            .longestStreak(0)
-                            .streakFreezeCount(0)
-                            .build();
-                    log.info("Created new UserStats record for user: {}", userId);
-                    return userStatsRepository.save(newStats);
-                });
+                .orElseThrow(() -> new RuntimeException("Failed to create UserStats for user: " + userId));
     }
 
     @Override
@@ -237,5 +236,11 @@ public class StreakServiceImpl implements StreakService {
         StreakHistory recentRecord = mostRecent.get();
         Integer streakCount = recentRecord.getStreakCount();
         return streakCount != null ? streakCount : 0;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean hasActivityOnDate(UUID userId, LocalDate date) {
+        return streakHistoryRepository.hasActivityOnDate(userId, date);
     }
 }
