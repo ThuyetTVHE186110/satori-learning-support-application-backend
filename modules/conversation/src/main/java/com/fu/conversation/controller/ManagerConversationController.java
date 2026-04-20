@@ -3,21 +3,17 @@ package com.fu.conversation.controller;
 import com.fu.common.response.ApiResponse;
 import com.fu.common.response.PageResponse;
 import com.fu.conversation.dto.request.CreateConversationRequest;
-import com.fu.conversation.dto.request.CreateMissionRequest;
 import com.fu.conversation.dto.request.CreateTopicRequest;
 import com.fu.conversation.dto.request.GenerateConversationRequest;
 import com.fu.conversation.dto.request.GenerateTopicRequest;
 import com.fu.conversation.dto.request.UpdateConversationRequest;
-import com.fu.conversation.dto.request.UpdateMissionRequest;
 import com.fu.conversation.dto.request.UpdateTopicRequest;
-import com.fu.conversation.dto.response.ConversationMissionResponse;
 import com.fu.conversation.dto.response.ConversationResponse;
 import com.fu.conversation.dto.response.ConversationSummaryResponse;
 import com.fu.conversation.dto.response.ConversationTopicResponse;
 import com.fu.conversation.dto.response.ConversationTopicSummaryResponse;
 import com.fu.conversation.dto.response.GeneratedConversationSuggestionResponse;
 import com.fu.conversation.dto.response.GeneratedTopicSuggestionResponse;
-import com.fu.conversation.service.ConversationMissionService;
 import com.fu.conversation.service.ConversationService;
 import com.fu.conversation.service.ConversationTopicService;
 import com.fu.course.entity.Course;
@@ -50,7 +46,6 @@ public class ManagerConversationController {
 
     private final ConversationTopicService topicService;
     private final ConversationService conversationService;
-    private final ConversationMissionService missionService;
 
     // ==================== TOPIC (Chủ đề lớn) ====================
 
@@ -313,71 +308,4 @@ public class ManagerConversationController {
         return ResponseEntity.ok(ApiResponse.success("Conversation deleted successfully", null));
     }
 
-    // ==================== MISSION (Nhiệm vụ) ====================
-
-    /**
-     * Create a new mission for a conversation.
-     * POST /api/v1/manager/conversation/missions
-     */
-    @PostMapping("/missions")
-    public ResponseEntity<ApiResponse<ConversationMissionResponse>> createMission(
-            @Valid @RequestBody CreateMissionRequest request,
-            @AuthenticationPrincipal(expression = "id") UUID managerId) {
-
-        log.info("Manager {} creating mission for conversation: {}", managerId, request.getConversationId());
-        ConversationMissionResponse response = missionService.createMission(request, managerId);
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success("Mission created successfully", response));
-    }
-
-    /**
-     * Get all missions for a conversation, sorted by order index.
-     * GET /api/v1/manager/conversation/conversations/{conversationId}/missions
-     */
-    @GetMapping("/conversations/{conversationId}/missions")
-    public ResponseEntity<ApiResponse<List<ConversationMissionResponse>>> getMissionsByConversation(
-            @PathVariable UUID conversationId) {
-
-        List<ConversationMissionResponse> missions = missionService.getMissionsByConversation(conversationId);
-        return ResponseEntity.ok(ApiResponse.success(
-                "Retrieved " + missions.size() + " missions", missions));
-    }
-
-    /**
-     * Get a mission by ID.
-     * GET /api/v1/manager/conversation/missions/{missionId}
-     */
-    @GetMapping("/missions/{missionId}")
-    public ResponseEntity<ApiResponse<ConversationMissionResponse>> getMission(
-            @PathVariable UUID missionId) {
-
-        return ResponseEntity.ok(ApiResponse.success(missionService.getMission(missionId)));
-    }
-
-    /**
-     * Update a mission.
-     * PUT /api/v1/manager/conversation/missions/{missionId}
-     */
-    @PutMapping("/missions/{missionId}")
-    public ResponseEntity<ApiResponse<ConversationMissionResponse>> updateMission(
-            @PathVariable UUID missionId,
-            @Valid @RequestBody UpdateMissionRequest request,
-            @AuthenticationPrincipal(expression = "id") UUID managerId) {
-
-        ConversationMissionResponse response = missionService.updateMission(missionId, request, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Mission updated successfully", response));
-    }
-
-    /**
-     * Soft-delete a mission.
-     * DELETE /api/v1/manager/conversation/missions/{missionId}
-     */
-    @DeleteMapping("/missions/{missionId}")
-    public ResponseEntity<ApiResponse<Void>> deleteMission(
-            @PathVariable UUID missionId,
-            @AuthenticationPrincipal(expression = "id") UUID managerId) {
-
-        missionService.deleteMission(missionId, managerId);
-        return ResponseEntity.ok(ApiResponse.success("Mission deleted successfully", null));
-    }
 }
