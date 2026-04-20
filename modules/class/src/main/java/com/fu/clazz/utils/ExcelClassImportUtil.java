@@ -28,6 +28,7 @@ public class ExcelClassImportUtil {
     public static final int COL_TEACHER_NAME = 5; // F
     public static final int COL_TEACHER_EMAIL = 6; // G
     public static final int COL_MAX_STUDENTS = 7; // H - Số học sinh tối đa
+    public static final int COL_EXPECTED_END_DATE = 8; // I
 
     // Sheet names
     public static final String SHEET_NAME_CLASSES = "Sheet quản lý lớp học";
@@ -42,8 +43,8 @@ public class ExcelClassImportUtil {
 
     // Date formatters - support both Vietnamese (DD/MM/YYYY) and ISO (yyyy-MM-dd) formats
     private static final DateTimeFormatter[] DATE_FORMATTERS = {
-        DateTimeFormatter.ofPattern("[d][dd]/[M][MM]/yyyy"),  // Vietnamese format (25/12/2003)
-        DateTimeFormatter.ofPattern("yyyy-MM[M]-dd[d]")   // ISO format
+            DateTimeFormatter.ofPattern("[d][dd]/[M][MM]/yyyy"),  // Vietnamese format (25/12/2003)
+            DateTimeFormatter.ofPattern("yyyy-MM[M]-dd[d]")   // ISO format
     };
 
     /**
@@ -243,13 +244,19 @@ public class ExcelClassImportUtil {
         }
 
         // Validate date format if provided
-        if (row.getStartDate() == null && row.getStartDate() != null) {
-            // Note: POI should already parse dates correctly, but double-check
-            return Optional.of(ClassImportError.builder()
-                    .rowNumber(row.getRowNumber())
-                    .className(name)
-                    .errorMessage("Ngày bắt đầu không hợp lệ (định dạng: yyyy-MM-dd)")
-                    .build());
+        // Note: POI should parse dates correctly, but we validate non-null dates are valid LocalDate objects
+        // This validation is somewhat redundant since POI handles it, but kept for safety
+        if (row.getStartDate() != null) {
+            // If we got here, POI already parsed it successfully as a valid date
+            // No need to re-validate - just ensure it's a valid LocalDate
+            if (row.getStartDate().isBefore(LocalDate.of(1900, 1, 1)) ||
+                    row.getStartDate().isAfter(LocalDate.of(2100, 12, 31))) {
+                return Optional.of(ClassImportError.builder()
+                        .rowNumber(row.getRowNumber())
+                        .className(name)
+                        .errorMessage("Ngày bắt đầu nằm ngoài phạm vi hợp lệ (1900-2100)")
+                        .build());
+            }
         }
 
         return Optional.empty();
@@ -345,6 +352,7 @@ public class ExcelClassImportUtil {
                 .startDate(getCellValueAsDate(row.getCell(COL_START_DATE)))
                 .teacherName(getCellValueAsString(row.getCell(COL_TEACHER_NAME)))
                 .teacherEmail(getCellValueAsString(row.getCell(COL_TEACHER_EMAIL)))
+                .expectedEndDate(getCellValueAsDate(row.getCell(COL_EXPECTED_END_DATE)))
                 .maxStudents(maxStudents)
                 .build();
     }
@@ -409,7 +417,7 @@ public class ExcelClassImportUtil {
                         .toLocalDate();
             } else if (cell.getCellType() == CellType.STRING) {
                 String dateStr = cell.getStringCellValue().trim();
-                
+
                 // Try multiple date formats
                 for (DateTimeFormatter formatter : DATE_FORMATTERS) {
                     try {
@@ -418,7 +426,7 @@ public class ExcelClassImportUtil {
                         // Try next formatter
                     }
                 }
-                
+
                 // If all formatters fail, log warning
                 log.warn("Failed to parse date from cell (tried all formats): {}", dateStr);
             }
@@ -448,5 +456,40 @@ public class ExcelClassImportUtil {
         }
 
         return true;
+    }
+
+    /**
+     * Check for duplicate learners in the same class and return consolidated errors.
+     * Groups duplicate learners and returns a single error per unique duplicate instead of per row.
+     *
+     * @param learnerExcelRows List of learners for a specific class
+     * @param className        Name of the class (for error reporting)
+     * @param excelRowNumber   Row number of the class in Excel (for error reporting)
+     * @return List of consolidated ClassImportError objects (one per unique duplicate learner)
+     */
+    public static List<ClassImportError> findDuplicateLearnerErrors(List<LearnerExcelRow> learnerExcelRows,
+                                                                    String className, int excelRowNumber) {
+        List<ClassImportError> errors = new ArrayList<>();
+
+        // Count occurrences of each learner email
+        Map<String, Long> emailCounts = new HashMap<>();
+        for (LearnerExcelRow row : learnerExcelRows) {
+            String email = row.getEmail().trim().toLowerCase();
+            emailCounts.put(email, emailCounts.getOrDefault(email, 0L) + 1);
+        }
+
+        // Create one error per unique duplicate learner (not per row)
+        for (Map.Entry<String, Long> entry : emailCounts.entrySet()) {
+            if (entry.getValue() > 1) {
+                errors.add(ClassImportError.builder()
+                        .rowNumber(excelRowNumber)
+                        .className(className)
+                        .errorMessage(String.format("Học sinh %s xuất hiện %d lần trong cùng một lớp trong file import. Vui lòng loại bỏ các dòng trùng lặp.",
+                                entry.getKey(), entry.getValue()))
+                        .build());
+            }
+        }
+
+        return errors;
     }
 }

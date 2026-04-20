@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 /**
@@ -27,4 +28,6 @@ public class ClassSummaryResponse {
     private String courseStatus;
     private ClassStatus status;
     private Long memberCount;
+    private LocalDate expectedEndDate;
+
 }

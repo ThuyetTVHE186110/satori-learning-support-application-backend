@@ -31,7 +31,7 @@ public class ClassResponse {
     private LocalDate startDate;
     private LocalDate endDate;
     private ClassStatus status;
-
+    private LocalDate expectedEndDate;
     private UUID createdBy;
     private UUID updatedBy;
     private LocalDateTime createdAt;

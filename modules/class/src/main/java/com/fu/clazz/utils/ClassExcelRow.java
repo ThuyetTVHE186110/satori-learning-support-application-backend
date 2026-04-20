@@ -25,13 +25,16 @@ public class ClassExcelRow {
     private String teacherName;  // cột F: Giảng Viên (display only)
     private String teacherEmail; // cột G: Email Giảng Viên
     private Integer maxStudents;  // cột H: Số học sinh tối đa (optional, default=8)
+    private LocalDate expectedEndDate;
 
     public boolean isEmpty() {
         return (name == null || name.isBlank()) &&
-               (description == null || description.isBlank()) &&
-               (courseName == null || courseName.isBlank()) &&
-               startDate == null &&
-               (teacherName == null || teacherName.isBlank()) &&
-               (teacherEmail == null || teacherEmail.isBlank());
+                (description == null || description.isBlank()) &&
+                (courseName == null || courseName.isBlank()) &&
+                startDate == null &&
+                (teacherName == null || teacherName.isBlank()) &&
+                (teacherEmail == null || teacherEmail.isBlank()) &&
+                expectedEndDate == null
+                ;
     }
 }

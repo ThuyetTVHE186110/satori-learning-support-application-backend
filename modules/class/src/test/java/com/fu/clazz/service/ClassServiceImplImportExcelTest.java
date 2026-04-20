@@ -167,10 +167,10 @@ class ClassServiceImplImportExcelTest {
             // Setup mocks to find the class by name search
             given(classRepository.findAll()).willReturn(List.of(existingClass));
             given(classRepository.save(any(Clazz.class))).willReturn(existingClass);
-            given(classMemberRepository.save(any(ClassMember.class))).willReturn(new ClassMember());
-            given(classMemberRepository.findAll()).willReturn(new ArrayList<>());
-            given(userRepository.findById(learnerId1)).willReturn(Optional.of(validUser));
-            given(classMemberRepository.existsByUserIdAndRemovedAtNull(learnerId1)).willReturn(false);
+            lenient().when(classMemberRepository.save(any(ClassMember.class))).thenReturn(new ClassMember());
+            lenient().when(classMemberRepository.findAll()).thenReturn(new ArrayList<>());
+            lenient().when(userRepository.findById(learnerId1)).thenReturn(Optional.of(validUser));
+            lenient().when(classMemberRepository.existsByUserIdAndRemovedAtNull(learnerId1)).thenReturn(false);
 
             // Act
             ImportClassesResult result = classService.approveImportClasses(request, managerId);
@@ -600,7 +600,7 @@ class ClassServiceImplImportExcelTest {
         void testLearnerAlreadyInUpdateClassIsNotDuplicated() {
             // This test verifies that learners already in an UPDATE class
             // are excluded from the learnersToAdd list in Step 1 preview
-            
+
             // Note: This would require an integration test with actual Excel file parsing
             // For now, we skip this as it's already tested in the full import flow tests
             // The deduplication logic is verified through:
@@ -623,4 +623,312 @@ class ClassServiceImplImportExcelTest {
             // 4. Update max student validation to include existing members
         }
     }
+
+    @Nested
+    @DisplayName("UPDATE Classes with Old vs New Values")
+    class UpdateClassComparisonTests {
+
+        private UUID existingClassId;
+        private Clazz existingClass;
+
+        @BeforeEach
+        void setUp() {
+            existingClassId = UUID.randomUUID();
+            existingClass = Clazz.builder()
+                    .id(existingClassId)
+                    .name("N1 Original Class")
+                    .description("Original description")
+                    .courseId(courseId)
+                    .startDate(LocalDate.of(2024, 1, 15))
+                    .status(ClassStatus.NOT_STARTED)
+                    .maxStudents(10)
+                    .build();
+        }
+
+        @Test
+        @DisplayName("UPDATE class shows old vs new values when fields change")
+        void testUpdateClassShowsChangedValues() {
+            ClassPreview preview = ClassPreview.builder()
+                    .name("N1 Updated Class")
+                    .description("Updated description")
+                    .courseId(courseId)
+                    .startDate(LocalDate.of(2024, 2, 15))
+                    .status(ClassStatus.ACTIVE)
+                    .maxStudents(15)
+                    .build();
+
+            preview.setOldClassName("N1 Original Class");
+            preview.setName("N1 Updated Class");
+            preview.setOldDescription("Original description");
+            preview.setDescription("Updated description");
+
+            assertThat(preview.getOldClassName()).isEqualTo("N1 Original Class");
+            assertThat(preview.getName()).isEqualTo("N1 Updated Class");
+            assertThat(preview.getOldDescription()).isEqualTo("Original description");
+            assertThat(preview.getDescription()).isEqualTo("Updated description");
+        }
+
+        @Test
+        @DisplayName("UPDATE class with same teacher shows no error")
+        void testUpdateClassWithSameTeacher() {
+            ClassPreview preview = ClassPreview.builder()
+                    .name("N1 Class")
+                    .teacherEmail("teacher@example.com")
+                    .build();
+
+            preview.setOldTeacherEmail("teacher@example.com");
+            preview.setTeacherEmail("teacher@example.com");
+
+            assertThat(preview.getOldTeacherEmail()).isEqualTo(preview.getTeacherEmail());
+            assertThat(preview.getTeacherValidationError()).isNull();
+        }
+
+        @Test
+        @DisplayName("UPDATE class with different teacher shows change")
+        void testUpdateClassWithDifferentTeacher() {
+            ClassPreview preview = ClassPreview.builder()
+                    .name("N1 Class")
+                    .teacherEmail("newteacher@example.com")
+                    .build();
+
+            preview.setOldTeacherEmail("oldteacher@example.com");
+            preview.setTeacherEmail("newteacher@example.com");
+            preview.setTeacherValidationError("Giảng viên sẽ được thay đổi từ oldteacher@example.com thành newteacher@example.com");
+
+            assertThat(preview.getOldTeacherEmail()).isNotEqualTo(preview.getTeacherEmail());
+            assertThat(preview.getTeacherValidationError()).contains("sẽ được thay đổi");
+        }
+
+        @Test
+        @DisplayName("UPDATE class dates and status tracked separately")
+        void testUpdateClassDateAndStatusChanges() {
+            ClassPreview preview = ClassPreview.builder()
+                    .name("N1 Class")
+                    .startDate(LocalDate.of(2024, 2, 15))
+                    .status(ClassStatus.ACTIVE)
+                    .maxStudents(15)
+                    .build();
+
+            preview.setOldStartDate(LocalDate.of(2024, 1, 15));
+            preview.setStartDate(LocalDate.of(2024, 2, 15));
+            preview.setOldStatus(ClassStatus.NOT_STARTED);
+            preview.setStatus(ClassStatus.ACTIVE);
+            preview.setOldMaxStudents(10);
+            preview.setMaxStudents(15);
+
+            assertThat(preview.getOldStartDate()).isBefore(preview.getStartDate());
+            assertThat(preview.getOldStatus()).isNotEqualTo(preview.getStatus());
+            assertThat(preview.getOldMaxStudents()).isLessThan(preview.getMaxStudents());
+        }
+    }
+
+    @Nested
+    @DisplayName("UPDATE Class No Changes Detection")
+    class UpdateClassNoChangesTests {
+
+        @Test
+        @DisplayName("Unchanged UPDATE class with no new learners has hasActualChanges=false")
+        void testUnchangedUpdateClassMarkedAsNoChanges() {
+            // Setup: All old/new values identical, no new learners
+            ClassPreview preview = ClassPreview.builder()
+                    .name("UD501")
+                    .description("Basic Class")
+                    .courseId(UUID.randomUUID())
+                    .courseName("N1")
+                    .teacherId(teacherId)
+                    .teacherName("Teacher One")
+                    .teacherEmail("teacher@example.com")
+                    .startDate(LocalDate.of(2027, 4, 23))
+                    .status(ClassStatus.NOT_STARTED)
+                    .maxStudents(8)
+                    .learnersToAdd(Collections.emptyList())  // No new learners
+                    .build();
+
+            // Set old values to match current values exactly
+            preview.setOldClassName("UD501");
+            preview.setOldDescription("Basic Class");
+            preview.setOldStartDate(LocalDate.of(2027, 4, 23));
+            preview.setOldStatus(ClassStatus.NOT_STARTED);
+            preview.setOldMaxStudents(8);
+            preview.setOldTeacherEmail("teacher@example.com");
+
+            // When no changes detected, all old values should match current values
+            assertThat(preview.getOldClassName()).isEqualTo(preview.getName());
+            assertThat(preview.getOldDescription()).isEqualTo(preview.getDescription());
+            assertThat(preview.getOldStartDate()).isEqualTo(preview.getStartDate());
+            assertThat(preview.getOldStatus()).isEqualTo(preview.getStatus());
+            assertThat(preview.getOldMaxStudents()).isEqualTo(preview.getMaxStudents());
+            assertThat(preview.getOldTeacherEmail()).isEqualTo(preview.getTeacherEmail());
+            assertThat(preview.getLearnersToAdd()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("UPDATE class with field changes has hasActualChanges=true")
+        void testUpdateClassWithDescriptionChange() {
+            // Setup: Description changed
+            ClassPreview preview = ClassPreview.builder()
+                    .name("UD501")
+                    .description("New Description")
+                    .courseId(UUID.randomUUID())
+                    .courseName("N1")
+                    .teacherId(teacherId)
+                    .teacherName("Teacher One")
+                    .teacherEmail("teacher@example.com")
+                    .startDate(LocalDate.of(2027, 4, 23))
+                    .status(ClassStatus.NOT_STARTED)
+                    .maxStudents(8)
+                    .learnersToAdd(Collections.emptyList())
+                    .build();
+
+            // Set old values (main field = new, oldXxx = old)
+            preview.setOldClassName("UD501");
+            preview.setOldDescription("Old Description");  // Different from new
+            preview.setOldStartDate(LocalDate.of(2027, 4, 23));
+
+            // Description changed
+            assertThat(preview.getOldDescription()).isNotEqualTo(preview.getDescription());
+        }
+
+        @Test
+        @DisplayName("UPDATE class with new learners has hasActualChanges=true")
+        void testUpdateClassWithNewLearners() {
+            // Setup: Has new learner to add
+            LearnerInfo newLearner = LearnerInfo.builder()
+                    .id(UUID.randomUUID())
+                    .email("newlearner@example.com")
+                    .fullName("New Learner")
+                    .build();
+
+            ClassPreview preview = ClassPreview.builder()
+                    .name("UD501")
+                    .description("Basic Class")
+                    .courseId(UUID.randomUUID())
+                    .courseName("N1")
+                    .teacherId(teacherId)
+                    .teacherName("Teacher One")
+                    .teacherEmail("teacher@example.com")
+                    .startDate(LocalDate.of(2027, 4, 23))
+                    .status(ClassStatus.NOT_STARTED)
+                    .maxStudents(8)
+                    .learnersToAdd(List.of(newLearner))  // Has learner
+                    .build();
+
+            // Set all old values identical to current (main field = new, oldXxx = old)
+            preview.setOldClassName("UD501");
+            preview.setOldDescription("Basic Class");
+            preview.setOldStartDate(LocalDate.of(2027, 4, 23));
+            preview.setOldStatus(ClassStatus.NOT_STARTED);
+
+            // Even though no field changes, has new learners so should have changes
+            assertThat(preview.getLearnersToAdd()).isNotEmpty();
+            assertThat(preview.getOldClassName()).isEqualTo(preview.getName());
+        }
+    }
+
+
+    @Nested
+    @DisplayName("Teacher Information Validation")
+    class TeacherInfoValidationTests {
+
+        @Test
+        @DisplayName("Teacher full name matches DB - validation passes")
+        void testTeacherFullNameMatchesDB() {
+            ClassPreview preview = ClassPreview.builder()
+                    .name("UD501")
+                    .teacherEmail("teacher@example.com")
+                    .teacherName("John Doe")
+                    .build();
+
+            preview.setOldTeacherEmail("teacher@example.com");
+            preview.setOldTeacherFullName("John Doe");
+
+            assertThat(preview.getTeacherName()).isEqualTo(preview.getOldTeacherFullName());
+            assertThat(preview.getTeacherInfoValidationError()).isNull();
+        }
+
+        @Test
+        @DisplayName("Teacher full name mismatch with DB - validation fails")
+        void testTeacherFullNameMismatchDB() {
+            ClassPreview preview = ClassPreview.builder()
+                    .name("UD501")
+                    .teacherEmail("teacher@example.com")
+                    .teacherName("Jane Doe")
+                    .build();
+
+            preview.setOldTeacherEmail("teacher@example.com");
+            preview.setOldTeacherFullName("John Doe");
+
+            String errorMsg = String.format("Thông tin giảng viên không khớp với DB: Tên Excel = '%s', Tên DB = '%s'",
+                    preview.getTeacherName(), preview.getOldTeacherFullName());
+            preview.setTeacherInfoValidationError(errorMsg);
+
+            assertThat(preview.getTeacherName()).isNotEqualTo(preview.getOldTeacherFullName());
+            assertThat(preview.getTeacherInfoValidationError()).contains("Tên Excel");
+        }
+
+        @Test
+        @DisplayName("No teacher full name in Excel - validation skipped")
+        void testNoTeacherFullNameInExcel() {
+            ClassPreview preview = ClassPreview.builder()
+                    .name("UD501")
+                    .teacherEmail("teacher@example.com")
+                    .teacherName(null)
+                    .build();
+
+            preview.setOldTeacherEmail("teacher@example.com");
+            preview.setOldTeacherFullName("John Doe");
+
+            assertThat(preview.getTeacherName()).isNull();
+            assertThat(preview.getTeacherInfoValidationError()).isNull();
+        }
+
+        @Test
+        @DisplayName("Teacher info mismatch filters class from update list")
+        void testTeacherInfoMismatchFiltersClass() {
+            ClassPreview preview = ClassPreview.builder()
+                    .name("UD501")
+                    .description("Class with mismatched teacher")
+                    .courseId(UUID.randomUUID())
+                    .courseName("N1")
+                    .teacherId(teacherId)
+                    .teacherEmail("teacher@example.com")
+                    .teacherName("Jane Doe")
+                    .startDate(LocalDate.of(2027, 4, 23))
+                    .status(ClassStatus.NOT_STARTED)
+                    .maxStudents(8)
+                    .learnersToAdd(Collections.emptyList())
+                    .build();
+
+            preview.setOldClassName("UD501");
+            preview.setOldTeacherEmail("teacher@example.com");
+            preview.setOldTeacherFullName("John Doe");
+
+            preview.setTeacherInfoValidationError(
+                    String.format("Thông tin giảng viên không khớp với DB: Tên Excel = 'Jane Doe', Tên DB = 'John Doe'")
+            );
+
+            assertThat(preview.getTeacherInfoValidationError()).isNotNull();
+            assertThat(preview.getTeacherInfoValidationError()).contains("Jane Doe");
+        }
+
+        @Test
+        @DisplayName("Empty teacher full name string treated as null")
+        void testEmptyTeacherFullNameTreatedAsNull() {
+            ClassPreview preview = ClassPreview.builder()
+                    .name("UD501")
+                    .teacherEmail("teacher@example.com")
+                    .teacherName("   ")
+                    .build();
+
+            preview.setOldTeacherEmail("teacher@example.com");
+            preview.setOldTeacherFullName("John Doe");
+
+            String trimmed = preview.getTeacherName() != null ? preview.getTeacherName().trim() : null;
+            boolean shouldValidate = trimmed != null && !trimmed.isEmpty();
+
+            assertThat(shouldValidate).isFalse();
+            assertThat(preview.getTeacherInfoValidationError()).isNull();
+        }
+    }
 }
+

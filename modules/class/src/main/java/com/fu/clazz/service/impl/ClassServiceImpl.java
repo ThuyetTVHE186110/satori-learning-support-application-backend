@@ -56,6 +56,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -681,9 +682,6 @@ public class ClassServiceImpl implements ClassService {
         List<ClassPreview> validClasses = new ArrayList<>();
         Set<String> seenClassNames = new HashSet<>();
 
-        int newClassCount = 0;
-        int updateClassCount = 0;
-
         // Step 1: Build map of learner email -> list of classes they appear in (for multi-class detection)
         // Using case-insensitive class name matching
         Map<String, Set<String>> learnerToClasses = new HashMap<>();
@@ -776,11 +774,8 @@ public class ClassServiceImpl implements ClassService {
             boolean classExists = classRepository.existsByNameIgnoreCase(className);
             Clazz existingClass = null;
             if (classExists) {
-                updateClassCount++;
                 // Retrieve the actual class for learner membership checks
                 existingClass = classRepository.findByNameIgnoreCaseAndNotDeleted(className).orElse(null);
-            } else {
-                newClassCount++;
             }
 
             // Determine status based on startDate
@@ -801,8 +796,36 @@ public class ClassServiceImpl implements ClassService {
                 }
             }
 
+            // Check for duplicate learners in this class first and add consolidated errors
+            List<ClassImportError> duplicateErrors = ExcelClassImportUtil.findDuplicateLearnerErrors(
+                    learnerExcelRows, className, excelRow.getRowNumber());
+            errors.addAll(duplicateErrors);
+
+            // Build set of emails with duplicates to skip them during processing
+            Set<String> duplicateLearnerEmails = duplicateErrors.stream()
+                    .map(error -> {
+                        // Extract email from error message: "Học sinh {email} xuất hiện..."
+                        String msg = error.getErrorMessage();
+                        if (msg.contains("xuất hiện")) {
+                            int startIdx = msg.indexOf("Học sinh ") + 9;
+                            int endIdx = msg.indexOf(" xuất hiện");
+                            if (startIdx > 8 && endIdx > startIdx) {
+                                return msg.substring(startIdx, endIdx).toLowerCase();
+                            }
+                        }
+                        return null;
+                    })
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
+
             for (LearnerExcelRow learnerExcelRow : learnerExcelRows) {
                 String learnerEmail = learnerExcelRow.getEmail().trim().toLowerCase();
+
+                // Skip learners that are duplicates in this class
+                if (duplicateLearnerEmails.contains(learnerEmail)) {
+                    log.debug("Skipping duplicate learner {} in class {}", learnerEmail, className);
+                    continue;
+                }
 
                 // Skip learners that are in multiple classes in this batch
                 if (learnersInMultipleClasses.contains(learnerEmail)) {
@@ -846,17 +869,28 @@ public class ClassServiceImpl implements ClassService {
                         continue;
                     }
                 }
-
-                String fullName = (learner.getFirstName() != null ? learner.getFirstName() : "") +
-                        (learner.getLastName() != null ? " " + learner.getLastName() : "");
-                fullName = fullName.trim();
-
+                //Check information of learner in excel file is different from database, if different, add to error list
+                //Show different information in error message to inform user to update learner information before import
+                if (!learner.getFullName().equals(learnerExcelRow.getName().trim()) ||
+                        !learner.getDateOfBirth().equals(learnerExcelRow.getDateOfBirth()) ||
+                        !learner.getPhoneNumber().equals(learnerExcelRow.getPhoneNumber().trim())) {
+                    errors.add(ClassImportError.builder()
+                            .rowNumber(excelRow.getRowNumber())
+                            .className(className)
+                            .errorMessage(String.format("Thông tin học sinh %s không khớp với dữ liệu hiện tại. Vui lòng cập nhật thông tin học sinh trước khi import. (Excel: name=%s, dob=%s, phone=%s; DB: name=%s, dob=%s, phone=%s)",
+                                    learnerEmail,
+                                    learnerExcelRow.getName().trim(), learnerExcelRow.getDateOfBirth(), learnerExcelRow.getPhoneNumber().trim(),
+                                    learner.getFullName(), learner.getDateOfBirth(), learner.getPhoneNumber()))
+                            .build());
+                    continue;
+                }
+                // Build LearnerInfo for preview
                 LearnerInfo learnerInfo = LearnerInfo.builder()
                         .id(learner.getId())
-                        .email(learner.getEmail())
-                        .fullName(!fullName.isEmpty() ? fullName : learnerExcelRow.getName())
-                        .dateOfBirth(learner.getDateOfBirth())
-                        .phoneNumber(learner.getPhoneNumber())
+                        .email(learnerExcelRow.getEmail())
+                        .fullName(learnerExcelRow.getName())
+                        .dateOfBirth(learnerExcelRow.getDateOfBirth())
+                        .phoneNumber(learnerExcelRow.getPhoneNumber())
                         .build();
                 learnersToAdd.add(learnerInfo);
             }
@@ -877,7 +911,16 @@ public class ClassServiceImpl implements ClassService {
                 errors.add(maxStudentsError.get());
                 continue;
             }
-
+            if (existingClass != null) {
+                long currentNumberOfLearners = classMemberRepository.countActiveByClassId(existingClass.getId());
+                if (excelRow.getMaxStudents() < currentNumberOfLearners) {
+                    errors.add(ClassImportError.builder()
+                            .rowNumber(excelRow.getRowNumber())
+                            .className(excelRow.getName())
+                            .errorMessage("Số học viên tối đa không được nhỏ hơn số học viên hiện tại đang theo học.")
+                            .build());
+                }
+            }
             // Create ClassPreview with both IDs and full details
             ClassPreview preview = ClassPreview.builder()
                     .name(className)
@@ -902,7 +945,56 @@ public class ClassServiceImpl implements ClassService {
         List<ClassPreview> updatedClasses = new ArrayList<>();
         for (ClassPreview preview : validClasses) {
             if (classRepository.existsByNameIgnoreCase(preview.getName())) {
-                updatedClasses.add(preview);
+                // For UPDATE classes, enrich with old values and validations
+                ClassPreview enrichedPreview = enrichUpdateClassPreview(preview, preview.getName());
+                Clazz existingClass = classRepository.findByNameIgnoreCase(preview.getName()).get();
+
+                // Check for validation errors - filter out if found
+                boolean hasTeacherError = enrichedPreview.getTeacherValidationError() != null;
+                boolean hasCourseError = enrichedPreview.getCourseValidationError() != null;
+                boolean hasTeacherInfoError = enrichedPreview.getTeacherInfoValidationError() != null;
+                boolean invalidStatusError = existingClass.isDeleted() || existingClass.getStatus().equals(ClassStatus.CLOSED);
+                if (hasTeacherError || hasCourseError || hasTeacherInfoError || invalidStatusError) {
+                    // Add validation errors to error list
+                    if (hasTeacherError) {
+                        errors.add(ClassImportError.builder()
+                                .className(preview.getName())
+                                .errorMessage(enrichedPreview.getTeacherValidationError())
+                                .build());
+                    }
+                    if (hasCourseError) {
+                        errors.add(ClassImportError.builder()
+                                .className(preview.getName())
+                                .errorMessage(enrichedPreview.getCourseValidationError())
+                                .build());
+                    }
+                    if (hasTeacherInfoError) {
+                        errors.add(ClassImportError.builder()
+                                .className(preview.getName())
+                                .errorMessage(enrichedPreview.getTeacherInfoValidationError())
+                                .build());
+                    }
+                    if (invalidStatusError) {
+                        errors.add(ClassImportError.builder()
+                                .className(preview.getName())
+                                .errorMessage("Lớp học " + preview.getName() + " đã bị xóa hoặc đóng, không thể cập nhật thông tin.")
+                                .build());
+
+                    }
+                    log.debug("Filtering out UPDATE class {} - has validation error", preview.getName());
+                    continue;
+                }
+
+                // Check if there are any actual changes by comparing current vs old values
+                boolean hasFieldChanges = hasFieldChanges(enrichedPreview);
+                boolean hasNewLearners = enrichedPreview.getLearnersToAdd() != null && !enrichedPreview.getLearnersToAdd().isEmpty();
+
+                // Only include if has changes or new learners
+                if (hasFieldChanges || hasNewLearners) {
+                    updatedClasses.add(enrichedPreview);
+                } else {
+                    log.debug("Filtering out UPDATE class {} - no actual changes detected", preview.getName());
+                }
             } else {
                 createdClasses.add(preview);
             }
@@ -912,15 +1004,15 @@ public class ClassServiceImpl implements ClassService {
                 .totalRows(excelRows.size())
                 .validRows(validClasses.size())
                 .invalidRows(errors.size())
-                .newClasses(newClassCount)
-                .updateClasses(updateClassCount)
+                .newClasses(createdClasses.size())
+                .updateClasses(updatedClasses.size())
                 .createdClasses(createdClasses)
                 .updatedClasses(updatedClasses)
                 .errors(errors)
                 .build();
 
         log.info("Class import preview complete: {} valid, {} errors, {} new, {} updates",
-                validClasses.size(), errors.size(), newClassCount, updateClassCount);
+                validClasses.size(), errors.size(), createdClasses.size(), updatedClasses.size());
 
         return result;
     }
@@ -1073,6 +1165,7 @@ public class ClassServiceImpl implements ClassService {
                                     .errorMessage(String.format("Lỗi gán giảng viên %s: %s",
                                             preview.getTeacherEmail(), e.getMessage()))
                                     .build());
+                            continue;
                         }
                         // Add new learners to existing class
                         if (preview.getLearnersToAdd() != null) {
@@ -1315,5 +1408,198 @@ public class ClassServiceImpl implements ClassService {
                 .collect(Collectors.toList());
 
         return new org.springframework.data.domain.PageImpl<>(responses, pageable, historyPage.getTotalElements());
+    }
+
+    /**
+     * Validate and enrich UPDATE class preview with old vs new values
+     * Checks teacher information and populates comparison fields
+     * Also detects if class has any actual changes worth importing
+     *
+     * @param preview ClassPreview to enrich
+     * @param className Name of class to find in DB
+     * @return Updated preview with old/new values and any validation errors
+     */
+    /**
+     * Validate and enrich UPDATE class preview with old vs new values
+     * Checks teacher and course information and populates comparison fields
+     *
+     * @param preview   ClassPreview to enrich
+     * @param className Name of class to find in DB
+     * @return Updated preview with old/new values and any validation errors
+     */
+    private ClassPreview enrichUpdateClassPreview(ClassPreview preview, String className) {
+        try {
+            // Find existing class in DB
+            Clazz existingClass = classRepository.findByNameIgnoreCaseAndNotDeleted(className).orElse(null);
+            if (existingClass == null) {
+                return preview; // Should not happen if we're in UPDATE path, but be safe
+            }
+
+            // Get existing teacher (if any)
+            User existingTeacher = null;
+            UUID currentTeacherId = classTeacherHistoryRepository.findCurrentTeacherIdByClassId(existingClass.getId()).orElse(null);
+            if (currentTeacherId != null) {
+                existingTeacher = userRepository.findById(currentTeacherId).orElse(null);
+            }
+
+            // Populate old values from DB
+            preview.setOldClassName(existingClass.getName());
+            preview.setOldDescription(existingClass.getDescription());
+            preview.setOldStartDate(existingClass.getStartDate());
+            preview.setOldStatus(existingClass.getStatus());
+            preview.setOldMaxStudents(existingClass.getMaxStudents());
+            preview.setOldCourseId(existingClass.getCourseId());
+
+            if (existingTeacher != null) {
+                preview.setOldTeacherEmail(existingTeacher.getEmail());
+                preview.setOldTeacherFullName(existingTeacher.getFullName());
+            }
+
+            // Validate course hasn't changed (courses cannot be changed on UPDATE)
+            String courseValidationError = validateCourseForUpdate(preview, existingClass);
+            if (courseValidationError != null) {
+                preview.setCourseValidationError(courseValidationError);
+            }
+
+            // Validate teacher info in Excel matches expected data
+            String teacherValidationError = validateTeacherForUpdate(preview, existingTeacher);
+            if (teacherValidationError != null) {
+                preview.setTeacherValidationError(teacherValidationError);
+            }
+
+            // Validate teacher information (full name, etc.) matches DB if teacher exists
+            if (existingTeacher != null) {
+                String teacherInfoError = validateTeacherInfoForUpdate(preview, existingTeacher);
+                if (teacherInfoError != null) {
+                    preview.setTeacherInfoValidationError(teacherInfoError);
+                }
+            }
+
+            return preview;
+
+        } catch (Exception e) {
+            log.error("Error enriching UPDATE class preview for {}: {}", className, e.getMessage(), e);
+            return preview; // Return preview even if error occurs
+        }
+    }
+
+    /**
+     * Check if any field has changed by comparing old vs new values in preview
+     * Old values are populated during enrichment from DB
+     *
+     * @param preview ClassPreview with old/new values populated
+     * @return true if any field changed, false if all identical
+     */
+    private boolean hasFieldChanges(ClassPreview preview) {
+        // Check each field for changes using Objects.equals for null-safety
+        if (!Objects.equals(preview.getName(), preview.getOldClassName())) return true;
+        if (!Objects.equals(preview.getDescription(), preview.getOldDescription())) return true;
+        if (!Objects.equals(preview.getStartDate(), preview.getOldStartDate())) return true;
+        if (!Objects.equals(preview.getStatus(), preview.getOldStatus())) return true;
+        if (!Objects.equals(preview.getMaxStudents(), preview.getOldMaxStudents())) return true;
+        if (!Objects.equals(preview.getCourseId(), preview.getOldCourseId())) return true;
+        if (!Objects.equals(preview.getTeacherEmail(), preview.getOldTeacherEmail())) return true;
+
+        return false;
+    }
+
+    /**
+     * Validate course hasn't changed for UPDATE classes
+     * Courses cannot be changed on existing classes
+     *
+     * @param preview       ClassPreview with course from Excel
+     * @param existingClass Current class in DB
+     * @return Error message if validation fails, null if passes
+     */
+    private String validateCourseForUpdate(ClassPreview preview, Clazz existingClass) {
+        if (preview.getCourseId() == null || existingClass.getCourseId() == null) {
+            return null; // Skip validation if either is null
+        }
+
+        // Course cannot be changed on UPDATE
+        if (!Objects.equals(preview.getCourseId(), existingClass.getCourseId())) {
+            return String.format("Không thể thay đổi khóa học của lớp đã tồn tại. Khóa học hiện tại: %s, khóa học trong file: %s",
+                    preview.getOldCourseId(), preview.getCourseId());
+        }
+
+        return null;
+    }
+
+    /**
+     * Validate teacher information for UPDATE classes
+     * Checks if teacher in Excel matches DB (same email, exists, has TEACHER role)
+     *
+     * @param preview         ClassPreview with teacher info from Excel
+     * @param existingTeacher Current teacher in DB (if any)
+     * @return Error message if validation fails, null if passes
+     */
+    private String validateTeacherForUpdate(ClassPreview preview, User existingTeacher) {
+        // If no teacher provided in Excel, no validation needed
+        if (preview.getTeacherEmail() == null || preview.getTeacherEmail().trim().isEmpty()) {
+            return null;
+        }
+
+        String excelTeacherEmail = preview.getTeacherEmail().trim().toLowerCase();
+
+        // If there's an existing teacher, check if it's the same
+        if (existingTeacher != null) {
+            String existingTeacherEmail = existingTeacher.getEmail().trim().toLowerCase();
+            String existingTeacherName = existingTeacher.getFullName().toLowerCase();
+            if (!excelTeacherEmail.equals(existingTeacherEmail)) {
+                return String.format("Giảng viên sẽ được thay đổi từ %s thành %s",
+                        existingTeacher.getEmail(), preview.getTeacherEmail());
+            }
+        }
+
+        // Verify the teacher in Excel exists in DB (should have been done in earlier validation)
+        // This is just a safety check
+        User teacherInExcel = userRepository.findByEmail(excelTeacherEmail).orElse(null);
+        if (teacherInExcel == null) {
+            return "Giảng viên " + preview.getTeacherEmail() + " không tồn tại trong hệ thống";
+        }
+
+        if (teacherInExcel.getRole() != UserRole.TEACHER) {
+            return "Người dùng " + preview.getTeacherEmail() + " không có vai trò TEACHER";
+        }
+
+        return null; // Validation passed
+    }
+
+    /**
+     * Validate teacher information matches between Excel and DB
+     * Checks if teacher's full name in Excel matches the teacher in DB
+     *
+     * @param preview         ClassPreview with teacher info from Excel
+     * @param existingTeacher Teacher from DB
+     * @return Error message if validation fails, null if passes
+     */
+    private String validateTeacherInfoForUpdate(ClassPreview preview, User existingTeacher) {
+        // If no teacher full name in Excel, skip validation
+        if (preview.getTeacherName() == null || preview.getTeacherName().trim().isEmpty()) {
+            return null;
+        }
+
+        // Existing teacher should not be null (this is called only if existingTeacher != null)
+        if (existingTeacher == null) {
+            return null;
+        }
+
+        String excelTeacherFullName = preview.getTeacherName().trim();
+        String dbTeacherFullName = existingTeacher.getFullName();
+
+        // If teacher in DB has no full name, can't validate
+        if (dbTeacherFullName == null || dbTeacherFullName.trim().isEmpty()) {
+            return null;
+        }
+
+        dbTeacherFullName = dbTeacherFullName.trim();
+
+        // Compare full names (case-sensitive, exact match)
+        if (!excelTeacherFullName.equals(dbTeacherFullName)) {
+            return String.format("Thông tin giảng viên không khớp với DB: Tên Excel = '%s', Tên DB = '%s'",
+                    excelTeacherFullName, dbTeacherFullName);
+        }
+
+        return null; // Validation passed
     }
 }
