@@ -259,7 +259,30 @@ public class ExcelClassImportUtil {
             }
         }
 
+        // Validate expected end date if provided
+        if (row.getExpectedEndDate() != null) {
+            // Ensure it's within valid range
+            if (row.getExpectedEndDate().isBefore(LocalDate.of(1900, 1, 1)) ||
+                    row.getExpectedEndDate().isAfter(LocalDate.of(2100, 12, 31))) {
+                return Optional.of(ClassImportError.builder()
+                        .rowNumber(row.getRowNumber())
+                        .className(name)
+                        .errorMessage("Ngày kết thúc dự kiến nằm ngoài phạm vi hợp lệ (1900-2100)")
+                        .build());
+            }
+
+            // If both startDate and expectedEndDate are provided, validate expectedEndDate >= startDate
+            if (row.getStartDate() != null && row.getExpectedEndDate().isBefore(row.getStartDate())) {
+                return Optional.of(ClassImportError.builder()
+                        .rowNumber(row.getRowNumber())
+                        .className(name)
+                        .errorMessage("Ngày kết thúc dự kiến " +row.getExpectedEndDate()+" không được trước ngày bắt đầu "+row.getStartDate())
+                        .build());
+            }
+        }
+
         return Optional.empty();
+
     }
 
     /**

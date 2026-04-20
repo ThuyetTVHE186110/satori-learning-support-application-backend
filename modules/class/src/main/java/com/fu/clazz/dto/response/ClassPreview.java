@@ -40,7 +40,7 @@ public class ClassPreview {
     private String teacherEmail;       // email giáo viên
 
     private LocalDate startDate;
-    private LocalDate expectedEndDate;
+    private LocalDate expectedEndDate;    // from Excel (new value)
     private ClassStatus status;
     
     // Capacity
@@ -53,6 +53,7 @@ public class ClassPreview {
     private String oldClassName;
     private String oldDescription;
     private LocalDate oldStartDate;
+    private LocalDate oldExpectedEndDate;  // from DB (old value, UPDATE only)
     private ClassStatus oldStatus;
     private Integer oldMaxStudents;
     private UUID oldCourseId;

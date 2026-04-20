@@ -80,6 +80,19 @@ public class ClassServiceImpl implements ClassService {
     private final ClassScheduleManager classScheduleManager;
 
     // =====================================================
+    // HELPER METHODS
+    // =====================================================
+
+    /**
+     * Safely trims a string value, handling null gracefully
+     * @param value the string to trim, can be null
+     * @return trimmed string or null if input is null
+     */
+    private String safeGetTrimmedValue(String value) {
+        return value != null ? value.trim() : null;
+    }
+
+    // =====================================================
     // CLASS CRUD
     // =====================================================
     @Override
@@ -125,6 +138,12 @@ public class ClassServiceImpl implements ClassService {
 
         if (course.getStatus() != Course.CourseStatus.ACTIVE) {
             throw new BusinessException("INVALID_COURSE_STATUS", "Chỉ có thể tạo lớp học cho khóa học đang hoạt động.");
+        }
+
+        // Validate expectedEndDate >= startDate if both are provided
+        if (request.getExpectedEndDate() != null && request.getStartDate() != null &&
+                request.getExpectedEndDate().isBefore(request.getStartDate())) {
+            throw new BusinessException("INVALID_EXPECTED_END_DATE", "Ngày kết thúc dự kiến" + request.getExpectedEndDate() + " không được trước ngày bắt đầu " + request.getStartDate());
         }
 
         // Create class entity
@@ -195,6 +214,13 @@ public class ClassServiceImpl implements ClassService {
         }
         if (clazz.getStatus() == ClassStatus.ACTIVE && request.getStartDate() != null && !request.getStartDate().isEqual(clazz.getStartDate())) {
             throw new BusinessException("INVALID_START_DATE", "Không thể cập nhật ngày bắt đầu sau khi lớp học đã hoạt động.");
+        }
+
+        // Validate expectedEndDate >= startDate if both are provided
+        LocalDate effectiveStartDate = request.getStartDate() != null ? request.getStartDate() : clazz.getStartDate();
+        LocalDate effectiveExpectedEndDate = request.getExpectedEndDate() != null ? request.getExpectedEndDate() : clazz.getExpectedEndDate();
+        if (effectiveStartDate != null && effectiveExpectedEndDate != null && effectiveExpectedEndDate.isBefore(effectiveStartDate)) {
+            throw new BusinessException("INVALID_EXPECTED_END_DATE", "Ngày kết thúc dự kiến không được trước ngày bắt đầu.");
         }
 
         // Auto-activate if startDate moved to today or earlier AND no members AND currently NOT_STARTED
@@ -682,9 +708,10 @@ public class ClassServiceImpl implements ClassService {
         List<ClassPreview> validClasses = new ArrayList<>();
         Set<String> seenClassNames = new HashSet<>();
 
-        // Step 1: Build map of learner email -> list of classes they appear in (for multi-class detection)
-        // Using case-insensitive class name matching
-        Map<String, Set<String>> learnerToClasses = new HashMap<>();
+        // Step 1: Build map of learner email -> classes with status info (for enhanced multi-class detection)
+        // Map: learnerEmail -> Map(className -> classStatus)
+        Map<String, Map<String, ClassStatus>> learnerToClassesWithStatus = new HashMap<>();
+        Map<String, String> classNameToIdMap = new HashMap<>();  // className -> classId for lookups
         log.debug("Building learner-to-classes map from {} excel rows and learner data", excelRows.size());
         log.debug("Learner data available for classes: {}", learnersByClass.keySet());
 
@@ -692,6 +719,19 @@ public class ClassServiceImpl implements ClassService {
             if (excelRow.isEmpty()) continue;
 
             String className = excelRow.getName().trim();
+
+            // Determine status based on startDate (same logic as later in code)
+            ClassStatus status = ClassStatus.NOT_STARTED;
+            if (excelRow.getStartDate() != null && !excelRow.getStartDate().isAfter(LocalDate.now())) {
+                status = ClassStatus.ACTIVE;
+            }
+
+            // Try to find existing class to get its actual status
+            Clazz existingClass = classRepository.findByNameIgnoreCaseAndNotDeleted(className).orElse(null);
+            if (existingClass != null) {
+                status = existingClass.getStatus();
+                classNameToIdMap.put(className, existingClass.getId().toString());
+            }
 
             // Try to find learners for this class (case-insensitive)
             List<LearnerExcelRow> learnerExcelRows = new ArrayList<>();
@@ -702,16 +742,33 @@ public class ClassServiceImpl implements ClassService {
                 }
             }
 
-            log.debug("Class '{}' has {} learners in import data", className, learnerExcelRows.size());
+            log.debug("Class '{}' has {} learners in import data, status={}", className, learnerExcelRows.size(), status);
 
             for (LearnerExcelRow learnerExcelRow : learnerExcelRows) {
                 String learnerEmail = learnerExcelRow.getEmail().trim().toLowerCase();
-                learnerToClasses.computeIfAbsent(learnerEmail, k -> new HashSet<>()).add(className);
+                learnerToClassesWithStatus
+                        .computeIfAbsent(learnerEmail, k -> new HashMap<>())
+                        .put(className, status);
             }
         }
 
-        // Identify learners in multiple classes within this batch
-        Set<String> learnersInMultipleClasses = learnerToClasses.entrySet().stream()
+        // Pre-load all ClassMember records for CLOSED/DELETED classes (for ghost learner detection)
+        Map<String, ClassMember> classMemberLookup = new HashMap<>();
+        for (ClassExcelRow excelRow : excelRows) {
+            if (excelRow.isEmpty()) continue;
+            Clazz existingClass = classRepository.findByNameIgnoreCaseAndNotDeleted(excelRow.getName().trim()).orElse(null);
+            if (existingClass != null && (existingClass.getStatus() == ClassStatus.CLOSED || existingClass.getStatus() == ClassStatus.DELETED)) {
+                // Load all members for this closed/deleted class
+                List<ClassMember> members = classMemberRepository.findAllByClassId(existingClass.getId());
+                for (ClassMember member : members) {
+                    String key = existingClass.getId() + ":" + member.getUserId();
+                    classMemberLookup.put(key, member);
+                }
+            }
+        }
+
+        // Identify learners in multiple classes and validate them
+        Set<String> learnersInMultipleClasses = learnerToClassesWithStatus.entrySet().stream()
                 .filter(e -> e.getValue().size() > 1)
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toSet());
@@ -720,7 +777,7 @@ public class ClassServiceImpl implements ClassService {
             log.warn("Found {} learners in multiple classes within this import batch: {}",
                     learnersInMultipleClasses.size(), learnersInMultipleClasses);
             learnersInMultipleClasses.forEach(email ->
-                    log.warn("  - {} appears in classes: {}", email, learnerToClasses.get(email))
+                    log.warn("  - {} appears in classes: {}", email, learnerToClassesWithStatus.get(email))
             );
         }
 
@@ -760,12 +817,21 @@ public class ClassServiceImpl implements ClassService {
             }
 
             // Find teacher by email
-            User teacher = userRepository.findByEmail(excelRow.getTeacherEmail().trim()).orElse(null);
+            String teacherEmail = safeGetTrimmedValue(excelRow.getTeacherEmail());
+            if (teacherEmail == null || teacherEmail.isEmpty()) {
+                errors.add(ClassImportError.builder()
+                        .rowNumber(excelRow.getRowNumber())
+                        .className(className)
+                        .errorMessage("Email giảng viên không được để trống")
+                        .build());
+                continue;
+            }
+            User teacher = userRepository.findByEmail(teacherEmail).orElse(null);
             if (teacher == null || teacher.getRole() != UserRole.TEACHER) {
                 errors.add(ClassImportError.builder()
                         .rowNumber(excelRow.getRowNumber())
                         .className(className)
-                        .errorMessage("Giảng viên không tồn tại hoặc không có quyền TEACHER: " + excelRow.getTeacherEmail())
+                        .errorMessage("Giảng viên không tồn tại hoặc không có quyền TEACHER: " + teacherEmail)
                         .build());
                 continue;
             }
@@ -819,21 +885,23 @@ public class ClassServiceImpl implements ClassService {
                     .collect(Collectors.toSet());
 
             for (LearnerExcelRow learnerExcelRow : learnerExcelRows) {
-                String learnerEmail = learnerExcelRow.getEmail().trim().toLowerCase();
+                String learnerEmail = safeGetTrimmedValue(learnerExcelRow.getEmail());
+                
+                // Validate email is not null
+                if (learnerEmail == null || learnerEmail.isEmpty()) {
+                    errors.add(ClassImportError.builder()
+                            .rowNumber(excelRow.getRowNumber())
+                            .className(className)
+                            .errorMessage("Email học sinh không được để trống")
+                            .build());
+                    continue;
+                }
+                
+                learnerEmail = learnerEmail.toLowerCase();
 
                 // Skip learners that are duplicates in this class
                 if (duplicateLearnerEmails.contains(learnerEmail)) {
                     log.debug("Skipping duplicate learner {} in class {}", learnerEmail, className);
-                    continue;
-                }
-
-                // Skip learners that are in multiple classes in this batch
-                if (learnersInMultipleClasses.contains(learnerEmail)) {
-                    errors.add(ClassImportError.builder()
-                            .rowNumber(excelRow.getRowNumber())
-                            .className(className)
-                            .errorMessage(String.format("Học sinh %s nằm ở nhiều lớp khác nhau trong file import, không thể thêm", learnerExcelRow.getEmail().trim()))
-                            .build());
                     continue;
                 }
 
@@ -857,6 +925,22 @@ public class ClassServiceImpl implements ClassService {
                     continue;
                 }
 
+                // Validate learner in multiple classes (v2: stricter membership requirement)
+                if (learnersInMultipleClasses.contains(learnerEmail)) {
+                    Optional<ClassImportError> multiClassError = validateLearnerInMultipleClassesV2(
+                            learnerEmail,
+                            learner,
+                            learnerToClassesWithStatus,
+                            classNameToIdMap,
+                            classMemberLookup,
+                            excelRow.getRowNumber()
+                    );
+                    if (multiClassError.isPresent()) {
+                        errors.add(multiClassError.get());
+                        continue;
+                    }
+                }
+
                 // For UPDATE classes: Skip learners already in this class
                 if (classExists && existingClass != null) {
                     boolean alreadyInClass = classMemberRepository
@@ -869,17 +953,20 @@ public class ClassServiceImpl implements ClassService {
                         continue;
                     }
                 }
-                //Check information of learner in excel file is different from database, if different, add to error list
-                //Show different information in error message to inform user to update learner information before import
-                if (!learner.getFullName().equals(learnerExcelRow.getName().trim()) ||
-                        !learner.getDateOfBirth().equals(learnerExcelRow.getDateOfBirth()) ||
-                        !learner.getPhoneNumber().equals(learnerExcelRow.getPhoneNumber().trim())) {
+                // Check information of learner in excel file is different from database
+                // Use Objects.equals() for null-safe comparison
+                String excelName = safeGetTrimmedValue(learnerExcelRow.getName());
+                String excelPhone = safeGetTrimmedValue(learnerExcelRow.getPhoneNumber());
+                
+                if (!Objects.equals(learner.getFullName(), excelName) ||
+                        !Objects.equals(learner.getDateOfBirth(), learnerExcelRow.getDateOfBirth()) ||
+                        !Objects.equals(learner.getPhoneNumber(), excelPhone)) {
                     errors.add(ClassImportError.builder()
                             .rowNumber(excelRow.getRowNumber())
                             .className(className)
                             .errorMessage(String.format("Thông tin học sinh %s không khớp với dữ liệu hiện tại. Vui lòng cập nhật thông tin học sinh trước khi import. (Excel: name=%s, dob=%s, phone=%s; DB: name=%s, dob=%s, phone=%s)",
                                     learnerEmail,
-                                    learnerExcelRow.getName().trim(), learnerExcelRow.getDateOfBirth(), learnerExcelRow.getPhoneNumber().trim(),
+                                    excelName, learnerExcelRow.getDateOfBirth(), excelPhone,
                                     learner.getFullName(), learner.getDateOfBirth(), learner.getPhoneNumber()))
                             .build());
                     continue;
@@ -931,6 +1018,7 @@ public class ClassServiceImpl implements ClassService {
                     .teacherName(excelRow.getTeacherName())
                     .teacherEmail(teacher.getEmail())
                     .startDate(excelRow.getStartDate())
+                    .expectedEndDate(excelRow.getExpectedEndDate())
                     .status(status)
                     .maxStudents(excelRow.getMaxStudents())
                     .learnersToAdd(learnersToAdd)
@@ -1046,6 +1134,7 @@ public class ClassServiceImpl implements ClassService {
                             .description(preview.getDescription())
                             .courseId(preview.getCourseId())
                             .startDate(preview.getStartDate())
+                            .expectedEndDate(preview.getExpectedEndDate())
                             .status(preview.getStatus())
                             .maxStudents(preview.getMaxStudents() != null ? preview.getMaxStudents() : 8)
                             .build();
@@ -1138,6 +1227,7 @@ public class ClassServiceImpl implements ClassService {
                         existingClass.setDescription(preview.getDescription());
                         existingClass.setCourseId(preview.getCourseId());
                         existingClass.setStartDate(preview.getStartDate());
+                        existingClass.setExpectedEndDate(preview.getExpectedEndDate());
                         existingClass.setStatus(preview.getStatus());
 
                         classRepository.save(existingClass);
@@ -1446,6 +1536,7 @@ public class ClassServiceImpl implements ClassService {
             preview.setOldClassName(existingClass.getName());
             preview.setOldDescription(existingClass.getDescription());
             preview.setOldStartDate(existingClass.getStartDate());
+            preview.setOldExpectedEndDate(existingClass.getExpectedEndDate());
             preview.setOldStatus(existingClass.getStatus());
             preview.setOldMaxStudents(existingClass.getMaxStudents());
             preview.setOldCourseId(existingClass.getCourseId());
@@ -1601,5 +1692,88 @@ public class ClassServiceImpl implements ClassService {
         }
 
         return null; // Validation passed
+    }
+
+    /**
+     * Validate learner in multiple classes (v2: stricter membership requirement)
+     * ⚡ NEW (v2): All CLOSED/DELETED classes MUST have ClassMember records to prevent ghost learners
+     * <p>
+     * Logic:
+     * 1. Count ACTIVE/NOT_STARTED classes learner appears in (N)
+     * 2. If N > 1: ERROR - conflicting active classes
+     * 3. If N >= 1 OR N == 0: For each CLOSED/DELETED class:
+     * - MUST have ClassMember record (no exceptions)
+     * - If DELETED: ERROR - can't re-enroll in deleted class
+     * 4. If all checks pass: OK
+     */
+    private Optional<ClassImportError> validateLearnerInMultipleClassesV2(
+            String learnerEmail,
+            User learner,
+            Map<String, Map<String, ClassStatus>> learnerToClassesWithStatus,
+            Map<String, String> classNameToIdMap,
+            Map<String, ClassMember> classMemberLookup,
+            int rowNumber) {
+
+        Map<String, ClassStatus> classMap = learnerToClassesWithStatus.get(learnerEmail);
+        if (classMap == null || classMap.size() <= 1) {
+            return Optional.empty(); // Not in multiple classes
+        }
+
+        // Count ACTIVE/NOT_STARTED classes
+        long activeNotStartedCount = classMap.values().stream()
+                .filter(status -> status == ClassStatus.ACTIVE || status == ClassStatus.NOT_STARTED)
+                .count();
+
+        log.debug("Learner {} in {} classes: {} ACTIVE/NOT_STARTED", learnerEmail, classMap.size(), activeNotStartedCount);
+
+        // Edge case 1: Multiple ACTIVE/NOT_STARTED classes
+        if (activeNotStartedCount > 1) {
+            String classNames = classMap.entrySet().stream()
+                    .filter(e -> e.getValue() == ClassStatus.ACTIVE || e.getValue() == ClassStatus.NOT_STARTED)
+                    .map(Map.Entry::getKey)
+                    .collect(Collectors.joining(", "));
+            return Optional.of(ClassImportError.builder()
+                    .rowNumber(rowNumber)
+                    .className("Multiple Classes")
+                    .errorMessage(String.format("Học sinh %s nằm ở nhiều lớp hoạt động: %s. Không thể thêm vào nhiều lớp cùng lúc",
+                            learnerEmail, classNames))
+                    .build());
+        }
+
+        // Edge case 2-3: Check CLOSED/DELETED classes (v2: ALWAYS require membership record)
+        for (Map.Entry<String, ClassStatus> entry : classMap.entrySet()) {
+            String className = entry.getKey();
+            ClassStatus status = entry.getValue();
+
+            if (status == ClassStatus.CLOSED || status == ClassStatus.DELETED) {
+                String classId = classNameToIdMap.get(className);
+                if (classId != null) {
+                    String memberKey = classId + ":" + learner.getId();
+                    ClassMember membership = classMemberLookup.get(memberKey);
+
+                    // ⚡ NEW (v2): ALWAYS check membership for CLOSED/DELETED - no exceptions
+                    if (membership == null) {
+                        return Optional.of(ClassImportError.builder()
+                                .rowNumber(rowNumber)
+                                .className(className)
+                                .errorMessage(String.format("Không tìm thấy ghi nhận học viên %s từng học ở lớp %s (Lớp này đã bị xóa hoặc đã đóng).",
+                                        learnerEmail, className))
+                                .build());
+                    }
+
+                    // Edge case 4: Can't re-enroll in DELETED class
+                    if (status == ClassStatus.DELETED) {
+                        return Optional.of(ClassImportError.builder()
+                                .rowNumber(rowNumber)
+                                .className(className)
+                                .errorMessage(String.format("Không thể thêm học viên %s vào lớp %s đã bị xóa",
+                                        learnerEmail, className))
+                                .build());
+                    }
+                }
+            }
+        }
+
+        return Optional.empty(); // All checks passed
     }
 }

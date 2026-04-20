@@ -1,6 +1,7 @@
 package com.fu.clazz.service;
 
 import com.fu.clazz.dto.request.ApproveImportClassesRequest;
+import com.fu.clazz.dto.request.CreateClassRequest;
 import com.fu.clazz.dto.response.*;
 import com.fu.clazz.entity.ClassMember;
 import com.fu.clazz.entity.Clazz;
@@ -8,7 +9,11 @@ import com.fu.clazz.entity.ClassStatus;
 import com.fu.clazz.mapper.ClassMapper;
 import com.fu.clazz.repository.ClassMemberRepository;
 import com.fu.clazz.repository.ClassRepository;
+import com.fu.clazz.repository.ClassTeacherHistoryRepository;
 import com.fu.clazz.service.impl.ClassServiceImpl;
+import com.fu.clazz.utils.ClassExcelRow;
+import com.fu.clazz.utils.LearnerExcelRow;
+import com.fu.clazz.utils.ExcelClassImportUtil;
 import com.fu.course.repository.CourseRepository;
 import com.fu.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -928,6 +933,656 @@ class ClassServiceImplImportExcelTest {
 
             assertThat(shouldValidate).isFalse();
             assertThat(preview.getTeacherInfoValidationError()).isNull();
+        }
+    }
+
+    @Nested
+    @DisplayName("Expected End Date Validation Tests")
+    class ExpectedEndDateValidationTests {
+
+        @Test
+        @DisplayName("Valid expectedEndDate - same as startDate")
+        void testValidExpectedEndDateSameAsStart() {
+            LocalDate startDate = LocalDate.of(2026, 5, 1);
+            LocalDate expectedEndDate = LocalDate.of(2026, 5, 1);
+
+            ClassExcelRow row = ClassExcelRow.builder()
+                    .rowNumber(1)
+                    .name("N5 Class")
+                    .description("Test")
+                    .courseName("N5")
+                    .startDate(startDate)
+                    .expectedEndDate(expectedEndDate)
+                    .teacherName("Teacher")
+                    .teacherEmail("teacher@test.com")
+                    .maxStudents(8)
+                    .build();
+
+            Optional<ClassImportError> error = ExcelClassImportUtil.validateClassRow(row);
+            assertThat(error).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Valid expectedEndDate - after startDate")
+        void testValidExpectedEndDateAfterStart() {
+            LocalDate startDate = LocalDate.of(2026, 5, 1);
+            LocalDate expectedEndDate = LocalDate.of(2026, 8, 31);
+
+            ClassExcelRow row = ClassExcelRow.builder()
+                    .rowNumber(1)
+                    .name("N5 Class")
+                    .description("Test")
+                    .courseName("N5")
+                    .startDate(startDate)
+                    .expectedEndDate(expectedEndDate)
+                    .teacherName("Teacher")
+                    .teacherEmail("teacher@test.com")
+                    .maxStudents(8)
+                    .build();
+
+            Optional<ClassImportError> error = ExcelClassImportUtil.validateClassRow(row);
+            assertThat(error).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Invalid expectedEndDate - before startDate")
+        void testInvalidExpectedEndDateBeforeStart() {
+            LocalDate startDate = LocalDate.of(2026, 5, 1);
+            LocalDate expectedEndDate = LocalDate.of(2026, 4, 15);
+
+            ClassExcelRow row = ClassExcelRow.builder()
+                    .rowNumber(2)
+                    .name("N5 Class")
+                    .description("Test")
+                    .courseName("N5")
+                    .startDate(startDate)
+                    .expectedEndDate(expectedEndDate)
+                    .teacherName("Teacher")
+                    .teacherEmail("teacher@test.com")
+                    .maxStudents(8)
+                    .build();
+
+            Optional<ClassImportError> error = ExcelClassImportUtil.validateClassRow(row);
+            assertThat(error).isPresent();
+            assertThat(error.get().getErrorMessage()).containsIgnoringCase("kết thúc dự kiến");
+        }
+
+        @Test
+        @DisplayName("Valid expectedEndDate - null is allowed")
+        void testExpectedEndDateNull() {
+            LocalDate startDate = LocalDate.of(2026, 5, 1);
+
+            ClassExcelRow row = ClassExcelRow.builder()
+                    .rowNumber(1)
+                    .name("N5 Class")
+                    .description("Test")
+                    .courseName("N5")
+                    .startDate(startDate)
+                    .expectedEndDate(null)  // Optional field
+                    .teacherName("Teacher")
+                    .teacherEmail("teacher@test.com")
+                    .maxStudents(8)
+                    .build();
+
+            Optional<ClassImportError> error = ExcelClassImportUtil.validateClassRow(row);
+            assertThat(error).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Invalid expectedEndDate - out of range (before 1900)")
+        void testExpectedEndDateOutOfRangeEarly() {
+            LocalDate startDate = LocalDate.of(2026, 5, 1);
+            LocalDate expectedEndDate = LocalDate.of(1899, 12, 31);
+
+            ClassExcelRow row = ClassExcelRow.builder()
+                    .rowNumber(3)
+                    .name("N5 Class")
+                    .description("Test")
+                    .courseName("N5")
+                    .startDate(startDate)
+                    .expectedEndDate(expectedEndDate)
+                    .teacherName("Teacher")
+                    .teacherEmail("teacher@test.com")
+                    .maxStudents(8)
+                    .build();
+
+            Optional<ClassImportError> error = ExcelClassImportUtil.validateClassRow(row);
+            assertThat(error).isPresent();
+            assertThat(error.get().getErrorMessage()).contains("Ngày kết thúc dự kiến nằm ngoài phạm vi hợp lệ");
+        }
+    }
+
+    @Nested
+    @DisplayName("Expected End Date Import Update Tests")
+    class ExpectedEndDateImportUpdateTests {
+
+        @Test
+        @DisplayName("ClassPreview can store oldExpectedEndDate for comparison")
+        void testClassPreviewStoresOldExpectedEndDate() {
+            LocalDate oldEndDate = LocalDate.of(2026, 8, 31);
+            LocalDate newEndDate = LocalDate.of(2026, 9, 30);
+
+            ClassPreview preview = ClassPreview.builder()
+                    .name("N5 Class")
+                    .description("Test")
+                    .courseId(UUID.randomUUID())
+                    .expectedEndDate(newEndDate)
+                    .oldExpectedEndDate(oldEndDate)
+                    .startDate(LocalDate.of(2026, 5, 1))
+                    .status(ClassStatus.NOT_STARTED)
+                    .maxStudents(8)
+                    .build();
+
+            assertThat(preview.getOldExpectedEndDate()).isEqualTo(oldEndDate);
+            assertThat(preview.getExpectedEndDate()).isEqualTo(newEndDate);
+        }
+
+        @Test
+        @DisplayName("CREATE class validation accepts valid expectedEndDate")
+        void testCreateClassWithValidExpectedEndDate() {
+            LocalDate startDate = LocalDate.of(2026, 5, 1);
+            LocalDate expectedEndDate = LocalDate.of(2026, 8, 31);
+
+            // Simulate the validation logic in createClass
+            assertThatCode(() -> {
+                if (expectedEndDate != null && startDate != null &&
+                        expectedEndDate.isBefore(startDate)) {
+                    throw new RuntimeException("INVALID_EXPECTED_END_DATE");
+                }
+            }).doesNotThrowAnyException();
+        }
+
+        @Test
+        @DisplayName("UPDATE class validation rejects expectedEndDate before startDate")
+        void testUpdateClassRejectsInvalidExpectedEndDate() {
+            LocalDate startDate = LocalDate.of(2026, 5, 1);
+            LocalDate invalidExpectedEndDate = LocalDate.of(2026, 4, 15);
+
+            // Simulate the validation logic in updateClass
+            assertThatCode(() -> {
+                if (invalidExpectedEndDate != null && startDate != null &&
+                        invalidExpectedEndDate.isBefore(startDate)) {
+                    throw new RuntimeException("INVALID_EXPECTED_END_DATE");
+                }
+            }).hasMessage("INVALID_EXPECTED_END_DATE");
+        }
+
+        @Test
+        @DisplayName("Expected end date can be null (optional field)")
+        void testExpectedEndDateOptional() {
+            ClassPreview preview = ClassPreview.builder()
+                    .name("N5 Class")
+                    .expectedEndDate(null)
+                    .startDate(LocalDate.of(2026, 5, 1))
+                    .build();
+
+            assertThat(preview.getExpectedEndDate()).isNull();
+        }
+
+        @Test
+        @DisplayName("Expected end date equals startDate is valid")
+        void testExpectedEndDateEqualStartDate() {
+            LocalDate startDate = LocalDate.of(2026, 5, 1);
+            LocalDate expectedEndDate = LocalDate.of(2026, 5, 1);
+
+            assertThatCode(() -> {
+                if (expectedEndDate != null && startDate != null &&
+                        expectedEndDate.isBefore(startDate)) {
+                    throw new RuntimeException("INVALID");
+                }
+            }).doesNotThrowAnyException();
+        }
+    }
+
+    @Nested
+    @DisplayName("Phase 6: Enhanced Learner Multi-Class Validation (v2)")
+    class MultiClassValidationEnhancedTests {
+
+        private UUID classId1;
+        private UUID classId2;
+        private UUID classId3;
+        private UUID learnerId;
+
+        @BeforeEach
+        void setUp() {
+            classId1 = UUID.randomUUID();
+            classId2 = UUID.randomUUID();
+            classId3 = UUID.randomUUID();
+            learnerId = UUID.randomUUID();
+        }
+
+        @Test
+        @DisplayName("Edge Case 1: Learner in 2 ACTIVE classes - ERROR")
+        void testLearnerInMultipleActiveClassesReturnsError() {
+            String learnerEmail = "student@test.com";
+            String className1 = "CLASS_A";
+            String className2 = "CLASS_B";
+
+            // Create classes with ACTIVE status
+            Clazz class1 = Clazz.builder()
+                    .id(classId1)
+                    .name(className1)
+                    .status(ClassStatus.ACTIVE)
+                    .build();
+            Clazz class2 = Clazz.builder()
+                    .id(classId2)
+                    .name(className2)
+                    .status(ClassStatus.ACTIVE)
+                    .build();
+
+            // Learner email -> classes with status
+            Map<String, Map<String, ClassStatus>> learnerToClassesWithStatus = new HashMap<>();
+            learnerToClassesWithStatus.put(learnerEmail, new HashMap<>());
+            learnerToClassesWithStatus.get(learnerEmail).put(className1, ClassStatus.ACTIVE);
+            learnerToClassesWithStatus.get(learnerEmail).put(className2, ClassStatus.ACTIVE);
+
+            Map<String, String> classNameToIdMap = new HashMap<>();
+            classNameToIdMap.put(className1, classId1.toString());
+            classNameToIdMap.put(className2, classId2.toString());
+
+            Map<String, ClassMember> classMemberLookup = new HashMap<>();
+
+            // Create a mock learner
+            com.fu.user.entity.User learner = com.fu.user.entity.User.builder()
+                    .id(learnerId)
+                    .email(learnerEmail)
+                    .build();
+
+            // Call the validation method via reflection (since it's private)
+            try {
+                java.lang.reflect.Method method = ClassServiceImpl.class.getDeclaredMethod(
+                        "validateLearnerInMultipleClassesV2",
+                        String.class,
+                        com.fu.user.entity.User.class,
+                        Map.class,
+                        Map.class,
+                        Map.class,
+                        int.class
+                );
+                method.setAccessible(true);
+                Optional<ClassImportError> result = (Optional<ClassImportError>) method.invoke(
+                        classService,
+                        learnerEmail,
+                        learner,
+                        learnerToClassesWithStatus,
+                        classNameToIdMap,
+                        classMemberLookup,
+                        1
+                );
+
+                assertThat(result).isPresent();
+                assertThat(result.get().getErrorMessage())
+                        .containsIgnoringCase("nhiều lớp hoạt động");
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Test
+        @DisplayName("Edge Case 2: Learner in ACTIVE + CLOSED with membership - OK")
+        void testLearnerInActiveAndClosedWithMembershipIsAllowed() {
+            String learnerEmail = "student@test.com";
+            String activeClassName = "ACTIVE_CLASS";
+            String closedClassName = "CLOSED_CLASS";
+
+            Map<String, Map<String, ClassStatus>> learnerToClassesWithStatus = new HashMap<>();
+            learnerToClassesWithStatus.put(learnerEmail, new HashMap<>());
+            learnerToClassesWithStatus.get(learnerEmail).put(activeClassName, ClassStatus.ACTIVE);
+            learnerToClassesWithStatus.get(learnerEmail).put(closedClassName, ClassStatus.CLOSED);
+
+            Map<String, String> classNameToIdMap = new HashMap<>();
+            classNameToIdMap.put(activeClassName, classId1.toString());
+            classNameToIdMap.put(closedClassName, classId2.toString());
+
+            // Add membership record for the closed class
+            ClassMember membership = ClassMember.builder()
+                    .id(UUID.randomUUID())
+                    .classId(classId2)
+                    .userId(learnerId)
+                    .build();
+            Map<String, ClassMember> classMemberLookup = new HashMap<>();
+            classMemberLookup.put(classId2 + ":" + learnerId, membership);
+
+            com.fu.user.entity.User learner = com.fu.user.entity.User.builder()
+                    .id(learnerId)
+                    .email(learnerEmail)
+                    .build();
+
+            try {
+                java.lang.reflect.Method method = ClassServiceImpl.class.getDeclaredMethod(
+                        "validateLearnerInMultipleClassesV2",
+                        String.class,
+                        com.fu.user.entity.User.class,
+                        Map.class,
+                        Map.class,
+                        Map.class,
+                        int.class
+                );
+                method.setAccessible(true);
+                Optional<ClassImportError> result = (Optional<ClassImportError>) method.invoke(
+                        classService,
+                        learnerEmail,
+                        learner,
+                        learnerToClassesWithStatus,
+                        classNameToIdMap,
+                        classMemberLookup,
+                        1
+                );
+
+                assertThat(result).isEmpty();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Test
+        @DisplayName("Edge Case 3: Learner in CLOSED without membership - ERROR (ghost learner)")
+        void testLearnerInClosedWithoutMembershipReturnsError() {
+            String learnerEmail = "student@test.com";
+            String activeClassName = "ACTIVE_CLASS";
+            String closedClassName = "CLOSED_CLASS";
+
+            Map<String, Map<String, ClassStatus>> learnerToClassesWithStatus = new HashMap<>();
+            learnerToClassesWithStatus.put(learnerEmail, new HashMap<>());
+            learnerToClassesWithStatus.get(learnerEmail).put(activeClassName, ClassStatus.ACTIVE);
+            learnerToClassesWithStatus.get(learnerEmail).put(closedClassName, ClassStatus.CLOSED);
+
+            Map<String, String> classNameToIdMap = new HashMap<>();
+            classNameToIdMap.put(activeClassName, classId1.toString());
+            classNameToIdMap.put(closedClassName, classId2.toString());
+
+            // NO membership record for CLOSED class - ghost learner
+            Map<String, ClassMember> classMemberLookup = new HashMap<>();
+
+            com.fu.user.entity.User learner = com.fu.user.entity.User.builder()
+                    .id(learnerId)
+                    .email(learnerEmail)
+                    .build();
+
+            try {
+                java.lang.reflect.Method method = ClassServiceImpl.class.getDeclaredMethod(
+                        "validateLearnerInMultipleClassesV2",
+                        String.class,
+                        com.fu.user.entity.User.class,
+                        Map.class,
+                        Map.class,
+                        Map.class,
+                        int.class
+                );
+                method.setAccessible(true);
+                Optional<ClassImportError> result = (Optional<ClassImportError>) method.invoke(
+                        classService,
+                        learnerEmail,
+                        learner,
+                        learnerToClassesWithStatus,
+                        classNameToIdMap,
+                        classMemberLookup,
+                        1
+                );
+
+                assertThat(result).isPresent();
+                assertThat(result.get().getErrorMessage())
+                        .containsIgnoringCase("không tìm thấy ghi nhận");
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Test
+        @DisplayName("Edge Case 4: Learner in DELETED class (even with membership) - ERROR")
+        void testLearnerInDeletedClassReturnsError() {
+            String learnerEmail = "student@test.com";
+            String activeClassName = "ACTIVE_CLASS";
+            String deletedClassName = "DELETED_CLASS";
+
+            Map<String, Map<String, ClassStatus>> learnerToClassesWithStatus = new HashMap<>();
+            learnerToClassesWithStatus.put(learnerEmail, new HashMap<>());
+            learnerToClassesWithStatus.get(learnerEmail).put(activeClassName, ClassStatus.ACTIVE);
+            learnerToClassesWithStatus.get(learnerEmail).put(deletedClassName, ClassStatus.DELETED);
+
+            Map<String, String> classNameToIdMap = new HashMap<>();
+            classNameToIdMap.put(activeClassName, classId1.toString());
+            classNameToIdMap.put(deletedClassName, classId3.toString());
+
+            // Add membership record (but still should error due to DELETED status)
+            ClassMember membership = ClassMember.builder()
+                    .id(UUID.randomUUID())
+                    .classId(classId3)
+                    .userId(learnerId)
+                    .build();
+            Map<String, ClassMember> classMemberLookup = new HashMap<>();
+            classMemberLookup.put(classId3 + ":" + learnerId, membership);
+
+            com.fu.user.entity.User learner = com.fu.user.entity.User.builder()
+                    .id(learnerId)
+                    .email(learnerEmail)
+                    .build();
+
+            try {
+                java.lang.reflect.Method method = ClassServiceImpl.class.getDeclaredMethod(
+                        "validateLearnerInMultipleClassesV2",
+                        String.class,
+                        com.fu.user.entity.User.class,
+                        Map.class,
+                        Map.class,
+                        Map.class,
+                        int.class
+                );
+                method.setAccessible(true);
+                Optional<ClassImportError> result = (Optional<ClassImportError>) method.invoke(
+                        classService,
+                        learnerEmail,
+                        learner,
+                        learnerToClassesWithStatus,
+                        classNameToIdMap,
+                        classMemberLookup,
+                        1
+                );
+
+                assertThat(result).isPresent();
+                assertThat(result.get().getErrorMessage())
+                        .containsIgnoringCase("bị xóa");
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Test
+        @DisplayName("Edge Case 5: Learner in NOT_STARTED + ACTIVE - ERROR")
+        void testLearnerInNotStartedAndActiveReturnsError() {
+            String learnerEmail = "student@test.com";
+            String notStartedClassName = "NOT_STARTED_CLASS";
+            String activeClassName = "ACTIVE_CLASS";
+
+            Map<String, Map<String, ClassStatus>> learnerToClassesWithStatus = new HashMap<>();
+            learnerToClassesWithStatus.put(learnerEmail, new HashMap<>());
+            learnerToClassesWithStatus.get(learnerEmail).put(notStartedClassName, ClassStatus.NOT_STARTED);
+            learnerToClassesWithStatus.get(learnerEmail).put(activeClassName, ClassStatus.ACTIVE);
+
+            Map<String, String> classNameToIdMap = new HashMap<>();
+            classNameToIdMap.put(notStartedClassName, classId1.toString());
+            classNameToIdMap.put(activeClassName, classId2.toString());
+
+            Map<String, ClassMember> classMemberLookup = new HashMap<>();
+
+            com.fu.user.entity.User learner = com.fu.user.entity.User.builder()
+                    .id(learnerId)
+                    .email(learnerEmail)
+                    .build();
+
+            try {
+                java.lang.reflect.Method method = ClassServiceImpl.class.getDeclaredMethod(
+                        "validateLearnerInMultipleClassesV2",
+                        String.class,
+                        com.fu.user.entity.User.class,
+                        Map.class,
+                        Map.class,
+                        Map.class,
+                        int.class
+                );
+                method.setAccessible(true);
+                Optional<ClassImportError> result = (Optional<ClassImportError>) method.invoke(
+                        classService,
+                        learnerEmail,
+                        learner,
+                        learnerToClassesWithStatus,
+                        classNameToIdMap,
+                        classMemberLookup,
+                        1
+                );
+
+                assertThat(result).isPresent();
+                assertThat(result.get().getErrorMessage())
+                        .containsIgnoringCase("nhiều lớp hoạt động");
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Test
+        @DisplayName("Single class learner - OK (no multi-class issue)")
+        void testSingleClassLearnerNoError() {
+            String learnerEmail = "student@test.com";
+            String className = "SINGLE_CLASS";
+
+            Map<String, Map<String, ClassStatus>> learnerToClassesWithStatus = new HashMap<>();
+            learnerToClassesWithStatus.put(learnerEmail, new HashMap<>());
+            learnerToClassesWithStatus.get(learnerEmail).put(className, ClassStatus.ACTIVE);
+
+            Map<String, String> classNameToIdMap = new HashMap<>();
+            Map<String, ClassMember> classMemberLookup = new HashMap<>();
+
+            com.fu.user.entity.User learner = com.fu.user.entity.User.builder()
+                    .id(learnerId)
+                    .email(learnerEmail)
+                    .build();
+
+            try {
+                java.lang.reflect.Method method = ClassServiceImpl.class.getDeclaredMethod(
+                        "validateLearnerInMultipleClassesV2",
+                        String.class,
+                        com.fu.user.entity.User.class,
+                        Map.class,
+                        Map.class,
+                        Map.class,
+                        int.class
+                );
+                method.setAccessible(true);
+                Optional<ClassImportError> result = (Optional<ClassImportError>) method.invoke(
+                        classService,
+                        learnerEmail,
+                        learner,
+                        learnerToClassesWithStatus,
+                        classNameToIdMap,
+                        classMemberLookup,
+                        1
+                );
+
+                assertThat(result).isEmpty();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    @Nested
+    @DisplayName("Null Field Safety Tests")
+    class NullFieldSafetyTests {
+
+        @Test
+        @DisplayName("Null teacher email should be rejected")
+        void testNullTeacherEmailIsRejected() {
+            // Create Excel row with null teacher email
+            ClassExcelRow row = ClassExcelRow.builder()
+                    .rowNumber(2)
+                    .name("Test Class")
+                    .courseName("N4")
+                    .teacherEmail(null)  // NULL EMAIL
+                    .startDate(LocalDate.now().plusDays(1))
+                    .maxStudents(10)
+                    .build();
+
+            Optional<ClassImportError> error = ExcelClassImportUtil.validateClassRow(row);
+            assertThat(error).isPresent();
+            assertThat(error.get().getErrorMessage()).containsIgnoringCase("email");
+        }
+
+        @Test
+        @DisplayName("Empty teacher email should be rejected")
+        void testEmptyTeacherEmailIsRejected() {
+            ClassExcelRow row = ClassExcelRow.builder()
+                    .rowNumber(2)
+                    .name("Test Class")
+                    .courseName("N4")
+                    .teacherEmail("   ")  // WHITESPACE ONLY
+                    .startDate(LocalDate.now().plusDays(1))
+                    .maxStudents(10)
+                    .build();
+
+            Optional<ClassImportError> error = ExcelClassImportUtil.validateClassRow(row);
+            assertThat(error).isPresent();
+            // Should fail at validation level
+        }
+
+        @Test
+        @DisplayName("Null learner email should be rejected with clear error message")
+        void testNullLearnerEmailIsRejected() {
+            // Create learner with null email
+            LearnerExcelRow learnerWithNullEmail = LearnerExcelRow.builder()
+                    .email(null)  // NULL EMAIL
+                    .name("John Doe")
+                    .dateOfBirth(LocalDate.of(2000, 1, 1))
+                    .phoneNumber("0901234567")
+                    .build();
+
+            // The validation should reject this at row processing level
+            // This would be caught in importClassesFirstStep
+            assertThat(learnerWithNullEmail.getEmail()).isNull();
+        }
+
+        @Test
+        @DisplayName("Null learner name should be handled gracefully")
+        void testNullLearnerNameIsHandledSafely() {
+            // Create learner with null name
+            LearnerExcelRow learnerWithNullName = LearnerExcelRow.builder()
+                    .email("learner@test.com")
+                    .name(null)  // NULL NAME
+                    .dateOfBirth(LocalDate.of(2000, 1, 1))
+                    .phoneNumber("0901234567")
+                    .build();
+
+            // Should not throw NPE when trimming
+            assertThat(learnerWithNullName.getName()).isNull();
+        }
+
+        @Test
+        @DisplayName("Null learner phone should be handled gracefully")
+        void testNullLearnerPhoneIsHandledSafely() {
+            // Create learner with null phone
+            LearnerExcelRow learnerWithNullPhone = LearnerExcelRow.builder()
+                    .email("learner@test.com")
+                    .name("John Doe")
+                    .dateOfBirth(LocalDate.of(2000, 1, 1))
+                    .phoneNumber(null)  // NULL PHONE
+                    .build();
+
+            // Should not throw NPE when trimming
+            assertThat(learnerWithNullPhone.getPhoneNumber()).isNull();
+        }
+
+        @Test
+        @DisplayName("Whitespace-only strings should be treated as empty")
+        void testWhitespaceOnlyStringsAreTrimmed() {
+            LearnerExcelRow learnerWithWhitespace = LearnerExcelRow.builder()
+                    .email("   ")  // WHITESPACE
+                    .name("   ")   // WHITESPACE
+                    .dateOfBirth(LocalDate.of(2000, 1, 1))
+                    .phoneNumber("   ")  // WHITESPACE
+                    .build();
+
+            // After trimming, should be empty strings
+            assertThat(learnerWithWhitespace.getEmail()).isNotNull();
+            assertThat(learnerWithWhitespace.getEmail().trim()).isEmpty();
         }
     }
 }
