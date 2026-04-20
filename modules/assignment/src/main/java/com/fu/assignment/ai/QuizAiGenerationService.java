@@ -29,6 +29,7 @@ import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
@@ -37,6 +38,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.ArrayList;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * AI service to generate quiz questions from a raw text.
@@ -78,6 +81,7 @@ public class QuizAiGenerationService {
     private final VocabularyRepository vocabularyRepository;
     private final GrammarPointRepository grammarPointRepository;
     private final EmbeddingService embeddingService;
+    private final Executor quizBatchExecutor;
 
 
     public QuizAiGenerationService(ObjectMapper objectMapper,
@@ -87,7 +91,8 @@ public class QuizAiGenerationService {
                                    LessonRepository lessonRepository,
                                    VocabularyRepository vocabularyRepository,
                                    GrammarPointRepository grammarPointRepository,
-                                   EmbeddingService embeddingService) {
+                                   EmbeddingService embeddingService,
+                                   @Qualifier("quizBatchExecutor") Executor quizBatchExecutor) {
         this.objectMapper = objectMapper;
         this.assignmentMapper = assignmentMapper;
         this.chatClient = ChatClient.builder(chatModel).build();
@@ -96,6 +101,7 @@ public class QuizAiGenerationService {
         this.vocabularyRepository = vocabularyRepository;
         this.grammarPointRepository = grammarPointRepository;
         this.embeddingService = embeddingService;
+        this.quizBatchExecutor = quizBatchExecutor;
         this.outputConverter = new BeanOutputConverter<>(AiQuizResponseWrapper.class);
     }
 
@@ -121,33 +127,47 @@ public class QuizAiGenerationService {
     // ═══════════════════════════════════════════════════════════════════════════
 
     private List<AiQuizQuestionDto> callAi(AiQuizGenerationRequest request) {
-        // 1. First Attempt: Full contextual prompt (Lesson Content + RAG Context)
-        try {
-            log.info("AI Generation Attempt 1: Using full context (Lesson + RAG)");
-            List<AiQuizQuestionDto> results = callAiSingleAttempt(request, true, userPromptResource);
-            if (results != null && !results.isEmpty()) {
-                return results;
-            }
-        } catch (Exception e) {
-            log.warn("AI Generation Attempt 1 failed. Error: {}", e.getMessage());
+        int totalCount = request.getQuestionCount();
+        
+        // 1. Distribute questions into batches
+        List<Integer> batchSizes = distributeByBatch(totalCount);
+        log.info("Batching {} questions into {} batches: {}", totalCount, batchSizes.size(), batchSizes);
+        
+        // 2. Create parallel tasks for each batch
+        List<CompletableFuture<List<AiQuizQuestionDto>>> futures = new ArrayList<>();
+        for (int i = 0; i < batchSizes.size(); i++) {
+            int count = batchSizes.get(i);
+            int batchNumber = i + 1;
+            futures.add(
+                CompletableFuture.supplyAsync(() ->
+                    callAiBatchWithRetry(count, batchNumber, request),
+                    quizBatchExecutor
+                )
+            );
         }
-
-        // 2. Second Attempt (Retry): Simple prompt (Lesson Content only, no RAG)
-        log.info("AI Generation Attempt 2 (Retry): Using simpler prompt (No RAG)");
-        try {
-            List<AiQuizQuestionDto> results = callAiSingleAttempt(request, false, simpleUserPromptResource);
-            if (results != null && !results.isEmpty()) {
-                return results;
+        
+        // 3. Wait for all batches to complete
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        
+        // 4. Merge results maintaining order
+        List<AiQuizQuestionDto> allDtos = new ArrayList<>();
+        int batchNum = 1;
+        for (CompletableFuture<List<AiQuizQuestionDto>> f : futures) {
+            try {
+                List<AiQuizQuestionDto> batchResult = f.join();
+                log.info("Batch {} completed: {} questions", batchNum++, batchResult.size());
+                allDtos.addAll(batchResult);
+            } catch (Exception e) {
+                log.warn("Batch {} failed: {}", batchNum++, e.getMessage());
+                // Continue with other batches even if one fails
             }
-        } catch (BusinessException be) {
-            log.error("AI Generation Attempt 2 (Retry) failed with BusinessException: {}", be.getMessage());
-            throw be; // Re-throw the specific error (e.g., AI_PARSE_ERROR, AI_EMPTY_RESPONSE)
-        } catch (Exception e) {
-            log.error("AI Generation Attempt 2 (Retry) failed with unexpected error: {}", e.getMessage());
-            throw new BusinessException("AI_GENERATION_FAILED", "Không thể sinh câu hỏi: " + e.getMessage());
         }
-
-        throw new BusinessException("AI_EMPTY_RESPONSE", "AI không thể sinh được câu hỏi hợp lệ sau 2 lượt thử.");
+        
+        if (allDtos.isEmpty()) {
+            throw new BusinessException("AI_EMPTY_RESPONSE", "AI không thể sinh được câu hỏi hợp lệ từ bất kỳ batch nào.");
+        }
+        
+        return allDtos;
     }
 
     private List<AiQuizQuestionDto> callAiSingleAttempt(AiQuizGenerationRequest request,
@@ -285,6 +305,71 @@ public class QuizAiGenerationService {
         } catch (Exception e) {
             log.warn("Salvage failed: {}", e.getMessage());
         }
+        return List.of();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // BATCHING — Distribute and call AI for each batch
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Distributes total count into optimal batch sizes.
+     * Example: 10 → [5, 5], 12 → [5, 5, 2], 3 → [3]
+     */
+    private List<Integer> distributeByBatch(int totalCount) {
+        List<Integer> batches = new ArrayList<>();
+        int batchSize = 5;  // Max questions per call
+        
+        while (totalCount > 0) {
+            int current = Math.min(batchSize, totalCount);
+            batches.add(current);
+            totalCount -= current;
+        }
+        
+        return batches;
+    }
+
+    /**
+     * Call AI for a single batch with retry logic.
+     * Tries with full context (RAG) first, then falls back to simple prompt if needed.
+     */
+    private List<AiQuizQuestionDto> callAiBatchWithRetry(int count, int batchNumber,
+                                                         AiQuizGenerationRequest request) {
+        // Create a modified request with the batch count
+        AiQuizGenerationRequest batchRequest = new AiQuizGenerationRequest(
+            request.getTeacherPrompt(),
+            request.getClassId(),
+            count,  // Use batch count instead of total count
+            request.getQuestionTypes(),
+            request.getJlptLevel(),
+            request.getLessonIds()
+        );
+
+        // 1. First Attempt: Full contextual prompt (Lesson Content + RAG Context)
+        try {
+            log.info("Batch {}: AI Generation Attempt 1: Using full context (RAG)", batchNumber);
+            List<AiQuizQuestionDto> results = callAiSingleAttempt(batchRequest, true, userPromptResource);
+            if (results != null && !results.isEmpty()) {
+                log.info("Batch {}: Successfully generated {} questions", batchNumber, results.size());
+                return results;
+            }
+        } catch (Exception e) {
+            log.warn("Batch {}: AI Generation Attempt 1 failed. Error: {}", batchNumber, e.getMessage());
+        }
+
+        // 2. Second Attempt (Retry): Simple prompt (Lesson Content only, no RAG)
+        log.info("Batch {}: AI Generation Attempt 2 (Retry): Using simpler prompt (No RAG)", batchNumber);
+        try {
+            List<AiQuizQuestionDto> results = callAiSingleAttempt(batchRequest, false, simpleUserPromptResource);
+            if (results != null && !results.isEmpty()) {
+                log.info("Batch {}: Successfully generated {} questions (retry)", batchNumber, results.size());
+                return results;
+            }
+        } catch (Exception e) {
+            log.error("Batch {}: AI Generation Attempt 2 (Retry) failed: {}", batchNumber, e.getMessage());
+        }
+
+        log.warn("Batch {}: Failed to generate any questions", batchNumber);
         return List.of();
     }
 

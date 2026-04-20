@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -93,16 +94,22 @@ public class LearningLevelServiceImpl implements LearningLevelService {
     @Override
     @Transactional
     public List<BadgeResponse> awardExpAndCheckLevelUp(UUID userId, int expAmount) {
-        UserStats stats = userStatsRepository.findByUserId(userId)
-                .orElseGet(() -> {
-                    UserStats newStats = UserStats.builder()
-                            .userId(userId)
-                            .totalExp(0)
-                            .currentLevel(1)
-                            .expToNextLevel(100)
-                            .build();
-                    return userStatsRepository.save(newStats);
-                });
+        // First, try to find existing record
+        Optional<UserStats> existing = userStatsRepository.findByUserId(userId);
+        UserStats stats;
+        
+        if (existing.isEmpty()) {
+            // Atomic UPSERT: Insert if not exists (prevents race condition from concurrent requests)
+            UUID statsId = UUID.randomUUID();
+            userStatsRepository.upsertUserStats(statsId, userId);
+            log.info("Created new UserStats record for user: {} (id: {})", userId, statsId);
+            
+            // Fetch the inserted record
+            stats = userStatsRepository.findByUserId(userId)
+                    .orElseThrow(() -> new RuntimeException("Failed to create UserStats for user: " + userId));
+        } else {
+            stats = existing.get();
+        }
 
         int previousLevel = stats.getCurrentLevel();
         int newTotalExp = stats.getTotalExp() + expAmount;

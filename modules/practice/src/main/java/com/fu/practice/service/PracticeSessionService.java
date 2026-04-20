@@ -40,6 +40,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 
 import com.fu.practice.entity.ItemMastery;
 import com.fu.practice.entity.PracticePreset;
@@ -80,41 +82,57 @@ public class PracticeSessionService {
     private final LearningLevelService learningLevelService;
     private final StreakService streakService;
     private final ApplicationEventPublisher eventPublisher;
+    private final HttpServletRequest httpServletRequest;
 
     /**
-     * ThreadLocal to store isFirstActivityOfDay flag by sessionId.
-     * Allows finishSession() to capture and store the flag for getSessionSummary() to retrieve.
-     * Scope: Single HTTP request lifetime.
-     */
-    private static final ThreadLocal<Map<UUID, Boolean>> firstActivityFlagBySession = 
-            ThreadLocal.withInitial(HashMap::new);
-
-    /**
-     * Store the isFirstActivityOfDay flag from streak notification.
+     * Store the isFirstActivityOfDay flag in HttpSession.
      * Called by finishSession() to capture the flag for getSessionSummary() to use.
+     * Using HttpSession allows the flag to persist across multiple HTTP requests in the same session.
      */
     private void storeFirstActivityFlag(UUID sessionId, boolean isFirstActivityOfDay) {
-        firstActivityFlagBySession.get().put(sessionId, isFirstActivityOfDay);
+        if (httpServletRequest == null) {
+            log.warn("storeFirstActivityFlag: HttpServletRequest not available, flag not stored");
+            return;
+        }
+        HttpSession httpSession = httpServletRequest.getSession(true);
+        String flagKey = "practice_first_activity_" + sessionId;
+        httpSession.setAttribute(flagKey, isFirstActivityOfDay);
+        log.debug("Stored first activity flag for session {}: {}", sessionId, isFirstActivityOfDay);
     }
 
     /**
-     * Retrieve the isFirstActivityOfDay flag for a session.
+     * Retrieve the isFirstActivityOfDay flag from HttpSession.
      * Called by getSessionSummary() to get the flag stored by finishSession().
      * Falls back to false if not found (safety).
      */
     private boolean getFirstActivityFlag(UUID sessionId) {
-        return firstActivityFlagBySession.get().getOrDefault(sessionId, false);
+        if (httpServletRequest == null) {
+            log.warn("getFirstActivityFlag: HttpServletRequest not available, returning false");
+            return false;
+        }
+        HttpSession httpSession = httpServletRequest.getSession(false);
+        if (httpSession == null) {
+            log.debug("getFirstActivityFlag: No HTTP session found for session {}", sessionId);
+            return false;
+        }
+        String flagKey = "practice_first_activity_" + sessionId;
+        Boolean flag = (Boolean) httpSession.getAttribute(flagKey);
+        return flag != null ? flag : false;
     }
 
     /**
-     * Clear ThreadLocal storage for a session.
-     * Should be called after getSessionSummary() completes to prevent memory leaks.
+     * Clear the isFirstActivityOfDay flag from HttpSession.
+     * Should be called after getSessionSummary() completes to prevent session bloat.
      */
     private void clearFirstActivityFlag(UUID sessionId) {
-        firstActivityFlagBySession.get().remove(sessionId);
-        // Optional: clear entire ThreadLocal if no more sessions
-        if (firstActivityFlagBySession.get().isEmpty()) {
-            firstActivityFlagBySession.remove();
+        if (httpServletRequest == null) {
+            return;
+        }
+        HttpSession httpSession = httpServletRequest.getSession(false);
+        if (httpSession != null) {
+            String flagKey = "practice_first_activity_" + sessionId;
+            httpSession.removeAttribute(flagKey);
+            log.debug("Cleared first activity flag for session {}", sessionId);
         }
     }
 
@@ -685,12 +703,14 @@ public class PracticeSessionService {
         }
         // ─────────────────────────────────────────────────────────────────────
         // Record daily activity for streak tracking
-        // Capture the isFirstActivityOfDay flag from the response and store it for getSessionSummary()
+        // Store the isFirstActivityOfDay flag in HttpSession so getSessionSummary() can retrieve it
+        // This works across multiple HTTP requests since HttpSession persists across requests
         try {
             StreakNotificationResponse streakResponse = streakService.recordDailyActivity(session.getUserId(), "PRACTICE");
             if (streakResponse != null && streakResponse.isFirstActivityToday()) {
                 storeFirstActivityFlag(session.getId(), true);
-                log.debug("Check flag: {} : {}",session.getId(),getFirstActivityFlag(session.getId()));
+                log.info("Streak notification: User {} first activity today, sessionId {}", 
+                    session.getUserId(), session.getId());
             }
         } catch (Exception e) {
             log.error("Error recording daily activity for learner: {}", session.getUserId(), e);
@@ -853,8 +873,10 @@ public class PracticeSessionService {
         com.fu.achievement.dto.response.StreakNotificationResponse streakNotification = null;
         if (session.getStatus() == PracticeStatus.COMPLETED) {
             try {
-                // Retrieve the isFirstActivityOfDay flag stored by finishSession()
+                // Retrieve the isFirstActivityOfDay flag stored in HttpSession by finishSession()
                 boolean isFirstActivityToday = getFirstActivityFlag(sessionId);
+                log.debug("Retrieved first activity flag for session {}: {}", sessionId, isFirstActivityToday);
+                
                 streakNotification = streakService.getUserStatsInfo(userId)
                         .map(stats -> com.fu.achievement.dto.response.StreakNotificationResponse.builder()
                                 .isFirstActivityToday(isFirstActivityToday)
@@ -862,12 +884,12 @@ public class PracticeSessionService {
                                 .longestStreak(stats.getLongestStreak())
                                 .build())
                         .orElse(null);
-                log.debug("Tracking daily activity: {}", isFirstActivityToday);
-                log.debug("SessionID: {}",sessionId);
+                log.debug("Streak notification for session {}: isFirstActivityToday={}", 
+                    sessionId, isFirstActivityToday);
             } catch (Exception e) {
                 log.debug("Error retrieving streak info for session summary", e);
             } finally {
-                // Clean up ThreadLocal to prevent memory leaks
+                // Clean up HttpSession to prevent session bloat
                 clearFirstActivityFlag(sessionId);
             }
         }
