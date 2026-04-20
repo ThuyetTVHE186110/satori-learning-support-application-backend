@@ -99,7 +99,72 @@ public class ConversationServiceImpl implements ConversationService {
         Conversation conversation = findActiveConversation(id);
         conversationMapper.updateEntity(conversation, request);
         conversation.setUpdatedBy(managerId);
-        return buildConversationResponse(conversationRepository.save(conversation));
+        Conversation saved = conversationRepository.save(conversation);
+
+        if (request.getMissions() != null) {
+            syncMissions(saved.getId(), request.getMissions(), managerId);
+        }
+
+        return buildConversationResponse(saved);
+    }
+
+    private void syncMissions(UUID conversationId,
+                              List<UpdateConversationRequest.InlineMissionUpsert> incoming,
+                              UUID managerId) {
+        List<ConversationMission> existing =
+                missionRepository.findByConversationIdAndDeletedAtIsNullOrderByOrderIndexAsc(conversationId);
+        Map<UUID, ConversationMission> existingById = existing.stream()
+                .collect(Collectors.toMap(ConversationMission::getId, m -> m));
+
+        List<ConversationMission> toSave = new java.util.ArrayList<>();
+        java.util.Set<UUID> keepIds = new java.util.HashSet<>();
+
+        for (UpdateConversationRequest.InlineMissionUpsert m : incoming) {
+            if (m.getId() != null && existingById.containsKey(m.getId())) {
+                ConversationMission target = existingById.get(m.getId());
+                target.setTitle(m.getTitle());
+                target.setTitleJapanese(m.getTitleJapanese());
+                target.setTitleVi(m.getTitleVi());
+                target.setDescription(m.getDescription());
+                target.setDescriptionVi(m.getDescriptionVi());
+                if (m.getMissionType() != null) target.setMissionType(m.getMissionType());
+                if (m.getSuccessCriteria() != null) target.setSuccessCriteria(m.getSuccessCriteria());
+                if (m.getRequiredVocabulary() != null) target.setRequiredVocabulary(m.getRequiredVocabulary());
+                if (m.getRequiredGrammar() != null) target.setRequiredGrammar(m.getRequiredGrammar());
+                if (m.getOrderIndex() != null) target.setOrderIndex(m.getOrderIndex());
+                target.setUpdatedBy(managerId);
+                toSave.add(target);
+                keepIds.add(target.getId());
+            } else {
+                toSave.add(ConversationMission.builder()
+                        .conversationId(conversationId)
+                        .title(m.getTitle())
+                        .titleJapanese(m.getTitleJapanese())
+                        .titleVi(m.getTitleVi())
+                        .description(m.getDescription())
+                        .descriptionVi(m.getDescriptionVi())
+                        .missionType(m.getMissionType() != null
+                                ? m.getMissionType() : ConversationMission.MissionType.CUSTOM)
+                        .successCriteria(m.getSuccessCriteria() != null ? m.getSuccessCriteria() : "{}")
+                        .requiredVocabulary(m.getRequiredVocabulary() != null ? m.getRequiredVocabulary() : "[]")
+                        .requiredGrammar(m.getRequiredGrammar() != null ? m.getRequiredGrammar() : "[]")
+                        .orderIndex(m.getOrderIndex() != null ? m.getOrderIndex() : 0)
+                        .createdBy(managerId)
+                        .updatedBy(managerId)
+                        .build());
+            }
+        }
+
+        List<ConversationMission> toRemove = existing.stream()
+                .filter(e -> !keepIds.contains(e.getId()))
+                .collect(Collectors.toList());
+        toRemove.forEach(m -> m.softDelete(managerId));
+
+        if (!toSave.isEmpty()) missionRepository.saveAll(toSave);
+        if (!toRemove.isEmpty()) missionRepository.saveAll(toRemove);
+
+        log.info("Synced missions for conversation {} — upsert={}, deleted={}",
+                conversationId, toSave.size(), toRemove.size());
     }
 
     @Override
