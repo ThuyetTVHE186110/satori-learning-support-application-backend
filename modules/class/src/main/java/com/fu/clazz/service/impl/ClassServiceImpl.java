@@ -85,6 +85,7 @@ public class ClassServiceImpl implements ClassService {
 
     /**
      * Safely trims a string value, handling null gracefully
+     *
      * @param value the string to trim, can be null
      * @return trimmed string or null if input is null
      */
@@ -841,13 +842,20 @@ public class ClassServiceImpl implements ClassService {
             Clazz existingClass = null;
             if (classExists) {
                 // Retrieve the actual class for learner membership checks
-                existingClass = classRepository.findByNameIgnoreCaseAndNotDeleted(className).orElse(null);
+                existingClass = classRepository.findByNameIgnoreCase(className).orElse(null);
             }
 
             // Determine status based on startDate
             ClassStatus status = ClassStatus.NOT_STARTED;
             if (excelRow.getStartDate() != null && !excelRow.getStartDate().isAfter(LocalDate.now())) {
                 status = ClassStatus.ACTIVE;
+            }
+            if (existingClass != null &&
+                    existingClass.getStatus().equals(ClassStatus.ACTIVE) ||
+                    existingClass.getStatus().equals(ClassStatus.CLOSED) ||
+                    existingClass.getStatus().equals(ClassStatus.DELETED)
+            ) {
+                status = existingClass.getStatus();
             }
 
             // Build learner list with full details and validate
@@ -886,7 +894,7 @@ public class ClassServiceImpl implements ClassService {
 
             for (LearnerExcelRow learnerExcelRow : learnerExcelRows) {
                 String learnerEmail = safeGetTrimmedValue(learnerExcelRow.getEmail());
-                
+
                 // Validate email is not null
                 if (learnerEmail == null || learnerEmail.isEmpty()) {
                     errors.add(ClassImportError.builder()
@@ -896,7 +904,7 @@ public class ClassServiceImpl implements ClassService {
                             .build());
                     continue;
                 }
-                
+
                 learnerEmail = learnerEmail.toLowerCase();
 
                 // Skip learners that are duplicates in this class
@@ -957,7 +965,7 @@ public class ClassServiceImpl implements ClassService {
                 // Use Objects.equals() for null-safe comparison
                 String excelName = safeGetTrimmedValue(learnerExcelRow.getName());
                 String excelPhone = safeGetTrimmedValue(learnerExcelRow.getPhoneNumber());
-                
+
                 if (!Objects.equals(learner.getFullName(), excelName) ||
                         !Objects.equals(learner.getDateOfBirth(), learnerExcelRow.getDateOfBirth()) ||
                         !Objects.equals(learner.getPhoneNumber(), excelPhone)) {
@@ -1042,7 +1050,7 @@ public class ClassServiceImpl implements ClassService {
                 boolean hasCourseError = enrichedPreview.getCourseValidationError() != null;
                 boolean hasTeacherInfoError = enrichedPreview.getTeacherInfoValidationError() != null;
                 boolean invalidStatusError = existingClass.isDeleted() || existingClass.getStatus().equals(ClassStatus.CLOSED);
-                if (hasTeacherError || hasCourseError || hasTeacherInfoError || invalidStatusError) {
+                if (hasTeacherError || hasCourseError || hasTeacherInfoError) {
                     // Add validation errors to error list
                     if (hasTeacherError) {
                         errors.add(ClassImportError.builder()
@@ -1062,13 +1070,6 @@ public class ClassServiceImpl implements ClassService {
                                 .errorMessage(enrichedPreview.getTeacherInfoValidationError())
                                 .build());
                     }
-                    if (invalidStatusError) {
-                        errors.add(ClassImportError.builder()
-                                .className(preview.getName())
-                                .errorMessage("Lớp học " + preview.getName() + " đã bị xóa hoặc đóng, không thể cập nhật thông tin.")
-                                .build());
-
-                    }
                     log.debug("Filtering out UPDATE class {} - has validation error", preview.getName());
                     continue;
                 }
@@ -1076,7 +1077,12 @@ public class ClassServiceImpl implements ClassService {
                 // Check if there are any actual changes by comparing current vs old values
                 boolean hasFieldChanges = hasFieldChanges(enrichedPreview);
                 boolean hasNewLearners = enrichedPreview.getLearnersToAdd() != null && !enrichedPreview.getLearnersToAdd().isEmpty();
-
+                if (hasFieldChanges && invalidStatusError) {
+                    errors.add(ClassImportError.builder()
+                            .className(preview.getName())
+                            .errorMessage("Lớp học " + preview.getName() + " đã bị xóa hoặc đóng, không thể cập nhật thông tin.")
+                            .build());
+                }
                 // Only include if has changes or new learners
                 if (hasFieldChanges || hasNewLearners) {
                     updatedClasses.add(enrichedPreview);
