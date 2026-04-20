@@ -965,8 +965,14 @@ public class ClassServiceImpl implements ClassService {
                 // Use Objects.equals() for null-safe comparison
                 String excelName = safeGetTrimmedValue(learnerExcelRow.getName());
                 String excelPhone = safeGetTrimmedValue(learnerExcelRow.getPhoneNumber());
-
-                if (!Objects.equals(learner.getFullName(), excelName) ||
+                StringBuilder sb = new StringBuilder();
+                if (learner.getLastName() != null) sb.append(learner.getLastName());
+                if (learner.getFirstName() != null) {
+                    if (sb.length() > 0) sb.append(" ");
+                    sb.append(learner.getFirstName());
+                }
+                String existingLearnerFullname = sb.toString();
+                if (!Objects.equals(existingLearnerFullname, excelName) ||
                         !Objects.equals(learner.getDateOfBirth(), learnerExcelRow.getDateOfBirth()) ||
                         !Objects.equals(learner.getPhoneNumber(), excelPhone)) {
                     errors.add(ClassImportError.builder()
