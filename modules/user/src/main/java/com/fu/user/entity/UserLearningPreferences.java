@@ -44,16 +44,9 @@ public class UserLearningPreferences extends BaseEntity {
     @Column(name = "preferred_topics", columnDefinition = "text[]")
     private String[] preferredTopics;
 
-    @Column(name = "learning_pace", length = 20)
-    @Builder.Default
-    private String learningPace = "normal"; // slow | normal | fast
-
     @Column(name = "preferred_formality", length = 20)
     @Builder.Default
     private String preferredFormality = "polite"; // casual | polite | formal
-
-    @Column(name = "conversation_style", length = 50)
-    private String conversationStyle; // practical | creative | business | travel
 
     // Notification preferences
     @Column(name = "streak_reminder_enabled")

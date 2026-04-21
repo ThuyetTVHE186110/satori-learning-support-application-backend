@@ -27,17 +27,9 @@ public class UpdateLearningPreferencesRequest {
 
     private List<String> preferredTopics;
 
-    @Pattern(regexp = "slow|normal|fast",
-             message = "learningPace must be one of: slow, normal, fast")
-    private String learningPace;
-
     @Pattern(regexp = "casual|polite|formal",
              message = "preferredFormality must be one of: casual, polite, formal")
     private String preferredFormality;
-
-    @Pattern(regexp = "practical|creative|business|travel",
-             message = "conversationStyle must be one of: practical, creative, business, travel")
-    private String conversationStyle;
 
     /**
      * Forwarded to notification_prefs.daily_reminder_enabled — not stored in learning_prefs.

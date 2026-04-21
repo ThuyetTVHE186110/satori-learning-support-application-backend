@@ -26,6 +26,7 @@ public class PracticeItemResponse {
     private PracticeItemType itemType;
     private String question;
     private String questionJapanese;
+    private String questionJapaneseWithFurigana;
     private String hint;
 
     /**

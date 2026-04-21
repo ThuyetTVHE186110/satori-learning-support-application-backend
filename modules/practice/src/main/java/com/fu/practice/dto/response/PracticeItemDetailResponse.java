@@ -22,6 +22,7 @@ public class PracticeItemDetailResponse {
     private String itemType;
     private String question;
     private String questionJapanese;
+    private String questionJapaneseWithFurigana;
     private List<OptionDto> options;
     private String correctAnswer;
     private String userAnswer;

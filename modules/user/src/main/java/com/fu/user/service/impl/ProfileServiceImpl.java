@@ -131,15 +131,12 @@ public class ProfileServiceImpl implements ProfileService {
                     return UserLearningPreferences.builder()
                             .user(user)
                             .dailyStudyGoalMinutes(30)
-                            .learningPace("normal")
                             .preferredFormality("polite")
                             .build();
                 });
 
         if (request.getDailyStudyGoalMinutes() != null) prefs.setDailyStudyGoalMinutes(request.getDailyStudyGoalMinutes());
-        if (request.getLearningPace() != null)        prefs.setLearningPace(request.getLearningPace());
         if (request.getPreferredFormality() != null)  prefs.setPreferredFormality(request.getPreferredFormality());
-        if (request.getConversationStyle() != null)   prefs.setConversationStyle(request.getConversationStyle());
         if (request.getPreferredTopics() != null) {
             prefs.setPreferredTopics(request.getPreferredTopics().toArray(String[]::new));
         }

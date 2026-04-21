@@ -124,33 +124,6 @@ public class ApplicationEventNotificationListener {
     }
 
     /**
-     * Handles AchievementUnlockedEvent - notifies user about new achievement.
-     */
-    @Async
-    @EventListener
-    public void handleAchievementUnlocked(AchievementUnlockedEvent event) {
-        log.debug("Processing AchievementUnlockedEvent: userId={}, achievement={}", 
-                event.getUserId(), event.getAchievementTitle());
-
-        Map<String, Object> data = new HashMap<>();
-        data.put("achievementId", event.getAchievementId().toString());
-
-        SendNotificationRequest request = SendNotificationRequest.builder()
-                .userId(event.getUserId())
-                .type(NotificationType.ACHIEVEMENT_UNLOCKED)
-                .priority(NotificationPriority.NORMAL)
-                .title("🏆 " + event.getAchievementTitle())
-                .body(event.getAchievementDescription())
-                .data(data)
-                .imageUrl(event.getBadgeImageUrl())
-                .actionUrl("/achievements")
-                .build();
-
-        notificationService.send(request);
-        log.info("Achievement notification sent: {} -> {}", event.getUserId(), event.getAchievementTitle());
-    }
-
-    /**
      * Handles ClassJoinedEvent - welcomes user to the class.
      */
     @Async

@@ -47,6 +47,9 @@ public class PracticeItem extends BaseEntity {
     @Column(name = "question_japanese", columnDefinition = "TEXT")
     private String questionJapanese;
 
+    @Column(name = "question_japanese_with_furigana", columnDefinition = "TEXT")
+    private String questionJapaneseWithFurigana;
+
     @Column(name = "hint", columnDefinition = "TEXT")
     private String hint;
 

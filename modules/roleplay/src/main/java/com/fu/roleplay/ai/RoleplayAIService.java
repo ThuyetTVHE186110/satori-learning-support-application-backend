@@ -81,11 +81,11 @@ public class RoleplayAIService {
     public String generateResponse(UUID sessionId, String systemPrompt, List<ConversationMessage> history,
                                     String userMessage) {
         try {
-            List<ConversationMessage> recentHistory = PromptUtils.slidingTail(history, roleplayProperties.getMaxContextMessages());
+            List<ConversationMessage> hybridHistory = buildHybridContextWindow(history);
 
             StringBuilder conversationHistory = new StringBuilder();
             conversationHistory.append("<conversation_history>\n");
-            for (ConversationMessage msg : recentHistory) {
+            for (ConversationMessage msg : hybridHistory) {
                 String role = msg.getRole() == ConversationMessage.MessageRole.USER ? "Learner" : "AI";
                 conversationHistory.append(role).append(": ").append(sanitizeUserInput(msg.getContent())).append("\n");
             }
@@ -176,11 +176,11 @@ public class RoleplayAIService {
                                         List<ConversationMessage> history,
                                         List<SessionMission> missions) {
         try {
-            List<ConversationMessage> recentHistory = PromptUtils.slidingTail(history, roleplayProperties.getMaxContextMessages());
+            List<ConversationMessage> hybridHistory = buildHybridContextWindow(history);
 
             StringBuilder sb = new StringBuilder();
             sb.append("<conversation_history>\n");
-            for (ConversationMessage msg : recentHistory) {
+            for (ConversationMessage msg : hybridHistory) {
                 String role = msg.getRole() == ConversationMessage.MessageRole.USER ? "Learner" : "AI";
                 sb.append(role).append(": ").append(sanitizeUserInput(msg.getContent())).append("\n");
             }
@@ -233,6 +233,39 @@ public class RoleplayAIService {
             "(?i)(</?system_instructions>|</?conversation_history>|</?hidden_objectives>|"
             + "SYSTEM_INSTRUCTIONS|END_SYSTEM_INSTRUCTIONS|CONVERSATION_HISTORY|END_CONVERSATION_HISTORY|"
             + "HIDDEN OBJECTIVES|<<<|>>>)", Pattern.CASE_INSENSITIVE);
+
+    /**
+     * Hybrid context window: pinned opening messages (scenario setup) + sliding tail of recent turns.
+     * Prevents attention dilution ("Lost in the Middle") from dropping the scenario anchor on long sessions.
+     * If total history ≤ window, returns full history unchanged.
+     */
+    private List<ConversationMessage> buildHybridContextWindow(List<ConversationMessage> history) {
+        int maxWindow = roleplayProperties.getMaxContextMessages();
+        int pinned = Math.max(0, roleplayProperties.getPinnedContextMessages());
+        if (history.size() <= maxWindow) {
+            return history;
+        }
+        int pinnedEffective = Math.min(pinned, history.size());
+        int tailSize = Math.max(0, maxWindow - pinnedEffective);
+        List<ConversationMessage> head = history.subList(0, pinnedEffective);
+        List<ConversationMessage> tail = history.subList(history.size() - tailSize, history.size());
+        // Deduplicate: if head and tail overlap (very short history, handled above), keep head then non-overlapping tail.
+        int headLast = pinnedEffective - 1;
+        int tailFirst = history.size() - tailSize;
+        List<ConversationMessage> combined = new java.util.ArrayList<>(pinnedEffective + tailSize);
+        combined.addAll(head);
+        if (tailFirst > headLast + 1) {
+            // Gap between pinned head and tail — inject a ellipsis marker as a synthetic SYSTEM message.
+            ConversationMessage ellipsis = ConversationMessage.builder()
+                    .role(ConversationMessage.MessageRole.SYSTEM)
+                    .content("[... earlier turns omitted ...]")
+                    .sequenceNumber(-1)
+                    .build();
+            combined.add(ellipsis);
+        }
+        combined.addAll(tail);
+        return combined;
+    }
 
     private String sanitizeUserInput(String input) {
         if (input == null) return "";

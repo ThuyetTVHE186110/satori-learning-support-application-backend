@@ -51,4 +51,14 @@ public interface CloudinaryService {
      * @return the secure URL of the uploaded audio
      */
     String uploadAudio(MultipartFile file, String folder);
+
+    /**
+     * Upload raw audio bytes to Cloudinary (e.g., produced by Azure TTS).
+     * Uses resource_type "video" (Cloudinary convention for audio files).
+     *
+     * @param bytes  the audio payload
+     * @param folder the Cloudinary folder to store the audio in
+     * @return the secure URL of the uploaded audio
+     */
+    String uploadAudioBytes(byte[] bytes, String folder);
 }
