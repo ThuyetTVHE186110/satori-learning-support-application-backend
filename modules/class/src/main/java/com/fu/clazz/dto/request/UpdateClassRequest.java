@@ -30,5 +30,6 @@ public class UpdateClassRequest {
     private Integer maxStudents;
 
     private LocalDate startDate;
+    private LocalDate expectedEndDate;
 
 }

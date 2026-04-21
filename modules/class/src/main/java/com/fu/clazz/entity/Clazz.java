@@ -55,4 +55,6 @@ public class Clazz extends SoftDeletableEntity {
     @Builder.Default
     private ClassStatus status = ClassStatus.NOT_STARTED;
 
+    @Column(name = "expected_end_date")
+    private LocalDate expectedEndDate;
 }

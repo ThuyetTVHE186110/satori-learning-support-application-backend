@@ -1,5 +1,6 @@
 package com.fu.conversation.service.impl;
 
+import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.conversation.dto.request.CreateConversationRequest;
 import com.fu.conversation.dto.request.GenerateConversationRequest;
@@ -63,6 +64,12 @@ public class ConversationServiceImpl implements ConversationService {
         if (request.getCourseId() != null) {
             Course course = courseRepository.findByIdAndNotDeleted(request.getCourseId()).orElseThrow(() -> new CourseNotFoundException(request.getCourseId()));
             conversation.setJlptLevel(course.getJlptLevel());
+        }
+        if (request.getMissions() == null || request.getMissions().isEmpty()) {
+            throw new BusinessException("MIN_MISSION", "Số lượng nhiệm vụ trong một bài hội thoại ít nhất là 1 nhiệm vụ.");
+        }
+        if (request.getMissions().size() > 3) {
+            throw new BusinessException("MAX_MISSION", "Số lượng nhiệm vụ trong một bài hội thoại không được vượt quá 3 nhiệm vụ.");
         }
         Conversation saved = conversationRepository.save(conversation);
 
