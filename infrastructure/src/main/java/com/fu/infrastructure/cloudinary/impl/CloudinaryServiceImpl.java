@@ -187,34 +187,6 @@ public class CloudinaryServiceImpl implements CloudinaryService {
         }
     }
 
-    @Override
-    public String uploadAudioBytes(byte[] bytes, String folder) {
-        if (!cloudinaryEnabled) {
-            log.info("[CLOUDINARY ĐANG TẮT] Sẽ tải {} bytes âm thanh lên thư mục: {}",
-                    bytes == null ? 0 : bytes.length, folder);
-            return "https://placeholder.co/audio?text=Cloudinary+Dang+Tat";
-        }
-        if (bytes == null || bytes.length == 0) {
-            throw new BusinessException("INVALID_FILE", "Dữ liệu âm thanh rỗng");
-        }
-        if (bytes.length > MAX_AUDIO_FILE_SIZE) {
-            throw new BusinessException("FILE_TOO_LARGE", "Kích thước âm thanh không được vượt quá 10MB");
-        }
-        try {
-            Map<?, ?> uploadResult = cloudinary.uploader().upload(bytes, ObjectUtils.asMap(
-                    "folder", folder,
-                    "resource_type", "video",
-                    "overwrite", true
-            ));
-            String secureUrl = (String) uploadResult.get("secure_url");
-            log.info("Tải âm thanh (bytes) lên Cloudinary thành công: {}", secureUrl);
-            return secureUrl;
-        } catch (IOException e) {
-            log.error("Tải âm thanh (bytes) lên Cloudinary thất bại", e);
-            throw new BusinessException("UPLOAD_FAILED", "Tải âm thanh lên thất bại: " + e.getMessage());
-        }
-    }
-
     private void validateAudioFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new BusinessException("INVALID_FILE", "Tệp âm thanh là bắt buộc và không được để trống");

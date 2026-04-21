@@ -32,7 +32,8 @@ public class AzureSpeechProperties {
         private String defaultVoice = "ja-JP-NanamiNeural";
         /** Audio format: mp3 to minimize Cloudinary storage; Azure supports Audio16Khz32KBitRateMonoMp3. */
         private String outputFormat = "Audio16Khz32KBitRateMonoMp3";
-        /** Cloudinary folder where synthesized audio lives. */
-        private String cloudinaryFolder = "roleplay/tts";
+        /** Max total wait for parallel synthesis of all AI segments in one turn.
+         *  Segments exceeding this window return null audio; their text is still delivered. */
+        private long bundleTimeoutMs = 10_000L;
     }
 }
