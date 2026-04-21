@@ -155,13 +155,24 @@ public class ExerciseGeneratorAgent {
         Map<PracticeItemType, Integer> distribution = distributeCount(resolvedCount, resolvedTypes);
         List<PracticeItemType> distinctTypes = resolvedTypes.stream().distinct().collect(Collectors.toList());
 
-        // Chuẩn bị entity list cho partitioning ở explicit mode:
-        // combined = vocab + grammar (theo thứ tự đã shuffle). Từ batch sẽ lấy slice xoay vòng
-        // để KHÔNG có 2 batch nào cùng prompt về cùng subset → tránh duplicate câu hỏi.
+        // Disjoint entity partition across batches. Combined = shuffled vocab + grammar.
+        // Each batch gets a NON-OVERLAPPING slice so two batches never prompt about the same
+        // subset — the root cause of duplicate questions. We no longer gate this on explicit mode:
+        // even in coverage mode, sharing the full pool between parallel batches invites near-duplicate
+        // generations from independent LLM calls.
+        // When the pool is smaller than the cumulative slice demand we fall back to cycling (each
+        // cycle offset-shifted) which still strictly beats "every batch sees everything".
         List<Object> combinedEntities = new ArrayList<>();
         combinedEntities.addAll(shuffledVocab);
         combinedEntities.addAll(shuffledGrammar);
-        final boolean partitionEntities = isExplicitMode && !combinedEntities.isEmpty();
+        final boolean partitionEntities = !combinedEntities.isEmpty();
+
+        // Pool size gate: if entity pool is smaller than target count, cycling is unavoidable and
+        // duplicate-risk rises sharply. Log so we can catch under-provisioned lessons in prod.
+        if (!combinedEntities.isEmpty() && combinedEntities.size() < resolvedCount) {
+            log.warn("Practice entity pool undersized: pool={} target={} — duplicates possible",
+                    combinedEntities.size(), resolvedCount);
+        }
 
         List<BatchTask> tasks = new ArrayList<>();
         int sliceCursor = 0;
@@ -183,7 +194,10 @@ public class ExerciseGeneratorAgent {
                     for (int i = 0; i < sliceSize; i++) {
                         slice.add(combinedEntities.get((sliceCursor + i) % combinedEntities.size()));
                     }
-                    sliceCursor = (sliceCursor + batchSize) % combinedEntities.size();
+                    // Advance cursor by the full sliceSize (not batchSize) so the NEXT batch's
+                    // window is disjoint — old code advanced by batchSize, which produced
+                    // heavy overlap (~75% for MATCHING where sliceSize = 4× batchSize).
+                    sliceCursor = (sliceCursor + sliceSize) % combinedEntities.size();
                     bv = new ArrayList<>();
                     bg = new ArrayList<>();
                     for (Object e : slice) {
@@ -242,6 +256,16 @@ public class ExerciseGeneratorAgent {
         }
 
         List<GeneratedItem> items = interleaveItems(byType, resolvedTypes, targetCount);
+
+        // Dedup across batches: parallel LLM calls occasionally produce near-duplicates (same
+        // refContentId + same question stem) — disjoint partition cuts this drastically but
+        // cycle-wrap and shared content blocks can still emit the same question twice. Key on
+        // (refContentId, normalized question+correctAnswer) so we catch exact reprints without
+        // falsely merging legitimate multi-angle items on the same entity.
+        int deduped = applyDedup(items);
+        if (deduped > 0) {
+            log.info("Dedup dropped {}/{} items (target={})", deduped, deduped + items.size(), targetCount);
+        }
 
         // Defensive quality filter — drop items with placeholder leak or
         // obvious Japanese grammar errors (LLM occasionally produces these).
@@ -389,26 +413,6 @@ public class ExerciseGeneratorAgent {
             sb.append("Chủ đề quan tâm: ")
               .append(String.join(", ", prefs.getPreferredTopics()))
               .append(" → ưu tiên đặt ví dụ/câu hỏi vào ngữ cảnh này\n");
-
-        if (prefs.getConversationStyle() != null) {
-            String hint = switch (prefs.getConversationStyle()) {
-                case "business"  -> "môi trường công sở, văn phòng";
-                case "travel"    -> "du lịch, hỏi đường, đặt phòng";
-                case "practical" -> "hội thoại hàng ngày, mua sắm, nhà hàng";
-                case "creative"  -> "sáng tạo, đa dạng ngữ cảnh";
-                default          -> null;
-            };
-            if (hint != null) sb.append("Ngữ cảnh ưa thích: ").append(hint).append("\n");
-        }
-
-        if (prefs.getLearningPace() != null) {
-            String hint = switch (prefs.getLearningPace()) {
-                case "slow" -> "CHẬM → thêm hint, câu hỏi ít bẫy, explanation chi tiết";
-                case "fast" -> "NHANH → ít hint, ưu tiên SENTENCE_ORDER và TRANSLATION, bẫy tinh tế";
-                default     -> null;
-            };
-            if (hint != null) sb.append("Tốc độ học: ").append(hint).append("\n");
-        }
 
         if (prefs.getPreferredFormality() != null) {
             String hint = switch (prefs.getPreferredFormality()) {
@@ -678,6 +682,7 @@ public class ExerciseGeneratorAgent {
                 + "- \"itemType\"        : \"" + itemType.name() + "\"\n"
                 + "- \"question\"        : câu hỏi / yêu cầu — KHÔNG rỗng, KHÔNG chứa \"~\".\n"
                 + "- \"questionJapanese\": câu tiếng Nhật (null nếu không cần).\n"
+                + "- \"questionJapaneseWithFurigana\": giống \"questionJapanese\" nhưng mọi từ kanji kèm hiragana dạng 漢字[かんじ] (null nếu questionJapanese null).\n"
                 + "- \"options\"         : " + optionsNote + "\n"
                 + "- \"pairs\"           : " + pairsNote + "\n"
                 + "- \"correctAnswer\"   : đáp án đúng dạng string (null nếu MATCHING).\n"
@@ -727,6 +732,35 @@ public class ExerciseGeneratorAgent {
      * Combines placeholder-leak and Japanese-grammar checks so the retry path
      * can reuse the exact same predicates as the main pipeline.
      */
+    /**
+     * Drops duplicate items keyed on (refContentId, normalized question+correctAnswer).
+     * Same entity with different question stems is kept — only byte-identical reprints are dropped.
+     */
+    private static int applyDedup(List<GeneratedItem> items) {
+        if (items == null || items.size() < 2) return 0;
+        Set<String> seen = new HashSet<>();
+        int before = items.size();
+        items.removeIf(it -> {
+            String ref = it.getRefContentId() == null ? "" : it.getRefContentId();
+            String q = normalizeDedupText(it.getQuestion());
+            String qj = normalizeDedupText(it.getQuestionJapanese());
+            String ans = normalizeDedupText(it.getCorrectAnswer());
+            String key = ref + "|" + q + "|" + qj + "|" + ans;
+            if (!seen.add(key)) {
+                log.warn("Drop duplicate item: refContentId={} question={}", ref,
+                        it.getQuestion() == null ? "" : it.getQuestion().substring(0, Math.min(40, it.getQuestion().length())));
+                return true;
+            }
+            return false;
+        });
+        return before - items.size();
+    }
+
+    private static String normalizeDedupText(String s) {
+        if (s == null) return "";
+        return s.trim().toLowerCase().replaceAll("\\s+", " ");
+    }
+
     private static int applyQualityFilter(List<GeneratedItem> items) {
         if (items == null || items.isEmpty()) return 0;
         int before = items.size();
@@ -1305,6 +1339,7 @@ public class ExerciseGeneratorAgent {
         @JsonProperty("itemType")         private String itemType;
         @JsonProperty("question")         private String question;
         @JsonProperty("questionJapanese") private String questionJapanese;
+        @JsonProperty("questionJapaneseWithFurigana") private String questionJapaneseWithFurigana;
         @JsonProperty("options")          private List<OptionItem> options;
         @JsonProperty("pairs")            private List<MatchingPair> pairs;
         @JsonProperty("correctAnswer")    private String correctAnswer;
@@ -1318,6 +1353,7 @@ public class ExerciseGeneratorAgent {
         public String getItemType()          { return itemType; }
         public String getQuestion()          { return question; }
         public String getQuestionJapanese()  { return questionJapanese; }
+        public String getQuestionJapaneseWithFurigana() { return questionJapaneseWithFurigana; }
         public List<OptionItem> getOptions() { return options; }
         public List<MatchingPair> getPairs() { return pairs; }
         public String getCorrectAnswer()     { return correctAnswer; }

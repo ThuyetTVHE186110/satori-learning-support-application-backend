@@ -215,7 +215,6 @@ public class InsightAggregationService {
                     UserLearningPreferences newPrefs = UserLearningPreferences.builder()
                             .user(user)
                             .dailyStudyGoalMinutes(30)
-                            .learningPace("normal")
                             .preferredFormality("polite")
                             .streakReminderEnabled(true)
                             .skillScores(SKILL_DIMENSIONS.stream()

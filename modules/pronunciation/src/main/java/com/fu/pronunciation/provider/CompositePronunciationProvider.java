@@ -2,6 +2,7 @@ package com.fu.pronunciation.provider;
 
 import com.fu.pronunciation.dto.AssessmentRequest;
 import com.fu.pronunciation.dto.AssessmentResult;
+import com.fu.pronunciation.dto.TranscriptionResult;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Primary;
@@ -78,5 +79,13 @@ public class CompositePronunciationProvider implements PronunciationAssessmentPr
     @Override
     public boolean isAvailable() {
         return azureSpeechProvider.isAvailable() || speechSuperProvider.isAvailable();
+    }
+
+    @Override
+    public TranscriptionResult recognize(byte[] audioData, String audioFormat) {
+        if (azureSpeechProvider.isAvailable()) {
+            return azureSpeechProvider.recognize(audioData, audioFormat);
+        }
+        return TranscriptionResult.failure("No STT-capable provider available");
     }
 }
