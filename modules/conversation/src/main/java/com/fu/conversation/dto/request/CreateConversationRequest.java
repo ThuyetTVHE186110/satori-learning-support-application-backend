@@ -31,11 +31,11 @@ public class CreateConversationRequest {
 
     @Size(max = 255)
     private String titleJapanese;
-
+    @Size(max = 1000)
     private String description;
-
+    @Size(max = 1000)
     private String descriptionVi;
-
+    @NotBlank(message = "Không được để trống kịch bản")
     private String scenario;
 
     private String vocabularyHints;
@@ -50,9 +50,9 @@ public class CreateConversationRequest {
     @Min(1) @Max(10)
     @Builder.Default
     private Integer difficultyScore = 1;
-
+    @NotBlank(message = "Không được để trống vai trò của AI")
     private String aiRole;
-
+    @NotBlank(message = "Không được để trống vai trò của học viên")
     private String learnerRole;
 
     private String roleplayContext;
