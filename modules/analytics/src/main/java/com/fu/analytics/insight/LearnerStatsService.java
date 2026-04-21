@@ -52,9 +52,29 @@ public class LearnerStatsService {
     private static final List<String> SKILL_DIMENSIONS = List.of(
             "VOCABULARY", "GRAMMAR", "PRONUNCIATION", "FLUENCY", "SPEAKING");
 
+    /** Skills sourced from roleplay/speaking sessions (Azure pronunciation + LLM language assessment). */
+    private static final List<String> SPEAKING_SKILLS = List.of("PRONUNCIATION", "FLUENCY", "SPEAKING");
+
+    /** Skills sourced from practice sessions (exercise generator + answer evaluator). */
+    private static final List<String> PRACTICE_SKILLS = List.of("VOCABULARY", "GRAMMAR");
+
     // ── Radar Chart ─────────────────────────────────────────────────────────
 
     public SkillRadarResponse getSkillRadar(UUID userId) {
+        return buildRadar(userId, SKILL_DIMENSIONS);
+    }
+
+    /** Speaking-only radar (PRONUNCIATION / FLUENCY / SPEAKING) for the speaking dashboard card. */
+    public SkillRadarResponse getSpeakingSkillRadar(UUID userId) {
+        return buildRadar(userId, SPEAKING_SKILLS);
+    }
+
+    /** Practice-only radar (VOCABULARY / GRAMMAR) for the practice dashboard card. */
+    public SkillRadarResponse getPracticeSkillRadar(UUID userId) {
+        return buildRadar(userId, PRACTICE_SKILLS);
+    }
+
+    private SkillRadarResponse buildRadar(UUID userId, List<String> dimensions) {
         UserLearningPreferences prefs = prefsRepository.findByUserId(userId).orElse(null);
 
         List<SkillScore> scores = prefs != null && prefs.getSkillScores() != null
@@ -63,12 +83,12 @@ public class LearnerStatsService {
 
         Set<String> present = scores.stream().map(SkillScore::skill).collect(Collectors.toSet());
         List<SkillScore> allScores = new ArrayList<>(scores);
-        for (String skill : SKILL_DIMENSIONS) {
+        for (String skill : dimensions) {
             if (!present.contains(skill)) allScores.add(SkillScore.defaultScore(skill));
         }
 
         List<SkillRadarResponse.SkillItem> items = allScores.stream()
-                .filter(s -> SKILL_DIMENSIONS.contains(s.skill()))
+                .filter(s -> dimensions.contains(s.skill()))
                 .map(s -> SkillRadarResponse.SkillItem.builder()
                         .skill(s.skill())
                         .score(s.score())
@@ -81,7 +101,8 @@ public class LearnerStatsService {
 
         double overall = items.stream().mapToDouble(SkillRadarResponse.SkillItem::getScore).average().orElse(0);
         String targetLevel = prefs != null ? prefs.getTargetJlptLevel() : "N5";
-        LocalDateTime lastUpdated = allScores.stream()
+        LocalDateTime lastUpdated = items.isEmpty() ? null : allScores.stream()
+                .filter(s -> dimensions.contains(s.skill()))
                 .map(SkillScore::lastUpdated)
                 .filter(Objects::nonNull)
                 .max(LocalDateTime::compareTo)

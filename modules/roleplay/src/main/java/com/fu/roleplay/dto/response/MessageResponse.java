@@ -20,6 +20,7 @@ public class MessageResponse {
     private ConversationMessage.MessageRole role;
     private String content;
     private String japaneseContent;
+    private String japaneseWithFurigana;
     private String translation;
     private String romaji;
     private String audioUrl;

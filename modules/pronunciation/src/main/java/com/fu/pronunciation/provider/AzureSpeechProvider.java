@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.pronunciation.config.AzureSpeechProperties;
 import com.fu.pronunciation.dto.AssessmentRequest;
 import com.fu.pronunciation.dto.AssessmentResult;
+import com.fu.pronunciation.dto.TranscriptionResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -12,6 +13,8 @@ import com.microsoft.cognitiveservices.speech.*;
 import com.microsoft.cognitiveservices.speech.audio.*;
 
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
@@ -40,6 +43,7 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
         SpeechConfig speechConfig = null;
         AudioConfig audioConfig = null;
         SpeechRecognizer recognizer = null;
+        Path tempWavFile = null;
 
         try {
             // 1. Create SpeechConfig
@@ -47,32 +51,40 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
                     properties.getSubscriptionKey(), properties.getRegion());
             speechConfig.setSpeechRecognitionLanguage(properties.getLanguage());
 
-            // 2. Create PronunciationAssessmentConfig
+            // 2. Create PronunciationAssessmentConfig.
+            // Unscripted mode: empty referenceText + miscue disabled → Azure scores phonemes
+            // against its own recognized words. Use this for free-form roleplay where there is
+            // no prescribed utterance (passing the learner's own transcript as reference produces
+            // tautologically high scores — audio matches its own recognition).
             PronunciationAssessmentGranularity granularity = mapGranularity(properties.getGranularity());
+            String refText = request.isUnscripted() ? "" :
+                    (request.getReferenceText() == null ? "" : request.getReferenceText());
+            boolean enableMiscue = !request.isUnscripted();
             PronunciationAssessmentConfig pronConfig = new PronunciationAssessmentConfig(
-                    request.getReferenceText(),
+                    refText,
                     PronunciationAssessmentGradingSystem.HundredMark,
                     granularity,
-                    true // enableMiscue
+                    enableMiscue
             );
             pronConfig.enableProsodyAssessment();
 
-            // 3. Create PushAudioInputStream with appropriate format for the audio type
+            // 3. Build AudioConfig. For WAV, write to a temp file so the SDK parses sample
+            // rate / channels / bits directly from the RIFF header. Pushing WAV bytes into a
+            // PushStream declared as fixed 16 kHz PCM caused client recordings at other rates
+            // (44.1/48 kHz) to be read as misaligned samples → SNR 0 → silent to Azure.
             String fmt = request.getAudioFormat() != null ? request.getAudioFormat().toLowerCase() : "";
-            PushAudioInputStream pushStream;
-            byte[] audioBytes;
             if ("mp3".equals(fmt)) {
-                pushStream = AudioInputStream.createPushStream(
+                PushAudioInputStream pushStream = AudioInputStream.createPushStream(
                         AudioStreamFormat.getCompressedFormat(AudioStreamContainerFormat.MP3));
-                audioBytes = request.getAudioData();
+                pushStream.write(request.getAudioData());
+                audioConfig = AudioConfig.fromStreamInput(pushStream);
+                pushStream.close();
             } else {
-                audioBytes = ensureWavFormat(request.getAudioData(), request.getAudioFormat());
-                pushStream = AudioInputStream.createPushStream(
-                        AudioStreamFormat.getWaveFormatPCM(16000, (short) 16, (short) 1));
+                byte[] wavBytes = ensureWavFormat(request.getAudioData(), request.getAudioFormat());
+                tempWavFile = Files.createTempFile("azure-assess-", ".wav");
+                Files.write(tempWavFile, wavBytes);
+                audioConfig = AudioConfig.fromWavFileInput(tempWavFile.toString());
             }
-            pushStream.write(audioBytes);
-            audioConfig = AudioConfig.fromStreamInput(pushStream);
-            pushStream.close(); // Signal end-of-audio so SDK doesn't wait for silence detection
 
             // 4. Create recognizer and apply pronunciation assessment
             recognizer = new SpeechRecognizer(speechConfig, audioConfig);
@@ -103,10 +115,11 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
             log.error("Azure Speech recognition timed out after {}ms", properties.getTimeout());
             // Cannot close the recognizer while async recognition is still running.
             // Schedule deferred cleanup so resources are freed once the native call finishes.
-            scheduleDeferredCleanup(recognizer, audioConfig, speechConfig);
+            scheduleDeferredCleanup(recognizer, audioConfig, speechConfig, tempWavFile);
             recognizer = null;
             audioConfig = null;
             speechConfig = null;
+            tempWavFile = null;
             return AssessmentResult.failure("Recognition timed out");
         } catch (Exception e) {
             log.error("Azure Speech assessment error: {}", e.getMessage(), e);
@@ -115,6 +128,9 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
             if (recognizer != null) recognizer.close();
             if (audioConfig != null) audioConfig.close();
             if (speechConfig != null) speechConfig.close();
+            if (tempWavFile != null) {
+                try { Files.deleteIfExists(tempWavFile); } catch (IOException ignored) {}
+            }
         }
     }
 
@@ -123,6 +139,82 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
         return properties.isEnabled()
                 && properties.getSubscriptionKey() != null
                 && !properties.getSubscriptionKey().isBlank();
+    }
+
+    /**
+     * Dedicated speech-to-text — no pronunciation assessment overhead.
+     * Used as the authoritative transcript for roleplay messages, replacing device STT.
+     */
+    @Override
+    public TranscriptionResult recognize(byte[] audioData, String audioFormat) {
+        if (!isAvailable()) {
+            return TranscriptionResult.failure("Azure Speech is not configured");
+        }
+        if (audioData == null || audioData.length == 0) {
+            return TranscriptionResult.failure("Audio data is empty");
+        }
+
+        SpeechConfig speechConfig = null;
+        AudioConfig audioConfig = null;
+        SpeechRecognizer recognizer = null;
+        Path tempWavFile = null;
+
+        try {
+            speechConfig = SpeechConfig.fromSubscription(
+                    properties.getSubscriptionKey(), properties.getRegion());
+            speechConfig.setSpeechRecognitionLanguage(properties.getLanguage());
+
+            // For WAV, write to temp file so SDK parses format from header (see assess() note).
+            String fmt = audioFormat != null ? audioFormat.toLowerCase() : "";
+            if ("mp3".equals(fmt)) {
+                PushAudioInputStream pushStream = AudioInputStream.createPushStream(
+                        AudioStreamFormat.getCompressedFormat(AudioStreamContainerFormat.MP3));
+                pushStream.write(audioData);
+                audioConfig = AudioConfig.fromStreamInput(pushStream);
+                pushStream.close();
+            } else {
+                byte[] wavBytes = ensureWavFormat(audioData, audioFormat);
+                tempWavFile = Files.createTempFile("azure-stt-", ".wav");
+                Files.write(tempWavFile, wavBytes);
+                audioConfig = AudioConfig.fromWavFileInput(tempWavFile.toString());
+            }
+
+            recognizer = new SpeechRecognizer(speechConfig, audioConfig);
+
+            long timeoutMs = properties.getTimeout();
+            Future<SpeechRecognitionResult> recognitionFuture = recognizer.recognizeOnceAsync();
+            SpeechRecognitionResult result = recognitionFuture.get(timeoutMs, TimeUnit.MILLISECONDS);
+
+            if (result.getReason() == ResultReason.RecognizedSpeech) {
+                return TranscriptionResult.of(result.getText(), "AZURE");
+            } else if (result.getReason() == ResultReason.NoMatch) {
+                return TranscriptionResult.failure("No speech recognized");
+            } else {
+                CancellationDetails cancellation = CancellationDetails.fromResult(result);
+                return TranscriptionResult.failure("Recognition cancelled: " + cancellation.getErrorDetails());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return TranscriptionResult.failure("Recognition interrupted");
+        } catch (TimeoutException e) {
+            log.warn("Azure STT timed out after {}ms", properties.getTimeout());
+            scheduleDeferredCleanup(recognizer, audioConfig, speechConfig, tempWavFile);
+            recognizer = null;
+            audioConfig = null;
+            speechConfig = null;
+            tempWavFile = null;
+            return TranscriptionResult.failure("Recognition timed out");
+        } catch (Exception e) {
+            log.error("Azure STT failed: {}", e.getMessage(), e);
+            return TranscriptionResult.failure("STT failed: " + e.getMessage());
+        } finally {
+            if (recognizer != null) recognizer.close();
+            if (audioConfig != null) audioConfig.close();
+            if (speechConfig != null) speechConfig.close();
+            if (tempWavFile != null) {
+                try { Files.deleteIfExists(tempWavFile); } catch (IOException ignored) {}
+            }
+        }
     }
 
     private AssessmentResult parseRecognitionResult(SpeechRecognitionResult result) {
@@ -305,7 +397,8 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
      */
     private void scheduleDeferredCleanup(SpeechRecognizer recognizer,
                                           AudioConfig audioConfig,
-                                          SpeechConfig speechConfig) {
+                                          SpeechConfig speechConfig,
+                                          Path tempWavFile) {
         Thread t = new Thread(() -> {
             try {
                 // Give the SDK up to 10 s to finish before forcing close.
@@ -316,6 +409,9 @@ public class AzureSpeechProvider implements PronunciationAssessmentProvider {
                 try { if (recognizer != null) recognizer.close(); } catch (Exception ignored) {}
                 try { if (audioConfig != null) audioConfig.close(); } catch (Exception ignored) {}
                 try { if (speechConfig != null) speechConfig.close(); } catch (Exception ignored) {}
+                if (tempWavFile != null) {
+                    try { Files.deleteIfExists(tempWavFile); } catch (IOException ignored) {}
+                }
             }
         }, "azure-speech-cleanup");
         t.setDaemon(true);

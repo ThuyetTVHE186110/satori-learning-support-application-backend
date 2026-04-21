@@ -27,7 +27,10 @@ import com.fu.conversation.repository.UserConversationProgressRepository;
 import com.fu.course.entity.Course;
 import com.fu.pronunciation.dto.AssessmentRequest;
 import com.fu.pronunciation.dto.AssessmentResult;
+import com.fu.pronunciation.provider.AzureTtsProvider;
 import com.fu.pronunciation.provider.PronunciationAssessmentProvider;
+import com.fu.pronunciation.config.AzureSpeechProperties;
+import com.fu.infrastructure.cloudinary.CloudinaryService;
 import com.fu.roleplay.ai.MissionEvaluatorAI;
 import com.fu.roleplay.ai.RoleplayAIService;
 import com.fu.roleplay.ai.SessionEvaluatorAI;
@@ -100,6 +103,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     private final com.fu.roleplay.evaluation.ErrorPatternAggregator errorPatternAggregator;
     private final com.fu.roleplay.evaluation.VocabularyRangeAnalyzer vocabularyRangeAnalyzer;
     private final com.fu.roleplay.evaluation.CrossSessionTracker crossSessionTracker;
+    private final AzureTtsProvider azureTtsProvider;
+    private final CloudinaryService cloudinaryService;
+    private final AzureSpeechProperties azureSpeechProperties;
 
     public RoleplaySessionServiceImpl(
             ConversationSessionRepository sessionRepository,
@@ -126,7 +132,10 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             LearnerProfileProvider learnerProfileProvider,
             com.fu.roleplay.evaluation.ErrorPatternAggregator errorPatternAggregator,
             com.fu.roleplay.evaluation.VocabularyRangeAnalyzer vocabularyRangeAnalyzer,
-            com.fu.roleplay.evaluation.CrossSessionTracker crossSessionTracker
+            com.fu.roleplay.evaluation.CrossSessionTracker crossSessionTracker,
+            AzureTtsProvider azureTtsProvider,
+            CloudinaryService cloudinaryService,
+            AzureSpeechProperties azureSpeechProperties
     ) {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
@@ -153,6 +162,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         this.errorPatternAggregator = errorPatternAggregator;
         this.vocabularyRangeAnalyzer = vocabularyRangeAnalyzer;
         this.crossSessionTracker = crossSessionTracker;
+        this.azureTtsProvider = azureTtsProvider;
+        this.cloudinaryService = cloudinaryService;
+        this.azureSpeechProperties = azureSpeechProperties;
     }
 
     @Override
@@ -359,12 +371,32 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             throw new BusinessException("AUDIO_READ_FAILED", "Failed to read audio file: " + e.getMessage());
         }
 
+        // 1c. Azure STT → authoritative transcript.
+        // Device STT (from request.getContent()) is preserved separately for debugging but is
+        // not used for AI response generation, mission evaluation, or pronunciation scoring —
+        // those would otherwise judge a transcript already corrupted by on-device misrecognition
+        // (chōon, homophones). On Azure failure we fall back to the device transcript to avoid
+        // blocking the learner.
+        String deviceTranscript = request.getContent();
+        String effectiveContent = deviceTranscript;
+        if (pronunciationProvider.isAvailable()) {
+            com.fu.pronunciation.dto.TranscriptionResult stt =
+                    pronunciationProvider.recognize(audioBytes, getAudioFormat(audioContentType));
+            if (stt.isSuccess() && stt.getTranscript() != null && !stt.getTranscript().isBlank()) {
+                effectiveContent = stt.getTranscript();
+            } else {
+                log.warn("Azure STT failed for session {} — falling back to device transcript. reason={}",
+                        sessionId, stt.getErrorMessage());
+            }
+        }
+
         // 2. Save user message (sequence number is safe under pessimistic lock)
         int nextSeq = messageRepository.findMaxSequenceNumberBySessionId(sessionId).orElse(0) + 1;
         ConversationMessage userMessage = ConversationMessage.builder()
                 .sessionId(sessionId)
                 .role(ConversationMessage.MessageRole.USER)
-                .content(request.getContent())
+                .content(effectiveContent)
+                .deviceTranscript(deviceTranscript)
                 .isHintRequest(request.isHintRequest())
                 .sequenceNumber(nextSeq)
                 .build();
@@ -394,6 +426,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     "Check AZURE_SPEECH_ENABLED/AZURE_SPEECH_KEY or SPEECHSUPER_APP_KEY/SPEECHSUPER_SECRET_KEY env vars.",
                     userId, sessionId);
         }
+        final String aiInputContent = effectiveContent;
         if (audioBytes != null && pronunciationProvider.isAvailable()) {
             final byte[] audioBytesRef = audioBytes;
             final String audioFormatRef = getAudioFormat(audioContentType);
@@ -405,7 +438,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                                             pronunciationProvider.assess(AssessmentRequest.builder()
                                                     .audioData(audioBytesRef)
                                                     .audioFormat(audioFormatRef)
-                                                    .referenceText(request.getContent())
+                                                    .referenceText(aiInputContent)
+                                                    .unscripted(true)
                                                     .build()),
                                     roleplayTaskExecutor)
                             .thenAccept(result -> savePronunciationResult(result, userMessageId, sessionId))
@@ -419,7 +453,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         // Task B: AI response
         CompletableFuture<String> aiResponseFuture = CompletableFuture.supplyAsync(() ->
-                                roleplayAIService.generateResponse(sessionId, cachedPrompt, history, request.getContent()),
+                                roleplayAIService.generateResponse(sessionId, cachedPrompt, history, aiInputContent),
                         roleplayTaskExecutor)
                 .exceptionally(ex -> {
                     log.error("AI response generation failed for session {}: {}", sessionId, ex.getMessage());
@@ -431,7 +465,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         CompletableFuture<List<MissionEvaluatorAI.MissionProgress>> missionFuture = isSetupPhase
                 ? CompletableFuture.completedFuture(new ArrayList<>())
                 : CompletableFuture.supplyAsync(() ->
-                                missionEvaluatorAI.evaluateProgress(history, request.getContent(), sessionMissions),
+                                missionEvaluatorAI.evaluateProgress(history, aiInputContent, sessionMissions),
                         roleplayTaskExecutor)
                 .exceptionally(ex -> {
                     log.error("Mission evaluation failed for session {}: {}", sessionId, ex.getMessage());
@@ -476,10 +510,20 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             sessionRepository.save(session);
         }
 
-        // 7. Update session mission statuses (only in CONVERSATION phase)
+        // 7. Update session mission statuses (only in CONVERSATION phase).
+        // When a mission transitions state, the system prompt's mission block is now stale — rebuild
+        // and re-cache so the next turn's AI sees the authoritative status (avoids prompting the
+        // learner to do something they just completed, or ignoring a newly failed mission).
         List<MissionEvaluatorAI.MissionProgress> missionProgress = missionFuture.join();
         if (!missionProgress.isEmpty()) {
-            updateSessionMissions(sessionMissions, missionProgress);
+            boolean missionStatusChanged = updateSessionMissions(sessionMissions, missionProgress);
+            if (missionStatusChanged) {
+                List<SessionMission> refreshed = sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+                String rebuilt = rebuildSystemPrompt(session, refreshed);
+                if (rebuilt != null) {
+                    roleplayAIService.cacheSystemPrompt(sessionId, rebuilt);
+                }
+            }
         }
 
         // 8. Update session stats
@@ -1035,6 +1079,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
      */
     private List<ConversationMessage> parseAndSaveAIMessages(UUID sessionId, String aiResponseJson, int startSeq) {
         List<ConversationMessage> saved = new ArrayList<>();
+        List<TtsJob> ttsJobs = new ArrayList<>();
         try {
             JsonNode root = objectMapper.readTree(aiResponseJson);
             JsonNode array;
@@ -1051,8 +1096,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             for (JsonNode node : array) {
                 String type = node.path("type").asText("DIALOGUE");
                 String japanese = node.path("japanese_content").asText("");
+                String japaneseWithFurigana = node.path("japanese_with_furigana").asText("");
                 String translation = node.path("translation").asText("");
                 String romaji = node.path("romaji").asText("");
+                String voice = node.path("voice").asText("");
+                String style = node.path("style").asText("");
                 String corrections = "[]";
                 JsonNode correctionsNode = node.path("corrections");
                 if (correctionsNode.isArray()) {
@@ -1071,14 +1119,24 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                         .messageType(type)
                         .content(japanese.isEmpty() ? translation : japanese)
                         .japaneseContent(japanese)
+                        .japaneseWithFurigana(japaneseWithFurigana.isEmpty() ? japanese : japaneseWithFurigana)
                         .translation(translation)
                         .romaji(romaji)
                         .corrections(corrections)
                         .vocabularyUsed(vocabularyUsed)
                         .sequenceNumber(seq++)
                         .build();
-                saved.add(messageRepository.save(msg));
+                ConversationMessage persisted = messageRepository.save(msg);
+                saved.add(persisted);
+
+                // Queue TTS for any AI segment that has Japanese content (DIALOGUE, SCENE_INTRO, MISSION_INTRO).
+                if (!japanese.isBlank()) {
+                    ttsJobs.add(new TtsJob(persisted.getId(), japanese,
+                            voice.isBlank() ? null : voice,
+                            style.isBlank() ? null : style));
+                }
             }
+            scheduleTtsAfterCommit(ttsJobs);
         } catch (Exception e) {
             log.warn("Failed to parse AI response array, saving as raw DIALOGUE: {}", e.getMessage());
             ConversationMessage msg = ConversationMessage.builder()
@@ -1185,35 +1243,44 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         }
     }
 
-    private void updateSessionMissions(List<SessionMission> sessionMissions,
-                                       List<MissionEvaluatorAI.MissionProgress> progressList) {
+    /**
+     * @return {@code true} if any mission's status transitioned (not just progressPct), so the caller
+     *         knows to rebuild the system prompt — stale mission status in the prompt is a primary
+     *         driver of AI drift on long sessions.
+     */
+    private boolean updateSessionMissions(List<SessionMission> sessionMissions,
+                                          List<MissionEvaluatorAI.MissionProgress> progressList) {
         List<SessionMission> updatedMissions = new ArrayList<>();
+        boolean statusChanged = false;
         for (MissionEvaluatorAI.MissionProgress progress : progressList) {
-            sessionMissions.stream()
+            var match = sessionMissions.stream()
                     .filter(sm -> sm.getId().toString().equals(progress.getMissionId()))
-                    .findFirst()
-                    .ifPresent(sm -> {
-                        // Do not downgrade terminal statuses (COMPLETED/FAILED are irreversible)
-                        if (sm.getStatus() == SessionMission.MissionStatus.COMPLETED
-                                || sm.getStatus() == SessionMission.MissionStatus.FAILED) {
-                            return;
-                        }
-                        try {
-                            SessionMission.MissionStatus newStatus =
-                                    SessionMission.MissionStatus.valueOf(progress.getStatus());
-                            sm.setStatus(newStatus);
-                        } catch (IllegalArgumentException e) {
-                            log.warn("Invalid mission status '{}' from AI for mission {}: {}",
-                                    progress.getStatus(), sm.getId(), e.getMessage());
-                        }
-                        sm.setProgressPct(Math.max(0, Math.min(100, progress.getProgressPct())));
-                        sm.setAiReasoning(progress.getReasoning());
-                        updatedMissions.add(sm);
-                    });
+                    .findFirst();
+            if (match.isEmpty()) continue;
+            SessionMission sm = match.get();
+            if (sm.getStatus() == SessionMission.MissionStatus.COMPLETED
+                    || sm.getStatus() == SessionMission.MissionStatus.FAILED) {
+                continue;
+            }
+            try {
+                SessionMission.MissionStatus newStatus =
+                        SessionMission.MissionStatus.valueOf(progress.getStatus());
+                if (newStatus != sm.getStatus()) {
+                    statusChanged = true;
+                    sm.setStatus(newStatus);
+                }
+            } catch (IllegalArgumentException e) {
+                log.warn("Invalid mission status '{}' from AI for mission {}: {}",
+                        progress.getStatus(), sm.getId(), e.getMessage());
+            }
+            sm.setProgressPct(Math.max(0, Math.min(100, progress.getProgressPct())));
+            sm.setAiReasoning(progress.getReasoning());
+            updatedMissions.add(sm);
         }
         if (!updatedMissions.isEmpty()) {
             sessionMissionRepository.saveAll(updatedMissions);
         }
+        return statusChanged;
     }
 
     /**
@@ -1425,6 +1492,48 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         } catch (Exception e) {
             log.warn("Failed to update session context from PHASE_TRANSITION for session {}: {}",
                     session.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * Async TTS payload — synthesized and uploaded after the containing transaction commits,
+     * so Cloudinary / Azure latency never extends the user's request-response cycle.
+     */
+    private record TtsJob(UUID messageId, String text, String voice, String style) {}
+
+    private void scheduleTtsAfterCommit(List<TtsJob> jobs) {
+        if (jobs == null || jobs.isEmpty()) return;
+        if (!azureTtsProvider.isAvailable()) return;
+
+        final List<TtsJob> snapshot = List.copyOf(jobs);
+        Runnable task = () -> CompletableFuture.runAsync(() -> runTtsJobs(snapshot), roleplayTaskExecutor);
+
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+        } else {
+            task.run();
+        }
+    }
+
+    private void runTtsJobs(List<TtsJob> jobs) {
+        String folder = azureSpeechProperties.getTts().getCloudinaryFolder();
+        for (TtsJob job : jobs) {
+            try {
+                byte[] audio = azureTtsProvider.synthesize(job.text(), job.voice(), job.style(), null);
+                if (audio == null || audio.length == 0) continue;
+                String url = cloudinaryService.uploadAudioBytes(audio, folder);
+                messageRepository.findById(job.messageId()).ifPresent(msg -> {
+                    msg.setAudioUrl(url);
+                    messageRepository.save(msg);
+                });
+            } catch (Exception e) {
+                log.warn("TTS job failed for message {}: {}", job.messageId(), e.getMessage());
+            }
         }
     }
 }

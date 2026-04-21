@@ -31,6 +31,20 @@ public class LearnerStatsController {
         return ResponseEntity.ok(ApiResponse.success(statsService.getSkillRadar(userId)));
     }
 
+    @GetMapping("/skill-radar/speaking")
+    public ResponseEntity<ApiResponse<SkillRadarResponse>> getSpeakingSkillRadar(
+            @AuthenticationPrincipal UserDetails userDetails) {
+        UUID userId = extractUserId(userDetails);
+        return ResponseEntity.ok(ApiResponse.success(statsService.getSpeakingSkillRadar(userId)));
+    }
+
+    @GetMapping("/skill-radar/practice")
+    public ResponseEntity<ApiResponse<SkillRadarResponse>> getPracticeSkillRadar(
+            @AuthenticationPrincipal UserDetails userDetails) {
+        UUID userId = extractUserId(userDetails);
+        return ResponseEntity.ok(ApiResponse.success(statsService.getPracticeSkillRadar(userId)));
+    }
+
     @GetMapping("/activity-heatmap")
     public ResponseEntity<ApiResponse<ActivityHeatmapResponse>> getActivityHeatmap(
             @AuthenticationPrincipal UserDetails userDetails,

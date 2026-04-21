@@ -122,6 +122,9 @@ public class RoleplayPromptBuilder {
 
         sb.append("### Field semantics (memorise these — do NOT deviate):\n");
         sb.append("- `japanese_content`: Your in-character Japanese speech as \"").append(aiRole).append("\".\n");
+        sb.append("- `japanese_with_furigana`: SAME sentence as `japanese_content`, but EVERY kanji word annotated with its hiragana reading in square brackets immediately after the kanji.\n");
+        sb.append("  Format: 漢字[かんじ]. Example: 先生[せんせい]と話[はな]しました。\n");
+        sb.append("  Rules: (1) annotate every kanji word including single-kanji verbs/nouns; (2) do NOT annotate hiragana or katakana; (3) do NOT add spaces around brackets; (4) if no kanji present, return the same string as `japanese_content`.\n");
         sb.append("- `translation`: Vietnamese translation of YOUR Japanese line above.\n");
         sb.append("  ⚠ This is what YOU said translated to Vietnamese — NOT what the learner should say.\n");
         sb.append("- `romaji`: Romaji reading of your Japanese line.\n");
@@ -130,7 +133,12 @@ public class RoleplayPromptBuilder {
         sb.append("  Each correction MUST include an `errorType` field: PARTICLE, CONJUGATION, WORD_ORDER, WORD_CHOICE, FORMALITY, SPELLING, or OTHER.\n");
         sb.append("- `vocabulary_detected`: Array of Japanese content words the LEARNER used in their message.\n");
         sb.append("  Include nouns, verbs, adjectives, adverbs. Exclude particles, copulas, and conjunctions.\n");
-        sb.append("  Example: [\"レストラン\",\"食べる\",\"おいしい\"]\n\n");
+        sb.append("  Example: [\"レストラン\",\"食べる\",\"おいしい\"]\n");
+        sb.append("- `voice`: (DIALOGUE only, optional) Japanese Neural voice best matching the character.\n");
+        sb.append("  Allowed values — polite/formal scenarios: ja-JP-NanamiNeural (female), ja-JP-KeitaNeural (male), ja-JP-MayuNeural (female, softer).\n");
+        sb.append("  Casual scenarios: ja-JP-AoiNeural (female, youthful), ja-JP-ShioriNeural (female), ja-JP-DaichiNeural (male, casual).\n");
+        sb.append("  Pick ONE voice at the SESSION OPENING and keep the SAME voice for every subsequent DIALOGUE (the character does not change).\n");
+        sb.append("- `style`: (DIALOGUE only, optional) expressive style — one of: cheerful, sad, angry, customer-service, chat, empathetic, excited, calm. Omit if neutral.\n\n");
 
         sb.append("### Session OPENING — return exactly 3 segments:\n");
         sb.append("[\n");
@@ -149,8 +157,11 @@ public class RoleplayPromptBuilder {
         sb.append("  {\n");
         sb.append("    \"type\": \"DIALOGUE\",\n");
         sb.append("    \"japanese_content\": \"(Your FIRST in-character line as ").append(aiRole).append(". Speak naturally for your role.)\",\n");
+        sb.append("    \"japanese_with_furigana\": \"(same sentence with 漢字[かんじ] furigana annotations)\",\n");
         sb.append("    \"translation\": \"(Vietnamese translation of YOUR line above — what YOU said as ").append(aiRole).append(")\",\n");
         sb.append("    \"romaji\": \"(romaji)\",\n");
+        sb.append("    \"voice\": \"(chosen ja-JP Neural voice, kept constant for the rest of the session)\",\n");
+        sb.append("    \"style\": \"(optional expressive style or omit)\",\n");
         sb.append("    \"corrections\": []\n");
         sb.append("  }\n");
         sb.append("]\n\n");
@@ -159,9 +170,11 @@ public class RoleplayPromptBuilder {
         sb.append("[\n");
         sb.append("  {\n");
         sb.append("    \"type\": \"DIALOGUE\",\n");
-        sb.append("    \"japanese_content\": \"(Your reply as ").append(aiRole).append(")\",\n");
+        sb.append("    \"japanese_with_furigana\": \"(same sentence with 漢字[かんじ] furigana annotations)\",\n    \"japanese_content\": \"(Your reply as").append(aiRole).append(")\",\n");
         sb.append("    \"translation\": \"(Vietnamese translation of YOUR line — what YOU said as ").append(aiRole).append(", NOT what learner should say)\",\n");
         sb.append("    \"romaji\": \"(romaji)\",\n");
+        sb.append("    \"voice\": \"(SAME voice chosen at session opening)\",\n");
+        sb.append("    \"style\": \"(optional expressive style or omit)\",\n");
         sb.append("    \"corrections\": [\n");
         sb.append("      // Only if learner made mistakes:\n");
         sb.append("      // {\"original\":\"...\",\"corrected\":\"...\",\"explanation\":\"... (Vietnamese)\",\"errorType\":\"PARTICLE|CONJUGATION|WORD_ORDER|WORD_CHOICE|FORMALITY|SPELLING|OTHER\"}\n");
