@@ -418,7 +418,7 @@ pronunciation:
             enabled: ${AZURE_TTS_ENABLED:true}
             default-voice: ${AZURE_TTS_DEFAULT_VOICE:ja-JP-NanamiNeural}
             output-format: ${AZURE_TTS_OUTPUT_FORMAT:Audio16Khz32KBitRateMonoMp3}
-            cloudinary-folder: ${AZURE_TTS_CLOUDINARY_FOLDER:roleplay/tts}
+            bundle-timeout-ms: ${AZURE_TTS_BUNDLE_TIMEOUT_MS:10000}
     speechsuper:
         app-key: ${SPEECHSUPER_APP_KEY:}
         secret-key: ${SPEECHSUPER_SECRET_KEY:}

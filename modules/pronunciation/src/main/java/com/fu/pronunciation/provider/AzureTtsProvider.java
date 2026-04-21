@@ -2,6 +2,7 @@ package com.fu.pronunciation.provider;
 
 import com.fu.pronunciation.config.AzureSpeechProperties;
 import com.microsoft.cognitiveservices.speech.ResultReason;
+import com.microsoft.cognitiveservices.speech.SpeechSynthesisCancellationDetails;
 import com.microsoft.cognitiveservices.speech.SpeechConfig;
 import com.microsoft.cognitiveservices.speech.SpeechSynthesisOutputFormat;
 import com.microsoft.cognitiveservices.speech.SpeechSynthesisResult;
@@ -80,7 +81,14 @@ public class AzureTtsProvider {
                 result.close();
                 return audio;
             }
-            log.warn("Azure TTS synthesis failed, reason={}", result.getReason());
+            if (result.getReason() == ResultReason.Canceled) {
+                SpeechSynthesisCancellationDetails details = SpeechSynthesisCancellationDetails.fromResult(result);
+                log.warn("Azure TTS canceled: reason={}, errorCode={}, errorDetails={}, region={}, voice={}",
+                        details.getReason(), details.getErrorCode(), details.getErrorDetails(),
+                        properties.getRegion(), resolvedVoice);
+            } else {
+                log.warn("Azure TTS synthesis failed, reason={}", result.getReason());
+            }
             result.close();
             return null;
         } catch (InterruptedException e) {
