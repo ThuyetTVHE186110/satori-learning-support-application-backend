@@ -3,6 +3,7 @@ package com.fu.conversation;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.conversation.dto.request.CreateConversationRequest;
 import com.fu.conversation.dto.request.UpdateConversationRequest;
+import com.fu.conversation.dto.request.UpdateMissionRequest;
 import com.fu.conversation.entity.Conversation;
 import com.fu.conversation.entity.ConversationTopic;
 import com.fu.conversation.entity.ConversationMission;
@@ -119,7 +120,7 @@ class ConversationManagementTest {
                 .build());
     }
 
-    private Conversation saveConversation(String title, UUID topicId) {
+    private Conversation saveConversation(String title, UUID topicId, UUID createdBy) {
         return conversationRepository.save(Conversation.builder()
                 .title(title)
                 .topicId(topicId)
@@ -127,6 +128,8 @@ class ConversationManagementTest {
                 .orderIndex(0)
                 .aiRole("AI Character")
                 .learnerRole("Learner")
+                .createdAt(LocalDateTime.now())
+                .createdBy(createdBy)
                 .build());
     }
 
@@ -186,9 +189,9 @@ class ConversationManagementTest {
 
             ConversationTopic topic = saveTopic("Restaurant Conversation");
 
-            Conversation conv1 = saveConversation("Ordering Food", topic.getId());
-            Conversation conv2 = saveConversation("Making Reservation", topic.getId());
-            Conversation conv3 = saveConversation("Paying Bill", topic.getId());
+            Conversation conv1 = saveConversation("Ordering Food", topic.getId(), manager.getId());
+            Conversation conv2 = saveConversation("Making Reservation", topic.getId(), manager.getId());
+            Conversation conv3 = saveConversation("Paying Bill", topic.getId(), manager.getId());
             saveSoftDeletedConversation("Deleted Conversation", topic.getId(), manager.getId());
 
             // ─ Act + Assert
@@ -240,7 +243,7 @@ class ConversationManagementTest {
             ConversationTopic topic = saveTopic("Test Topic");
 
             for (int i = 1; i <= 15; i++) {
-                Conversation conv = saveConversation("Conversation " + i, topic.getId());
+                Conversation conv = saveConversation("Conversation " + i, topic.getId(), manager.getId());
                 conv.setOrderIndex(i - 1);
                 conversationRepository.save(conv);
             }
@@ -289,10 +292,10 @@ class ConversationManagementTest {
 
             ConversationTopic topic = saveTopic("Test Topic");
 
-            saveConversation("Restaurant - Ordering", topic.getId());
-            saveConversation("Restaurant - Reservation", topic.getId());
-            saveConversation("Hotel - Check-in", topic.getId());
-            saveConversation("Train Station - Ticket", topic.getId());
+            saveConversation("Restaurant - Ordering", topic.getId(), manager.getId());
+            saveConversation("Restaurant - Reservation", topic.getId(), manager.getId());
+            saveConversation("Hotel - Check-in", topic.getId(), manager.getId());
+            saveConversation("Train Station - Ticket", topic.getId(), manager.getId());
 
             // ─ Act + Assert
             mockMvc.perform(get("/api/v1/manager/conversation/topics/{topicId}/conversations", topic.getId())
@@ -334,15 +337,15 @@ class ConversationManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             ConversationTopic topic = saveTopic("Test");
 
-            Conversation n1_conv = saveConversation("N1 Conversation", topic.getId());
+            Conversation n1_conv = saveConversation("N1 Conversation", topic.getId(), manager.getId());
             n1_conv.setJlptLevel(Course.JlptLevel.N1);
             conversationRepository.save(n1_conv);
 
-            Conversation n2_conv1 = saveConversation("N2 Conversation 1", topic.getId());
+            Conversation n2_conv1 = saveConversation("N2 Conversation 1", topic.getId(), manager.getId());
             n2_conv1.setJlptLevel(Course.JlptLevel.N2);
             conversationRepository.save(n2_conv1);
 
-            Conversation n2_conv2 = saveConversation("N2 Conversation 2", topic.getId());
+            Conversation n2_conv2 = saveConversation("N2 Conversation 2", topic.getId(), manager.getId());
             n2_conv2.setJlptLevel(Course.JlptLevel.N2);
             conversationRepository.save(n2_conv2);
 
@@ -363,15 +366,15 @@ class ConversationManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             ConversationTopic topic = saveTopic("Test");
 
-            Conversation draft = saveConversation("Draft Conv", topic.getId());
+            Conversation draft = saveConversation("Draft Conv", topic.getId(), manager.getId());
             draft.setStatus(Course.ContentStatus.DRAFT);
             conversationRepository.save(draft);
 
-            Conversation published1 = saveConversation("Published Conv 1", topic.getId());
+            Conversation published1 = saveConversation("Published Conv 1", topic.getId(), manager.getId());
             published1.setStatus(Course.ContentStatus.PUBLISHED);
             conversationRepository.save(published1);
 
-            Conversation published2 = saveConversation("Published Conv 2", topic.getId());
+            Conversation published2 = saveConversation("Published Conv 2", topic.getId(), manager.getId());
             published2.setStatus(Course.ContentStatus.PUBLISHED);
             conversationRepository.save(published2);
 
@@ -391,17 +394,17 @@ class ConversationManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
             ConversationTopic topic = saveTopic("Test");
 
-            Conversation n1_draft = saveConversation("N1 Draft", topic.getId());
+            Conversation n1_draft = saveConversation("N1 Draft", topic.getId(), manager.getId());
             n1_draft.setJlptLevel(Course.JlptLevel.N1);
             n1_draft.setStatus(Course.ContentStatus.DRAFT);
             conversationRepository.save(n1_draft);
 
-            Conversation n1_published = saveConversation("N1 Published", topic.getId());
+            Conversation n1_published = saveConversation("N1 Published", topic.getId(), manager.getId());
             n1_published.setJlptLevel(Course.JlptLevel.N1);
             n1_published.setStatus(Course.ContentStatus.PUBLISHED);
             conversationRepository.save(n1_published);
 
-            Conversation n2_published = saveConversation("N2 Published", topic.getId());
+            Conversation n2_published = saveConversation("N2 Published", topic.getId(), manager.getId());
             n2_published.setJlptLevel(Course.JlptLevel.N2);
             n2_published.setStatus(Course.ContentStatus.PUBLISHED);
             conversationRepository.save(n2_published);
@@ -911,7 +914,7 @@ class ConversationManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             ConversationTopic topic = saveTopic("Test");
-            Conversation conversation = saveConversation("Test Conversation", topic.getId());
+            Conversation conversation = saveConversation("Test Conversation", topic.getId(), manager.getId());
 
             // ─ Act
             mockMvc.perform(delete("/api/v1/manager/conversation/conversations/{conversationId}", conversation.getId())
@@ -944,7 +947,7 @@ class ConversationManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             ConversationTopic topic = saveTopic("Test");
-            Conversation conversation = saveConversation("Test Conversation", topic.getId());
+            Conversation conversation = saveConversation("Test Conversation", topic.getId(), manager.getId());
 
             ConversationMission mission1 = saveMission(conversation.getId(), "Mission 1");
             ConversationMission mission2 = saveMission(conversation.getId(), "Mission 2");
@@ -981,7 +984,7 @@ class ConversationManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             ConversationTopic topic = saveTopic("Test");
-            Conversation conversation = saveConversation("Test", topic.getId());
+            Conversation conversation = saveConversation("Test", topic.getId(), manager.getId());
 
             mockMvc.perform(delete("/api/v1/manager/conversation/conversations/{conversationId}", conversation.getId())
                             .header("Authorization", "Bearer " + token))
@@ -1007,7 +1010,7 @@ class ConversationManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             ConversationTopic topic = saveTopic("Test");
-            Conversation original = saveConversation("Original Title", topic.getId());
+            Conversation original = saveConversation("Original Title", topic.getId(), manager.getId());
             original.setDescription("Original Description");
             original.setJlptLevel(Course.JlptLevel.N3);
             original.setDifficultyScore(3);
@@ -1052,7 +1055,8 @@ class ConversationManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             ConversationTopic topic = saveTopic("Test");
-            Conversation conversation = saveConversation("Original", topic.getId());
+            Conversation conversation = saveConversation("Original", topic.getId(), manager.getId());
+            ConversationMission mission = saveMission(conversation.getId(), "Original Mission");
 
             String requestBody = objectMapper.writeValueAsString(UpdateConversationRequest.builder()
                     .title("Updated Title")
@@ -1078,11 +1082,11 @@ class ConversationManagementTest {
         @DisplayName("TC_CUV_003 — title too long returns 400")
         void tc_cuv_003_titleTooLong_returns400() throws Exception {
             // ─ Arrange
-            saveManager("manager@test.com");
+            User manager = saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             ConversationTopic topic = saveTopic("Test");
-            Conversation conversation = saveConversation("Test", topic.getId());
+            Conversation conversation = saveConversation("Test", topic.getId(), manager.getId());
 
             String longTitle = "a".repeat(256);
             String requestBody = objectMapper.writeValueAsString(UpdateConversationRequest.builder()
@@ -1110,11 +1114,11 @@ class ConversationManagementTest {
         @DisplayName("TC_CVI_001 — get conversation returns full details")
         void tc_cvi_001_getConversation_returnsFull() throws Exception {
             // ─ Arrange
-            saveManager("manager@test.com");
+            User manager = saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             ConversationTopic topic = saveTopic("Test");
-            Conversation conversation = saveConversation("Test Conversation", topic.getId());
+            Conversation conversation = saveConversation("Test Conversation", topic.getId(), manager.getId());
             conversation.setDescription("Full description");
             conversation.setTitleJapanese("テストタイトル");
             conversation.setJlptLevel(Course.JlptLevel.N2);
@@ -1144,11 +1148,11 @@ class ConversationManagementTest {
         @Test
         @DisplayName("TC_CVI_003 — soft-deleted conversation returns 404")
         void tc_cvi_003_softDeletedConversation_returns404() throws Exception {
-            saveManager("manager@test.com");
+            User manager = saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             ConversationTopic topic = saveTopic("Test");
-            Conversation conversation = saveConversation("Test", topic.getId());
+            Conversation conversation = saveConversation("Test", topic.getId(), manager.getId());
             conversation.setDeletedAt(LocalDateTime.now());
             conversation.setDeletedBy(UUID.randomUUID());
             conversationRepository.save(conversation);
@@ -1162,11 +1166,11 @@ class ConversationManagementTest {
         @Test
         @DisplayName("TC_CVI_004 — response includes missions ordered by index")
         void tc_cvi_004_withMissions_returnsOrdered() throws Exception {
-            saveManager("manager@test.com");
+            User manager = saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             ConversationTopic topic = saveTopic("Test");
-            Conversation conversation = saveConversation("Test", topic.getId());
+            Conversation conversation = saveConversation("Test", topic.getId(), manager.getId());
 
             saveMission(conversation.getId(), "Mission A");
             saveMission(conversation.getId(), "Mission B");
@@ -1254,18 +1258,18 @@ class ConversationManagementTest {
         @DisplayName("TC_CROSS_002 — multiple conversations isolation")
         void tc_cross_002_multipleConversationsIsolation() throws Exception {
             // ─ Arrange
-            saveManager("manager@test.com");
+            User manager = saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             ConversationTopic topic1 = saveTopic("Topic 1");
             ConversationTopic topic2 = saveTopic("Topic 2");
 
-            saveConversation("Conv 1.1", topic1.getId());
-            saveConversation("Conv 1.2", topic1.getId());
-            saveConversation("Conv 1.3", topic1.getId());
+            saveConversation("Conv 1.1", topic1.getId(), manager.getId());
+            saveConversation("Conv 1.2", topic1.getId(), manager.getId());
+            saveConversation("Conv 1.3", topic1.getId(), manager.getId());
 
-            saveConversation("Conv 2.1", topic2.getId());
-            saveConversation("Conv 2.2", topic2.getId());
+            saveConversation("Conv 2.1", topic2.getId(), manager.getId());
+            saveConversation("Conv 2.2", topic2.getId(), manager.getId());
 
             // ─ Act + Assert: Topic 1 returns 3
             mockMvc.perform(get("/api/v1/manager/conversation/topics/{topicId}/conversations", topic1.getId())
@@ -1295,7 +1299,7 @@ class ConversationManagementTest {
             ConversationTopic topic = saveTopic("Test");
 
             for (int i = 1; i <= 15; i++) {
-                Conversation conv = saveConversation("Conv " + i, topic.getId());
+                Conversation conv = saveConversation("Conv " + i, topic.getId(), manager.getId());
                 conv.setOrderIndex(i - 1);
                 conversationRepository.save(conv);
             }
@@ -1345,7 +1349,7 @@ class ConversationManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             ConversationTopic topic = saveTopic("Test");
-            Conversation conversation = saveConversation("Test", topic.getId());
+            Conversation conversation = saveConversation("Test", topic.getId(), manager.getId());
 
             mockMvc.perform(patch("/api/v1/manager/conversation/conversations/{conversationId}/publish", conversation.getId())
                             .header("Authorization", "Bearer " + token))
@@ -1363,7 +1367,7 @@ class ConversationManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             ConversationTopic topic = saveTopic("Test");
-            Conversation conversation = saveConversation("Test", topic.getId());
+            Conversation conversation = saveConversation("Test", topic.getId(), manager.getId());
 
             mockMvc.perform(patch("/api/v1/manager/conversation/conversations/{conversationId}/archive", conversation.getId())
                             .header("Authorization", "Bearer " + token))
@@ -1381,7 +1385,7 @@ class ConversationManagementTest {
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             ConversationTopic topic = saveTopic("Test");
-            Conversation conversation = saveConversation("Test", topic.getId());
+            Conversation conversation = saveConversation("Test", topic.getId(), manager.getId());
             conversation.setStatus(Course.ContentStatus.PUBLISHED);
             conversationRepository.save(conversation);
 
@@ -1403,11 +1407,11 @@ class ConversationManagementTest {
         @Test
         @DisplayName("TC_RBAC_001 — CONTENT_MANAGER has full access")
         void tc_rbac_001_contentManager_fullAccess() throws Exception {
-            saveManager("manager@test.com");
+            User manager = saveManager("manager@test.com");
             String token = loginAndGetToken("manager@test.com", "ValidPass@1");
 
             ConversationTopic topic = saveTopic("Test");
-            Conversation conversation = saveConversation("Test", topic.getId());
+            Conversation conversation = saveConversation("Test", topic.getId(), manager.getId());
 
             // GET should succeed
             mockMvc.perform(get("/api/v1/manager/conversation/conversations/{conversationId}", conversation.getId())
@@ -1430,11 +1434,12 @@ class ConversationManagementTest {
         @Test
         @DisplayName("TC_RBAC_002 — LEARNER gets 403 for all manager endpoints")
         void tc_rbac_002_learner_allForbidden() throws Exception {
+            User manager = saveManager("manager@test.com");
             saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com", "ValidPass@1");
 
             ConversationTopic topic = saveTopic("Test");
-            Conversation conversation = saveConversation("Test", topic.getId());
+            Conversation conversation = saveConversation("Test", topic.getId(), manager.getId());
 
             mockMvc.perform(get("/api/v1/manager/conversation/conversations/{conversationId}", conversation.getId())
                             .header("Authorization", "Bearer " + token))
@@ -1466,8 +1471,9 @@ class ConversationManagementTest {
                     .build());
             String token = loginAndGetToken("teacher@test.com", "ValidPass@1");
 
+            User manager = saveManager("manager@test.com");
             ConversationTopic topic = saveTopic("Test");
-            Conversation conversation = saveConversation("Test", topic.getId());
+            Conversation conversation = saveConversation("Test", topic.getId(), manager.getId());
 
             mockMvc.perform(get("/api/v1/manager/conversation/conversations/{conversationId}", conversation.getId())
                             .header("Authorization", "Bearer " + token))
@@ -1487,9 +1493,9 @@ class ConversationManagementTest {
                     .failedLoginAttempts(0)
                     .build());
             String token = loginAndGetToken("admin@test.com", "ValidPass@1");
-
+            User manager = saveManager("manager@test.com");
             ConversationTopic topic = saveTopic("Test");
-            Conversation conversation = saveConversation("Test", topic.getId());
+            Conversation conversation = saveConversation("Test", topic.getId(), manager.getId());
 
             mockMvc.perform(get("/api/v1/manager/conversation/conversations/{conversationId}", conversation.getId())
                             .header("Authorization", "Bearer " + token))
@@ -1499,8 +1505,9 @@ class ConversationManagementTest {
         @Test
         @DisplayName("TC_RBAC_005 — Unauthenticated gets 401 for all endpoints")
         void tc_rbac_005_unauthenticated_allUnauthorized() throws Exception {
+            User manager = saveManager("manager@test.com");
             ConversationTopic topic = saveTopic("Test");
-            Conversation conversation = saveConversation("Test", topic.getId());
+            Conversation conversation = saveConversation("Test", topic.getId(), manager.getId());
 
             // No token provided
             mockMvc.perform(get("/api/v1/manager/conversation/conversations/{conversationId}", conversation.getId()))

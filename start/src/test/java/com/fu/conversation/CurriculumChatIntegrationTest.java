@@ -43,6 +43,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -386,7 +387,7 @@ class CurriculumChatIntegrationTest {
             ChatSession session = createDefaultChatSession();
 
             // Stub EmbeddingService to throw exception
-            when(embeddingService.retrieveContext(any(String.class), any()))
+            when(chatModel.call(any(Prompt.class)))
                     .thenThrow(new RuntimeException("Pinecone Error"));
 
             SendChatMessageRequest request = new SendChatMessageRequest();
@@ -536,12 +537,16 @@ class CurriculumChatIntegrationTest {
         @DisplayName("Should list sessions in descending order by updated_at")
         void tc_list_002_sessionsOrderedDescByUpdatedAt() throws Exception {
             ChatSession session1 = createChatSession(learner, 1, 1, null);
-            Thread.sleep(50);
+            session1.setUpdatedAt(LocalDateTime.now().minusMinutes(3));
+            chatSessionRepository.save(session1);
 
             ChatSession session2 = createChatSession(learner, 1, 1, null);
-            Thread.sleep(50);
+            session2.setUpdatedAt(LocalDateTime.now().minusMinutes(2));
+            chatSessionRepository.save(session2);
 
             ChatSession session3 = createChatSession(learner, 1, 1, null);
+            session3.setUpdatedAt(LocalDateTime.now().minusMinutes(1));
+            chatSessionRepository.save(session3);
 
             String responseBody = mockMvc.perform(get("/api/v1/learner/curriculum-chat/sessions")
                     .header("Authorization", "Bearer " + learnerToken)

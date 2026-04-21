@@ -54,7 +54,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(classes = com.fu.StartApplication.class)
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@DisplayName("AuthController — Integration Tests (PostgreSQL satori_test)")
+@DisplayName("Authentication — Integration Tests (PostgreSQL satori_test)")
 class    AuthControllerIntegrationTest {
 
     @Autowired private MockMvc mockMvc;
