@@ -24,6 +24,9 @@ public class MessageResponse {
     private String translation;
     private String romaji;
     private String audioUrl;
+    /** Base64-encoded MP3 of {@link #japaneseContent}, synthesized inline by Azure Neural TTS.
+     *  Populated only on first delivery — history reloads return null. */
+    private String audioBase64;
     private String userAudioUrl;
     private String corrections;
     private String vocabularyUsed;

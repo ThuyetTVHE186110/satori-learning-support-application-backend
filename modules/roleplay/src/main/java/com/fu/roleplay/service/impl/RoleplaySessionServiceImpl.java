@@ -30,7 +30,6 @@ import com.fu.pronunciation.dto.AssessmentResult;
 import com.fu.pronunciation.provider.AzureTtsProvider;
 import com.fu.pronunciation.provider.PronunciationAssessmentProvider;
 import com.fu.pronunciation.config.AzureSpeechProperties;
-import com.fu.infrastructure.cloudinary.CloudinaryService;
 import com.fu.roleplay.ai.MissionEvaluatorAI;
 import com.fu.roleplay.ai.RoleplayAIService;
 import com.fu.roleplay.ai.SessionEvaluatorAI;
@@ -104,7 +103,6 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     private final com.fu.roleplay.evaluation.VocabularyRangeAnalyzer vocabularyRangeAnalyzer;
     private final com.fu.roleplay.evaluation.CrossSessionTracker crossSessionTracker;
     private final AzureTtsProvider azureTtsProvider;
-    private final CloudinaryService cloudinaryService;
     private final AzureSpeechProperties azureSpeechProperties;
 
     public RoleplaySessionServiceImpl(
@@ -134,7 +132,6 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             com.fu.roleplay.evaluation.VocabularyRangeAnalyzer vocabularyRangeAnalyzer,
             com.fu.roleplay.evaluation.CrossSessionTracker crossSessionTracker,
             AzureTtsProvider azureTtsProvider,
-            CloudinaryService cloudinaryService,
             AzureSpeechProperties azureSpeechProperties
     ) {
         this.sessionRepository = sessionRepository;
@@ -163,7 +160,6 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         this.vocabularyRangeAnalyzer = vocabularyRangeAnalyzer;
         this.crossSessionTracker = crossSessionTracker;
         this.azureTtsProvider = azureTtsProvider;
-        this.cloudinaryService = cloudinaryService;
         this.azureSpeechProperties = azureSpeechProperties;
     }
 
@@ -242,8 +238,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // 7. Generate AI opening (returns JSON array: MISSION_INTRO + SCENE_INTRO + DIALOGUE)
         String aiResponseJson = roleplayAIService.generateOpeningMessage(systemPrompt);
 
-        // 8. Parse and save all opening message segments
-        List<ConversationMessage> openingMessages = parseAndSaveAIMessages(session.getId(), aiResponseJson, 1);
+        // 8. Parse and save all opening message segments (TTS runs synchronously inside)
+        AiMessagesResult opening = parseAndSaveAIMessages(session.getId(), aiResponseJson, 1);
+        List<ConversationMessage> openingMessages = opening.messages();
 
         // Update session stats
         session.setMessageCount(openingMessages.size());
@@ -251,9 +248,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         // 9. Build response
         SessionResponse response = sessionMapper.toResponse(session);
-        response.setMessages(openingMessages.stream()
+        List<MessageResponse> openingResponses = openingMessages.stream()
                 .map(messageMapper::toResponse)
-                .collect(Collectors.toList()));
+                .collect(Collectors.toList());
+        attachAudio(openingResponses, opening.audioByMessageId());
+        response.setMessages(openingResponses);
         response.setMissions(sessionMissions.stream()
                 .map(missionMapper::toSessionMissionResponse)
                 .collect(Collectors.toList()));
@@ -303,8 +302,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // 5. Generate the opening setup question
         String aiResponseJson = roleplayAIService.generateSetupOpening(setupPrompt);
 
-        // 6. Parse and save setup opening messages
-        List<ConversationMessage> openingMessages = parseAndSaveAIMessages(session.getId(), aiResponseJson, 1);
+        // 6. Parse and save setup opening messages (TTS runs synchronously inside)
+        AiMessagesResult opening = parseAndSaveAIMessages(session.getId(), aiResponseJson, 1);
+        List<ConversationMessage> openingMessages = opening.messages();
 
         session.setMessageCount(openingMessages.size());
         sessionRepository.save(session);
@@ -317,9 +317,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         // 7. Build response (no missions yet during SETUP)
         SessionResponse response = sessionMapper.toResponse(session);
-        response.setMessages(openingMessages.stream()
+        List<MessageResponse> openingResponses = openingMessages.stream()
                 .map(messageMapper::toResponse)
-                .collect(Collectors.toList()));
+                .collect(Collectors.toList());
+        attachAudio(openingResponses, opening.audioByMessageId());
+        response.setMessages(openingResponses);
         response.setMissions(List.of());
 
         log.info("Started FREE_TALK session {} for user {} at JLPT {}", session.getId(), userId, jlptLevel);
@@ -480,7 +482,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // 5. Parse AI response array and save each segment
         String aiResponseJson = aiResponseFuture.join();
         int aiStartSeq = nextSeq + 1;
-        List<ConversationMessage> aiMessages = parseAndSaveAIMessages(sessionId, aiResponseJson, aiStartSeq);
+        AiMessagesResult aiResult = parseAndSaveAIMessages(sessionId, aiResponseJson, aiStartSeq);
+        List<ConversationMessage> aiMessages = aiResult.messages();
 
         // Set processing time on the first AI message
         if (!aiMessages.isEmpty()) {
@@ -541,6 +544,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         List<MessageResponse> messageResponses = aiMessages.stream()
                 .map(messageMapper::toResponse)
                 .collect(Collectors.toList());
+        attachAudio(messageResponses, aiResult.audioByMessageId());
         List<SessionMissionResponse> missionResponses = freshMissions.stream()
                 .map(missionMapper::toSessionMissionResponse)
                 .collect(Collectors.toList());
@@ -1077,7 +1081,15 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
      * Parses a JSON array response from the AI and saves each segment as a separate
      * ConversationMessage. Falls back to a single DIALOGUE message if parsing fails.
      */
-    private List<ConversationMessage> parseAndSaveAIMessages(UUID sessionId, String aiResponseJson, int startSeq) {
+    /**
+     * Result of parsing AI response: persisted messages + audio bytes keyed by message id.
+     * Audio is synthesized synchronously in parallel before returning, so the response
+     * delivered to the client always includes ready-to-play MP3 (no null, no polling).
+     */
+    private record AiMessagesResult(List<ConversationMessage> messages,
+                                    java.util.Map<UUID, byte[]> audioByMessageId) {}
+
+    private AiMessagesResult parseAndSaveAIMessages(UUID sessionId, String aiResponseJson, int startSeq) {
         List<ConversationMessage> saved = new ArrayList<>();
         List<TtsJob> ttsJobs = new ArrayList<>();
         try {
@@ -1136,7 +1148,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                             style.isBlank() ? null : style));
                 }
             }
-            scheduleTtsAfterCommit(ttsJobs);
+            java.util.Map<UUID, byte[]> audio = synthesizeBundle(ttsJobs);
+            return new AiMessagesResult(saved, audio);
         } catch (Exception e) {
             log.warn("Failed to parse AI response array, saving as raw DIALOGUE: {}", e.getMessage());
             ConversationMessage msg = ConversationMessage.builder()
@@ -1150,7 +1163,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     .build();
             saved.add(messageRepository.save(msg));
         }
-        return saved;
+        return new AiMessagesResult(saved, java.util.Map.of());
     }
 
     /**
@@ -1413,7 +1426,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         String hintJson = roleplayAIService.generateHintResponse(sessionId, systemPrompt, history, sessionMissions);
         int nextSeq = messageRepository.findMaxSequenceNumberBySessionId(sessionId).orElse(0) + 1;
-        List<ConversationMessage> hintMessages = parseAndSaveAIMessages(sessionId, hintJson, nextSeq);
+        AiMessagesResult hintResult = parseAndSaveAIMessages(sessionId, hintJson, nextSeq);
+        List<ConversationMessage> hintMessages = hintResult.messages();
 
         // Update total message count (hint messages are stored) but not userMessageCount
         session.setMessageCount(session.getMessageCount() + hintMessages.size());
@@ -1422,6 +1436,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         List<MessageResponse> hintResponses = hintMessages.stream()
                 .map(messageMapper::toResponse)
                 .collect(Collectors.toList());
+        attachAudio(hintResponses, hintResult.audioByMessageId());
         List<SessionMissionResponse> missionResponses =
                 sessionMissions.stream()
                         .map(missionMapper::toSessionMissionResponse)
@@ -1495,44 +1510,64 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         }
     }
 
-    /**
-     * Async TTS payload — synthesized and uploaded after the containing transaction commits,
-     * so Cloudinary / Azure latency never extends the user's request-response cycle.
-     */
+    /** Per-segment TTS payload. Synthesis runs synchronously in parallel before response is returned. */
     private record TtsJob(UUID messageId, String text, String voice, String style) {}
 
-    private void scheduleTtsAfterCommit(List<TtsJob> jobs) {
-        if (jobs == null || jobs.isEmpty()) return;
-        if (!azureTtsProvider.isAvailable()) return;
+    /**
+     * Synthesize every job in parallel via the roleplay executor, capped by the bundle timeout.
+     * Latency of the whole bundle ≈ max(job latency), not sum. A job that fails or times out
+     * contributes null — the caller omits audio for that segment but still returns the text.
+     */
+    private java.util.Map<UUID, byte[]> synthesizeBundle(List<TtsJob> jobs) {
+        if (jobs == null || jobs.isEmpty()) return java.util.Map.of();
+        if (!azureTtsProvider.isAvailable()) return java.util.Map.of();
 
-        final List<TtsJob> snapshot = List.copyOf(jobs);
-        Runnable task = () -> CompletableFuture.runAsync(() -> runTtsJobs(snapshot), roleplayTaskExecutor);
+        long bundleTimeoutMs = azureSpeechProperties.getTts().getBundleTimeoutMs();
 
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    task.run();
-                }
-            });
-        } else {
-            task.run();
+        List<CompletableFuture<java.util.Map.Entry<UUID, byte[]>>> futures = jobs.stream()
+                .map(job -> CompletableFuture.supplyAsync(
+                        () -> azureTtsProvider.synthesize(job.text(), job.voice(), job.style(), null),
+                        roleplayTaskExecutor)
+                        .exceptionally(ex -> {
+                            log.warn("TTS synth failed for message {}: {}", job.messageId(), ex.getMessage());
+                            return null;
+                        })
+                        .thenApply(audio -> audio == null || audio.length == 0
+                                ? null
+                                : java.util.Map.entry(job.messageId(), audio)))
+                .toList();
+
+        java.util.Map<UUID, byte[]> result = new java.util.HashMap<>();
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .get(bundleTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.warn("TTS bundle timed out after {}ms — collecting whatever completed", bundleTimeoutMs);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return result;
+        } catch (java.util.concurrent.ExecutionException e) {
+            log.warn("TTS bundle execution error: {}", e.getMessage());
         }
+
+        for (CompletableFuture<java.util.Map.Entry<UUID, byte[]>> f : futures) {
+            if (!f.isDone() || f.isCancelled() || f.isCompletedExceptionally()) continue;
+            try {
+                java.util.Map.Entry<UUID, byte[]> entry = f.getNow(null);
+                if (entry != null) result.put(entry.getKey(), entry.getValue());
+            } catch (Exception ignored) {}
+        }
+        return result;
     }
 
-    private void runTtsJobs(List<TtsJob> jobs) {
-        String folder = azureSpeechProperties.getTts().getCloudinaryFolder();
-        for (TtsJob job : jobs) {
-            try {
-                byte[] audio = azureTtsProvider.synthesize(job.text(), job.voice(), job.style(), null);
-                if (audio == null || audio.length == 0) continue;
-                String url = cloudinaryService.uploadAudioBytes(audio, folder);
-                messageRepository.findById(job.messageId()).ifPresent(msg -> {
-                    msg.setAudioUrl(url);
-                    messageRepository.save(msg);
-                });
-            } catch (Exception e) {
-                log.warn("TTS job failed for message {}: {}", job.messageId(), e.getMessage());
+    /** Populates MessageResponse.audioBase64 for any response whose id has synthesized audio. */
+    private void attachAudio(List<MessageResponse> responses, java.util.Map<UUID, byte[]> audio) {
+        if (responses == null || audio == null || audio.isEmpty()) return;
+        java.util.Base64.Encoder enc = java.util.Base64.getEncoder();
+        for (MessageResponse r : responses) {
+            byte[] bytes = audio.get(r.getId());
+            if (bytes != null && bytes.length > 0) {
+                r.setAudioBase64(enc.encodeToString(bytes));
             }
         }
     }
