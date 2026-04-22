@@ -18,6 +18,7 @@ import com.fu.infrastructure.learner.LearnerProfileProvider;
 import com.fu.infrastructure.event.RoleplaySessionCompletedEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
+import com.fu.common.util.FuriganaRubyRepair;
 import com.fu.roleplay.exception.SessionLimitExceededException;
 import com.fu.conversation.entity.Conversation;
 import com.fu.conversation.entity.ConversationMission;
@@ -1108,7 +1109,10 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             for (JsonNode node : array) {
                 String type = node.path("type").asText("DIALOGUE");
                 String japanese = node.path("japanese_content").asText("");
-                String japaneseWithFurigana = node.path("japanese_with_furigana").asText("");
+                // Repair degraded furigana (漢字{かな} / legacy 漢字[かな] → [漢字]{かな}).
+                // Safety net — prompt already asks for ruby syntax but LLM occasionally slips.
+                String japaneseWithFurigana = FuriganaRubyRepair.repair(
+                        node.path("japanese_with_furigana").asText(""));
                 String translation = node.path("translation").asText("");
                 String romaji = node.path("romaji").asText("");
                 String voice = node.path("voice").asText("");

@@ -239,9 +239,9 @@ class ItemMasteryTest {
     class MasteryLabel {
 
         @Test
-        @DisplayName("Level 0 → 'Chưa luyện'")
-        void shouldReturnChuaLuyenForLevel0() {
-            assertThat(mastery.getMasteryLabel()).isEqualTo("Chưa luyện");
+        @DisplayName("Level 0 → 'Chưa thành thạo'")
+        void shouldReturnChuaThanhThaoForLevel0() {
+            assertThat(mastery.getMasteryLabel()).isEqualTo("Chưa thành thạo");
         }
 
         @Test
