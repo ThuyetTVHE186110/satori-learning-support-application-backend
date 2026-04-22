@@ -11,6 +11,7 @@ import com.fu.achievement.enums.BadgeType;
 import com.fu.achievement.service.StreakService;
 import com.fu.infrastructure.event.PracticeFeedbackReadyEvent;
 import com.fu.common.exception.BusinessException;
+import com.fu.common.util.FuriganaRubyRepair;
 import com.fu.course.entity.Course;
 import com.fu.course.entity.GrammarPoint;
 import com.fu.course.entity.Lesson;
@@ -1104,7 +1105,7 @@ public class PracticeSessionService {
             case 1 -> "Quen thuộc";
             case 2 -> "Nắm vững";
             case 3 -> "Thuộc";
-            default -> "Chưa luyện";
+            default -> "Chưa thành thạo";
         };
         return LessonItemsResponse.MasteryDto.builder()
                 .level(m.getMasteryLevel())
@@ -1780,7 +1781,7 @@ public class PracticeSessionService {
                 .itemType(item.getItemType())
                 .question(item.getQuestion())
                 .questionJapanese(item.getQuestionJapanese())
-                .questionJapaneseWithFurigana(item.getQuestionJapaneseWithFurigana())
+                .questionJapaneseWithFurigana(FuriganaRubyRepair.repair(item.getQuestionJapaneseWithFurigana()))
                 .hint(item.getHint())
                 .options(options)
                 .correctMapping(correctMapping)
@@ -1868,7 +1869,7 @@ public class PracticeSessionService {
                 .itemType(item.getItemType().name())
                 .question(item.getQuestion())
                 .questionJapanese(item.getQuestionJapanese())
-                .questionJapaneseWithFurigana(item.getQuestionJapaneseWithFurigana())
+                .questionJapaneseWithFurigana(FuriganaRubyRepair.repair(item.getQuestionJapaneseWithFurigana()))
                 .options(options)
                 .correctAnswer(correctAnswer)
                 .userAnswer(item.getUserAnswer())

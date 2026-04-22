@@ -24,6 +24,11 @@ import java.util.regex.Pattern;
  * <p>Only content composed of hiragana, katakana, or the prolonged-sound mark
  * (ー) is treated as a furigana reading; other parenthetical content (English
  * abbreviations, numbers, etc.) is left untouched.
+ *
+ * <p><b>Note on ruby syntax:</b> downstream chatbot / practice / roleplay layers
+ * re-normalize this output to the ruby form {@code [漢字]{かな}} on read (see
+ * {@code com.fu.common.util.FuriganaRubyRepair}). Import pipeline and embeddings
+ * deliberately keep the simpler {@code word[reading]} form.
  */
 public final class FuriganaNormalizer {
 

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.common.ai.PromptUtils;
+import com.fu.common.util.FuriganaRubyRepair;
 import com.fu.curriculumimport.service.CurriculumStatsService;
 import com.fu.curriculumimport.service.embedding.ChatbotFilter;
 import com.fu.curriculumimport.service.embedding.EmbeddingService;
@@ -524,7 +525,11 @@ public class RetrievalAdvisor implements BaseAdvisor {
         return rag.getSimilarItems().stream()
                 .map(item -> {
                     String type = item.getContentType() != null ? item.getContentType() : "UNKNOWN";
-                    String text = item.getTextContent() != null ? item.getTextContent() : "";
+                    // Convert legacy 漢字[かな] (produced by FuriganaNormalizer at import time)
+                    // to canonical ruby [漢字]{かな} so the LLM sees the same format the
+                    // system prompt asks it to emit. Idempotent on already-canonical text.
+                    String text = FuriganaRubyRepair.repair(
+                            item.getTextContent() != null ? item.getTextContent() : "");
                     var meta = item.getMetadata() != null ? item.getMetadata() : Map.<String, String>of();
                     String lessonInfo = meta.containsKey("lesson_title")
                             ? " (Bài: " + meta.get("lesson_title") + ")" : "";

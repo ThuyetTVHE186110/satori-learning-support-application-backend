@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import java.io.IOException;
 import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.common.exception.BusinessException;
+import com.fu.common.util.FuriganaRubyRepair;
 import com.fu.course.entity.GrammarPoint;
 import com.fu.course.entity.Vocabulary;
 import com.fu.curriculumimport.service.embedding.ChatbotFilter;
@@ -1281,14 +1282,14 @@ public class ExerciseGeneratorAgent {
                 if (!arr.isMissingNode() && arr.isArray()) {
                     List<GeneratedItem> items = objectMapper.convertValue(arr,
                             new TypeReference<List<GeneratedItem>>() {});
-                    return items != null ? items : List.of();
+                    return items != null ? repairFurigana(items) : List.of();
                 }
             } catch (Exception firstEx) {
                 String repaired = repairJson(cleaned);
                 try {
                     List<GeneratedItem> items = objectMapper.readValue(repaired,
                             new TypeReference<List<GeneratedItem>>() {});
-                    if (items != null && !items.isEmpty()) return items;
+                    if (items != null && !items.isEmpty()) return repairFurigana(items);
                 } catch (Exception ignored) {}
                 log.warn("ExerciseGeneratorAgent: Lỗi parse JSON: {}", firstEx.getMessage());
                 return null;
@@ -1298,6 +1299,21 @@ public class ExerciseGeneratorAgent {
             log.warn("ExerciseGeneratorAgent: Lỗi gọi LLM: {}", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Normalize degraded furigana (漢字{かな} or legacy 漢字[かな]) on generated items
+     * to canonical [漢字]{かな}. Safety net — the prompt already asks for ruby syntax,
+     * but GPT-4o-mini occasionally drops the outer brackets.
+     */
+    private static List<GeneratedItem> repairFurigana(List<GeneratedItem> items) {
+        for (GeneratedItem it : items) {
+            String f = it.getQuestionJapaneseWithFurigana();
+            if (f != null && !f.isEmpty()) {
+                it.setQuestionJapaneseWithFurigana(FuriganaRubyRepair.repair(f));
+            }
+        }
+        return items;
     }
 
     private String repairJson(String json) {
@@ -1363,6 +1379,7 @@ public class ExerciseGeneratorAgent {
         public String getRefContentType()    { return refContentType; }
         public void setRefContentId(String v)   { this.refContentId = v; }
         public void setRefContentType(String v) { this.refContentType = v; }
+        public void setQuestionJapaneseWithFurigana(String v) { this.questionJapaneseWithFurigana = v; }
 
         @JsonDeserialize(using = OptionItemDeserializer.class)
         public record OptionItem(
