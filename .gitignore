@@ -71,3 +71,4 @@ release.properties
  environment/secrets/
 /.local.github/
 **/docs
+/scripts/
