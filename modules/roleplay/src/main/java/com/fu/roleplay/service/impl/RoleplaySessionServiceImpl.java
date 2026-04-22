@@ -1513,6 +1513,23 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     /** Per-segment TTS payload. Synthesis runs synchronously in parallel before response is returned. */
     private record TtsJob(UUID messageId, String text, String voice, String style) {}
 
+    // [kanji]{reading} → kanji   (new ruby syntax we now ask the model to use)
+    private static final java.util.regex.Pattern FURIGANA_RUBY = java.util.regex.Pattern.compile("\\[([^\\[\\]]+)\\]\\{([^\\{\\}]+)\\}");
+    // kanji[reading] → kanji     (legacy format; strip so Azure TTS does not read the reading twice)
+    private static final java.util.regex.Pattern FURIGANA_LEGACY = java.util.regex.Pattern.compile("([\\p{IsHan}々]+)\\[([\\p{InHiragana}\\p{InKatakana}ー]+)\\]");
+
+    /**
+     * Strip furigana annotations before handing text to Azure TTS. Defensive: the prompt already
+     * tells the model to keep japanese_content free of brackets, but occasionally it leaks the
+     * ruby form. Azure then reads kanji AND the bracketed reading, producing duplicated words.
+     */
+    private static String stripFuriganaForTts(String text) {
+        if (text == null || text.isEmpty()) return text;
+        String cleaned = FURIGANA_RUBY.matcher(text).replaceAll("$1");
+        cleaned = FURIGANA_LEGACY.matcher(cleaned).replaceAll("$1");
+        return cleaned;
+    }
+
     /**
      * Synthesize every job in parallel via the roleplay executor, capped by the bundle timeout.
      * Latency of the whole bundle ≈ max(job latency), not sum. A job that fails or times out
@@ -1526,7 +1543,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         List<CompletableFuture<java.util.Map.Entry<UUID, byte[]>>> futures = jobs.stream()
                 .map(job -> CompletableFuture.supplyAsync(
-                        () -> azureTtsProvider.synthesize(job.text(), job.voice(), job.style(), null),
+                        () -> azureTtsProvider.synthesize(stripFuriganaForTts(job.text()), job.voice(), job.style(), null),
                         roleplayTaskExecutor)
                         .exceptionally(ex -> {
                             log.warn("TTS synth failed for message {}: {}", job.messageId(), ex.getMessage());

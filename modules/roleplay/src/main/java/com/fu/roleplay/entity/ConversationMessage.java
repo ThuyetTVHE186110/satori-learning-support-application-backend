@@ -44,8 +44,8 @@ public class ConversationMessage extends BaseEntity {
     private String japaneseContent;
 
     /**
-     * Japanese content annotated with furigana in kanji[reading] format.
-     * Example: 先生[せんせい]と話[はな]しました.
+     * Japanese content annotated with furigana using the ruby syntax [kanji]{reading}.
+     * Example: [先生]{せんせい}と[話]{はな}しました.
      * Rendered by the client for learners who cannot yet read kanji.
      */
     @Column(name = "japanese_with_furigana", columnDefinition = "TEXT")
