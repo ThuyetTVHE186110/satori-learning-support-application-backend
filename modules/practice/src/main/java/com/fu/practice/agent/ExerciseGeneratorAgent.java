@@ -682,7 +682,7 @@ public class ExerciseGeneratorAgent {
                 + "- \"itemType\"        : \"" + itemType.name() + "\"\n"
                 + "- \"question\"        : câu hỏi / yêu cầu — KHÔNG rỗng, KHÔNG chứa \"~\".\n"
                 + "- \"questionJapanese\": câu tiếng Nhật (null nếu không cần).\n"
-                + "- \"questionJapaneseWithFurigana\": giống \"questionJapanese\" nhưng mọi từ kanji kèm hiragana dạng 漢字[かんじ] (null nếu questionJapanese null).\n"
+                + "- \"questionJapaneseWithFurigana\": giống \"questionJapanese\" nhưng mọi từ kanji bọc theo cú pháp ruby [漢字]{かんじ} (ví dụ: [先生]{せんせい}と[話]{はな}しました。). null nếu questionJapanese null. KHÔNG đưa cú pháp này vào \"questionJapanese\".\n"
                 + "- \"options\"         : " + optionsNote + "\n"
                 + "- \"pairs\"           : " + pairsNote + "\n"
                 + "- \"correctAnswer\"   : đáp án đúng dạng string (null nếu MATCHING).\n"

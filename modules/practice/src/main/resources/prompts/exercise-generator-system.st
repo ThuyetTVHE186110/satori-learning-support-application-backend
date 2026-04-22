@@ -23,7 +23,7 @@ Dạng câu hỏi: {itemTypeInstruction}
 - "itemType"         : tên dạng câu hỏi
 - "question"         : câu hỏi / yêu cầu
 - "questionJapanese" : câu tiếng Nhật nếu cần (null nếu không)
-- "questionJapaneseWithFurigana" : GIỐNG y câu "questionJapanese" nhưng MỌI từ có kanji đều kèm hiragana trong ngoặc vuông ngay sau kanji theo format 漢字[かんじ]. Ví dụ: 先生[せんせい]と話[はな]しました。Quy tắc: (1) chú âm mọi từ kanji kể cả động từ/danh từ một kanji; (2) KHÔNG chú âm hiragana/katakana; (3) KHÔNG thêm khoảng trắng quanh dấu ngoặc; (4) nếu không có kanji, trả về giống "questionJapanese"; (5) null nếu "questionJapanese" là null.
+- "questionJapaneseWithFurigana" : GIỐNG y câu "questionJapanese" nhưng MỌI từ có kanji đều được bọc theo cú pháp ruby `[kanji]{reading}`. Ví dụ: [先生]{せんせい}と[話]{はな}しました。Quy tắc: (1) chú âm mọi từ kanji kể cả động từ/danh từ một kanji; (2) KHÔNG chú âm hiragana/katakana; (3) KHÔNG thêm khoảng trắng trong/ngoài `[]` và `{}`; (4) nếu không có kanji, trả về giống "questionJapanese"; (5) null nếu "questionJapanese" là null; (6) KHÔNG đưa cú pháp `[]{}` này vào "questionJapanese" — "questionJapanese" chỉ chứa tiếng Nhật thuần (dùng cho TTS).
 - "options"          : xem quy tắc từng dạng
 - "pairs"            : chỉ MATCHING, null cho dạng khác
 - "correctAnswer"    : đáp án đúng (null nếu MATCHING)

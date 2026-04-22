@@ -122,9 +122,9 @@ public class RoleplayPromptBuilder {
 
         sb.append("### Field semantics (memorise these — do NOT deviate):\n");
         sb.append("- `japanese_content`: Your in-character Japanese speech as \"").append(aiRole).append("\".\n");
-        sb.append("- `japanese_with_furigana`: SAME sentence as `japanese_content`, but EVERY kanji word annotated with its hiragana reading in square brackets immediately after the kanji.\n");
-        sb.append("  Format: 漢字[かんじ]. Example: 先生[せんせい]と話[はな]しました。\n");
-        sb.append("  Rules: (1) annotate every kanji word including single-kanji verbs/nouns; (2) do NOT annotate hiragana or katakana; (3) do NOT add spaces around brackets; (4) if no kanji present, return the same string as `japanese_content`.\n");
+        sb.append("- `japanese_with_furigana`: SAME sentence as `japanese_content`, but EVERY kanji word wrapped with its hiragana reading using the ruby syntax `[kanji]{reading}`.\n");
+        sb.append("  Format: [漢字]{かんじ}. Example: [先生]{せんせい}と[話]{はな}しました。\n");
+        sb.append("  Rules: (1) annotate every kanji word including single-kanji verbs/nouns; (2) do NOT annotate hiragana or katakana; (3) do NOT add spaces inside or around the brackets/braces; (4) if no kanji present, return the same string as `japanese_content`; (5) NEVER put this ruby syntax into `japanese_content` — `japanese_content` must contain ONLY plain Japanese text (kanji + kana, no brackets/braces), because it is fed directly to Text-to-Speech.\n");
         sb.append("- `translation`: Vietnamese translation of YOUR Japanese line above.\n");
         sb.append("  ⚠ This is what YOU said translated to Vietnamese — NOT what the learner should say.\n");
         sb.append("- `romaji`: Romaji reading of your Japanese line.\n");
@@ -157,7 +157,7 @@ public class RoleplayPromptBuilder {
         sb.append("  {\n");
         sb.append("    \"type\": \"DIALOGUE\",\n");
         sb.append("    \"japanese_content\": \"(Your FIRST in-character line as ").append(aiRole).append(". Speak naturally for your role.)\",\n");
-        sb.append("    \"japanese_with_furigana\": \"(same sentence with 漢字[かんじ] furigana annotations)\",\n");
+        sb.append("    \"japanese_with_furigana\": \"(same sentence with [漢字]{かんじ} furigana annotations)\",\n");
         sb.append("    \"translation\": \"(Vietnamese translation of YOUR line above — what YOU said as ").append(aiRole).append(")\",\n");
         sb.append("    \"romaji\": \"(romaji)\",\n");
         sb.append("    \"voice\": \"(chosen ja-JP Neural voice, kept constant for the rest of the session)\",\n");
@@ -170,7 +170,7 @@ public class RoleplayPromptBuilder {
         sb.append("[\n");
         sb.append("  {\n");
         sb.append("    \"type\": \"DIALOGUE\",\n");
-        sb.append("    \"japanese_with_furigana\": \"(same sentence with 漢字[かんじ] furigana annotations)\",\n    \"japanese_content\": \"(Your reply as").append(aiRole).append(")\",\n");
+        sb.append("    \"japanese_with_furigana\": \"(same sentence with [漢字]{かんじ} furigana annotations)\",\n    \"japanese_content\": \"(Your reply as").append(aiRole).append(" — plain text, NO furigana brackets)\",\n");
         sb.append("    \"translation\": \"(Vietnamese translation of YOUR line — what YOU said as ").append(aiRole).append(", NOT what learner should say)\",\n");
         sb.append("    \"romaji\": \"(romaji)\",\n");
         sb.append("    \"voice\": \"(SAME voice chosen at session opening)\",\n");
