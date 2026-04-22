@@ -1,5 +1,6 @@
 package com.fu.conversation.ai.tools;
 
+import com.fu.common.util.FuriganaRubyRepair;
 import com.fu.curriculumimport.service.CurriculumStatsService;
 import com.fu.curriculumimport.service.StructuredCurriculumQueryService;
 import com.fu.curriculumimport.service.embedding.ChatbotFilter;
@@ -274,7 +275,8 @@ public class CurriculumQueryTools {
               .append(" mục. Hỏi cụ thể hơn để thu hẹp kết quả.]");
         }
 
-        return sb.toString();
+        // formatVocab emits legacy 漢字[かな] — normalize to canonical before returning to LLM.
+        return FuriganaRubyRepair.repair(sb.toString());
     }
 
     /**
@@ -529,7 +531,10 @@ public class CurriculumQueryTools {
         return rag.getSimilarItems().stream()
                 .map(item -> {
                     String type = item.getContentType() != null ? item.getContentType() : "UNKNOWN";
-                    String text = item.getTextContent() != null ? item.getTextContent() : "";
+                    // Normalize embedding / structured formats (漢字[かな], 漢字 (かな)) → canonical
+                    // [漢字]{かな} so the LLM sees one format across RAG context and tool output.
+                    String text = FuriganaRubyRepair.repair(
+                            item.getTextContent() != null ? item.getTextContent() : "");
                     Map<String, String> meta = item.getMetadata() != null
                             ? item.getMetadata() : Map.of();
                     String lesson = meta.containsKey("lesson_title")

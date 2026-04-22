@@ -5,6 +5,7 @@ import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.infrastructure.event.ConversationSessionCompletedEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
+import com.fu.common.util.FuriganaRubyRepair;
 import com.fu.conversation.ai.advisor.GroundingAdvisor;
 import com.fu.conversation.ai.advisor.IntentRouterAdvisor;
 import com.fu.conversation.ai.advisor.RelevanceCheckAdvisor;
@@ -285,6 +286,9 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
                     "Hệ thống AI không trả về phản hồi hợp lệ, vui lòng thử lại sau.");
         }
 
+        // Repair degraded furigana (漢字{かな} → [漢字]{かな}) that the LLM occasionally leaks.
+        aiResponse = FuriganaRubyRepair.repair(aiResponse);
+
         // Extract retrieved documents stored by RetrievalAdvisor for source references
         @SuppressWarnings("unchecked")
         List<Document> retrievedDocs = (List<Document>) chatClientResponse.context()
@@ -480,6 +484,10 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
                 log.error("streamChat: blank response for session {}", sessionId);
                 return;
             }
+
+            // Repair degraded furigana before persisting; streamed chunks may still show the
+            // degraded form live, but history reload returns the canonical [漢字]{かな}.
+            fullResponse = FuriganaRubyRepair.repair(fullResponse);
 
             UUID aiMessageId = historyManager.saveExchange(sessionId, question, fullResponse);
 

@@ -59,7 +59,7 @@ COMMENT ON COLUMN practice.practice_sessions.session_dimension
 -- ── 3. Bảng practice.item_mastery ────────────────────────────────────────
 -- Per-user, per-item mastery tracking dùng WRCR + EMA algorithm.
 -- Công thức: score = accuracy*0.30 + ema*0.50 + streak*0.20
--- Mastery level: 0=Chưa luyện, 1=Quen thuộc, 2=Nắm vững, 3=Thuộc
+-- Mastery level: 0=Chưa thành thạo, 1=Quen thuộc, 2=Nắm vững, 3=Thuộc
 
 CREATE TABLE IF NOT EXISTS practice.item_mastery (
     id                  UUID         NOT NULL DEFAULT gen_random_uuid(),
@@ -100,6 +100,6 @@ COMMENT ON TABLE practice.item_mastery
 COMMENT ON COLUMN practice.item_mastery.ema_score
     IS 'Exponential Moving Average với alpha=0.4. Prior = 0.5 (uninformed).';
 COMMENT ON COLUMN practice.item_mastery.mastery_level
-    IS '0=Chưa luyện (<40%), 1=Quen thuộc (40-69%), 2=Nắm vững (70-89%), 3=Thuộc (>=90%).';
+    IS '0=Chưa thành thạo (<40%), 1=Quen thuộc (40-69%), 2=Nắm vững (70-89%), 3=Thuộc (>=90%).';
 COMMENT ON COLUMN practice.item_mastery.last_dimension
     IS 'QuestionDimension của session gần nhất có câu hỏi về item này.';
