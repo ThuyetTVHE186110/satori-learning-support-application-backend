@@ -13,7 +13,6 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.UUID;
-
 @Repository
 public interface BadgeRepository extends JpaRepository<Badge, UUID> {
 
@@ -55,4 +54,39 @@ public interface BadgeRepository extends JpaRepository<Badge, UUID> {
      */
     @Query("SELECT COUNT(ub) FROM UserBadges ub WHERE ub.badgeId = :badgeId")
     Long countEarnersByBadgeId(@Param("badgeId") UUID badgeId);
+
+    /**
+     * Find top 5 most awarded badges with their award counts.
+     * Returns rows: [id (UUID), name (String), awardCount (Long)]
+     */
+    @Query(value = "SELECT b.id, b.name, COUNT(ub.id) AS award_count " +
+                   "FROM gamification.badges b " +
+                   "LEFT JOIN gamification.user_badges ub ON b.id = ub.badge_id " +
+                   "WHERE b.status = 'ACTIVE' " +
+                   "GROUP BY b.id, b.name " +
+                   "ORDER BY award_count DESC " +
+                   "LIMIT 5",
+           nativeQuery = true)
+    List<Object[]> findTop5PopularBadges();
+
+    /**
+     * Count total badge awards across all users
+     */
+    @Query("SELECT COUNT(ub) FROM UserBadges ub")
+    Long countTotalBadgeAwards();
+
+    /**
+     * Find bottom 5 rarest badges (fewest earners) among active badges that have been awarded at least once.
+     * Returns rows: [id (UUID), name (String), awardCount (Long)]
+     */
+    @Query(value = "SELECT b.id, b.name, COUNT(ub.id) AS award_count " +
+                   "FROM gamification.badges b " +
+                   "LEFT JOIN gamification.user_badges ub ON b.id = ub.badge_id " +
+                   "WHERE b.status = 'ACTIVE' " +
+                   "GROUP BY b.id, b.name " +
+                   "HAVING COUNT(ub.id) > 0 " +
+                   "ORDER BY award_count ASC " +
+                   "LIMIT 5",
+           nativeQuery = true)
+    List<Object[]> findBottom5RareBadges();
 }
