@@ -6,6 +6,7 @@ import com.fu.monitoring.dto.AdminUserStatsDTO;
 import com.fu.monitoring.dto.DashboardStatsResponse;
 import com.fu.monitoring.dto.OpenAiUsageResponse;
 import com.fu.monitoring.service.AdminUserService;
+import com.fu.monitoring.service.ClassManagementDashboardService;
 import com.fu.monitoring.service.OpenAiUsageService;
 import com.fu.monitoring.service.SystemMonitoringService;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,12 +31,14 @@ class MonitoringControllerTest {
 
     @Mock
     private AdminUserService adminUserService;
+    @Mock
+    private ClassManagementDashboardService dashboardService;
 
     private MonitoringController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new MonitoringController(monitoringService, openAiUsageService, adminUserService);
+        controller = new MonitoringController(monitoringService, openAiUsageService, adminUserService, dashboardService);
     }
 
     @Test
