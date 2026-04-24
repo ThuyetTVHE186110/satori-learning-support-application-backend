@@ -35,7 +35,7 @@ public class ExcelClassImportUtil {
     public static final String SHEET_NAME_LEARNERS = "sheet tổng thông tin học viên";
 
     // Learner sheet columns (for auto-assignment)
-    public static final int LEARNER_COL_CLASS_NAME = 6;  // G
+    public static final int LEARNER_COL_CLASS_NAME = 7;  // H
     public static final int LEARNER_COL_LEARNER_NAME = 8; // I
     public static final int LEARNER_COL_EMAIL = 11;  // L
     public static final int LEARNER_COL_DOB = 9;     // J (estimated, may need adjustment)
