@@ -98,18 +98,17 @@ public interface ClassRepository extends JpaRepository<Clazz, UUID>, JpaSpecific
     Long countActiveClasses();
 
     /**
-     * Count total enrolled students across all classes (removedAt IS NULL)
+     * Count total  students
      */
-    @Query("SELECT COUNT(m) FROM ClassMember m " +
-            "JOIN Clazz c ON m.classId = c.id " +
-            "WHERE m.removedAt IS NULL AND c.deletedAt IS NULL")
+    @Query("SELECT COUNT(m) FROM User m " +
+            "WHERE m.deletedAt IS NULL AND m.role = 'LEARNER'")
     Long countTotalStudents();
 
     /**
      * Count unique teachers currently assigned to classes (releasedAt IS NULL)
      */
-    @Query("SELECT COUNT(DISTINCT cth.teacherId) FROM ClassTeacherHistory cth " +
-            "WHERE cth.releasedAt IS NULL")
+    @Query("SELECT COUNT(m) FROM User m " +
+            "WHERE m.deletedAt IS NULL AND m.role = 'TEACHER'")
     Long countUniqueTeachers();
 
     // =====================================================

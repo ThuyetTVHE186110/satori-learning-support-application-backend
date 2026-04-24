@@ -213,6 +213,29 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     @Override
+    public Page<ConversationSummaryResponse> getConversationsByTopic(
+            UUID topicId, Course.JlptLevel jlptLevel, Course.ContentStatus status, Pageable pageable) {
+
+        Pageable unsorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
+
+        Page<Conversation> page;
+        if (jlptLevel != null && status != null) {
+            page = conversationRepository.findByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(
+                    topicId, jlptLevel.name(), status.name(), unsorted);
+        } else if (jlptLevel != null) {
+            page = conversationRepository.findByTopicIdAndJlptLevelAndDeletedAtIsNull(
+                    topicId, jlptLevel.name(), unsorted);
+        } else if (status != null) {
+            page = conversationRepository.findByTopicIdAndStatusAndDeletedAtIsNull(
+                    topicId, status.name(), unsorted);
+        } else {
+            page = conversationRepository.findByTopicIdAndDeletedAtIsNull(topicId, unsorted);
+        }
+
+        return page.map(conversationMapper::toSummaryResponse);
+    }
+
+    @Override
     public List<ConversationSummaryResponse> getPublishedConversationsByTopic(UUID topicId, UUID userId) {
         List<Conversation> conversations = conversationRepository
                 .findByTopicIdAndStatusAndDeletedAtIsNullOrderByOrderIndexAsc(
