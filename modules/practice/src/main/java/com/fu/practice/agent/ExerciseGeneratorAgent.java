@@ -13,7 +13,7 @@ import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import java.io.IOException;
 import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.common.exception.BusinessException;
-import com.fu.common.util.FuriganaRubyRepair;
+import com.fu.common.util.FuriganaAnnotator;
 import com.fu.course.entity.GrammarPoint;
 import com.fu.course.entity.Vocabulary;
 import com.fu.curriculumimport.service.embedding.ChatbotFilter;
@@ -682,8 +682,7 @@ public class ExerciseGeneratorAgent {
                 + "CẤU TRÚC JSON mỗi phần tử:\n"
                 + "- \"itemType\"        : \"" + itemType.name() + "\"\n"
                 + "- \"question\"        : câu hỏi / yêu cầu — KHÔNG rỗng, KHÔNG chứa \"~\".\n"
-                + "- \"questionJapanese\": câu tiếng Nhật (null nếu không cần).\n"
-                + "- \"questionJapaneseWithFurigana\": giống \"questionJapanese\" nhưng mọi từ kanji bọc theo cú pháp ruby [漢字]{かんじ} (ví dụ: [先生]{せんせい}と[話]{はな}しました。). null nếu questionJapanese null. KHÔNG đưa cú pháp này vào \"questionJapanese\".\n"
+                + "- \"questionJapanese\": câu tiếng Nhật thuần (kanji + kana), không chứa brackets/furigana. Null nếu không cần. Server sẽ tự sinh furigana từ trường này.\n"
                 + "- \"options\"         : " + optionsNote + "\n"
                 + "- \"pairs\"           : " + pairsNote + "\n"
                 + "- \"correctAnswer\"   : đáp án đúng dạng string (null nếu MATCHING).\n"
@@ -1302,15 +1301,17 @@ public class ExerciseGeneratorAgent {
     }
 
     /**
-     * Normalize degraded furigana (漢字{かな} or legacy 漢字[かな]) on generated items
-     * to canonical [漢字]{かな}. Safety net — the prompt already asks for ruby syntax,
-     * but GPT-4o-mini occasionally drops the outer brackets.
+     * Generate {@code questionJapaneseWithFurigana} server-side from {@code questionJapanese}
+     * using Kuromoji. The LLM no longer emits the furigana field — this removes an entire class
+     * of hallucinations (double readings, kanji prefix duplication) the old repair could not fix.
      */
     private static List<GeneratedItem> repairFurigana(List<GeneratedItem> items) {
         for (GeneratedItem it : items) {
-            String f = it.getQuestionJapaneseWithFurigana();
-            if (f != null && !f.isEmpty()) {
-                it.setQuestionJapaneseWithFurigana(FuriganaRubyRepair.repair(f));
+            String plain = it.getQuestionJapanese();
+            if (plain != null && !plain.isEmpty()) {
+                it.setQuestionJapaneseWithFurigana(FuriganaAnnotator.annotate(plain));
+            } else {
+                it.setQuestionJapaneseWithFurigana(null);
             }
         }
         return items;
