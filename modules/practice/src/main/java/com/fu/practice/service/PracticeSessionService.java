@@ -1104,7 +1104,7 @@ public class PracticeSessionService {
         String label = switch (m.getMasteryLevel()) {
             case 1 -> "Quen thuộc";
             case 2 -> "Nắm vững";
-            case 3 -> "Thuộc";
+            case 3 -> "Thành thạo";
             default -> "Chưa thành thạo";
         };
         return LessonItemsResponse.MasteryDto.builder()

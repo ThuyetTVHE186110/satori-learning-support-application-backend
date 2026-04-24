@@ -271,7 +271,7 @@ class ItemMasteryTest {
             mastery.setMasteryLevel(3);
 
             // Assert
-            assertThat(mastery.getMasteryLabel()).isEqualTo("Thuộc");
+            assertThat(mastery.getMasteryLabel()).isEqualTo("Thành thạo");
         }
     }
 
