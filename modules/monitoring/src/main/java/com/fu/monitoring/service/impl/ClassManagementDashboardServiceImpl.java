@@ -5,6 +5,8 @@ import com.fu.achievement.repository.UserBadgesRepository;
 import com.fu.achievement.repository.UserStatsRepository;
 import com.fu.clazz.entity.Clazz;
 import com.fu.clazz.repository.ClassRepository;
+import com.fu.course.entity.Course;
+import com.fu.course.repository.CourseRepository;
 import com.fu.monitoring.dto.response.AchievementMetricsResponse;
 import com.fu.monitoring.dto.response.BadgeDto;
 import com.fu.monitoring.dto.response.ClassManagementDashboardResponse;
@@ -24,7 +26,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
 import java.time.LocalDate;
-import java.time.LocalDateTime;import java.util.ArrayList;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -45,6 +48,7 @@ public class ClassManagementDashboardServiceImpl implements ClassManagementDashb
     private final BadgeRepository badgeRepository;
     private final UserBadgesRepository userBadgesRepository;
     private final UserStatsRepository userStatsRepository;
+    private final CourseRepository courseRepository;
 
     private static final int DAYS_THRESHOLD = 7;
 
@@ -165,11 +169,12 @@ public class ClassManagementDashboardServiceImpl implements ClassManagementDashb
                 .map(classId -> {
                     Clazz clazz = classRepository.findById(classId).orElse(null);
                     if (clazz == null) return null;
-
+                    Course course = courseRepository.findById(clazz.getCourseId()).orElse(null);
                     Integer enrolledCount = classRepository.getEnrolledCount(classId);
                     return PriorityClassResponse.builder()
                             .id(clazz.getId())
                             .name(clazz.getName())
+                            .courseName(course != null ? course.getName() : "Unknown Course")
                             .enrolledCount(enrolledCount != null ? enrolledCount : 0)
                             .maxStudents(clazz.getMaxStudents())
                             .startDate(clazz.getStartDate())
