@@ -466,10 +466,10 @@ public class UserServiceImpl implements UserService {
 
                     String fullName, phoneNumber, email, birthDay;
                     if (i == 0) {
-                        fullName = getCellValueAsString(row.getCell(8));
-                        birthDay = getCellValueAsString(row.getCell(9));
-                        phoneNumber = getCellValueAsString(row.getCell(10));
-                        email = getCellValueAsString(row.getCell(11));
+                        fullName = getCellValueAsString(row.getCell(1));
+                        birthDay = getCellValueAsString(row.getCell(2));
+                        phoneNumber = getCellValueAsString(row.getCell(3));
+                        email = getCellValueAsString(row.getCell(4));
                     } else {
                         fullName = getCellValueAsString(row.getCell(1));
                         birthDay = getCellValueAsString(row.getCell(2));
@@ -851,7 +851,6 @@ public class UserServiceImpl implements UserService {
                 DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
                 // 2. Format the LocalDateTime object
                 String formattedDate = dateTime.format(formatter);
-                log.debug("Formatted Date: {}", formattedDate);
                 return formattedDate;
             }
             // Trường hợp là số điện thoại hoặc số thường
