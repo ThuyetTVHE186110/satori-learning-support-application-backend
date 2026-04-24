@@ -76,6 +76,7 @@ class AssignmentServiceImplTest {
     @Mock private AiGradingService aiGradingService;
     @Mock private ClassTeacherHistoryRepository classTeacherHistoryRepository;
     @Mock private AssignmentScheduleManager scheduleManager;
+    @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
 
 
     @InjectMocks
