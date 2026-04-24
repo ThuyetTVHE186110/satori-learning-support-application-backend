@@ -72,6 +72,43 @@ public interface ConversationRepository extends JpaRepository<Conversation, UUID
     Page<Conversation> findByTopicIdAndStatusAndDeletedAtIsNull(
             @Param("topicId") UUID topicId, @Param("status") String status, Pageable pageable);
 
+    @Query(
+            value = "SELECT * FROM speaking.conversations " +
+                    "WHERE topic_id = :topicId " +
+                    "  AND jlpt_level = CAST(:jlptLevel AS jlpt_level) " +
+                    "  AND deleted_at IS NULL " +
+                    "ORDER BY order_index ASC",
+            countQuery = "SELECT COUNT(*) FROM speaking.conversations " +
+                         "WHERE topic_id = :topicId " +
+                         "  AND jlpt_level = CAST(:jlptLevel AS jlpt_level) " +
+                         "  AND deleted_at IS NULL",
+            nativeQuery = true
+    )
+    Page<Conversation> findByTopicIdAndJlptLevelAndDeletedAtIsNull(
+            @Param("topicId") UUID topicId,
+            @Param("jlptLevel") String jlptLevel,
+            Pageable pageable);
+
+    @Query(
+            value = "SELECT * FROM speaking.conversations " +
+                    "WHERE topic_id = :topicId " +
+                    "  AND jlpt_level = CAST(:jlptLevel AS jlpt_level) " +
+                    "  AND status = CAST(:status AS content_status) " +
+                    "  AND deleted_at IS NULL " +
+                    "ORDER BY order_index ASC",
+            countQuery = "SELECT COUNT(*) FROM speaking.conversations " +
+                         "WHERE topic_id = :topicId " +
+                         "  AND jlpt_level = CAST(:jlptLevel AS jlpt_level) " +
+                         "  AND status = CAST(:status AS content_status) " +
+                         "  AND deleted_at IS NULL",
+            nativeQuery = true
+    )
+    Page<Conversation> findByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(
+            @Param("topicId") UUID topicId,
+            @Param("jlptLevel") String jlptLevel,
+            @Param("status") String status,
+            Pageable pageable);
+
     @Query(value = "SELECT * FROM speaking.conversations WHERE topic_id = :topicId AND status = CAST(:status AS content_status) AND deleted_at IS NULL ORDER BY order_index ASC",
             nativeQuery = true)
     List<Conversation> findByTopicIdAndStatusAndDeletedAtIsNullOrderByOrderIndexAsc(

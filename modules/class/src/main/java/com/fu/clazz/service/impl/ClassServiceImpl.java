@@ -851,9 +851,9 @@ public class ClassServiceImpl implements ClassService {
                 status = ClassStatus.ACTIVE;
             }
             if (existingClass != null &&
-                    existingClass.getStatus().equals(ClassStatus.ACTIVE) ||
-                    existingClass.getStatus().equals(ClassStatus.CLOSED) ||
-                    existingClass.getStatus().equals(ClassStatus.DELETED)
+                    (existingClass.getStatus().equals(ClassStatus.ACTIVE) ||
+                            existingClass.getStatus().equals(ClassStatus.CLOSED) ||
+                            existingClass.getStatus().equals(ClassStatus.DELETED))
             ) {
                 status = existingClass.getStatus();
             }
@@ -965,14 +965,8 @@ public class ClassServiceImpl implements ClassService {
                 // Use Objects.equals() for null-safe comparison
                 String excelName = safeGetTrimmedValue(learnerExcelRow.getName());
                 String excelPhone = safeGetTrimmedValue(learnerExcelRow.getPhoneNumber());
-                StringBuilder sb = new StringBuilder();
-                if (learner.getLastName() != null) sb.append(learner.getLastName());
-                if (learner.getFirstName() != null) {
-                    if (sb.length() > 0) sb.append(" ");
-                    sb.append(learner.getFirstName());
-                }
-                String existingLearnerFullname = sb.toString();
-                if (!Objects.equals(existingLearnerFullname, excelName) ||
+
+                if (!Objects.equals(learner.getFullName(), excelName) ||
                         !Objects.equals(learner.getDateOfBirth(), learnerExcelRow.getDateOfBirth()) ||
                         !Objects.equals(learner.getPhoneNumber(), excelPhone)) {
                     errors.add(ClassImportError.builder()
@@ -1601,9 +1595,7 @@ public class ClassServiceImpl implements ClassService {
         if (!Objects.equals(preview.getStatus(), preview.getOldStatus())) return true;
         if (!Objects.equals(preview.getMaxStudents(), preview.getOldMaxStudents())) return true;
         if (!Objects.equals(preview.getCourseId(), preview.getOldCourseId())) return true;
-        if (!Objects.equals(preview.getTeacherEmail(), preview.getOldTeacherEmail())) return true;
-
-        return false;
+        return !Objects.equals(preview.getTeacherEmail(), preview.getOldTeacherEmail());
     }
 
     /**
@@ -1644,16 +1636,6 @@ public class ClassServiceImpl implements ClassService {
 
         String excelTeacherEmail = preview.getTeacherEmail().trim().toLowerCase();
 
-        // If there's an existing teacher, check if it's the same
-        if (existingTeacher != null) {
-            String existingTeacherEmail = existingTeacher.getEmail().trim().toLowerCase();
-            String existingTeacherName = existingTeacher.getFullName().toLowerCase();
-            if (!excelTeacherEmail.equals(existingTeacherEmail)) {
-                return String.format("Giảng viên sẽ được thay đổi từ %s thành %s",
-                        existingTeacher.getEmail(), preview.getTeacherEmail());
-            }
-        }
-
         // Verify the teacher in Excel exists in DB (should have been done in earlier validation)
         // This is just a safety check
         User teacherInExcel = userRepository.findByEmail(excelTeacherEmail).orElse(null);
@@ -1689,7 +1671,8 @@ public class ClassServiceImpl implements ClassService {
 
         String excelTeacherFullName = preview.getTeacherName().trim();
         String dbTeacherFullName = existingTeacher.getFullName();
-
+        String excelTeacherEmail = preview.getTeacherEmail().trim();
+        String dbTeacherEmail = existingTeacher.getEmail().trim();
         // If teacher in DB has no full name, can't validate
         if (dbTeacherFullName == null || dbTeacherFullName.trim().isEmpty()) {
             return null;
@@ -1698,7 +1681,7 @@ public class ClassServiceImpl implements ClassService {
         dbTeacherFullName = dbTeacherFullName.trim();
 
         // Compare full names (case-sensitive, exact match)
-        if (!excelTeacherFullName.equals(dbTeacherFullName)) {
+        if (!excelTeacherFullName.equals(dbTeacherFullName) && excelTeacherEmail.equals(dbTeacherEmail) ) {
             return String.format("Thông tin giảng viên không khớp với DB: Tên Excel = '%s', Tên DB = '%s'",
                     excelTeacherFullName, dbTeacherFullName);
         }

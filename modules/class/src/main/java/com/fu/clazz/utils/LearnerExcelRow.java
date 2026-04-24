@@ -16,7 +16,7 @@ import java.time.LocalDate;
 @NoArgsConstructor
 @AllArgsConstructor
 public class LearnerExcelRow {
-    private String className;       // G column
+    private String className;       // H column
     private String name;            // I column
     private String email;           // L column
     private LocalDate dateOfBirth;  // J column (estimated)
