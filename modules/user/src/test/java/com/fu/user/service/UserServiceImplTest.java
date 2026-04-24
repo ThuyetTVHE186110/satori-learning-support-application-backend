@@ -936,10 +936,10 @@ class UserServiceImplTest {
         private void writeLearnerRow(XSSFSheet sheet, int rowIndex,
                                      String fullName, String birthDay, String phone, String email) {
             var row = sheet.createRow(rowIndex);
-            row.createCell(8).setCellValue(fullName  != null ? fullName  : "");
-            row.createCell(9).setCellValue(birthDay  != null ? birthDay  : "");
-            row.createCell(10).setCellValue(phone    != null ? phone     : "");
-            row.createCell(11).setCellValue(email    != null ? email     : "");
+            row.createCell(1).setCellValue(fullName  != null ? fullName  : "");
+            row.createCell(2).setCellValue(birthDay  != null ? birthDay  : "");
+            row.createCell(3).setCellValue(phone    != null ? phone     : "");
+            row.createCell(4).setCellValue(email    != null ? email     : "");
         }
 
         /**

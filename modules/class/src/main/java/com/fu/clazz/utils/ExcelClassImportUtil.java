@@ -35,11 +35,11 @@ public class ExcelClassImportUtil {
     public static final String SHEET_NAME_LEARNERS = "sheet tổng thông tin học viên";
 
     // Learner sheet columns (for auto-assignment)
-    public static final int LEARNER_COL_CLASS_NAME = 7;  // H
-    public static final int LEARNER_COL_LEARNER_NAME = 8; // I
-    public static final int LEARNER_COL_EMAIL = 11;  // L
-    public static final int LEARNER_COL_DOB = 9;     // J (estimated, may need adjustment)
-    public static final int LEARNER_COL_PHONE = 10;  // K (estimated, may need adjustment)
+    public static final int LEARNER_COL_CLASS_NAME = 0;  // A
+    public static final int LEARNER_COL_LEARNER_NAME = 1; // B
+    public static final int LEARNER_COL_DOB = 2;     // C (estimated, may need adjustment)
+    public static final int LEARNER_COL_PHONE = 3;  // D(estimated, may need adjustment)
+    public static final int LEARNER_COL_EMAIL = 4;  // E
 
     // Date formatters - support both Vietnamese (DD/MM/YYYY) and ISO (yyyy-MM-dd) formats
     private static final DateTimeFormatter[] DATE_FORMATTERS = {
