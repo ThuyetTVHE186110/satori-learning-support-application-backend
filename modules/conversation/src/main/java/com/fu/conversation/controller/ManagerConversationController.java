@@ -234,12 +234,14 @@ public class ManagerConversationController {
     @GetMapping("/topics/{topicId}/conversations")
     public ResponseEntity<ApiResponse<PageResponse<ConversationSummaryResponse>>> getConversationsByTopic(
             @PathVariable UUID topicId,
+            @RequestParam(required = false) Course.JlptLevel level,
+            @RequestParam(required = false) Course.ContentStatus status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
 
-        Pageable pageable = PageRequest.of(page, Math.min(size, 100),
-                Sort.by("orderIndex").ascending());
-        Page<ConversationSummaryResponse> result = conversationService.getConversationsByTopic(topicId, pageable);
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        Page<ConversationSummaryResponse> result =
+                conversationService.getConversationsByTopic(topicId, level, status, pageable);
         return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
                 result.getContent(), result.getNumber(), result.getSize(),
                 result.getTotalElements(), result.getTotalPages())));
