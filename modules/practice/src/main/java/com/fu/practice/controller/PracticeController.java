@@ -89,7 +89,7 @@ public class PracticeController {
      * Dùng để render item picker trước khi bắt đầu phiên luyện tập.
      * GET /api/v1/learner/practice/lessons/{lessonId}/items
      *
-     * @param masteryLevel filter theo mức mastery (0=Chưa thành thạo, 1=Quen thuộc, 2=Nắm vững, 3=Thuộc).
+     * @param masteryLevel filter theo mức mastery (0=Chưa thành thạo, 1=Quen thuộc, 2=Nắm vững, 3=Thành thạo).
      *                     Null = trả về tất cả. Có thể truyền nhiều giá trị: ?masteryLevel=0&masteryLevel=1
      */
     @GetMapping("/lessons/{lessonId}/items")

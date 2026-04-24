@@ -28,7 +28,7 @@ import java.util.UUID;
  *   0 = Chưa thành thạo  (đã luyện nhưng score < 40)
  *   1 = Quen thuộc  (40 <= score < 70)
  *   2 = Nắm vững    (70 <= score < 90)
- *   3 = Thuộc       (score >= 90)
+ *   3 = Thành thạo  (score >= 90)
  */
 @Entity
 @Table(
@@ -92,7 +92,7 @@ public class ItemMastery extends BaseEntity {
     private BigDecimal emaScore = BigDecimal.valueOf(INITIAL_EMA);
 
     /**
-     * 0=Chưa thành thạo, 1=Quen thuộc, 2=Nắm vững, 3=Thuộc.
+     * 0=Chưa thành thạo, 1=Quen thuộc, 2=Nắm vững, 3=Thành thạo.
      * Tính lại sau mỗi recordAnswer().
      */
     @Column(name = "mastery_level", nullable = false)
@@ -156,7 +156,7 @@ public class ItemMastery extends BaseEntity {
         return switch (masteryLevel) {
             case 1  -> "Quen thuộc";
             case 2  -> "Nắm vững";
-            case 3  -> "Thuộc";
+            case 3  -> "Thành thạo";
             default -> "Chưa thành thạo";
         };
     }
