@@ -32,9 +32,11 @@ import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.infrastructure.cloudinary.CloudinaryService;
 import com.fu.infrastructure.email.EmailService;
+import com.fu.infrastructure.event.AssignmentGradedEvent;
 import com.fu.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -78,6 +80,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     private final LearningLevelService learningLevelService;
     private final AchievementService achievementService;
     private final EmailService emailService;
+    private final ApplicationEventPublisher eventPublisher;
     private static final String SUBMISSION_IMAGE_FOLDER = "satori/assignment-submissions";
     private static final String SUBMISSION_FAILED_MSG = "Không thể lưu hoặc chấm điểm bài nộp.";
     private static final int MAX_SUBMISSION_IMAGES = 3;
@@ -737,6 +740,14 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         submissionRepository.save(submission);
         log.info("Writing submission {} graded by teacher {} with score {}", submissionId, teacherId, request.getTeacherScore());
+
+        eventPublisher.publishEvent(new AssignmentGradedEvent(
+                this,
+                assignment.getId(),
+                submission.getId(),
+                submission.getUserId(),
+                assignment.getTitle(),
+                request.getTeacherScore().doubleValue()));
 
         // NOTE: Streak is NOT recorded here because:
         // 1. Streak already counted when learner submitted (submitWriting)

@@ -4,13 +4,22 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Normalizes Japanese furigana annotations to the canonical ruby syntax
- * {@code [漢字]{かな}}. Handles three degraded inputs that show up in practice:
+ * Converts curator-authored paren-form readings ({@code 先生 (せんせい)}) into canonical ruby
+ * syntax ({@code [先生]{せんせい}}) while preserving the reading the Content Manager chose.
+ *
+ * <p><b>Scope after the Kuromoji migration:</b> this class is NOT used for LLM write-paths
+ * anymore — those use {@link FuriganaAnnotator} which tokenizes plain Japanese deterministically.
+ * {@code FuriganaRubyRepair} remains for READ paths that surface curated vocabulary / grammar
+ * data from the learning-content schema (see {@code CurriculumQueryTools}, {@code RetrievalAdvisor}),
+ * where the DB stores the curator's paren form via {@code ContentEmbeddingEventListener.buildRichText}
+ * and Kuromoji would override the pedagogically chosen reading.
+ *
+ * <p>Handles three degraded inputs that show up in curated data:
  *
  * <ul>
- *   <li>LLM leak of half-ruby: {@code 漢字{かな}} (reading delimiter kept, base brackets dropped)</li>
- *   <li>Legacy wiki style:     {@code 漢字[かな]} (older ingestion format still present in historical embeddings)</li>
  *   <li>Paren form:            {@code 漢字 (かな)} (produced by vocabulary embedding {@code buildRichText})</li>
+ *   <li>Legacy wiki style:     {@code 漢字[かな]} (older ingestion format still present in historical embeddings)</li>
+ *   <li>Half-ruby leak:        {@code 漢字{かな}} (reading delimiter kept, base brackets dropped)</li>
  * </ul>
  *
  * <p>The kanji run is captured together with any trailing okurigana so

@@ -18,7 +18,7 @@ import com.fu.infrastructure.learner.LearnerProfileProvider;
 import com.fu.infrastructure.event.RoleplaySessionCompletedEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
-import com.fu.common.util.FuriganaRubyRepair;
+import com.fu.common.util.FuriganaAnnotator;
 import com.fu.roleplay.exception.SessionLimitExceededException;
 import com.fu.conversation.entity.Conversation;
 import com.fu.conversation.entity.ConversationMission;
@@ -242,6 +242,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // 8. Parse and save all opening message segments (TTS runs synchronously inside)
         AiMessagesResult opening = parseAndSaveAIMessages(session.getId(), aiResponseJson, 1);
         List<ConversationMessage> openingMessages = opening.messages();
+
+        // Lock the voice discovered on turn 1 so subsequent turns don't drift gender.
+        lockVoiceIfAbsent(session, opening.discoveredVoice());
 
         // Update session stats
         session.setMessageCount(openingMessages.size());
@@ -483,8 +486,13 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // 5. Parse AI response array and save each segment
         String aiResponseJson = aiResponseFuture.join();
         int aiStartSeq = nextSeq + 1;
-        AiMessagesResult aiResult = parseAndSaveAIMessages(sessionId, aiResponseJson, aiStartSeq);
+        String lockedVoice = extractLockedVoice(session);
+        AiMessagesResult aiResult = parseAndSaveAIMessages(sessionId, aiResponseJson, aiStartSeq, lockedVoice);
         List<ConversationMessage> aiMessages = aiResult.messages();
+        // Turn 1 of CONVERSATION phase (or first DIALOGUE after SETUP) is when a voice first appears.
+        if (lockedVoice == null) {
+            lockVoiceIfAbsent(session, aiResult.discoveredVoice());
+        }
 
         // Set processing time on the first AI message
         if (!aiMessages.isEmpty()) {
@@ -1088,11 +1096,24 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
      * delivered to the client always includes ready-to-play MP3 (no null, no polling).
      */
     private record AiMessagesResult(List<ConversationMessage> messages,
-                                    java.util.Map<UUID, byte[]> audioByMessageId) {}
+                                    java.util.Map<UUID, byte[]> audioByMessageId,
+                                    String discoveredVoice) {}
 
     private AiMessagesResult parseAndSaveAIMessages(UUID sessionId, String aiResponseJson, int startSeq) {
+        return parseAndSaveAIMessages(sessionId, aiResponseJson, startSeq, null);
+    }
+
+    /**
+     * @param lockedVoice voice chosen at session opening (from session context). When non-null,
+     *   overrides whatever the LLM emits on subsequent turns so the character's voice stays
+     *   consistent. The LLM reliably picks a coherent voice on turn 1 but drifts later, so we
+     *   pin it server-side rather than re-asking every turn.
+     */
+    private AiMessagesResult parseAndSaveAIMessages(UUID sessionId, String aiResponseJson,
+                                                   int startSeq, String lockedVoice) {
         List<ConversationMessage> saved = new ArrayList<>();
         List<TtsJob> ttsJobs = new ArrayList<>();
+        String discoveredVoice = null;
         try {
             JsonNode root = objectMapper.readTree(aiResponseJson);
             JsonNode array;
@@ -1108,14 +1129,23 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             int seq = startSeq;
             for (JsonNode node : array) {
                 String type = node.path("type").asText("DIALOGUE");
-                String japanese = node.path("japanese_content").asText("");
-                // Repair degraded furigana (漢字{かな} / legacy 漢字[かな] → [漢字]{かな}).
-                // Safety net — prompt already asks for ruby syntax but LLM occasionally slips.
-                String japaneseWithFurigana = FuriganaRubyRepair.repair(
-                        node.path("japanese_with_furigana").asText(""));
+                // Strip any ruby syntax the LLM may leak, then feed plain text into Kuromoji.
+                // This replaces both the old LLM-generated `japanese_with_furigana` field and the
+                // post-hoc FuriganaRubyRepair, neither of which handled hallucination patterns like
+                // `[駅]{えき}{えき}` or `映画[映画]{えいが}`.
+                String japanese = FuriganaAnnotator.stripAllFurigana(node.path("japanese_content").asText(""));
+                String japaneseWithFurigana = FuriganaAnnotator.annotate(japanese);
                 String translation = node.path("translation").asText("");
                 String romaji = node.path("romaji").asText("");
-                String voice = node.path("voice").asText("");
+                String llmVoice = node.path("voice").asText("");
+                // Voice resolution: locked > LLM-emitted. First non-blank LLM voice on a DIALOGUE
+                // segment is captured as discoveredVoice so the caller can persist it for later turns.
+                if (lockedVoice == null && discoveredVoice == null
+                        && !llmVoice.isBlank() && "DIALOGUE".equals(type)) {
+                    discoveredVoice = llmVoice;
+                }
+                String voice = lockedVoice != null ? lockedVoice
+                        : (discoveredVoice != null ? discoveredVoice : llmVoice);
                 String style = node.path("style").asText("");
                 String corrections = "[]";
                 JsonNode correctionsNode = node.path("corrections");
@@ -1153,7 +1183,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 }
             }
             java.util.Map<UUID, byte[]> audio = synthesizeBundle(ttsJobs);
-            return new AiMessagesResult(saved, audio);
+            return new AiMessagesResult(saved, audio, discoveredVoice);
         } catch (Exception e) {
             log.warn("Failed to parse AI response array, saving as raw DIALOGUE: {}", e.getMessage());
             ConversationMessage msg = ConversationMessage.builder()
@@ -1167,7 +1197,34 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     .build();
             saved.add(messageRepository.save(msg));
         }
-        return new AiMessagesResult(saved, java.util.Map.of());
+        return new AiMessagesResult(saved, java.util.Map.of(), discoveredVoice);
+    }
+
+    /**
+     * Extract the locked voice from {@code session.context.voice}. Returns null if not yet locked.
+     */
+    private String extractLockedVoice(ConversationSession session) {
+        return extractStringFromContext(session.getContext(), "voice");
+    }
+
+    /**
+     * Persist {@code voice} into {@code session.context.voice} when not already set. Idempotent —
+     * subsequent calls with a different voice are ignored so the first-turn choice is authoritative.
+     */
+    private void lockVoiceIfAbsent(ConversationSession session, String voice) {
+        if (voice == null || voice.isBlank()) return;
+        if (extractLockedVoice(session) != null) return;
+        try {
+            JsonNode existing = objectMapper.readTree(session.getContext());
+            ObjectNode updated = objectMapper.createObjectNode();
+            existing.fields().forEachRemaining(e -> updated.set(e.getKey(), e.getValue()));
+            updated.put("voice", voice);
+            session.setContext(objectMapper.writeValueAsString(updated));
+            sessionRepository.save(session);
+            log.info("Locked voice '{}' for session {}", voice, session.getId());
+        } catch (Exception e) {
+            log.warn("Failed to lock voice for session {}: {}", session.getId(), e.getMessage());
+        }
     }
 
     /**
@@ -1273,7 +1330,14 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             var match = sessionMissions.stream()
                     .filter(sm -> sm.getId().toString().equals(progress.getMissionId()))
                     .findFirst();
-            if (match.isEmpty()) continue;
+            if (match.isEmpty()) {
+                // Surface mismatch so we can distinguish "LLM judged 0%" from "LLM returned wrong id
+                // and every update was silently dropped". Expected ids are the session mission UUIDs.
+                log.warn("Mission evaluator returned unknown missionId='{}' (known ids: {}). Dropping update.",
+                        progress.getMissionId(),
+                        sessionMissions.stream().map(sm -> sm.getId().toString()).toList());
+                continue;
+            }
             SessionMission sm = match.get();
             if (sm.getStatus() == SessionMission.MissionStatus.COMPLETED
                     || sm.getStatus() == SessionMission.MissionStatus.FAILED) {
@@ -1430,7 +1494,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         String hintJson = roleplayAIService.generateHintResponse(sessionId, systemPrompt, history, sessionMissions);
         int nextSeq = messageRepository.findMaxSequenceNumberBySessionId(sessionId).orElse(0) + 1;
-        AiMessagesResult hintResult = parseAndSaveAIMessages(sessionId, hintJson, nextSeq);
+        AiMessagesResult hintResult = parseAndSaveAIMessages(sessionId, hintJson, nextSeq, extractLockedVoice(session));
         List<ConversationMessage> hintMessages = hintResult.messages();
 
         // Update total message count (hint messages are stored) but not userMessageCount
@@ -1517,23 +1581,6 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     /** Per-segment TTS payload. Synthesis runs synchronously in parallel before response is returned. */
     private record TtsJob(UUID messageId, String text, String voice, String style) {}
 
-    // [kanji]{reading} → kanji   (new ruby syntax we now ask the model to use)
-    private static final java.util.regex.Pattern FURIGANA_RUBY = java.util.regex.Pattern.compile("\\[([^\\[\\]]+)\\]\\{([^\\{\\}]+)\\}");
-    // kanji[reading] → kanji     (legacy format; strip so Azure TTS does not read the reading twice)
-    private static final java.util.regex.Pattern FURIGANA_LEGACY = java.util.regex.Pattern.compile("([\\p{IsHan}々]+)\\[([\\p{InHiragana}\\p{InKatakana}ー]+)\\]");
-
-    /**
-     * Strip furigana annotations before handing text to Azure TTS. Defensive: the prompt already
-     * tells the model to keep japanese_content free of brackets, but occasionally it leaks the
-     * ruby form. Azure then reads kanji AND the bracketed reading, producing duplicated words.
-     */
-    private static String stripFuriganaForTts(String text) {
-        if (text == null || text.isEmpty()) return text;
-        String cleaned = FURIGANA_RUBY.matcher(text).replaceAll("$1");
-        cleaned = FURIGANA_LEGACY.matcher(cleaned).replaceAll("$1");
-        return cleaned;
-    }
-
     /**
      * Synthesize every job in parallel via the roleplay executor, capped by the bundle timeout.
      * Latency of the whole bundle ≈ max(job latency), not sum. A job that fails or times out
@@ -1547,7 +1594,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         List<CompletableFuture<java.util.Map.Entry<UUID, byte[]>>> futures = jobs.stream()
                 .map(job -> CompletableFuture.supplyAsync(
-                        () -> azureTtsProvider.synthesize(stripFuriganaForTts(job.text()), job.voice(), job.style(), null),
+                        () -> azureTtsProvider.synthesize(job.text(), job.voice(), job.style(), null),
                         roleplayTaskExecutor)
                         .exceptionally(ex -> {
                             log.warn("TTS synth failed for message {}: {}", job.messageId(), ex.getMessage());

@@ -17,17 +17,15 @@ public class AssignmentGradedEvent extends ApplicationEvent {
     private final UUID studentId;
     private final String assignmentTitle;
     private final Double score;
-    private final Double maxScore;
 
     public AssignmentGradedEvent(Object source, UUID assignmentId, UUID submissionId,
                                   UUID studentId, String assignmentTitle,
-                                  Double score, Double maxScore) {
+                                  Double score) {
         super(source);
         this.assignmentId = assignmentId;
         this.submissionId = submissionId;
         this.studentId = studentId;
         this.assignmentTitle = assignmentTitle;
         this.score = score;
-        this.maxScore = maxScore;
     }
 }
