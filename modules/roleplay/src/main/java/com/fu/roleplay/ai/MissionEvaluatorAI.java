@@ -81,6 +81,8 @@ public class MissionEvaluatorAI {
                     .call()
                     .content();
 
+            log.debug("Mission evaluator raw response ({} missions in scope): {}", missions.size(), rawResponse);
+
             String cleanJson = cleanJson(rawResponse);
             List<Map<String, Object>> results = objectMapper.readValue(cleanJson,
                     new TypeReference<List<Map<String, Object>>>() {});

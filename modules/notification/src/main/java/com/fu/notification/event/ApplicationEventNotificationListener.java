@@ -78,15 +78,14 @@ public class ApplicationEventNotificationListener {
         data.put("assignmentId", event.getAssignmentId().toString());
         data.put("submissionId", event.getSubmissionId().toString());
         data.put("score", event.getScore());
-        data.put("maxScore", event.getMaxScore());
 
-        String scoreText = String.format("%.1f/%.1f", event.getScore(), event.getMaxScore());
-        
+        String scoreText = String.format("%.1f điểm", event.getScore());
+
         SendNotificationRequest request = SendNotificationRequest.builder()
                 .userId(event.getStudentId())
                 .type(NotificationType.ASSIGNMENT_GRADED)
                 .priority(NotificationPriority.NORMAL)
-                .title("✅ Bài tập đã được chấm điểm")
+                .title("Bài tập đã được chấm điểm")
                 .body("Bài \"" + event.getAssignmentTitle() + "\" của bạn đã được chấm: " + scoreText)
                 .data(data)
                 .actionUrl("/assignments/" + event.getAssignmentId() + "/result")
@@ -189,36 +188,6 @@ public class ApplicationEventNotificationListener {
 
         notificationService.send(request);
         log.info("Curriculum import {} notification sent to manager: {}", event.getStatus(), event.getManagerId());
-    }
-
-    /**
-     * Handles PracticeFeedbackReadyEvent - notifies learner that AI feedback is available.
-     */
-    @Async
-    @EventListener
-    public void handlePracticeFeedbackReady(PracticeFeedbackReadyEvent event) {
-        log.debug("Processing PracticeFeedbackReadyEvent: sessionId={}, userId={}", event.getSessionId(), event.getUserId());
-
-        Map<String, Object> data = new HashMap<>();
-        data.put("sessionId", event.getSessionId().toString());
-        if (event.getLessonId() != null) {
-            data.put("lessonId", event.getLessonId().toString());
-        }
-
-        String scoreText = String.format("%.0f%%", event.getScore());
-        SendNotificationRequest request = SendNotificationRequest.builder()
-                .userId(event.getUserId())
-                .type(NotificationType.PRACTICE_FEEDBACK_READY)
-                .priority(NotificationPriority.NORMAL)
-                .title("Kết quả luyện tập: " + scoreText)
-                .body("AI đã phân tích bài luyện tập của bạn. Xem nhận xét chi tiết!")
-                .data(data)
-                .actionUrl("/practice/sessions/" + event.getSessionId() + "/summary")
-                .saveToHistory(true)
-                .build();
-
-        notificationService.send(request);
-        log.info("Practice feedback notification sent to user: {}", event.getUserId());
     }
 
     /**

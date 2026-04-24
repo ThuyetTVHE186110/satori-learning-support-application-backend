@@ -11,7 +11,7 @@ import com.fu.achievement.enums.BadgeType;
 import com.fu.achievement.service.StreakService;
 import com.fu.infrastructure.event.PracticeFeedbackReadyEvent;
 import com.fu.common.exception.BusinessException;
-import com.fu.common.util.FuriganaRubyRepair;
+import com.fu.common.util.FuriganaAnnotator;
 import com.fu.course.entity.Course;
 import com.fu.course.entity.GrammarPoint;
 import com.fu.course.entity.Lesson;
@@ -1781,13 +1781,27 @@ public class PracticeSessionService {
                 .itemType(item.getItemType())
                 .question(item.getQuestion())
                 .questionJapanese(item.getQuestionJapanese())
-                .questionJapaneseWithFurigana(FuriganaRubyRepair.repair(item.getQuestionJapaneseWithFurigana()))
+                .questionJapaneseWithFurigana(annotateForResponse(item.getQuestionJapanese(), item.getQuestionJapaneseWithFurigana()))
                 .hint(item.getHint())
                 .options(options)
                 .correctMapping(correctMapping)
                 .refContentId(item.getRefContentId())
                 .refContentType(item.getRefContentType())
                 .build();
+    }
+
+    /**
+     * Re-generate canonical furigana from plain {@code questionJapanese} on every response. Falls
+     * back to normalising the stored {@code questionJapaneseWithFurigana} for legacy rows where
+     * plain text was not persisted. This heals older rows that still carry LLM hallucination
+     * patterns in the furigana field.
+     */
+    private static String annotateForResponse(String plain, String storedFurigana) {
+        if (plain != null && !plain.isBlank()) {
+            return FuriganaAnnotator.annotate(plain);
+        }
+        if (storedFurigana == null || storedFurigana.isBlank()) return storedFurigana;
+        return FuriganaAnnotator.normalizeAndAnnotate(storedFurigana);
     }
 
     private List<OptionDto> parseOptionsForDisplay(String optionsJson, boolean revealCorrect) {
@@ -1869,7 +1883,7 @@ public class PracticeSessionService {
                 .itemType(item.getItemType().name())
                 .question(item.getQuestion())
                 .questionJapanese(item.getQuestionJapanese())
-                .questionJapaneseWithFurigana(FuriganaRubyRepair.repair(item.getQuestionJapaneseWithFurigana()))
+                .questionJapaneseWithFurigana(annotateForResponse(item.getQuestionJapanese(), item.getQuestionJapaneseWithFurigana()))
                 .options(options)
                 .correctAnswer(correctAnswer)
                 .userAnswer(item.getUserAnswer())
