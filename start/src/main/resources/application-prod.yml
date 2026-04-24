@@ -141,6 +141,8 @@ logging:
         org.springframework: WARN
         org.hibernate: WARN
         org.springframework.data.redis: WARN
+        com.fu.notification: DEBUG
+        com.google.firebase: INFO
 
 # ==================== Curriculum Import ====================
 curriculum-import:
