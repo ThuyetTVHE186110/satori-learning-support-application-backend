@@ -69,6 +69,16 @@ public class LearnerStatsController {
         return ResponseEntity.ok(ApiResponse.success(statsService.getLessonMastery(userId, courseId)));
     }
 
+    @GetMapping("/mastery")
+    public ResponseEntity<ApiResponse<MasteryCountResponse>> getMasteryCounts(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @RequestParam(required = false) UUID courseId,
+            @RequestParam(required = false) UUID lessonId) {
+        UUID userId = extractUserId(userDetails);
+        return ResponseEntity.ok(ApiResponse.success(
+                statsService.getMasteryCounts(userId, courseId, lessonId)));
+    }
+
     @GetMapping("/insights")
     public ResponseEntity<ApiResponse<LearningInsightsResponse>> getInsights(
             @AuthenticationPrincipal UserDetails userDetails) {

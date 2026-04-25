@@ -32,8 +32,9 @@ public class AnswerFeedbackResponse {
 
     /**
      * Text đáp án đúng (resolved từ options) — để FE hiển thị trực tiếp không cần lookup.
-     * Ví dụ: "先生" với MC/FILL_BLANK, "Đúng" với TRUE_FALSE.
-     * null cho SENTENCE_ORDER / MATCHING (không có text đơn).
+     * Ví dụ: "先生" với MC/FILL_BLANK, "Đúng" với TRUE_FALSE,
+     * "これは辞書です" với SENTENCE_ORDER (token được ghép theo thứ tự id đúng).
+     * null cho MATCHING và các trường hợp không resolve được.
      */
     private String correctAnswerText;
 
