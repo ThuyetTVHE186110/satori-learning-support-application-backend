@@ -91,8 +91,12 @@ public class ApplicationEventNotificationListener {
                 .actionUrl("/assignments/" + event.getAssignmentId() + "/result")
                 .build();
 
-        notificationService.send(request);
-        log.info("Assignment graded notification sent to student: {}", event.getStudentId());
+        int sent = notificationService.send(request);
+        if (sent > 0) {
+            log.info("Assignment graded notification dispatched to student: {}", event.getStudentId());
+        } else {
+            log.warn("Assignment graded notification DROPPED for student {} — check prefs/quiet hours/dedup/tokens (DEBUG c.f.n.s.impl.NotificationServiceImpl for reason)", event.getStudentId());
+        }
     }
 
     /**

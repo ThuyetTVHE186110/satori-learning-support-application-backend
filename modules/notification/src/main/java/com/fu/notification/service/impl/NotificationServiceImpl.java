@@ -68,6 +68,7 @@ public class NotificationServiceImpl implements NotificationService {
     @Override
     @Transactional
     public boolean sendToUser(UUID userId, SendNotificationRequest request) {
+        log.info("[NOTIF-TRACE] sendToUser ENTER userId={}, type={}", userId, request.getType());
         // Check user preferences (unless bypassed)
         if (!request.isBypassPreferences()) {
             if (!preferencesService.isNotificationEnabled(userId, request.getType())) {
@@ -101,6 +102,7 @@ public class NotificationServiceImpl implements NotificationService {
 
         // Get active device tokens
         List<UserDeviceToken> tokens = deviceTokenRepository.findByUserIdAndIsActiveTrue(userId);
+        log.info("[NOTIF-TRACE] tokens for user {}: count={}", userId, tokens.size());
         if (tokens.isEmpty()) {
             log.debug("No active device tokens for user {}", userId);
             return notification != null;
@@ -111,6 +113,7 @@ public class NotificationServiceImpl implements NotificationService {
                 tokens.stream().map(UserDeviceToken::getFcmToken).collect(Collectors.toList()),
                 request
         );
+        log.info("[NOTIF-TRACE] pushSent={} for user {}", pushSent, userId);
 
         // Update notification push status
         if (notification != null && pushSent) {
