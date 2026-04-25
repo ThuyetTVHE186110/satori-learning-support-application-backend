@@ -93,4 +93,25 @@ public interface VocabularyRepository extends JpaRepository<Vocabulary, UUID> {
     Optional<Vocabulary> findFirstByJapaneseTextAndDeletedAtIsNullOrderByCreatedAtAsc(String japaneseText);
 
     Optional<Vocabulary> findIdByJapaneseTextAndJlptLevel(String japaneseText, JlptLevel jlptLevel);
+
+    /**
+     * IDs of non-deleted vocab linked to a specific lesson.
+     * Used by the learner mastery dashboard — cheaper than loading full entities.
+     */
+    @Query("SELECT v.id FROM Vocabulary v JOIN LessonVocabulary lv ON lv.vocabulary.id = v.id " +
+            "WHERE lv.lesson.id = :lessonId AND v.deletedAt IS NULL")
+    List<UUID> findIdsByLessonId(@Param("lessonId") UUID lessonId);
+
+    /**
+     * IDs of non-deleted vocab linked to a course via PUBLISHED lessons only.
+     * Mirrors the Option B embedding gate so dashboard counts honor lesson lifecycle.
+     */
+    @Query("SELECT DISTINCT v.id FROM Vocabulary v " +
+            "JOIN LessonVocabulary lv ON lv.vocabulary.id = v.id " +
+            "JOIN Lesson l ON l.id = lv.lesson.id " +
+            "WHERE l.course.id = :courseId " +
+            "  AND v.deletedAt IS NULL " +
+            "  AND l.deletedAt IS NULL " +
+            "  AND l.status = com.fu.course.entity.Lesson.ContentStatus.PUBLISHED")
+    List<UUID> findIdsByCourseIdAndPublished(@Param("courseId") UUID courseId);
 }

@@ -80,4 +80,20 @@ public interface ConversationSessionRepository extends JpaRepository<Conversatio
     Page<ConversationSession> findByUserIdAndSessionTypeAndOptionalStatus(
             @Param("userId") UUID userId, @Param("sessionType") String sessionType,
             @Param("status") String status, Pageable pageable);
+
+    /**
+     * Completed speaking sessions for dashboard timeline aggregation.
+     * Excludes CURRICULUM_QA chatbot sessions; covers GUIDED_CONVERSATION, ROLEPLAY,
+     * FREE_TALK, PRACTICE_ASSIGNMENT.
+     */
+    @Query(value = """
+            SELECT * FROM ai_conversation.conversation_sessions
+             WHERE user_id = :userId
+               AND status = CAST('COMPLETED' AS session_status)
+               AND completed_at BETWEEN :start AND :end
+            """, nativeQuery = true)
+    List<ConversationSession> findCompletedSpeakingInRange(
+            @Param("userId") UUID userId,
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end);
 }

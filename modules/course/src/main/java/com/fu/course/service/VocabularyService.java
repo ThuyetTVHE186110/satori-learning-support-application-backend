@@ -38,6 +38,12 @@ public interface VocabularyService {
      */
     void deleteVocabulary(UUID vocabularyId, UUID managerId);
 
+    /**
+     * Remove the link between a lesson and a vocabulary entry without affecting
+     * the vocabulary itself. Other lessons that reference this vocabulary keep it.
+     */
+    void unlinkVocabularyFromLesson(UUID lessonId, UUID vocabularyId, UUID managerId);
+
     // ===== Query =====
 
     /**

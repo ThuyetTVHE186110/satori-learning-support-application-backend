@@ -580,9 +580,18 @@ public class PracticeSessionService {
                 ? toItemResponse(nextItem)
                 : null;
 
-        // Resolve text của đáp án đúng + đáp án user — chỉ áp dụng cho dạng chọn 1 option.
-        String correctAnswerText = resolveSelectionOptionText(item, item.getCorrectAnswer());
-        String userAnswerText = resolveSelectionOptionText(item, userAnswer);
+        // Resolve text của đáp án đúng + đáp án user.
+        // Dạng chọn 1 option: text của option tại id; SENTENCE_ORDER: ghép token theo
+        // thứ tự id để FE có chuỗi tiếng Nhật hiển thị thay vì raw "0,1,2,3".
+        String correctAnswerText;
+        String userAnswerText;
+        if (item.getItemType() == PracticeItemType.SENTENCE_ORDER) {
+            correctAnswerText = resolveSentenceOrderText(item, item.getCorrectAnswer());
+            userAnswerText = resolveSentenceOrderText(item, userAnswer);
+        } else {
+            correctAnswerText = resolveSelectionOptionText(item, item.getCorrectAnswer());
+            userAnswerText = resolveSelectionOptionText(item, userAnswer);
+        }
 
         return AnswerFeedbackResponse.builder()
                 .isCorrect(result.isCorrect())
@@ -609,6 +618,36 @@ public class PracticeSessionService {
      * - Nếu không parse được (legacy text answer): trả nguyên answer.
      * - Null-safe cho mọi input không hợp lệ.
      */
+    /**
+     * Resolve text cho SENTENCE_ORDER: ghép token tại các id (CSV) theo thứ tự đó.
+     * Ví dụ options=[これ,は,辞書,です], answer="0,1,2,3" → "これは辞書です".
+     * Trả null nếu answer rỗng / sai format / id ngoài range — FE sẽ không hiển thị.
+     */
+    private String resolveSentenceOrderText(PracticeItem item, String answer) {
+        if (item == null || answer == null || answer.isBlank()) return null;
+        try {
+            com.fasterxml.jackson.databind.JsonNode options = objectMapper.readTree(
+                    item.getOptions() != null ? item.getOptions() : "[]");
+            if (!options.isArray() || options.isEmpty()) return null;
+            StringBuilder sb = new StringBuilder();
+            for (String idStr : answer.split(",")) {
+                int id = Integer.parseInt(idStr.trim());
+                if (id < 0 || id >= options.size()) return null;
+                com.fasterxml.jackson.databind.JsonNode textNode = options.get(id).get("text");
+                if (textNode == null || textNode.isNull()) return null;
+                sb.append(textNode.asText());
+            }
+            return sb.length() == 0 ? null : sb.toString();
+        } catch (NumberFormatException e) {
+            // Legacy item correctAnswer dạng text → trả nguyên answer
+            return answer;
+        } catch (Exception e) {
+            log.debug("resolveSentenceOrderText: parse fail cho item {}: {}",
+                    item.getId(), e.getMessage());
+            return null;
+        }
+    }
+
     private String resolveSelectionOptionText(PracticeItem item, String answer) {
         if (item == null || answer == null || answer.isBlank()) return null;
         PracticeItemType type = item.getItemType();
