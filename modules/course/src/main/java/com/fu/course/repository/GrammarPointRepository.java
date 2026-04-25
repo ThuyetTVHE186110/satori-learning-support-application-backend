@@ -87,4 +87,22 @@ public interface GrammarPointRepository extends JpaRepository<GrammarPoint, UUID
             "LOWER(g.meaningVi) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
             "LOWER(g.meaningEn) LIKE LOWER(CONCAT('%', :keyword, '%')))")
     Page<GrammarPoint> searchByKeyword(@Param("keyword") String keyword, Pageable pageable);
+
+    /** IDs of non-deleted grammar points linked to a lesson — used by mastery dashboard. */
+    @Query("SELECT g.id FROM GrammarPoint g JOIN LessonGrammar lg ON lg.grammarPoint.id = g.id " +
+            "WHERE lg.lesson.id = :lessonId AND g.deletedAt IS NULL")
+    List<UUID> findIdsByLessonId(@Param("lessonId") UUID lessonId);
+
+    /**
+     * IDs of non-deleted grammar points linked to a course via PUBLISHED lessons only.
+     * Mirrors the Option B embedding gate so dashboard counts honor lesson lifecycle.
+     */
+    @Query("SELECT DISTINCT g.id FROM GrammarPoint g " +
+            "JOIN LessonGrammar lg ON lg.grammarPoint.id = g.id " +
+            "JOIN Lesson l ON l.id = lg.lesson.id " +
+            "WHERE l.course.id = :courseId " +
+            "  AND g.deletedAt IS NULL " +
+            "  AND l.deletedAt IS NULL " +
+            "  AND l.status = com.fu.course.entity.Lesson.ContentStatus.PUBLISHED")
+    List<UUID> findIdsByCourseIdAndPublished(@Param("courseId") UUID courseId);
 }

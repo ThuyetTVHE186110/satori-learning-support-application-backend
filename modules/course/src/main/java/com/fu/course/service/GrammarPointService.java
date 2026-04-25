@@ -39,6 +39,12 @@ public interface GrammarPointService {
      */
     void deleteGrammarPoint(UUID grammarPointId, UUID managerId);
 
+    /**
+     * Remove the link between a lesson and a grammar point without affecting the
+     * grammar point itself. Other lessons that reference it keep it.
+     */
+    void unlinkGrammarFromLesson(UUID lessonId, UUID grammarPointId, UUID managerId);
+
     // ===== Query =====
 
     /**
