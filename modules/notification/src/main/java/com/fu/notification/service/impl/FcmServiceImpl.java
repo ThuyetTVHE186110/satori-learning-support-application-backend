@@ -27,20 +27,26 @@ public class FcmServiceImpl implements FcmService {
     }
 
     @Override
-    public boolean sendToDevice(String fcmToken, String title, String body, 
+    public boolean sendToDevice(String fcmToken, String title, String body,
                                  Map<String, String> data, String imageUrl) {
+        log.info("[FCM-TRACE] sendToDevice ENTER token={}..., title={}",
+                fcmToken == null ? "null" : fcmToken.substring(0, Math.min(20, fcmToken.length())), title);
         if (!isAvailable()) {
-            log.debug("FCM not available, skipping push to device");
+            log.warn("[FCM-TRACE] FCM not available, skipping push to device");
             return false;
         }
 
         try {
             Message message = buildMessage(fcmToken, null, title, body, data, imageUrl);
             String response = firebaseMessaging.get().send(message);
-            log.debug("FCM message sent successfully: {}", response);
+            log.info("[FCM-TRACE] FCM message sent successfully: {}", response);
             return true;
         } catch (FirebaseMessagingException e) {
+            log.error("[FCM-TRACE] FirebaseMessagingException code={} msg={}", e.getMessagingErrorCode(), e.getMessage());
             handleFcmException(e, fcmToken);
+            return false;
+        } catch (RuntimeException e) {
+            log.error("[FCM-TRACE] Unexpected error sending FCM", e);
             return false;
         }
     }
