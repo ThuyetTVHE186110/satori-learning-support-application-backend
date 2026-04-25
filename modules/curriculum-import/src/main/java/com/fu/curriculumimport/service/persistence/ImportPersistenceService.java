@@ -8,8 +8,10 @@ import com.fu.curriculumimport.repository.CurriculumImportRepository;
 import com.fu.curriculumimport.repository.ImportChunkRepository;
 import com.fu.curriculumimport.service.agent.ExtractionResult;
 import com.fu.curriculumimport.service.ingestion.DocumentChunk;
+import com.fu.infrastructure.event.ContentEmbeddingEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,7 +43,10 @@ public class ImportPersistenceService {
     private final LessonRepository lessonRepository;
     private final LessonVocabularyRepository lessonVocabularyRepository;
     private final LessonGrammarRepository lessonGrammarRepository;
+    private final VocabularyRepository vocabularyRepository;
+    private final GrammarPointRepository grammarPointRepository;
     private final ImportItemPersistenceHelper itemHelper;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * Persist document chunks to the database.
@@ -404,6 +409,12 @@ public class ImportPersistenceService {
         List<UUID> lessonIds = lessons.stream()
                 .map(com.fu.course.entity.Lesson::getId)
                 .toList();
+
+        // Snapshot vocabulary/grammar candidates BEFORE wiping junctions so we can
+        // detect orphans (items only used by lessons of this import).
+        List<UUID> candidateVocabIds = lessonVocabularyRepository.findVocabularyIdsByLessonIdIn(lessonIds);
+        List<UUID> candidateGrammarIds = lessonGrammarRepository.findGrammarPointIdsByLessonIdIn(lessonIds);
+
         lessonVocabularyRepository.deleteByLessonIdIn(lessonIds);
         lessonGrammarRepository.deleteByLessonIdIn(lessonIds);
 
@@ -413,8 +424,49 @@ public class ImportPersistenceService {
         }
         lessonRepository.saveAll(lessons);
 
-        log.info("Soft-deleted {} lessons (batch-cleaned join records) for import {}",
-                lessons.size(), importId);
+        // Orphan cleanup: items linked exclusively to the rolled-back lessons no longer
+        // appear in any active lesson. Soft-delete them and emit embedding-delete events
+        // so RAG / vector store stay consistent. Items still referenced elsewhere are
+        // preserved (shared-resource semantics).
+        int orphanVocab = softDeleteOrphanVocabulary(candidateVocabIds, managerId);
+        int orphanGrammar = softDeleteOrphanGrammar(candidateGrammarIds, managerId);
+
+        log.info("Soft-deleted {} lessons (cleaned join records, {} orphan vocab, {} orphan grammar) for import {}",
+                lessons.size(), orphanVocab, orphanGrammar, importId);
+    }
+
+    private int softDeleteOrphanVocabulary(List<UUID> candidateIds, UUID managerId) {
+        if (candidateIds == null || candidateIds.isEmpty()) return 0;
+        int count = 0;
+        for (UUID vocabId : candidateIds) {
+            if (lessonVocabularyRepository.countByVocabularyId(vocabId) > 0) continue;
+            vocabularyRepository.findById(vocabId).ifPresent(v -> {
+                if (v.getDeletedAt() != null) return;
+                v.softDelete(managerId);
+                vocabularyRepository.save(v);
+                eventPublisher.publishEvent(
+                        ContentEmbeddingEvent.forDelete(this, v.getId(), "VOCABULARY"));
+            });
+            count++;
+        }
+        return count;
+    }
+
+    private int softDeleteOrphanGrammar(List<UUID> candidateIds, UUID managerId) {
+        if (candidateIds == null || candidateIds.isEmpty()) return 0;
+        int count = 0;
+        for (UUID grammarId : candidateIds) {
+            if (lessonGrammarRepository.countByGrammarPointId(grammarId) > 0) continue;
+            grammarPointRepository.findById(grammarId).ifPresent(g -> {
+                if (g.getDeletedAt() != null) return;
+                g.softDelete(managerId);
+                grammarPointRepository.save(g);
+                eventPublisher.publishEvent(
+                        ContentEmbeddingEvent.forDelete(this, g.getId(), "GRAMMAR"));
+            });
+            count++;
+        }
+        return count;
     }
 
     /**

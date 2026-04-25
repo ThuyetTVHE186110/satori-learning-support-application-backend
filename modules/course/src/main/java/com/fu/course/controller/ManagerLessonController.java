@@ -8,8 +8,10 @@ import com.fu.course.dto.response.LessonResponse;
 import com.fu.course.dto.response.LessonSummaryResponse;
 import com.fu.course.entity.Course;
 import com.fu.course.entity.Lesson;
+import com.fu.course.service.GrammarPointService;
 import com.fu.course.service.LessonService;
 import com.fu.course.service.LessonService.LessonStatistics;
+import com.fu.course.service.VocabularyService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +42,38 @@ import java.util.UUID;
 public class ManagerLessonController {
 
     private final LessonService lessonService;
+    private final VocabularyService vocabularyService;
+    private final GrammarPointService grammarPointService;
+
+    /**
+     * Unlink a vocabulary entry from a lesson without affecting the vocabulary itself.
+     * DELETE /api/v1/manager/lessons/{lessonId}/vocabulary/{vocabularyId}
+     */
+    @DeleteMapping("/{lessonId}/vocabulary/{vocabularyId}")
+    public ResponseEntity<ApiResponse<Void>> unlinkVocabularyFromLesson(
+            @PathVariable UUID lessonId,
+            @PathVariable UUID vocabularyId,
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
+
+        log.info("Manager {} unlinking vocabulary {} from lesson {}", managerId, vocabularyId, lessonId);
+        vocabularyService.unlinkVocabularyFromLesson(lessonId, vocabularyId, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Vocabulary unlinked from lesson", null));
+    }
+
+    /**
+     * Unlink a grammar point from a lesson without affecting the grammar point itself.
+     * DELETE /api/v1/manager/lessons/{lessonId}/grammar/{grammarPointId}
+     */
+    @DeleteMapping("/{lessonId}/grammar/{grammarPointId}")
+    public ResponseEntity<ApiResponse<Void>> unlinkGrammarFromLesson(
+            @PathVariable UUID lessonId,
+            @PathVariable UUID grammarPointId,
+            @AuthenticationPrincipal(expression = "id") UUID managerId) {
+
+        log.info("Manager {} unlinking grammar {} from lesson {}", managerId, grammarPointId, lessonId);
+        grammarPointService.unlinkGrammarFromLesson(lessonId, grammarPointId, managerId);
+        return ResponseEntity.ok(ApiResponse.success("Grammar unlinked from lesson", null));
+    }
 
     /**
      * Create a new lesson.

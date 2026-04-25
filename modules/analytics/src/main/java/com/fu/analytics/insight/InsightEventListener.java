@@ -37,7 +37,7 @@ public class InsightEventListener {
             log.debug("Insight aggregation triggered by roleplay session {} for user {}",
                     event.getSessionId(), event.getUserId());
             aggregationService.aggregateFromRoleplay(
-                    event.getUserId(),
+                    event.getSessionId(), event.getUserId(),
                     event.getOverallScore(), event.getAccuracyScore(),
                     event.getPronunciationScore(), event.getTaskCompletionScore(),
                     event.getComplexityScore(), event.getErrorBreakdown());
