@@ -187,4 +187,20 @@ public interface ConversationRepository extends JpaRepository<Conversation, UUID
     Page<Conversation> searchByKeywordAndJlptLevelAndStatusAndDeletedAtIsNull(
             @Param("keyword") String keyword, @Param("jlptLevel") String jlptLevel,
             @Param("status") String status, Pageable pageable);
+
+    /**
+     * Find published conversations by topic and JLPT level, ordered by index.
+     * Used for learner endpoint to show only conversations matching their enrolled course's JLPT level.
+     */
+    @Query(value = "SELECT * FROM speaking.conversations " +
+            "WHERE topic_id = :topicId " +
+            "  AND jlpt_level = CAST(:jlptLevel AS jlpt_level) " +
+            "  AND status = CAST(:status AS content_status) " +
+            "  AND deleted_at IS NULL " +
+            "ORDER BY order_index ASC",
+            nativeQuery = true)
+    List<Conversation> findByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNullOrderByOrderIndexAsc(
+            @Param("topicId") UUID topicId,
+            @Param("jlptLevel") String jlptLevel,
+            @Param("status") String status);
 }

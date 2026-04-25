@@ -41,6 +41,16 @@ public interface ConversationService {
      */
     List<ConversationSummaryResponse> getPublishedConversationsByTopic(UUID topicId, UUID userId);
 
+    /**
+     * Returns published conversations for a topic filtered by the user's enrolled course's JLPT level.
+     * Returns empty list if user is not enrolled in any class.
+     *
+     * @param topicId the topic to fetch conversations for
+     * @param userId  the learner's user ID
+     * @return list of conversations matching the user's JLPT level, enriched with practice history
+     */
+    List<ConversationSummaryResponse> getPublishedConversationsByTopicAndUserJlptLevel(UUID topicId, UUID userId);
+
     /** Returns an active, published conversation — throws 404 for drafts/archived/deleted. */
     ConversationResponse getPublishedConversation(UUID id);
 

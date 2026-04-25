@@ -48,6 +48,8 @@ public class ConversationServiceImpl implements ConversationService {
     private final ConversationMissionRepository missionRepository;
     private final ConversationMissionMapper missionMapper;
     private final ConversationGenerationService generationService;
+    private final com.fu.clazz.repository.ClassMemberRepository classMemberRepository;
+    private final com.fu.clazz.repository.ClassRepository classRepository;
 
     @Override
     @Transactional
@@ -245,6 +247,63 @@ public class ConversationServiceImpl implements ConversationService {
             return Collections.emptyList();
         }
 
+        Map<UUID, ConversationRepository.PracticeStatsProjection> practiceStats =
+                buildPracticeStatsMap(userId, conversations);
+
+        return conversations.stream()
+                .map(conv -> {
+                    ConversationSummaryResponse dto = conversationMapper.toSummaryResponse(conv);
+                    ConversationRepository.PracticeStatsProjection stats =
+                            practiceStats.get(conv.getId());
+                    if (stats != null) {
+                        dto.setPracticed(true);
+                        dto.setPracticeCount(stats.getPracticeCount().intValue());
+                        dto.setLastPracticedAt(stats.getLastPracticedAt());
+                        dto.setPracticeStatus(Boolean.TRUE.equals(stats.getIsCompleted())
+                                ? ConversationSummaryResponse.PracticeStatus.COMPLETED
+                                : ConversationSummaryResponse.PracticeStatus.IN_PROGRESS);
+                    } else {
+                        dto.setPracticeStatus(ConversationSummaryResponse.PracticeStatus.NOT_STARTED);
+                    }
+                    return dto;
+                })
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public List<ConversationSummaryResponse> getPublishedConversationsByTopicAndUserJlptLevel(UUID topicId, UUID userId) {
+        // Step 1: Find user's active class enrollment
+        List<UUID> activeClassIds = classMemberRepository.findActiveClassIdsByUserId(userId);
+        
+        if (activeClassIds.isEmpty()) {
+            log.debug("User {} has no active class enrollment, returning empty conversations", userId);
+            return Collections.emptyList();
+        }
+        
+        // Get the first active class (user can only have one active class at a time per requirement)
+        UUID classId = activeClassIds.get(0);
+        
+        // Step 2: Get the class details to find course ID
+        com.fu.clazz.entity.Clazz clazz = classRepository.findByIdAndNotDeleted(classId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Class", "id", classId.toString()));
+        
+        // Step 3: Get the course to extract JLPT level
+        Course course = courseRepository.findByIdAndNotDeleted(clazz.getCourseId())
+                .orElseThrow(() -> new CourseNotFoundException(clazz.getCourseId()));
+        
+        // Step 4: Filter conversations by topic + JLPT level + PUBLISHED status
+        List<Conversation> conversations = conversationRepository
+                .findByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNullOrderByOrderIndexAsc(
+                        topicId,
+                        course.getJlptLevel().name(),
+                        Course.ContentStatus.PUBLISHED.name());
+        
+        if (conversations.isEmpty()) {
+            return Collections.emptyList();
+        }
+        
+        // Step 5: Enrich with practice stats
         Map<UUID, ConversationRepository.PracticeStatsProjection> practiceStats =
                 buildPracticeStatsMap(userId, conversations);
 
