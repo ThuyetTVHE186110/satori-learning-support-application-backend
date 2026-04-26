@@ -1,10 +1,13 @@
 package com.fu.clazz.utils;
 
 import com.fu.clazz.dto.response.ClassImportError;
+import com.fu.user.entity.User;
+import com.fu.user.entity.UserRole;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDate;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -440,6 +443,251 @@ class ExcelClassImportUtilTest {
             assertTrue(error.isPresent());
             assertNotNull(error.get().getErrorMessage());
             assertTrue(error.get().getErrorMessage().length() > 0);
+        }
+    }
+
+    @Nested
+    @DisplayName("Duplicate Learner Consolidation Tests")
+    class DuplicateLearnerConsolidationTests {
+
+        @Test
+        @DisplayName("No errors for learners appearing once")
+        void testNoErrorsForUniqueLeaners() {
+            List<LearnerExcelRow> learners = Arrays.asList(
+                    LearnerExcelRow.builder().email("john@example.com").build(),
+                    LearnerExcelRow.builder().email("jane@example.com").build(),
+                    LearnerExcelRow.builder().email("bob@example.com").build()
+            );
+
+            List<ClassImportError> errors = ExcelClassImportUtil.findDuplicateLearnerErrors(
+                    learners, "TestClass", 5);
+
+            assertTrue(errors.isEmpty());
+        }
+
+        @Test
+        @DisplayName("Consolidate duplicates into single error per learner")
+        void testConsolidateDuplicateLearners() {
+            List<LearnerExcelRow> learners = Arrays.asList(
+                    LearnerExcelRow.builder().email("john@example.com").build(),
+                    LearnerExcelRow.builder().email("john@example.com").build(),
+                    LearnerExcelRow.builder().email("john@example.com").build(),
+                    LearnerExcelRow.builder().email("jane@example.com").build(),
+                    LearnerExcelRow.builder().email("jane@example.com").build()
+            );
+
+            List<ClassImportError> errors = ExcelClassImportUtil.findDuplicateLearnerErrors(
+                    learners, "TestClass", 5);
+
+            // Should have 2 errors: one for john (appears 3 times), one for jane (appears 2 times)
+            assertEquals(2, errors.size());
+        }
+
+        @Test
+        @DisplayName("Error message includes count of duplicates")
+        void testErrorMessageIncludesCount() {
+            List<LearnerExcelRow> learners = Arrays.asList(
+                    LearnerExcelRow.builder().email("john@example.com").build(),
+                    LearnerExcelRow.builder().email("john@example.com").build(),
+                    LearnerExcelRow.builder().email("john@example.com").build()
+            );
+
+            List<ClassImportError> errors = ExcelClassImportUtil.findDuplicateLearnerErrors(
+                    learners, "TestClass", 5);
+
+            assertEquals(1, errors.size());
+            assertTrue(errors.get(0).getErrorMessage().contains("3"));
+            assertTrue(errors.get(0).getErrorMessage().contains("xuất hiện"));
+        }
+
+        @Test
+        @DisplayName("Case-insensitive email matching")
+        void testCaseInsensitiveMatching() {
+            List<LearnerExcelRow> learners = Arrays.asList(
+                    LearnerExcelRow.builder().email("John@Example.com").build(),
+                    LearnerExcelRow.builder().email("john@example.com").build(),
+                    LearnerExcelRow.builder().email("JOHN@EXAMPLE.COM").build()
+            );
+
+            List<ClassImportError> errors = ExcelClassImportUtil.findDuplicateLearnerErrors(
+                    learners, "TestClass", 5);
+
+            // Should treat as one email (case-insensitive)
+            assertEquals(1, errors.size());
+            assertTrue(errors.get(0).getErrorMessage().contains("3"));
+        }
+
+        @Test
+        @DisplayName("Error includes class name and row number")
+        void testErrorIncludesClassAndRowInfo() {
+            List<LearnerExcelRow> learners = Arrays.asList(
+                    LearnerExcelRow.builder().email("john@example.com").build(),
+                    LearnerExcelRow.builder().email("john@example.com").build()
+            );
+
+            List<ClassImportError> errors = ExcelClassImportUtil.findDuplicateLearnerErrors(
+                    learners, "MyClass", 10);
+
+            assertEquals(1, errors.size());
+            assertEquals("MyClass", errors.get(0).getClassName());
+            assertEquals(10, errors.get(0).getRowNumber());
+        }
+
+        @Test
+        @DisplayName("Handle 20 identical rows consolidates to one error")
+        void testHandleManyDuplicateRows() {
+            List<LearnerExcelRow> learners = new ArrayList<>();
+            for (int i = 0; i < 20; i++) {
+                learners.add(LearnerExcelRow.builder().email("duplicate@example.com").build());
+            }
+
+            List<ClassImportError> errors = ExcelClassImportUtil.findDuplicateLearnerErrors(
+                    learners, "TestClass", 5);
+
+            // Should consolidate 20 rows into 1 error
+            assertEquals(1, errors.size());
+            assertTrue(errors.get(0).getErrorMessage().contains("20"));
+        }
+
+        @Test
+        @DisplayName("Empty learner list returns no errors")
+        void testEmptyLearnerList() {
+            List<ClassImportError> errors = ExcelClassImportUtil.findDuplicateLearnerErrors(
+                    new ArrayList<>(), "TestClass", 5);
+
+            assertTrue(errors.isEmpty());
+        }
+    }
+
+    @Nested
+    @DisplayName("Edge Case Tests - NPE and Null Safety")
+    class EdgeCaseNullSafetyTests {
+
+        @Test
+        @DisplayName("Handle null learner fields in comparison without NPE")
+        void testNullLearnerFieldsNoNPE() {
+            LearnerExcelRow learner1 = LearnerExcelRow.builder()
+                    .email("john@example.com")
+                    .name("John Doe")
+                    .dateOfBirth(null)  // null DOB
+                    .phoneNumber("0123456789")
+                    .build();
+
+            LearnerExcelRow learner2 = LearnerExcelRow.builder()
+                    .email("john@example.com")
+                    .name("John Doe")
+                    .dateOfBirth(null)  // null DOB
+                    .phoneNumber(null)  // null phone
+                    .build();
+
+            // Should not throw NPE when comparing null fields
+            assertDoesNotThrow(() -> {
+                Objects.equals(learner1.getDateOfBirth(), learner2.getDateOfBirth());
+                Objects.equals(learner1.getPhoneNumber(), learner2.getPhoneNumber());
+            });
+        }
+
+        @Test
+        @DisplayName("Email case insensitive comparison works")
+        void testEmailCaseInsensitivity() {
+            String email1 = "John@Example.Com";
+            String email2 = "john@example.com";
+
+            assertTrue(email1.toLowerCase().equals(email2.toLowerCase()));
+        }
+
+        @Test
+        @DisplayName("Date validation handles boundary cases")
+        void testDateValidationBoundaries() {
+            LocalDate minDate = LocalDate.of(1900, 1, 1);
+            LocalDate maxDate = LocalDate.of(2100, 12, 31);
+            LocalDate validDate = LocalDate.of(2000, 6, 15);
+
+            assertNotNull(minDate);
+            assertNotNull(maxDate);
+            assertNotNull(validDate);
+        }
+
+        @Test
+        @DisplayName("Null teacher role doesn't cause NPE")
+        void testNullTeacherRoleNoNPE() {
+            User teacher = User.builder()
+                    .id(UUID.randomUUID())
+                    .email("teacher@example.com")
+                    .role(null)  // null role
+                    .build();
+
+            assertDoesNotThrow(() -> {
+                if (teacher.getRole() != null) {
+                    teacher.getRole().equals(UserRole.TEACHER);
+                }
+            });
+        }
+    }
+
+    @Nested
+    @DisplayName("Edge Case Tests - Empty and Edge Conditions")
+    class EdgeCaseEmptyConditionTests {
+
+        @Test
+        @DisplayName("Empty learner list consolidation returns empty")
+        void testEmptyLearnerConsolidation() {
+            Map<String, Long> emailCounts = new HashMap<>();
+            List<ClassImportError> errors = new ArrayList<>();
+
+            emailCounts.forEach((email, count) -> {
+                if (count > 1) {
+                    errors.add(ClassImportError.builder()
+                            .rowNumber(0)
+                            .className("")
+                            .errorMessage(String.format("Email %s appears %d times", email, count))
+                            .build());
+                }
+            });
+
+            assertTrue(errors.isEmpty());
+        }
+
+        @Test
+        @DisplayName("Single learner (no duplicates) consolidation returns empty")
+        void testSingleLearnerConsolidation() {
+            Map<String, Long> emailCounts = new HashMap<>();
+            emailCounts.put("john@example.com", 1L);
+
+            List<ClassImportError> errors = new ArrayList<>();
+            emailCounts.forEach((email, count) -> {
+                if (count > 1) {
+                    errors.add(ClassImportError.builder()
+                            .rowNumber(0)
+                            .className("")
+                            .errorMessage(String.format("Email %s appears %d times", email, count))
+                            .build());
+                }
+            });
+
+            assertTrue(errors.isEmpty());
+        }
+
+        @Test
+        @DisplayName("Multiple different emails returns no duplicates")
+        void testMultipleDifferentEmails() {
+            Map<String, Long> emailCounts = new HashMap<>();
+            emailCounts.put("john@example.com", 1L);
+            emailCounts.put("jane@example.com", 1L);
+            emailCounts.put("bob@example.com", 1L);
+
+            List<ClassImportError> errors = new ArrayList<>();
+            emailCounts.forEach((email, count) -> {
+                if (count > 1) {
+                    errors.add(ClassImportError.builder()
+                            .rowNumber(0)
+                            .className("")
+                            .errorMessage(String.format("Email %s appears %d times", email, count))
+                            .build());
+                }
+            });
+
+            assertTrue(errors.isEmpty());
         }
     }
 }

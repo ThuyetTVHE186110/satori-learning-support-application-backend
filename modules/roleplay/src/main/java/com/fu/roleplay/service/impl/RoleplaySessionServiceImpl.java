@@ -18,6 +18,7 @@ import com.fu.infrastructure.learner.LearnerProfileProvider;
 import com.fu.infrastructure.event.RoleplaySessionCompletedEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
+import com.fu.common.util.FuriganaAnnotator;
 import com.fu.roleplay.exception.SessionLimitExceededException;
 import com.fu.conversation.entity.Conversation;
 import com.fu.conversation.entity.ConversationMission;
@@ -27,7 +28,9 @@ import com.fu.conversation.repository.UserConversationProgressRepository;
 import com.fu.course.entity.Course;
 import com.fu.pronunciation.dto.AssessmentRequest;
 import com.fu.pronunciation.dto.AssessmentResult;
+import com.fu.pronunciation.provider.AzureTtsProvider;
 import com.fu.pronunciation.provider.PronunciationAssessmentProvider;
+import com.fu.pronunciation.config.AzureSpeechProperties;
 import com.fu.roleplay.ai.MissionEvaluatorAI;
 import com.fu.roleplay.ai.RoleplayAIService;
 import com.fu.roleplay.ai.SessionEvaluatorAI;
@@ -100,6 +103,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     private final com.fu.roleplay.evaluation.ErrorPatternAggregator errorPatternAggregator;
     private final com.fu.roleplay.evaluation.VocabularyRangeAnalyzer vocabularyRangeAnalyzer;
     private final com.fu.roleplay.evaluation.CrossSessionTracker crossSessionTracker;
+    private final AzureTtsProvider azureTtsProvider;
+    private final AzureSpeechProperties azureSpeechProperties;
 
     public RoleplaySessionServiceImpl(
             ConversationSessionRepository sessionRepository,
@@ -126,7 +131,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             LearnerProfileProvider learnerProfileProvider,
             com.fu.roleplay.evaluation.ErrorPatternAggregator errorPatternAggregator,
             com.fu.roleplay.evaluation.VocabularyRangeAnalyzer vocabularyRangeAnalyzer,
-            com.fu.roleplay.evaluation.CrossSessionTracker crossSessionTracker
+            com.fu.roleplay.evaluation.CrossSessionTracker crossSessionTracker,
+            AzureTtsProvider azureTtsProvider,
+            AzureSpeechProperties azureSpeechProperties
     ) {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
@@ -153,6 +160,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         this.errorPatternAggregator = errorPatternAggregator;
         this.vocabularyRangeAnalyzer = vocabularyRangeAnalyzer;
         this.crossSessionTracker = crossSessionTracker;
+        this.azureTtsProvider = azureTtsProvider;
+        this.azureSpeechProperties = azureSpeechProperties;
     }
 
     @Override
@@ -227,11 +236,21 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         }
         roleplayAIService.cacheSystemPrompt(session.getId(), systemPrompt);
 
-        // 7. Generate AI opening (returns JSON array: MISSION_INTRO + SCENE_INTRO + DIALOGUE)
-        String aiResponseJson = roleplayAIService.generateOpeningMessage(systemPrompt);
+        // 7. Generate AI opening (returns JSON array: MISSION_INTRO + SCENE_INTRO + DIALOGUE).
+        // Pass roles + scenario so the fallback (when OpenAI fails) can emit a context-aware
+        // notice instead of the old hardcoded shopkeeper line.
+        String aiResponseJson = roleplayAIService.generateOpeningMessage(
+                systemPrompt,
+                conversation.getAiRole(),
+                conversation.getLearnerRole(),
+                conversation.getScenario());
 
-        // 8. Parse and save all opening message segments
-        List<ConversationMessage> openingMessages = parseAndSaveAIMessages(session.getId(), aiResponseJson, 1);
+        // 8. Parse and save all opening message segments (TTS runs synchronously inside)
+        AiMessagesResult opening = parseAndSaveAIMessages(session.getId(), aiResponseJson, 1);
+        List<ConversationMessage> openingMessages = opening.messages();
+
+        // Lock the voice discovered on turn 1 so subsequent turns don't drift gender.
+        lockVoiceIfAbsent(session, opening.discoveredVoice());
 
         // Update session stats
         session.setMessageCount(openingMessages.size());
@@ -239,9 +258,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         // 9. Build response
         SessionResponse response = sessionMapper.toResponse(session);
-        response.setMessages(openingMessages.stream()
+        List<MessageResponse> openingResponses = openingMessages.stream()
                 .map(messageMapper::toResponse)
-                .collect(Collectors.toList()));
+                .collect(Collectors.toList());
+        attachAudio(openingResponses, opening.audioByMessageId());
+        response.setMessages(openingResponses);
         response.setMissions(sessionMissions.stream()
                 .map(missionMapper::toSessionMissionResponse)
                 .collect(Collectors.toList()));
@@ -291,8 +312,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // 5. Generate the opening setup question
         String aiResponseJson = roleplayAIService.generateSetupOpening(setupPrompt);
 
-        // 6. Parse and save setup opening messages
-        List<ConversationMessage> openingMessages = parseAndSaveAIMessages(session.getId(), aiResponseJson, 1);
+        // 6. Parse and save setup opening messages (TTS runs synchronously inside)
+        AiMessagesResult opening = parseAndSaveAIMessages(session.getId(), aiResponseJson, 1);
+        List<ConversationMessage> openingMessages = opening.messages();
 
         session.setMessageCount(openingMessages.size());
         sessionRepository.save(session);
@@ -305,9 +327,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         // 7. Build response (no missions yet during SETUP)
         SessionResponse response = sessionMapper.toResponse(session);
-        response.setMessages(openingMessages.stream()
+        List<MessageResponse> openingResponses = openingMessages.stream()
                 .map(messageMapper::toResponse)
-                .collect(Collectors.toList()));
+                .collect(Collectors.toList());
+        attachAudio(openingResponses, opening.audioByMessageId());
+        response.setMessages(openingResponses);
         response.setMissions(List.of());
 
         log.info("Started FREE_TALK session {} for user {} at JLPT {}", session.getId(), userId, jlptLevel);
@@ -359,12 +383,32 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             throw new BusinessException("AUDIO_READ_FAILED", "Failed to read audio file: " + e.getMessage());
         }
 
+        // 1c. Azure STT → authoritative transcript.
+        // Device STT (from request.getContent()) is preserved separately for debugging but is
+        // not used for AI response generation, mission evaluation, or pronunciation scoring —
+        // those would otherwise judge a transcript already corrupted by on-device misrecognition
+        // (chōon, homophones). On Azure failure we fall back to the device transcript to avoid
+        // blocking the learner.
+        String deviceTranscript = request.getContent();
+        String effectiveContent = deviceTranscript;
+        if (pronunciationProvider.isAvailable()) {
+            com.fu.pronunciation.dto.TranscriptionResult stt =
+                    pronunciationProvider.recognize(audioBytes, getAudioFormat(audioContentType));
+            if (stt.isSuccess() && stt.getTranscript() != null && !stt.getTranscript().isBlank()) {
+                effectiveContent = stt.getTranscript();
+            } else {
+                log.warn("Azure STT failed for session {} — falling back to device transcript. reason={}",
+                        sessionId, stt.getErrorMessage());
+            }
+        }
+
         // 2. Save user message (sequence number is safe under pessimistic lock)
         int nextSeq = messageRepository.findMaxSequenceNumberBySessionId(sessionId).orElse(0) + 1;
         ConversationMessage userMessage = ConversationMessage.builder()
                 .sessionId(sessionId)
                 .role(ConversationMessage.MessageRole.USER)
-                .content(request.getContent())
+                .content(effectiveContent)
+                .deviceTranscript(deviceTranscript)
                 .isHintRequest(request.isHintRequest())
                 .sequenceNumber(nextSeq)
                 .build();
@@ -394,6 +438,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     "Check AZURE_SPEECH_ENABLED/AZURE_SPEECH_KEY or SPEECHSUPER_APP_KEY/SPEECHSUPER_SECRET_KEY env vars.",
                     userId, sessionId);
         }
+        final String aiInputContent = effectiveContent;
         if (audioBytes != null && pronunciationProvider.isAvailable()) {
             final byte[] audioBytesRef = audioBytes;
             final String audioFormatRef = getAudioFormat(audioContentType);
@@ -405,7 +450,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                                             pronunciationProvider.assess(AssessmentRequest.builder()
                                                     .audioData(audioBytesRef)
                                                     .audioFormat(audioFormatRef)
-                                                    .referenceText(request.getContent())
+                                                    .referenceText(aiInputContent)
+                                                    .unscripted(true)
                                                     .build()),
                                     roleplayTaskExecutor)
                             .thenAccept(result -> savePronunciationResult(result, userMessageId, sessionId))
@@ -419,7 +465,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         // Task B: AI response
         CompletableFuture<String> aiResponseFuture = CompletableFuture.supplyAsync(() ->
-                                roleplayAIService.generateResponse(sessionId, cachedPrompt, history, request.getContent()),
+                                roleplayAIService.generateResponse(sessionId, cachedPrompt, history, aiInputContent),
                         roleplayTaskExecutor)
                 .exceptionally(ex -> {
                     log.error("AI response generation failed for session {}: {}", sessionId, ex.getMessage());
@@ -431,7 +477,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         CompletableFuture<List<MissionEvaluatorAI.MissionProgress>> missionFuture = isSetupPhase
                 ? CompletableFuture.completedFuture(new ArrayList<>())
                 : CompletableFuture.supplyAsync(() ->
-                                missionEvaluatorAI.evaluateProgress(history, request.getContent(), sessionMissions),
+                                missionEvaluatorAI.evaluateProgress(history, aiInputContent, sessionMissions),
                         roleplayTaskExecutor)
                 .exceptionally(ex -> {
                     log.error("Mission evaluation failed for session {}: {}", sessionId, ex.getMessage());
@@ -446,7 +492,13 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // 5. Parse AI response array and save each segment
         String aiResponseJson = aiResponseFuture.join();
         int aiStartSeq = nextSeq + 1;
-        List<ConversationMessage> aiMessages = parseAndSaveAIMessages(sessionId, aiResponseJson, aiStartSeq);
+        String lockedVoice = extractLockedVoice(session);
+        AiMessagesResult aiResult = parseAndSaveAIMessages(sessionId, aiResponseJson, aiStartSeq, lockedVoice);
+        List<ConversationMessage> aiMessages = aiResult.messages();
+        // Turn 1 of CONVERSATION phase (or first DIALOGUE after SETUP) is when a voice first appears.
+        if (lockedVoice == null) {
+            lockVoiceIfAbsent(session, aiResult.discoveredVoice());
+        }
 
         // Set processing time on the first AI message
         if (!aiMessages.isEmpty()) {
@@ -476,10 +528,20 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             sessionRepository.save(session);
         }
 
-        // 7. Update session mission statuses (only in CONVERSATION phase)
+        // 7. Update session mission statuses (only in CONVERSATION phase).
+        // When a mission transitions state, the system prompt's mission block is now stale — rebuild
+        // and re-cache so the next turn's AI sees the authoritative status (avoids prompting the
+        // learner to do something they just completed, or ignoring a newly failed mission).
         List<MissionEvaluatorAI.MissionProgress> missionProgress = missionFuture.join();
         if (!missionProgress.isEmpty()) {
-            updateSessionMissions(sessionMissions, missionProgress);
+            boolean missionStatusChanged = updateSessionMissions(sessionMissions, missionProgress);
+            if (missionStatusChanged) {
+                List<SessionMission> refreshed = sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+                String rebuilt = rebuildSystemPrompt(session, refreshed);
+                if (rebuilt != null) {
+                    roleplayAIService.cacheSystemPrompt(sessionId, rebuilt);
+                }
+            }
         }
 
         // 8. Update session stats
@@ -497,6 +559,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         List<MessageResponse> messageResponses = aiMessages.stream()
                 .map(messageMapper::toResponse)
                 .collect(Collectors.toList());
+        attachAudio(messageResponses, aiResult.audioByMessageId());
         List<SessionMissionResponse> missionResponses = freshMissions.stream()
                 .map(missionMapper::toSessionMissionResponse)
                 .collect(Collectors.toList());
@@ -1033,8 +1096,30 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
      * Parses a JSON array response from the AI and saves each segment as a separate
      * ConversationMessage. Falls back to a single DIALOGUE message if parsing fails.
      */
-    private List<ConversationMessage> parseAndSaveAIMessages(UUID sessionId, String aiResponseJson, int startSeq) {
+    /**
+     * Result of parsing AI response: persisted messages + audio bytes keyed by message id.
+     * Audio is synthesized synchronously in parallel before returning, so the response
+     * delivered to the client always includes ready-to-play MP3 (no null, no polling).
+     */
+    private record AiMessagesResult(List<ConversationMessage> messages,
+                                    java.util.Map<UUID, byte[]> audioByMessageId,
+                                    String discoveredVoice) {}
+
+    private AiMessagesResult parseAndSaveAIMessages(UUID sessionId, String aiResponseJson, int startSeq) {
+        return parseAndSaveAIMessages(sessionId, aiResponseJson, startSeq, null);
+    }
+
+    /**
+     * @param lockedVoice voice chosen at session opening (from session context). When non-null,
+     *   overrides whatever the LLM emits on subsequent turns so the character's voice stays
+     *   consistent. The LLM reliably picks a coherent voice on turn 1 but drifts later, so we
+     *   pin it server-side rather than re-asking every turn.
+     */
+    private AiMessagesResult parseAndSaveAIMessages(UUID sessionId, String aiResponseJson,
+                                                   int startSeq, String lockedVoice) {
         List<ConversationMessage> saved = new ArrayList<>();
+        List<TtsJob> ttsJobs = new ArrayList<>();
+        String discoveredVoice = null;
         try {
             JsonNode root = objectMapper.readTree(aiResponseJson);
             JsonNode array;
@@ -1050,9 +1135,24 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             int seq = startSeq;
             for (JsonNode node : array) {
                 String type = node.path("type").asText("DIALOGUE");
-                String japanese = node.path("japanese_content").asText("");
+                // Strip any ruby syntax the LLM may leak, then feed plain text into Kuromoji.
+                // This replaces both the old LLM-generated `japanese_with_furigana` field and the
+                // post-hoc FuriganaRubyRepair, neither of which handled hallucination patterns like
+                // `[駅]{えき}{えき}` or `映画[映画]{えいが}`.
+                String japanese = FuriganaAnnotator.stripAllFurigana(node.path("japanese_content").asText(""));
+                String japaneseWithFurigana = FuriganaAnnotator.annotate(japanese);
                 String translation = node.path("translation").asText("");
                 String romaji = node.path("romaji").asText("");
+                String llmVoice = node.path("voice").asText("");
+                // Voice resolution: locked > LLM-emitted. First non-blank LLM voice on a DIALOGUE
+                // segment is captured as discoveredVoice so the caller can persist it for later turns.
+                if (lockedVoice == null && discoveredVoice == null
+                        && !llmVoice.isBlank() && "DIALOGUE".equals(type)) {
+                    discoveredVoice = llmVoice;
+                }
+                String voice = lockedVoice != null ? lockedVoice
+                        : (discoveredVoice != null ? discoveredVoice : llmVoice);
+                String style = node.path("style").asText("");
                 String corrections = "[]";
                 JsonNode correctionsNode = node.path("corrections");
                 if (correctionsNode.isArray()) {
@@ -1071,14 +1171,25 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                         .messageType(type)
                         .content(japanese.isEmpty() ? translation : japanese)
                         .japaneseContent(japanese)
+                        .japaneseWithFurigana(japaneseWithFurigana.isEmpty() ? japanese : japaneseWithFurigana)
                         .translation(translation)
                         .romaji(romaji)
                         .corrections(corrections)
                         .vocabularyUsed(vocabularyUsed)
                         .sequenceNumber(seq++)
                         .build();
-                saved.add(messageRepository.save(msg));
+                ConversationMessage persisted = messageRepository.save(msg);
+                saved.add(persisted);
+
+                // Queue TTS for any AI segment that has Japanese content (DIALOGUE, SCENE_INTRO, MISSION_INTRO).
+                if (!japanese.isBlank()) {
+                    ttsJobs.add(new TtsJob(persisted.getId(), japanese,
+                            voice.isBlank() ? null : voice,
+                            style.isBlank() ? null : style));
+                }
             }
+            java.util.Map<UUID, byte[]> audio = synthesizeBundle(ttsJobs);
+            return new AiMessagesResult(saved, audio, discoveredVoice);
         } catch (Exception e) {
             log.warn("Failed to parse AI response array, saving as raw DIALOGUE: {}", e.getMessage());
             ConversationMessage msg = ConversationMessage.builder()
@@ -1092,7 +1203,34 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     .build();
             saved.add(messageRepository.save(msg));
         }
-        return saved;
+        return new AiMessagesResult(saved, java.util.Map.of(), discoveredVoice);
+    }
+
+    /**
+     * Extract the locked voice from {@code session.context.voice}. Returns null if not yet locked.
+     */
+    private String extractLockedVoice(ConversationSession session) {
+        return extractStringFromContext(session.getContext(), "voice");
+    }
+
+    /**
+     * Persist {@code voice} into {@code session.context.voice} when not already set. Idempotent —
+     * subsequent calls with a different voice are ignored so the first-turn choice is authoritative.
+     */
+    private void lockVoiceIfAbsent(ConversationSession session, String voice) {
+        if (voice == null || voice.isBlank()) return;
+        if (extractLockedVoice(session) != null) return;
+        try {
+            JsonNode existing = objectMapper.readTree(session.getContext());
+            ObjectNode updated = objectMapper.createObjectNode();
+            existing.fields().forEachRemaining(e -> updated.set(e.getKey(), e.getValue()));
+            updated.put("voice", voice);
+            session.setContext(objectMapper.writeValueAsString(updated));
+            sessionRepository.save(session);
+            log.info("Locked voice '{}' for session {}", voice, session.getId());
+        } catch (Exception e) {
+            log.warn("Failed to lock voice for session {}: {}", session.getId(), e.getMessage());
+        }
     }
 
     /**
@@ -1185,35 +1323,51 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         }
     }
 
-    private void updateSessionMissions(List<SessionMission> sessionMissions,
-                                       List<MissionEvaluatorAI.MissionProgress> progressList) {
+    /**
+     * @return {@code true} if any mission's status transitioned (not just progressPct), so the caller
+     *         knows to rebuild the system prompt — stale mission status in the prompt is a primary
+     *         driver of AI drift on long sessions.
+     */
+    private boolean updateSessionMissions(List<SessionMission> sessionMissions,
+                                          List<MissionEvaluatorAI.MissionProgress> progressList) {
         List<SessionMission> updatedMissions = new ArrayList<>();
+        boolean statusChanged = false;
         for (MissionEvaluatorAI.MissionProgress progress : progressList) {
-            sessionMissions.stream()
+            var match = sessionMissions.stream()
                     .filter(sm -> sm.getId().toString().equals(progress.getMissionId()))
-                    .findFirst()
-                    .ifPresent(sm -> {
-                        // Do not downgrade terminal statuses (COMPLETED/FAILED are irreversible)
-                        if (sm.getStatus() == SessionMission.MissionStatus.COMPLETED
-                                || sm.getStatus() == SessionMission.MissionStatus.FAILED) {
-                            return;
-                        }
-                        try {
-                            SessionMission.MissionStatus newStatus =
-                                    SessionMission.MissionStatus.valueOf(progress.getStatus());
-                            sm.setStatus(newStatus);
-                        } catch (IllegalArgumentException e) {
-                            log.warn("Invalid mission status '{}' from AI for mission {}: {}",
-                                    progress.getStatus(), sm.getId(), e.getMessage());
-                        }
-                        sm.setProgressPct(Math.max(0, Math.min(100, progress.getProgressPct())));
-                        sm.setAiReasoning(progress.getReasoning());
-                        updatedMissions.add(sm);
-                    });
+                    .findFirst();
+            if (match.isEmpty()) {
+                // Surface mismatch so we can distinguish "LLM judged 0%" from "LLM returned wrong id
+                // and every update was silently dropped". Expected ids are the session mission UUIDs.
+                log.warn("Mission evaluator returned unknown missionId='{}' (known ids: {}). Dropping update.",
+                        progress.getMissionId(),
+                        sessionMissions.stream().map(sm -> sm.getId().toString()).toList());
+                continue;
+            }
+            SessionMission sm = match.get();
+            if (sm.getStatus() == SessionMission.MissionStatus.COMPLETED
+                    || sm.getStatus() == SessionMission.MissionStatus.FAILED) {
+                continue;
+            }
+            try {
+                SessionMission.MissionStatus newStatus =
+                        SessionMission.MissionStatus.valueOf(progress.getStatus());
+                if (newStatus != sm.getStatus()) {
+                    statusChanged = true;
+                    sm.setStatus(newStatus);
+                }
+            } catch (IllegalArgumentException e) {
+                log.warn("Invalid mission status '{}' from AI for mission {}: {}",
+                        progress.getStatus(), sm.getId(), e.getMessage());
+            }
+            sm.setProgressPct(Math.max(0, Math.min(100, progress.getProgressPct())));
+            sm.setAiReasoning(progress.getReasoning());
+            updatedMissions.add(sm);
         }
         if (!updatedMissions.isEmpty()) {
             sessionMissionRepository.saveAll(updatedMissions);
         }
+        return statusChanged;
     }
 
     /**
@@ -1346,7 +1500,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         String hintJson = roleplayAIService.generateHintResponse(sessionId, systemPrompt, history, sessionMissions);
         int nextSeq = messageRepository.findMaxSequenceNumberBySessionId(sessionId).orElse(0) + 1;
-        List<ConversationMessage> hintMessages = parseAndSaveAIMessages(sessionId, hintJson, nextSeq);
+        AiMessagesResult hintResult = parseAndSaveAIMessages(sessionId, hintJson, nextSeq, extractLockedVoice(session));
+        List<ConversationMessage> hintMessages = hintResult.messages();
 
         // Update total message count (hint messages are stored) but not userMessageCount
         session.setMessageCount(session.getMessageCount() + hintMessages.size());
@@ -1355,6 +1510,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         List<MessageResponse> hintResponses = hintMessages.stream()
                 .map(messageMapper::toResponse)
                 .collect(Collectors.toList());
+        attachAudio(hintResponses, hintResult.audioByMessageId());
         List<SessionMissionResponse> missionResponses =
                 sessionMissions.stream()
                         .map(missionMapper::toSessionMissionResponse)
@@ -1425,6 +1581,68 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         } catch (Exception e) {
             log.warn("Failed to update session context from PHASE_TRANSITION for session {}: {}",
                     session.getId(), e.getMessage());
+        }
+    }
+
+    /** Per-segment TTS payload. Synthesis runs synchronously in parallel before response is returned. */
+    private record TtsJob(UUID messageId, String text, String voice, String style) {}
+
+    /**
+     * Synthesize every job in parallel via the roleplay executor, capped by the bundle timeout.
+     * Latency of the whole bundle ≈ max(job latency), not sum. A job that fails or times out
+     * contributes null — the caller omits audio for that segment but still returns the text.
+     */
+    private java.util.Map<UUID, byte[]> synthesizeBundle(List<TtsJob> jobs) {
+        if (jobs == null || jobs.isEmpty()) return java.util.Map.of();
+        if (!azureTtsProvider.isAvailable()) return java.util.Map.of();
+
+        long bundleTimeoutMs = azureSpeechProperties.getTts().getBundleTimeoutMs();
+
+        List<CompletableFuture<java.util.Map.Entry<UUID, byte[]>>> futures = jobs.stream()
+                .map(job -> CompletableFuture.supplyAsync(
+                        () -> azureTtsProvider.synthesize(job.text(), job.voice(), job.style(), null),
+                        roleplayTaskExecutor)
+                        .exceptionally(ex -> {
+                            log.warn("TTS synth failed for message {}: {}", job.messageId(), ex.getMessage());
+                            return null;
+                        })
+                        .thenApply(audio -> audio == null || audio.length == 0
+                                ? null
+                                : java.util.Map.entry(job.messageId(), audio)))
+                .toList();
+
+        java.util.Map<UUID, byte[]> result = new java.util.HashMap<>();
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .get(bundleTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.warn("TTS bundle timed out after {}ms — collecting whatever completed", bundleTimeoutMs);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return result;
+        } catch (java.util.concurrent.ExecutionException e) {
+            log.warn("TTS bundle execution error: {}", e.getMessage());
+        }
+
+        for (CompletableFuture<java.util.Map.Entry<UUID, byte[]>> f : futures) {
+            if (!f.isDone() || f.isCancelled() || f.isCompletedExceptionally()) continue;
+            try {
+                java.util.Map.Entry<UUID, byte[]> entry = f.getNow(null);
+                if (entry != null) result.put(entry.getKey(), entry.getValue());
+            } catch (Exception ignored) {}
+        }
+        return result;
+    }
+
+    /** Populates MessageResponse.audioBase64 for any response whose id has synthesized audio. */
+    private void attachAudio(List<MessageResponse> responses, java.util.Map<UUID, byte[]> audio) {
+        if (responses == null || audio == null || audio.isEmpty()) return;
+        java.util.Base64.Encoder enc = java.util.Base64.getEncoder();
+        for (MessageResponse r : responses) {
+            byte[] bytes = audio.get(r.getId());
+            if (bytes != null && bytes.length > 0) {
+                r.setAudioBase64(enc.encodeToString(bytes));
+            }
         }
     }
 }

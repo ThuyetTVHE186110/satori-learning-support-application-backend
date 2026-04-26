@@ -76,6 +76,7 @@ class AssignmentServiceImplTest {
     @Mock private AiGradingService aiGradingService;
     @Mock private ClassTeacherHistoryRepository classTeacherHistoryRepository;
     @Mock private AssignmentScheduleManager scheduleManager;
+    @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
 
 
     @InjectMocks
@@ -484,7 +485,7 @@ class AssignmentServiceImplTest {
             given(submissionRepository.countUngradedByAssignmentIds(any())).willReturn(List.of());
 
             Page<AssignmentSummaryResponse> result = assignmentService.getAssignmentsByClass(
-                    classId, null, null, null, pageable, teacherId);
+                    classId, null, null, null, null, pageable, teacherId);
 
             assertThat(result.getTotalElements()).isEqualTo(1);
             verify(assignmentRepository).findAll(any(Specification.class), eq(pageable));
@@ -511,7 +512,7 @@ class AssignmentServiceImplTest {
             given(submissionRepository.countUngradedByAssignmentIds(any())).willReturn(List.of());
 
             Page<AssignmentSummaryResponse> result = assignmentService.getMyAssignments(
-                    teacherId, null, null, null, pageable);
+                    teacherId, null, null, null, null, pageable);
 
             assertThat(result.getTotalElements()).isEqualTo(1);
         }
@@ -1176,7 +1177,7 @@ class AssignmentServiceImplTest {
             given(classMemberRepository.findActiveClassIdsByUserId(learnerId)).willReturn(List.of(classId));
             given(classRepository.findAllById(List.of(classId))).willReturn(List.of(testClazz));
             given(assignmentRepository.findLearnerAssignmentsSorted(eq(learnerId), eq(List.of(classId)), 
-                    nullable(String.class), nullable(String.class), nullable(String.class), eq(pageable)))
+                    nullable(String.class), nullable(String.class), nullable(String.class), isNull(), eq(pageable)))
                     .willReturn(page);
             given(mapper.toLearnerSummaryResponse(any(Assignment.class))).willReturn(testLearnerSummaryResponse);
             
@@ -1186,7 +1187,7 @@ class AssignmentServiceImplTest {
                     .willReturn(statuses);
 
             Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(
-                    learnerId, null, null, null, null, pageable);
+                    learnerId, null, null, null, null, null, pageable);
 
             assertThat(result.getTotalElements()).isEqualTo(1);
             LearnerAssignmentSummaryResponse r = result.getContent().get(0);
@@ -1203,11 +1204,11 @@ class AssignmentServiceImplTest {
             given(classMemberRepository.findActiveClassIdsByUserId(learnerId)).willReturn(Collections.emptyList());
 
             Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(
-                    learnerId, null, null, null, null, pageable);
+                    learnerId, null, null, null, null, null, pageable);
 
             assertThat(result).isEmpty();
             assertThat(result.getTotalElements()).isZero();
-            verify(assignmentRepository, never()).findLearnerAssignmentsSorted(any(), any(), any(), any(), any(), any());
+            verify(assignmentRepository, never()).findLearnerAssignmentsSorted(any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test
@@ -1220,18 +1221,18 @@ class AssignmentServiceImplTest {
             given(classMemberRepository.findActiveClassIdsByUserId(learnerId))
                     .willReturn(List.of(classId, specificClassId));
             given(assignmentRepository.findLearnerAssignmentsSorted(eq(learnerId), eq(List.of(specificClassId)), 
-                    nullable(String.class), nullable(String.class), nullable(String.class), eq(pageable)))
+                    nullable(String.class), nullable(String.class), nullable(String.class), isNull(), eq(pageable)))
                     .willReturn(page);
             given(mapper.toLearnerSummaryResponse(any(Assignment.class))).willReturn(testLearnerSummaryResponse);
             given(submissionRepository.findLatestStatusByAssignmentIdsAndUserId(anyList(), eq(learnerId)))
                     .willReturn(Collections.emptyList());
 
             Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(
-                    learnerId, specificClassId, null, null, null, pageable);
+                    learnerId, specificClassId, null, null, null, null, pageable);
 
             assertThat(result.getTotalElements()).isEqualTo(1);
             verify(assignmentRepository).findLearnerAssignmentsSorted(
-                    eq(learnerId), eq(List.of(specificClassId)), any(), any(), any(), eq(pageable));
+                    eq(learnerId), eq(List.of(specificClassId)), any(), any(), any(), isNull(), eq(pageable));
         }
 
         @Test
@@ -1244,10 +1245,10 @@ class AssignmentServiceImplTest {
                     .willReturn(List.of(classId));
 
             Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(
-                    learnerId, otherClassId, null, null, null, pageable);
+                    learnerId, otherClassId, null, null, null, null, pageable);
 
             assertThat(result).isEmpty();
-            verify(assignmentRepository, never()).findLearnerAssignmentsSorted(any(), any(), any(), any(), any(), any());
+            verify(assignmentRepository, never()).findLearnerAssignmentsSorted(any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test
@@ -1259,14 +1260,14 @@ class AssignmentServiceImplTest {
             given(classMemberRepository.findActiveClassIdsByUserId(learnerId)).willReturn(List.of(classId));
             given(classRepository.findAllById(List.of(classId))).willReturn(List.of(testClazz));
             given(assignmentRepository.findLearnerAssignmentsSorted(eq(learnerId), anyList(), 
-                    nullable(String.class), nullable(String.class), nullable(String.class), eq(pageable)))
+                    nullable(String.class), nullable(String.class), nullable(String.class), isNull(), eq(pageable)))
                     .willReturn(page);
             given(mapper.toLearnerSummaryResponse(any(Assignment.class))).willReturn(testLearnerSummaryResponse);
             given(submissionRepository.findLatestStatusByAssignmentIdsAndUserId(anyList(), eq(learnerId)))
                     .willReturn(Collections.emptyList());
 
             Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(
-                    learnerId, null, null, null, null, pageable);
+                    learnerId, null, null, null, null, null, pageable);
 
             assertThat(result.getTotalElements()).isEqualTo(1);
             LearnerAssignmentSummaryResponse r = result.getContent().get(0);

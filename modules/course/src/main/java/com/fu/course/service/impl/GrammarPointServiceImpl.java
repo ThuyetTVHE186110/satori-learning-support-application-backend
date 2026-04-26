@@ -165,9 +165,25 @@ public class GrammarPointServiceImpl implements GrammarPointService {
     public void deleteGrammarPoint(UUID grammarPointId, UUID managerId) {
         log.info("Manager {} soft-deleting grammar point: {}", managerId, grammarPointId);
         GrammarPoint grammar = findOrThrow(grammarPointId);
+        // Hard-delete junctions first so list counts and lesson detail stay consistent
+        // and we don't leave dangling rows pointing to a tombstone grammar point.
+        lessonGrammarRepository.deleteByGrammarPointId(grammarPointId);
         eventPublisher.publishEvent(ContentEmbeddingEvent.forDelete(this, grammarPointId, "GRAMMAR"));
         grammar.softDelete(managerId);
         grammarPointRepository.save(grammar);
+    }
+
+    @Override
+    @Transactional
+    public void unlinkGrammarFromLesson(UUID lessonId, UUID grammarPointId, UUID managerId) {
+        log.info("Manager {} unlinking grammar {} from lesson {}", managerId, grammarPointId, lessonId);
+        lessonRepository.findByIdAndNotDeleted(lessonId)
+                .orElseThrow(() -> new ResourceNotFoundException("Lesson", lessonId));
+        int removed = lessonGrammarRepository.deleteByLessonIdAndGrammarPointId(lessonId, grammarPointId);
+        if (removed == 0) {
+            throw new ResourceNotFoundException(
+                    "LessonGrammar link (lesson=" + lessonId + ", grammar=" + grammarPointId + ")", grammarPointId);
+        }
     }
 
     @Override

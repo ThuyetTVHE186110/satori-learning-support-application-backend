@@ -122,6 +122,7 @@ public class RoleplayPromptBuilder {
 
         sb.append("### Field semantics (memorise these — do NOT deviate):\n");
         sb.append("- `japanese_content`: Your in-character Japanese speech as \"").append(aiRole).append("\".\n");
+        sb.append("  MUST be plain Japanese text (kanji + kana only). NEVER include brackets, braces, ruby syntax, or furigana annotations — the server generates furigana from this field, and this field is also fed directly to Text-to-Speech.\n");
         sb.append("- `translation`: Vietnamese translation of YOUR Japanese line above.\n");
         sb.append("  ⚠ This is what YOU said translated to Vietnamese — NOT what the learner should say.\n");
         sb.append("- `romaji`: Romaji reading of your Japanese line.\n");
@@ -130,7 +131,12 @@ public class RoleplayPromptBuilder {
         sb.append("  Each correction MUST include an `errorType` field: PARTICLE, CONJUGATION, WORD_ORDER, WORD_CHOICE, FORMALITY, SPELLING, or OTHER.\n");
         sb.append("- `vocabulary_detected`: Array of Japanese content words the LEARNER used in their message.\n");
         sb.append("  Include nouns, verbs, adjectives, adverbs. Exclude particles, copulas, and conjunctions.\n");
-        sb.append("  Example: [\"レストラン\",\"食べる\",\"おいしい\"]\n\n");
+        sb.append("  Example: [\"レストラン\",\"食べる\",\"おいしい\"]\n");
+        sb.append("- `voice`: (SESSION OPENING ONLY — omit on subsequent turns) Japanese Neural voice best matching the character.\n");
+        sb.append("  Allowed values — polite/formal scenarios: ja-JP-NanamiNeural (female), ja-JP-KeitaNeural (male), ja-JP-MayuNeural (female, softer).\n");
+        sb.append("  Casual scenarios: ja-JP-AoiNeural (female, youthful), ja-JP-ShioriNeural (female), ja-JP-DaichiNeural (male, casual).\n");
+        sb.append("  Pick ONE voice on the OPENING DIALOGUE. The server locks this choice and injects it on every later turn, so do NOT include the `voice` field in regular responses.\n");
+        sb.append("- `style`: (DIALOGUE only, optional) expressive style — one of: cheerful, sad, angry, customer-service, chat, empathetic, excited, calm. Omit if neutral.\n\n");
 
         sb.append("### Session OPENING — return exactly 3 segments:\n");
         sb.append("[\n");
@@ -148,20 +154,33 @@ public class RoleplayPromptBuilder {
         sb.append("  },\n");
         sb.append("  {\n");
         sb.append("    \"type\": \"DIALOGUE\",\n");
-        sb.append("    \"japanese_content\": \"(Your FIRST in-character line as ").append(aiRole).append(". Speak naturally for your role.)\",\n");
+        sb.append("    \"japanese_content\": \"(Your FIRST in-character line as ").append(aiRole)
+                .append(". This is what YOU say first to ").append(learnerRole)
+                .append(" — a greeting, question, or natural opener for ").append(aiRole)
+                .append(". DO NOT say the learner's line, even if it appears in their tasks. Plain Japanese only — no brackets or furigana.)\",\n");
         sb.append("    \"translation\": \"(Vietnamese translation of YOUR line above — what YOU said as ").append(aiRole).append(")\",\n");
         sb.append("    \"romaji\": \"(romaji)\",\n");
+        sb.append("    \"voice\": \"(chosen ja-JP Neural voice, kept constant for the rest of the session)\",\n");
+        sb.append("    \"style\": \"(optional expressive style or omit)\",\n");
         sb.append("    \"corrections\": []\n");
         sb.append("  }\n");
         sb.append("]\n\n");
+        sb.append("### Opening DIALOGUE — anti-mistakes:\n");
+        sb.append("- WRONG: emitting a sentence from the learner's task list as your opening line.\n");
+        sb.append("  e.g. learner task = \"ask for the bill\" → DO NOT open with お会計をお願いします.\n");
+        sb.append("- WRONG: speaking on behalf of ").append(learnerRole).append(" (\"As a customer, I would say...\").\n");
+        sb.append("- RIGHT: open with what ").append(aiRole).append(" naturally says first in this scenario\n");
+        sb.append("  (e.g. shopkeeper → いらっしゃいませ; interviewer → 自己紹介をお願いします;\n");
+        sb.append("   teacher → 今日はどうしましたか). Then wait for ").append(learnerRole).append(" to respond.\n\n");
 
         sb.append("### Regular RESPONSES — return 1-2 DIALOGUE segments:\n");
         sb.append("[\n");
         sb.append("  {\n");
         sb.append("    \"type\": \"DIALOGUE\",\n");
-        sb.append("    \"japanese_content\": \"(Your reply as ").append(aiRole).append(")\",\n");
+        sb.append("    \"japanese_content\": \"(Your reply as ").append(aiRole).append(" — plain Japanese, NO brackets or furigana)\",\n");
         sb.append("    \"translation\": \"(Vietnamese translation of YOUR line — what YOU said as ").append(aiRole).append(", NOT what learner should say)\",\n");
         sb.append("    \"romaji\": \"(romaji)\",\n");
+        sb.append("    \"style\": \"(optional expressive style or omit)\",\n");
         sb.append("    \"corrections\": [\n");
         sb.append("      // Only if learner made mistakes:\n");
         sb.append("      // {\"original\":\"...\",\"corrected\":\"...\",\"explanation\":\"... (Vietnamese)\",\"errorType\":\"PARTICLE|CONJUGATION|WORD_ORDER|WORD_CHOICE|FORMALITY|SPELLING|OTHER\"}\n");

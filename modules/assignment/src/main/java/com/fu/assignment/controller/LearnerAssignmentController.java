@@ -50,6 +50,7 @@ public class LearnerAssignmentController {
             @RequestParam(required = false) AssignmentType type,
             @RequestParam(required = false) SubmissionStatus status,
             @RequestParam(required = false) UUID classId,
+            @RequestParam(required = false) UUID lessonId,
             @AuthenticationPrincipal UserDetails userDetails) {
         if (size <= 0) {
             throw new BusinessException("INVALID_PAGE_SIZE", "Kích thước trang phải lớn hơn 0.");
@@ -58,7 +59,7 @@ public class LearnerAssignmentController {
             throw new BusinessException("INVALID_PAGE_NUMBER", "Số trang phải lớn hơn hoặc bằng 0.");
         }
         Page<LearnerAssignmentSummaryResponse> result = assignmentService.getLearnerAssignments(
-                getUserId(userDetails), classId, title, type, status, PageRequest.of(page , size));
+                getUserId(userDetails), classId, title, type, status, lessonId, PageRequest.of(page , size));
         return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber(),
                 result.getSize(), result.getTotalElements(), result.getTotalPages()));
     }

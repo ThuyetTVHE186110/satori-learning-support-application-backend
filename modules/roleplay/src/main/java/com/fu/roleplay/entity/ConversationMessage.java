@@ -32,8 +32,24 @@ public class ConversationMessage extends BaseEntity {
     @Column(name = "content", nullable = false, columnDefinition = "TEXT")
     private String content;
 
+    /**
+     * Raw transcript provided by the client device (on-device STT).
+     * Kept for debugging/flagging when it diverges from the Azure-recognized transcript
+     * stored in {@code content}. Not used for AI evaluation or pronunciation reference.
+     */
+    @Column(name = "device_transcript", columnDefinition = "TEXT")
+    private String deviceTranscript;
+
     @Column(name = "japanese_content", columnDefinition = "TEXT")
     private String japaneseContent;
+
+    /**
+     * Japanese content annotated with furigana using the ruby syntax [kanji]{reading}.
+     * Example: [先生]{せんせい}と[話]{はな}しました.
+     * Rendered by the client for learners who cannot yet read kanji.
+     */
+    @Column(name = "japanese_with_furigana", columnDefinition = "TEXT")
+    private String japaneseWithFurigana;
 
     @Column(name = "translation", columnDefinition = "TEXT")
     private String translation;

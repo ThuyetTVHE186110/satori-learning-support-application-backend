@@ -28,9 +28,7 @@ public class LearningPreferencesResponse {
 
     // AI conversation preferences
     private List<String> preferredTopics;
-    private String learningPace;       // slow | normal | fast
     private String preferredFormality; // casual | polite | formal
-    private String conversationStyle;  // practical | creative | business | travel
 
     // Personalization insights (typed)
     private List<LearningInsightPoint> weakPoints;
@@ -49,9 +47,7 @@ public class LearningPreferencesResponse {
                 .dailyStudyGoalMinutes(prefs.getDailyStudyGoalMinutes())
                 .preferredTopics(prefs.getPreferredTopics() != null
                         ? Arrays.asList(prefs.getPreferredTopics()) : List.of())
-                .learningPace(prefs.getLearningPace())
                 .preferredFormality(prefs.getPreferredFormality())
-                .conversationStyle(prefs.getConversationStyle())
                 .weakPoints(prefs.getWeakPoints() != null ? prefs.getWeakPoints() : List.of())
                 .strongPoints(prefs.getStrongPoints() != null ? prefs.getStrongPoints() : List.of())
                 .skillScores(prefs.getSkillScores() != null ? prefs.getSkillScores() : defaultSkillScores())
@@ -66,9 +62,7 @@ public class LearningPreferencesResponse {
                 .targetJlptLevel("N5")
                 .dailyStudyGoalMinutes(30)
                 .preferredTopics(List.of())
-                .learningPace("normal")
                 .preferredFormality("polite")
-                .conversationStyle(null)
                 .weakPoints(List.of())
                 .strongPoints(List.of())
                 .skillScores(defaultSkillScores())

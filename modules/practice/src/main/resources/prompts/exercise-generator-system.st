@@ -22,7 +22,7 @@ Dạng câu hỏi: {itemTypeInstruction}
 === CÁC TRƯỜNG JSON (mỗi phần tử) ===
 - "itemType"         : tên dạng câu hỏi
 - "question"         : câu hỏi / yêu cầu
-- "questionJapanese" : câu tiếng Nhật nếu cần (null nếu không)
+- "questionJapanese" : câu tiếng Nhật thuần (kanji + kana, KHÔNG chứa brackets/braces/ruby syntax). Null nếu không cần. Server sẽ tự sinh furigana từ trường này — KHÔNG cần trả `questionJapaneseWithFurigana`.
 - "options"          : xem quy tắc từng dạng
 - "pairs"            : chỉ MATCHING, null cho dạng khác
 - "correctAnswer"    : đáp án đúng (null nếu MATCHING)

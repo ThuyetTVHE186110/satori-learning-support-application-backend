@@ -155,9 +155,25 @@ public class VocabularyServiceImpl implements VocabularyService {
     public void deleteVocabulary(UUID vocabularyId, UUID managerId) {
         log.info("Manager {} soft-deleting vocabulary: {}", managerId, vocabularyId);
         Vocabulary vocab = findOrThrow(vocabularyId);
+        // Hard-delete junctions first so list counts and lesson detail stay consistent
+        // and we don't leave dangling rows pointing to a tombstone vocabulary.
+        lessonVocabularyRepository.deleteByVocabularyId(vocabularyId);
         eventPublisher.publishEvent(ContentEmbeddingEvent.forDelete(this, vocabularyId, "VOCABULARY"));
         vocab.softDelete(managerId);
         vocabularyRepository.save(vocab);
+    }
+
+    @Override
+    @Transactional
+    public void unlinkVocabularyFromLesson(UUID lessonId, UUID vocabularyId, UUID managerId) {
+        log.info("Manager {} unlinking vocabulary {} from lesson {}", managerId, vocabularyId, lessonId);
+        lessonRepository.findByIdAndNotDeleted(lessonId)
+                .orElseThrow(() -> new ResourceNotFoundException("Lesson", lessonId));
+        int removed = lessonVocabularyRepository.deleteByLessonIdAndVocabularyId(lessonId, vocabularyId);
+        if (removed == 0) {
+            throw new ResourceNotFoundException(
+                    "LessonVocabulary link (lesson=" + lessonId + ", vocabulary=" + vocabularyId + ")", vocabularyId);
+        }
     }
 
     @Override

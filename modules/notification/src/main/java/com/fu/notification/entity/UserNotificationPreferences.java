@@ -107,10 +107,10 @@ public class UserNotificationPreferences extends BaseEntity {
         }
 
         return switch (type) {
-            case DAILY_REMINDER, STREAK_ALERT, LEARNING_GOAL_REACHED -> dailyReminderEnabled;
+            case DAILY_REMINDER, STREAK_ALERT -> dailyReminderEnabled;
             case ASSIGNMENT_CREATED, ASSIGNMENT_DUE_SOON, ASSIGNMENT_OVERDUE,
                  ASSIGNMENT_GRADED, SUBMISSION_RECEIVED -> assignmentNotifications;
-            case ACHIEVEMENT_UNLOCKED, LESSON_COMPLETE, PRACTICE_FEEDBACK_READY -> achievementNotifications;
+            case LESSON_COMPLETE, PRACTICE_FEEDBACK_READY -> achievementNotifications;
             case CLASS_JOINED, CLASS_REMOVED, CLASS_ANNOUNCEMENT -> classNotifications;
             // Always-on: security + import status (manager workflow critical path)
             case ACCOUNT_SECURITY, PASSWORD_CHANGED, MAINTENANCE_NOTICE, WELCOME,

@@ -45,9 +45,9 @@ public class LessonItemsResponse {
     @Data
     @Builder
     public static class MasteryDto {
-        /** 0=Chưa luyện, 1=Quen thuộc, 2=Nắm vững, 3=Thuộc */
+        /** 0=Chưa thành thạo, 1=Quen thuộc, 2=Nắm vững, 3=Thành thạo */
         private int    level;
-        /** Nhãn hiển thị: "Chưa luyện" / "Quen thuộc" / "Nắm vững" / "Thuộc" */
+        /** Nhãn hiển thị: "Chưa thành thạo" / "Quen thuộc" / "Nắm vững" / "Thành thạo" */
         private String label;
         private int    attemptCount;
         /** EMA score [0.0, 1.0] — dùng cho client sort/filter nếu cần */

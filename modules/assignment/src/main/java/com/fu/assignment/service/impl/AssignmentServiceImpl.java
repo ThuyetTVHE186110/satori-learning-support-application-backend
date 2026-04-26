@@ -32,9 +32,11 @@ import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.infrastructure.cloudinary.CloudinaryService;
 import com.fu.infrastructure.email.EmailService;
+import com.fu.infrastructure.event.AssignmentGradedEvent;
 import com.fu.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -78,6 +80,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     private final LearningLevelService learningLevelService;
     private final AchievementService achievementService;
     private final EmailService emailService;
+    private final ApplicationEventPublisher eventPublisher;
     private static final String SUBMISSION_IMAGE_FOLDER = "satori/assignment-submissions";
     private static final String SUBMISSION_FAILED_MSG = "Không thể lưu hoặc chấm điểm bài nộp.";
     private static final int MAX_SUBMISSION_IMAGES = 3;
@@ -127,7 +130,7 @@ public class AssignmentServiceImpl implements AssignmentService {
                 Clazz clazz = classRepository.findByIdAndNotDeleted(classId).orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy lớp học"));
                 verifyTeacherAccess(clazz, teacherId);
             }
-            assignment = Assignment.builder().assignmentType(AssignmentType.QUIZ).classId(classId).createdBy(teacherId).createdAt(LocalDateTime.now()).hasSubmissions(false).build();
+            assignment = Assignment.builder().assignmentType(AssignmentType.QUIZ).classId(classId).lessonId(request.getLessonId()).createdBy(teacherId).createdAt(LocalDateTime.now()).hasSubmissions(false).build();
         } else {
             // -- UPDATE EXISTING ASSIGNMENT --
             assignment = findAssignmentOrThrow(assignmentId);
@@ -278,7 +281,7 @@ public class AssignmentServiceImpl implements AssignmentService {
             }
 
 
-            assignment = Assignment.builder().assignmentType(assignmentType).classId(classId).createdBy(teacherId).createdAt(LocalDateTime.now()).hasSubmissions(false).build();
+            assignment = Assignment.builder().assignmentType(assignmentType).classId(classId).lessonId(request.getLessonId()).createdBy(teacherId).createdAt(LocalDateTime.now()).hasSubmissions(false).build();
         } else {
             // -- UPDATE EXISTING --
             assignment = findAssignmentOrThrow(assignmentId);
@@ -384,12 +387,12 @@ public class AssignmentServiceImpl implements AssignmentService {
     }
 
     @Override
-    public Page<AssignmentSummaryResponse> getAssignmentsByClass(UUID classId, String title, com.fu.assignment.entity.AssignmentStatus status, AssignmentType type, Pageable pageable, UUID teacherId) {
+    public Page<AssignmentSummaryResponse> getAssignmentsByClass(UUID classId, String title, com.fu.assignment.entity.AssignmentStatus status, AssignmentType type, UUID lessonId, Pageable pageable, UUID teacherId) {
         Clazz clazz = classRepository.findByIdAndNotDeleted(classId).orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy lớp học"));
         // Teacher must be in class to see its assignments
         verifyTeacherAccess(clazz, teacherId);
 
-        Specification<Assignment> spec = Specification.where(AssignmentSpecification.withClassId(classId)).and(AssignmentSpecification.isNotDeleted()).and(AssignmentSpecification.withTitle(title)).and(AssignmentSpecification.withStatus(status)).and(AssignmentSpecification.withType(type));
+        Specification<Assignment> spec = Specification.where(AssignmentSpecification.withClassId(classId)).and(AssignmentSpecification.isNotDeleted()).and(AssignmentSpecification.withTitle(title)).and(AssignmentSpecification.withStatus(status)).and(AssignmentSpecification.withType(type)).and(AssignmentSpecification.withLessonId(lessonId));
 
         Page<Assignment> assignments = assignmentRepository.findAll(spec, pageable);
         return populateTeacherSummaryResponses(assignments);
@@ -500,9 +503,14 @@ public class AssignmentServiceImpl implements AssignmentService {
     }
 
     @Override
-    public Page<AssignmentSummaryResponse> getMyAssignments(UUID teacherId, String title, com.fu.assignment.entity.AssignmentStatus status, AssignmentType type, Pageable pageable) {
-        log.warn("title={}, status={}, type={}", title, status, type);
-        Specification<Assignment> spec = Specification.where(AssignmentSpecification.withCreatedBy(teacherId)).and(AssignmentSpecification.isNotDeleted()).and(AssignmentSpecification.withTitle(title)).and(AssignmentSpecification.withStatus(status)).and(AssignmentSpecification.withType(type));
+    public Page<AssignmentSummaryResponse> getMyAssignments(UUID teacherId, String title, com.fu.assignment.entity.AssignmentStatus status, AssignmentType type, UUID lessonId, Pageable pageable) {
+        log.warn("title={}, status={}, type={}, lessonId={}", title, status, type, lessonId);
+        Specification<Assignment> spec = Specification.where(AssignmentSpecification.withCreatedBy(teacherId))
+                .and(AssignmentSpecification.isNotDeleted())
+                .and(AssignmentSpecification.withTitle(title))
+                .and(AssignmentSpecification.withStatus(status))
+                .and(AssignmentSpecification.withType(type))
+                .and(AssignmentSpecification.withLessonId(lessonId));
 
         Page<Assignment> assignments = assignmentRepository.findAll(spec, pageable);
         return populateTeacherSummaryResponses(assignments);
@@ -511,10 +519,19 @@ public class AssignmentServiceImpl implements AssignmentService {
     private Page<AssignmentSummaryResponse> populateTeacherSummaryResponses(Page<Assignment> assignments) {
         List<UUID> ids = assignments.getContent().stream().map(Assignment::getId).toList();
         List<UUID> classIds = assignments.getContent().stream().map(Assignment::getClassId).filter(Objects::nonNull).distinct().toList();
+        List<UUID> lessonIds = assignments.getContent().stream().map(Assignment::getLessonId).filter(Objects::nonNull).distinct().toList();
 
         Map<UUID, String> classNames = new HashMap<>();
         if (!classIds.isEmpty()) {
             classRepository.findAllById(classIds).forEach(c -> classNames.put(c.getId(), c.getName()));
+        }
+
+        Map<UUID, String> lessonNames = new HashMap<>();
+        if (!lessonIds.isEmpty()) {
+            List<Object[]> lessons = assignmentRepository.findLessonNamesByIds(lessonIds);
+            for (Object[] row : lessons) {
+                lessonNames.put((UUID) row[0], (String) row[1]);
+            }
         }
 
         Map<UUID, Long> ungradedCounts = new HashMap<>();
@@ -530,12 +547,16 @@ public class AssignmentServiceImpl implements AssignmentService {
             r.setUngradedCount(ungradedCounts.getOrDefault(a.getId(), 0L));
             r.setClassId(a.getClassId());
             r.setClassName(classNames.get(a.getClassId()));
+            r.setLessonId(a.getLessonId());
+            r.setLessonName(lessonNames.get(a.getLessonId()));
             return r;
         });
     }
 
     private Page<LearnerAssignmentSummaryResponse> populateLearnerSummaryResponses(Page<Assignment> assignments, UUID learnerId) {
         List<UUID> ids = assignments.getContent().stream().map(Assignment::getId).toList();
+        List<UUID> lessonIds = assignments.getContent().stream().map(Assignment::getLessonId).filter(Objects::nonNull).distinct().toList();
+        
         Map<UUID, SubmissionStatus> learnerStatuses = new HashMap<>();
         Map<UUID, UUID> learnerSubmissionIds = new HashMap<>();
 
@@ -544,6 +565,14 @@ public class AssignmentServiceImpl implements AssignmentService {
             for (Object[] row : statuses) {
                 learnerStatuses.put((UUID) row[0], SubmissionStatus.valueOf((String) row[1]));
                 learnerSubmissionIds.put((UUID) row[0], (UUID) row[2]);
+            }
+        }
+
+        Map<UUID, String> lessonNames = new HashMap<>();
+        if (!lessonIds.isEmpty()) {
+            List<Object[]> lessons = assignmentRepository.findLessonNamesByIds(lessonIds);
+            for (Object[] row : lessons) {
+                lessonNames.put((UUID) row[0], (String) row[1]);
             }
         }
 
@@ -558,6 +587,8 @@ public class AssignmentServiceImpl implements AssignmentService {
 
             r.setLearnerSubmissionStatus(status);
             r.setLearnerSubmissionId(learnerSubmissionIds.get(a.getId()));
+            r.setLessonId(a.getLessonId());
+            r.setLessonName(lessonNames.get(a.getLessonId()));
             return r;
         });
     }
@@ -738,6 +769,14 @@ public class AssignmentServiceImpl implements AssignmentService {
         submissionRepository.save(submission);
         log.info("Writing submission {} graded by teacher {} with score {}", submissionId, teacherId, request.getTeacherScore());
 
+        eventPublisher.publishEvent(new AssignmentGradedEvent(
+                this,
+                assignment.getId(),
+                submission.getId(),
+                submission.getUserId(),
+                assignment.getTitle(),
+                request.getTeacherScore().doubleValue()));
+
         // NOTE: Streak is NOT recorded here because:
         // 1. Streak already counted when learner submitted (submitWriting)
         // 2. Teacher grading is not a learner activity
@@ -751,7 +790,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Override
-    public Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, UUID classId, String title, AssignmentType type, SubmissionStatus status, Pageable pageable) {
+    public Page<LearnerAssignmentSummaryResponse> getLearnerAssignments(UUID learnerId, UUID classId, String title, AssignmentType type, SubmissionStatus status, UUID lessonId, Pageable pageable) {
 
         List<UUID> classIds;
 
@@ -777,7 +816,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         String typeStr = (type != null) ? type.name() : "";
         String statusStr = (status != null) ? status.name() : "";
 
-        Page<Assignment> assignments = assignmentRepository.findLearnerAssignmentsSorted(learnerId, classIds, titleStr, typeStr, statusStr, pageable);
+        Page<Assignment> assignments = assignmentRepository.findLearnerAssignmentsSorted(learnerId, classIds, titleStr, typeStr, statusStr, lessonId, pageable);
 
         return populateLearnerSummaryResponses(assignments, learnerId);
     }
@@ -1149,6 +1188,11 @@ public class AssignmentServiceImpl implements AssignmentService {
                 response.setClassName(c.getName());
                 response.setClassId(c.getId());
             });
+        }
+        //Enrich lesson title
+        if (assignment.getLessonId() != null) {
+            response.setLessonId(assignment.getLessonId());
+            assignmentRepository.findLessonNamesByIds(List.of(assignment.getLessonId())).stream().findFirst().ifPresent(row -> response.setLessonName((String) row[1]));
         }
 
         return response;

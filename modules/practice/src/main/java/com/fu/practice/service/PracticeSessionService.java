@@ -11,6 +11,7 @@ import com.fu.achievement.enums.BadgeType;
 import com.fu.achievement.service.StreakService;
 import com.fu.infrastructure.event.PracticeFeedbackReadyEvent;
 import com.fu.common.exception.BusinessException;
+import com.fu.common.util.FuriganaAnnotator;
 import com.fu.course.entity.Course;
 import com.fu.course.entity.GrammarPoint;
 import com.fu.course.entity.Lesson;
@@ -579,9 +580,18 @@ public class PracticeSessionService {
                 ? toItemResponse(nextItem)
                 : null;
 
-        // Resolve text của đáp án đúng + đáp án user — chỉ áp dụng cho dạng chọn 1 option.
-        String correctAnswerText = resolveSelectionOptionText(item, item.getCorrectAnswer());
-        String userAnswerText = resolveSelectionOptionText(item, userAnswer);
+        // Resolve text của đáp án đúng + đáp án user.
+        // Dạng chọn 1 option: text của option tại id; SENTENCE_ORDER: ghép token theo
+        // thứ tự id để FE có chuỗi tiếng Nhật hiển thị thay vì raw "0,1,2,3".
+        String correctAnswerText;
+        String userAnswerText;
+        if (item.getItemType() == PracticeItemType.SENTENCE_ORDER) {
+            correctAnswerText = resolveSentenceOrderText(item, item.getCorrectAnswer());
+            userAnswerText = resolveSentenceOrderText(item, userAnswer);
+        } else {
+            correctAnswerText = resolveSelectionOptionText(item, item.getCorrectAnswer());
+            userAnswerText = resolveSelectionOptionText(item, userAnswer);
+        }
 
         return AnswerFeedbackResponse.builder()
                 .isCorrect(result.isCorrect())
@@ -608,6 +618,36 @@ public class PracticeSessionService {
      * - Nếu không parse được (legacy text answer): trả nguyên answer.
      * - Null-safe cho mọi input không hợp lệ.
      */
+    /**
+     * Resolve text cho SENTENCE_ORDER: ghép token tại các id (CSV) theo thứ tự đó.
+     * Ví dụ options=[これ,は,辞書,です], answer="0,1,2,3" → "これは辞書です".
+     * Trả null nếu answer rỗng / sai format / id ngoài range — FE sẽ không hiển thị.
+     */
+    private String resolveSentenceOrderText(PracticeItem item, String answer) {
+        if (item == null || answer == null || answer.isBlank()) return null;
+        try {
+            com.fasterxml.jackson.databind.JsonNode options = objectMapper.readTree(
+                    item.getOptions() != null ? item.getOptions() : "[]");
+            if (!options.isArray() || options.isEmpty()) return null;
+            StringBuilder sb = new StringBuilder();
+            for (String idStr : answer.split(",")) {
+                int id = Integer.parseInt(idStr.trim());
+                if (id < 0 || id >= options.size()) return null;
+                com.fasterxml.jackson.databind.JsonNode textNode = options.get(id).get("text");
+                if (textNode == null || textNode.isNull()) return null;
+                sb.append(textNode.asText());
+            }
+            return sb.length() == 0 ? null : sb.toString();
+        } catch (NumberFormatException e) {
+            // Legacy item correctAnswer dạng text → trả nguyên answer
+            return answer;
+        } catch (Exception e) {
+            log.debug("resolveSentenceOrderText: parse fail cho item {}: {}",
+                    item.getId(), e.getMessage());
+            return null;
+        }
+    }
+
     private String resolveSelectionOptionText(PracticeItem item, String answer) {
         if (item == null || answer == null || answer.isBlank()) return null;
         PracticeItemType type = item.getItemType();
@@ -1103,8 +1143,8 @@ public class PracticeSessionService {
         String label = switch (m.getMasteryLevel()) {
             case 1 -> "Quen thuộc";
             case 2 -> "Nắm vững";
-            case 3 -> "Thuộc";
-            default -> "Chưa luyện";
+            case 3 -> "Thành thạo";
+            default -> "Chưa thành thạo";
         };
         return LessonItemsResponse.MasteryDto.builder()
                 .level(m.getMasteryLevel())
@@ -1355,6 +1395,7 @@ public class PracticeSessionService {
                 .itemType(resolvedType)
                 .question(gen.getQuestion() != null ? gen.getQuestion() : "")
                 .questionJapanese(gen.getQuestionJapanese())
+                .questionJapaneseWithFurigana(gen.getQuestionJapaneseWithFurigana())
                 .hint(gen.getHint())
                 .options(buildOptionsJson(options))
                 .correctAnswer(gen.getCorrectAnswer() != null ? gen.getCorrectAnswer() : "")
@@ -1427,6 +1468,7 @@ public class PracticeSessionService {
                     .itemType(itemType)
                     .question(gen.getQuestion() != null ? gen.getQuestion() : "")
                     .questionJapanese(gen.getQuestionJapanese())
+                .questionJapaneseWithFurigana(gen.getQuestionJapaneseWithFurigana())
                     .hint(gen.getHint())
                     .options(buildOptionsJson(finalOptions))
                     .correctAnswer("")
@@ -1442,6 +1484,7 @@ public class PracticeSessionService {
                 .itemType(itemType)
                 .question(gen.getQuestion() != null ? gen.getQuestion() : "")
                 .questionJapanese(gen.getQuestionJapanese())
+                .questionJapaneseWithFurigana(gen.getQuestionJapaneseWithFurigana())
                 .hint(gen.getHint())
                 .options(buildOptionsJson(finalOptions))
                 .correctAnswer(String.valueOf(correctId))
@@ -1489,6 +1532,7 @@ public class PracticeSessionService {
                 .itemType(PracticeItemType.SENTENCE_ORDER)
                 .question(gen.getQuestion() != null ? gen.getQuestion() : "")
                 .questionJapanese(gen.getQuestionJapanese())
+                .questionJapaneseWithFurigana(gen.getQuestionJapaneseWithFurigana())
                 .hint(gen.getHint())
                 .options(buildOptionsJson(options))   // giữ thứ tự đúng, frontend tự shuffle
                 .correctAnswer(correctAnswer.toString())
@@ -1575,6 +1619,7 @@ public class PracticeSessionService {
                 .itemType(PracticeItemType.MATCHING)
                 .question(gen.getQuestion() != null ? gen.getQuestion() : "Nối từ tiếng Nhật với nghĩa tiếng Việt")
                 .questionJapanese(gen.getQuestionJapanese())
+                .questionJapaneseWithFurigana(gen.getQuestionJapaneseWithFurigana())
                 .hint(gen.getHint())
                 .options(optionsJson)
                 .correctAnswer(correctAnswer.toString())
@@ -1775,12 +1820,27 @@ public class PracticeSessionService {
                 .itemType(item.getItemType())
                 .question(item.getQuestion())
                 .questionJapanese(item.getQuestionJapanese())
+                .questionJapaneseWithFurigana(annotateForResponse(item.getQuestionJapanese(), item.getQuestionJapaneseWithFurigana()))
                 .hint(item.getHint())
                 .options(options)
                 .correctMapping(correctMapping)
                 .refContentId(item.getRefContentId())
                 .refContentType(item.getRefContentType())
                 .build();
+    }
+
+    /**
+     * Re-generate canonical furigana from plain {@code questionJapanese} on every response. Falls
+     * back to normalising the stored {@code questionJapaneseWithFurigana} for legacy rows where
+     * plain text was not persisted. This heals older rows that still carry LLM hallucination
+     * patterns in the furigana field.
+     */
+    private static String annotateForResponse(String plain, String storedFurigana) {
+        if (plain != null && !plain.isBlank()) {
+            return FuriganaAnnotator.annotate(plain);
+        }
+        if (storedFurigana == null || storedFurigana.isBlank()) return storedFurigana;
+        return FuriganaAnnotator.normalizeAndAnnotate(storedFurigana);
     }
 
     private List<OptionDto> parseOptionsForDisplay(String optionsJson, boolean revealCorrect) {
@@ -1862,6 +1922,7 @@ public class PracticeSessionService {
                 .itemType(item.getItemType().name())
                 .question(item.getQuestion())
                 .questionJapanese(item.getQuestionJapanese())
+                .questionJapaneseWithFurigana(annotateForResponse(item.getQuestionJapanese(), item.getQuestionJapaneseWithFurigana()))
                 .options(options)
                 .correctAnswer(correctAnswer)
                 .userAnswer(item.getUserAnswer())

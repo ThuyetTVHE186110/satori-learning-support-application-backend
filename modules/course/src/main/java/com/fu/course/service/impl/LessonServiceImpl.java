@@ -105,6 +105,11 @@ public class LessonServiceImpl implements LessonService {
         log.info("Soft-deleting lesson {} by manager {}", lessonId, managerId);
 
         Lesson lesson = findLessonOrThrow(lessonId);
+        // Mirror import rollback behaviour: hard-delete join rows so they don't
+        // outlive the lesson and skew downstream counts (vocabulary/grammar entities
+        // are shared across lessons and intentionally preserved).
+        lessonVocabularyRepository.deleteByLessonId(lessonId);
+        lessonGrammarRepository.deleteByLessonId(lessonId);
         lesson.softDelete(managerId);
 
         lessonRepository.save(lesson);

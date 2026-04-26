@@ -13,7 +13,7 @@ EXAMPLES:
 
 Example 1 — Retrieval required, relevant:
 Question: "食べる nghĩa là gì?"
-Documents: ["食べる[たべる]: to eat (verb group 2)"]
+Documents: ["[食べる]{たべる}: to eat (verb group 2)"]
 → isRetrievalRequired=true, isRelevant=true, confidence=0.95
 
 Example 2 — Retrieval required, irrelevant (wrong content):

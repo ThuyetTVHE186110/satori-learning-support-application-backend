@@ -30,7 +30,13 @@ public class RoleplayProperties {
     private int redisSessionTtlHours = 2;
 
     /** Max conversation history messages sent to the AI for context. */
-    private int maxContextMessages = 20;
+    private int maxContextMessages = 30;
+
+    /**
+     * Number of opening messages (MISSION_INTRO / SCENE_INTRO / first DIALOGUE) always pinned
+     * at the head of the AI context window so scenario setup never slides out of attention.
+     */
+    private int pinnedContextMessages = 3;
 
     /** Max messages sent to the mission evaluator. */
     private int maxEvalMessages = 20;

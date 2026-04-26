@@ -5,6 +5,8 @@ import com.fu.infrastructure.learner.SkillScore;
 import com.fu.infrastructure.event.LearningInsightsUpdatedEvent;
 import com.fu.practice.entity.ItemMastery;
 import com.fu.practice.repository.ItemMasteryRepository;
+import com.fu.roleplay.entity.MessagePronunciation;
+import com.fu.roleplay.repository.MessagePronunciationRepository;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserLearningPreferences;
 import com.fu.user.repository.UserLearningPreferencesRepository;
@@ -33,6 +35,7 @@ public class InsightAggregationService {
     private final UserLearningPreferencesRepository prefsRepository;
     private final UserRepository userRepository;
     private final ItemMasteryRepository itemMasteryRepository;
+    private final MessagePronunciationRepository messagePronunciationRepository;
     private final ApplicationEventPublisher eventPublisher;
 
     private static final int MAX_INSIGHTS_PER_LIST = 20;
@@ -111,20 +114,37 @@ public class InsightAggregationService {
     // ── Roleplay aggregation ────────────────────────────────────────────────
 
     @Transactional
-    public void aggregateFromRoleplay(UUID userId, double overallScore,
+    public void aggregateFromRoleplay(UUID sessionId, UUID userId, double overallScore,
                                        double accuracyScore, double pronunciationScore,
                                        double taskCompletionScore, double complexityScore,
                                        Map<String, Integer> errorBreakdown) {
-        log.debug("Aggregating roleplay insights for user {}", userId);
+        log.debug("Aggregating roleplay insights for user {} session {}", userId, sessionId);
 
         UserLearningPreferences prefs = getOrCreatePreferences(userId);
+
+        // Skill source-of-truth mapping (post-bugfix):
+        //   PRONUNCIATION ← Azure pronunciationScore   (event-supplied, per-session avg)
+        //   FLUENCY       ← Azure fluencyScore         (queried per-message from MessagePronunciation)
+        //   SPEAKING      ← roleplay overallScore      (composite)
+        //   VOCABULARY    ← practice ItemMastery EMA   (NOT touched here — practice owns it)
+        //   GRAMMAR       ← practice ItemMastery EMA   (NOT touched here — practice owns it)
+        //
+        // Earlier code wrote VOCABULARY ← complexityScore, GRAMMAR ← accuracyScore,
+        // FLUENCY ← taskCompletionScore. complexityScore (lexical variety) and
+        // accuracyScore (LLM-judged language quality) are different signals than item-
+        // level mastery, and taskCompletionScore (mission %) is unrelated to fluency.
+        // Cross-mapping caused practice's EMA writes to be overwritten by roleplay events
+        // and the FLUENCY axis to drift with mission-completion behavior.
+        // taskCompletionScore + complexityScore remain available on ConversationSession
+        // for session-level dashboards; they don't belong on the user-level pentagon.
+        double fluencyScore = computeAverageFluency(sessionId);
 
         List<SkillScore> scores = ensureAllSkills(prefs.getSkillScores());
         scores = updateSkill(scores, "PRONUNCIATION", pronunciationScore);
         scores = updateSkill(scores, "SPEAKING", overallScore);
-        scores = updateSkill(scores, "GRAMMAR", accuracyScore);
-        scores = updateSkill(scores, "VOCABULARY", complexityScore);
-        scores = updateSkill(scores, "FLUENCY", taskCompletionScore);
+        if (fluencyScore >= 0) {
+            scores = updateSkill(scores, "FLUENCY", fluencyScore);
+        }
         prefs.setSkillScores(scores);
 
         // Use structured error breakdown for weak points (replaces fragile text classification)
@@ -155,8 +175,24 @@ public class InsightAggregationService {
         prefsRepository.save(prefs);
 
         eventPublisher.publishEvent(new LearningInsightsUpdatedEvent(this, userId));
-        log.info("Roleplay insights updated for user {}: accuracy={}, pronunciation={}, taskCompletion={}, complexity={}",
-                userId, accuracyScore, pronunciationScore, taskCompletionScore, complexityScore);
+        log.info("Roleplay insights updated for user {}: pronunciation={}, fluency={}, speaking={}",
+                userId, pronunciationScore, fluencyScore, overallScore);
+    }
+
+    /**
+     * Average Azure fluency score across utterances of a roleplay session.
+     * Returns -1 if the session has no MessagePronunciation rows (no audio submitted)
+     * — the caller skips the FLUENCY skill update in that case.
+     */
+    private double computeAverageFluency(UUID sessionId) {
+        if (sessionId == null) return -1;
+        List<MessagePronunciation> rows = messagePronunciationRepository.findBySessionId(sessionId);
+        return rows.stream()
+                .map(MessagePronunciation::getFluencyScore)
+                .filter(Objects::nonNull)
+                .mapToDouble(java.math.BigDecimal::doubleValue)
+                .average()
+                .orElse(-1);
     }
 
     private String mapErrorTypeToCategory(String errorType) {
@@ -215,7 +251,6 @@ public class InsightAggregationService {
                     UserLearningPreferences newPrefs = UserLearningPreferences.builder()
                             .user(user)
                             .dailyStudyGoalMinutes(30)
-                            .learningPace("normal")
                             .preferredFormality("polite")
                             .streakReminderEnabled(true)
                             .skillScores(SKILL_DIMENSIONS.stream()

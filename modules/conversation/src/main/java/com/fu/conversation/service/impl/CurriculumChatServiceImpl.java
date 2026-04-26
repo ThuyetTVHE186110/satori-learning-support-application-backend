@@ -5,6 +5,7 @@ import com.fu.common.ai.PromptTemplateLoader;
 import com.fu.infrastructure.event.ConversationSessionCompletedEvent;
 import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
+import com.fu.common.util.FuriganaAnnotator;
 import com.fu.conversation.ai.advisor.GroundingAdvisor;
 import com.fu.conversation.ai.advisor.IntentRouterAdvisor;
 import com.fu.conversation.ai.advisor.RelevanceCheckAdvisor;
@@ -285,6 +286,10 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
                     "Hệ thống AI không trả về phản hồi hợp lệ, vui lòng thử lại sau.");
         }
 
+        // Strip any ruby syntax the LLM emitted, then generate canonical furigana from the plain
+        // text via Kuromoji. Deterministic output — no LLM hallucination patterns survive.
+        aiResponse = FuriganaAnnotator.normalizeAndAnnotate(aiResponse);
+
         // Extract retrieved documents stored by RetrievalAdvisor for source references
         @SuppressWarnings("unchecked")
         List<Document> retrievedDocs = (List<Document>) chatClientResponse.context()
@@ -480,6 +485,10 @@ public class CurriculumChatServiceImpl implements CurriculumChatService {
                 log.error("streamChat: blank response for session {}", sessionId);
                 return;
             }
+
+            // Strip any ruby syntax the LLM emitted and re-annotate from plain text. Streamed
+            // chunks may still show the LLM-raw form live, but history reload returns canonical.
+            fullResponse = FuriganaAnnotator.normalizeAndAnnotate(fullResponse);
 
             UUID aiMessageId = historyManager.saveExchange(sessionId, question, fullResponse);
 

@@ -38,7 +38,7 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
     List<Object[]> countByStatusForClass(@Param("classId") UUID classId);
 
     /**
-     * Find learner assignments sorted by urgency and filtered by submission status.
+     * Find learner assignments sorted by urgency and filtered by submission status and optional lessonId.
      * 
      * Logic for Filtering by Status (Virtual Logic):
      * - NOT_STARTED: No submission exists AND not past due.
@@ -65,6 +65,7 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
               AND a.status IN ('PUBLISHED', 'CLOSED')
               AND (CAST(:title AS text) = '' OR LOWER(a.title) LIKE LOWER(CONCAT('%', CAST(:title AS text), '%')))
               AND (CAST(:type AS text) = '' OR CAST(a.assignment_type AS text) = CAST(:type AS text))
+              AND (CAST(:lessonId AS text) IS NULL OR a.lesson_id = CAST(:lessonId AS uuid))
               AND (
                   CAST(:status AS text) = ''
                   OR (CAST(:status AS text) = 'NOT_STARTED' AND sub.status IS NULL AND a.due_date >= CURRENT_TIMESTAMP)
@@ -106,6 +107,7 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
               AND a.status IN ('PUBLISHED', 'CLOSED')
               AND (CAST(:title AS text) = '' OR LOWER(a.title) LIKE LOWER(CONCAT('%', CAST(:title AS text), '%')))
               AND (CAST(:type AS text) = '' OR CAST(a.assignment_type AS text) = CAST(:type AS text))
+              AND (CAST(:lessonId AS text) IS NULL OR a.lesson_id = CAST(:lessonId AS uuid))
               AND (
                   CAST(:status AS text) = ''
                   OR (CAST(:status AS text) = 'NOT_STARTED' AND sub.status IS NULL AND a.due_date >= CURRENT_TIMESTAMP)
@@ -121,6 +123,7 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
             @Param("title") String title,
             @Param("type") String type,
             @Param("status") String status,
+            @Param("lessonId") UUID lessonId,
             Pageable pageable);
 
     /**
@@ -144,4 +147,14 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
      */
     @Query("SELECT a.title FROM Assignment a WHERE a.id = :assignmentId AND a.deletedAt IS NULL")
     Optional<String> getAssignmentTitleById(@Param("assignmentId") UUID assignmentId);
+    /**
+     * Find lesson names by lesson IDs from the learning_content schema
+     */
+    @Query(value = """
+            SELECT l.id, l.title
+            FROM learning_content.lessons l
+            WHERE l.id IN (:lessonIds)
+            """, nativeQuery = true)
+    List<Object[]> findLessonNamesByIds(@Param("lessonIds") List<UUID> lessonIds);
+
 }

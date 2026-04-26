@@ -19,7 +19,7 @@ Nếu vocab nguồn có "X ~" → thay bằng danh từ cụ thể (VD: "この 
 Trả về {"items": [...]}. Cấu trúc mỗi phần tử:
 - "itemType"       : tên dạng câu hỏi — PHẢI khớp đúng dạng được yêu cầu
 - "question"       : câu hỏi bằng tiếng Việt hoặc tiếng Nhật, KHÔNG rỗng
-- "questionJapanese": câu tiếng Nhật nếu cần, ngược lại null
+- "questionJapanese": câu tiếng Nhật thuần (kanji + kana, không brackets/furigana) nếu cần, ngược lại null. Server tự sinh furigana từ trường này.
 - "options"        : xem ràng buộc số lượng bên trên; key BẮT BUỘC là "text" (KHÔNG "token"/"word")
 - "pairs"          : chỉ MATCHING, null cho dạng khác
 - "correctAnswer"  : đáp án đúng dạng string (null nếu MATCHING)

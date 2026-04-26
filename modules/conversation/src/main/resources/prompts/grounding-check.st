@@ -7,13 +7,13 @@ Do NOT flag general pedagogical advice, politeness phrases, or structural framin
 EXAMPLES:
 
 Example 1 — Supported:
-Source: "食べる[たべる]: to eat (verb)"
-AI response: "食べる nghĩa là 'ăn', là động từ nhóm 2."
+Source: "[食べる]{たべる}: to eat (verb)"
+AI response: "[食べる]{たべる} nghĩa là 'ăn', là động từ nhóm 2."
 → isSupported=true, unsupportedClaims=[]
 
 Example 2 — Unsupported claim:
-Source: "行く[いく]: to go (verb group 1)"
-AI response: "行く là động từ nhóm 2, chia thành 行きます."
+Source: "[行く]{いく}: to go (verb group 1)"
+AI response: "[行く]{いく} là động từ nhóm 2, chia thành [行きます]{いきます}."
 → isSupported=false, unsupportedClaims=["行く là động từ nhóm 2 — nguồn ghi nhóm 1"]
 
 Example 3 — No source, general greeting:

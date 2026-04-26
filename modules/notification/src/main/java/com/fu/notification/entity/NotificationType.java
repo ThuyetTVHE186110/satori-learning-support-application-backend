@@ -10,8 +10,6 @@ public enum NotificationType {
     DAILY_REMINDER,
     STREAK_ALERT,
     LESSON_COMPLETE,
-    ACHIEVEMENT_UNLOCKED,
-    LEARNING_GOAL_REACHED,
 
     // ── Assignment Notifications ──────────────────────────────────────────────
     ASSIGNMENT_CREATED,
