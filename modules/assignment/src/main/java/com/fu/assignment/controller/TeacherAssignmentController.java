@@ -254,6 +254,7 @@ public class TeacherAssignmentController {
             @RequestParam(required = false) String title,
             @RequestParam(required = false) com.fu.assignment.entity.AssignmentStatus status,
             @RequestParam(required = false) AssignmentType type,
+            @RequestParam(required = false) UUID lessonId,
             @AuthenticationPrincipal UserDetails userDetails) {
         if (size <= 0) {
             throw new BusinessException("INVALID_PAGE_SIZE", "Kích thước trang phải lớn hơn 0.");
@@ -261,7 +262,7 @@ public class TeacherAssignmentController {
         if (page <= 0) {
             throw new BusinessException("INVALID_PAGE_NUMBER", "Số trang phải lớn hơn hoặc bằng 1.");
         }
-        Page<AssignmentSummaryResponse> result = assignmentService.getMyAssignments(getUserId(userDetails), title, status, type, PageRequest.of(page - 1, size));
+        Page<AssignmentSummaryResponse> result = assignmentService.getMyAssignments(getUserId(userDetails), title, status, type, lessonId, PageRequest.of(page - 1, size));
         return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages()));
     }
 
@@ -282,6 +283,7 @@ public class TeacherAssignmentController {
             @RequestParam(required = false) String title,
             @RequestParam(required = false) com.fu.assignment.entity.AssignmentStatus status,
             @RequestParam(required = false) AssignmentType type,
+            @RequestParam(required = false) UUID lessonId,
             @AuthenticationPrincipal UserDetails userDetails) {
         if (size <= 0) {
             throw new BusinessException("INVALID_PAGE_SIZE", "Kích thước trang phải lớn hơn 0.");
@@ -289,7 +291,7 @@ public class TeacherAssignmentController {
         if (page <= 0) {
             throw new BusinessException("INVALID_PAGE_NUMBER", "Số trang phải lớn hơn hoặc bằng 1.");
         }
-        Page<AssignmentSummaryResponse> result = assignmentService.getAssignmentsByClass(classId, title, status, type, PageRequest.of(page - 1, size, Sort.by("createdAt").descending()), getUserId(userDetails));
+        Page<AssignmentSummaryResponse> result = assignmentService.getAssignmentsByClass(classId, title, status, type, lessonId, PageRequest.of(page - 1, size, Sort.by("createdAt").descending()), getUserId(userDetails));
         return ApiResponse.success(PageResponse.of(result.getContent(), result.getNumber() + 1, result.getSize(), result.getTotalElements(), result.getTotalPages()));
     }
 

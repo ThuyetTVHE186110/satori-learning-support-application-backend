@@ -56,6 +56,13 @@ public class AssignmentSpecification {
         };
     }
 
+    public static Specification<Assignment> withLessonId(UUID lessonId) {
+        return (root, query, cb) -> {
+            if (lessonId == null) return null;
+            return cb.equal(root.get("lessonId"), lessonId);
+        };
+    }
+
     public static Specification<Assignment> isNotDeleted() {
         return (root, query, cb) -> cb.isNull(root.get("deletedAt"));
     }

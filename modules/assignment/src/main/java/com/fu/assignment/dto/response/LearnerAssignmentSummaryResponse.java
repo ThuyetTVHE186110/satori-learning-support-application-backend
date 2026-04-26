@@ -25,4 +25,7 @@ public class LearnerAssignmentSummaryResponse {
     private LocalDateTime createdAt;
     private SubmissionStatus learnerSubmissionStatus;
     private UUID learnerSubmissionId;
+    
+    private UUID lessonId;
+    private String lessonName;
 }

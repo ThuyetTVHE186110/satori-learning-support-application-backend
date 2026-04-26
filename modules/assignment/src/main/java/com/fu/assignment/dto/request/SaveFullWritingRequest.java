@@ -11,6 +11,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 /**
  * Unified request DTO for creating or updating a full WRITING or TRANSLATION assignment.
@@ -34,6 +35,13 @@ public class SaveFullWritingRequest implements AssignmentMetadataRequest {
     @NotNull(message = "Due date is required")
     @Future(message = "Due date must be in the future")
     private LocalDateTime dueDate;
+
+    /**
+     * Reference to lesson for this assignment (required at creation).
+     * Associates the writing assignment with specific lesson content.
+     */
+    @NotNull(message = "Lesson is required")
+    private UUID lessonId;
 
     /**
      * Target status. Use DRAFT for "Ủu bản nháp", PUBLISHED for "Xác nhận giao bài", CLOSED to close.

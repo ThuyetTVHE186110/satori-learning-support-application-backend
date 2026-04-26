@@ -59,6 +59,5 @@ public class AiQuizGenerationRequest {
      * If provided, these lessons will be used for context (Vocabulary/Grammar).
      */
     @NotNull(message = "Danh sách bài học không được để trống")
-    @NotEmpty(message = "Danh sách bài học không được để trống")
-    private List<UUID> lessonIds;
+    private UUID lessonId;
 }

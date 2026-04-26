@@ -104,5 +104,38 @@ public abstract class AssignmentMapper {
         }
     }
 
+    /**
+     * Enrich assignment responses with lesson name.
+     * This method is called after mapping to populate lessonName from lessonId.
+     * The actual lesson name fetching is done in the service layer via AssignmentServiceImpl.
+     */
+    public AssignmentResponse enrichWithLessonName(AssignmentResponse response, String lessonName) {
+        if (response != null) {
+            response.setLessonName(lessonName);
+        }
+        return response;
+    }
+
+    public AssignmentSummaryResponse enrichSummaryWithLessonName(AssignmentSummaryResponse response, String lessonName) {
+        if (response != null) {
+            response.setLessonName(lessonName);
+        }
+        return response;
+    }
+
+    public LearnerAssignmentSummaryResponse enrichLearnerSummaryWithLessonName(LearnerAssignmentSummaryResponse response, String lessonName) {
+        if (response != null) {
+            response.setLessonName(lessonName);
+        }
+        return response;
+    }
+
+    public LearnerAssignmentResponse enrichLearnerResponseWithLessonName(LearnerAssignmentResponse response, String lessonName) {
+        if (response != null) {
+            response.setLessonName(lessonName);
+        }
+        return response;
+    }
+
 
 }
