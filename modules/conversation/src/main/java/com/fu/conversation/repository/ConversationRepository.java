@@ -203,4 +203,92 @@ public interface ConversationRepository extends JpaRepository<Conversation, UUID
             @Param("topicId") UUID topicId,
             @Param("jlptLevel") String jlptLevel,
             @Param("status") String status);
+
+    @Query(value = "SELECT * FROM speaking.conversations " +
+            "WHERE topic_id = :topicId " +
+            "  AND deleted_at IS NULL " +
+            "  AND (LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "       LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "       LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+            "ORDER BY order_index ASC",
+            countQuery = "SELECT COUNT(*) FROM speaking.conversations " +
+                    "WHERE topic_id = :topicId " +
+                    "  AND deleted_at IS NULL " +
+                    "  AND (LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "       LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "       LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%')))",
+            nativeQuery = true)
+    Page<Conversation> findByTopicIdAndKeywordAndDeletedAtIsNull(
+            @Param("topicId") UUID topicId,
+            @Param("keyword") String keyword,
+            Pageable pageable);
+
+    @Query(value = "SELECT * FROM speaking.conversations " +
+            "WHERE topic_id = :topicId " +
+            "  AND jlpt_level = CAST(:jlptLevel AS jlpt_level) " +
+            "  AND deleted_at IS NULL " +
+            "  AND (LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "       LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "       LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+            "ORDER BY order_index ASC",
+            countQuery = "SELECT COUNT(*) FROM speaking.conversations " +
+                    "WHERE topic_id = :topicId " +
+                    "  AND jlpt_level = CAST(:jlptLevel AS jlpt_level) " +
+                    "  AND deleted_at IS NULL " +
+                    "  AND (LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "       LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "       LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%')))",
+            nativeQuery = true)
+    Page<Conversation> findByTopicIdAndKeywordAndJlptLevelAndDeletedAtIsNull(
+            @Param("topicId") UUID topicId,
+            @Param("keyword") String keyword,
+            @Param("jlptLevel") String jlptLevel,
+            Pageable pageable);
+
+    @Query(value = "SELECT * FROM speaking.conversations " +
+            "WHERE topic_id = :topicId " +
+            "  AND status = CAST(:status AS content_status) " +
+            "  AND deleted_at IS NULL " +
+            "  AND (LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "       LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "       LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+            "ORDER BY order_index ASC",
+            countQuery = "SELECT COUNT(*) FROM speaking.conversations " +
+                    "WHERE topic_id = :topicId " +
+                    "  AND status = CAST(:status AS content_status) " +
+                    "  AND deleted_at IS NULL " +
+                    "  AND (LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "       LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "       LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%')))",
+            nativeQuery = true)
+    Page<Conversation> findByTopicIdAndKeywordAndStatusAndDeletedAtIsNull(
+            @Param("topicId") UUID topicId,
+            @Param("keyword") String keyword,
+            @Param("status") String status,
+            Pageable pageable);
+
+    @Query(value = "SELECT * FROM speaking.conversations " +
+            "WHERE topic_id = :topicId " +
+            "  AND jlpt_level = CAST(:jlptLevel AS jlpt_level) " +
+            "  AND status = CAST(:status AS content_status) " +
+            "  AND deleted_at IS NULL " +
+            "  AND (LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "       LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "       LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+            "ORDER BY order_index ASC",
+            countQuery = "SELECT COUNT(*) FROM speaking.conversations " +
+                    "WHERE topic_id = :topicId " +
+                    "  AND jlpt_level = CAST(:jlptLevel AS jlpt_level) " +
+                    "  AND status = CAST(:status AS content_status) " +
+                    "  AND deleted_at IS NULL " +
+                    "  AND (LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "       LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "       LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%')))",
+            nativeQuery = true)
+    Page<Conversation> findByTopicIdAndKeywordAndJlptLevelAndStatusAndDeletedAtIsNull(
+            @Param("topicId") UUID topicId,
+            @Param("keyword") String keyword,
+            @Param("jlptLevel") String jlptLevel,
+            @Param("status") String status,
+            Pageable pageable);
 }
