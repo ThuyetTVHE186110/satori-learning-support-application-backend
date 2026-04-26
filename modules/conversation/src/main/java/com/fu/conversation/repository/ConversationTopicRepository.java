@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -79,4 +80,13 @@ public interface ConversationTopicRepository extends JpaRepository<ConversationT
             @Param("keyword") String keyword,
             @Param("jlptLevel") String jlptLevel,
             Pageable pageable);
+
+    /**
+     * Case-insensitive lookup of an active topic by exact title.
+     * Used as a pre-check on create/update to surface a friendly BusinessException
+     * instead of letting the unique index throw a raw constraint violation.
+     */
+    @Query("SELECT t FROM ConversationTopic t " +
+           "WHERE LOWER(t.title) = LOWER(:title) AND t.deletedAt IS NULL")
+    Optional<ConversationTopic> findActiveByTitleIgnoreCase(@Param("title") String title);
 }

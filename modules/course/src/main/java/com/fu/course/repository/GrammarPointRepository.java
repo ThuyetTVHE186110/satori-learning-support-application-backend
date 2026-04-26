@@ -103,6 +103,6 @@ public interface GrammarPointRepository extends JpaRepository<GrammarPoint, UUID
             "WHERE l.course.id = :courseId " +
             "  AND g.deletedAt IS NULL " +
             "  AND l.deletedAt IS NULL " +
-            "  AND l.status = com.fu.course.entity.Lesson.ContentStatus.PUBLISHED")
+            "  AND l.status = 'PUBLISHED'")
     List<UUID> findIdsByCourseIdAndPublished(@Param("courseId") UUID courseId);
 }

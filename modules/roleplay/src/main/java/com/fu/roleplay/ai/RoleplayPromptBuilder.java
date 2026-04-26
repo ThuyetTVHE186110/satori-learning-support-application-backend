@@ -154,7 +154,10 @@ public class RoleplayPromptBuilder {
         sb.append("  },\n");
         sb.append("  {\n");
         sb.append("    \"type\": \"DIALOGUE\",\n");
-        sb.append("    \"japanese_content\": \"(Your FIRST in-character line as ").append(aiRole).append(". Speak naturally for your role. Plain Japanese only — no brackets or furigana.)\",\n");
+        sb.append("    \"japanese_content\": \"(Your FIRST in-character line as ").append(aiRole)
+                .append(". This is what YOU say first to ").append(learnerRole)
+                .append(" — a greeting, question, or natural opener for ").append(aiRole)
+                .append(". DO NOT say the learner's line, even if it appears in their tasks. Plain Japanese only — no brackets or furigana.)\",\n");
         sb.append("    \"translation\": \"(Vietnamese translation of YOUR line above — what YOU said as ").append(aiRole).append(")\",\n");
         sb.append("    \"romaji\": \"(romaji)\",\n");
         sb.append("    \"voice\": \"(chosen ja-JP Neural voice, kept constant for the rest of the session)\",\n");
@@ -162,6 +165,13 @@ public class RoleplayPromptBuilder {
         sb.append("    \"corrections\": []\n");
         sb.append("  }\n");
         sb.append("]\n\n");
+        sb.append("### Opening DIALOGUE — anti-mistakes:\n");
+        sb.append("- WRONG: emitting a sentence from the learner's task list as your opening line.\n");
+        sb.append("  e.g. learner task = \"ask for the bill\" → DO NOT open with お会計をお願いします.\n");
+        sb.append("- WRONG: speaking on behalf of ").append(learnerRole).append(" (\"As a customer, I would say...\").\n");
+        sb.append("- RIGHT: open with what ").append(aiRole).append(" naturally says first in this scenario\n");
+        sb.append("  (e.g. shopkeeper → いらっしゃいませ; interviewer → 自己紹介をお願いします;\n");
+        sb.append("   teacher → 今日はどうしましたか). Then wait for ").append(learnerRole).append(" to respond.\n\n");
 
         sb.append("### Regular RESPONSES — return 1-2 DIALOGUE segments:\n");
         sb.append("[\n");

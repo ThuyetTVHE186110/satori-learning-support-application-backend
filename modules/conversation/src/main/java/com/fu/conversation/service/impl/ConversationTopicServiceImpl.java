@@ -52,6 +52,7 @@ public class ConversationTopicServiceImpl implements ConversationTopicService {
     @Override
     @Transactional
     public ConversationTopicResponse createTopic(CreateTopicRequest request, UUID managerId) {
+        assertTitleAvailable(request.getTitle(), null);
         ConversationTopic topic = topicMapper.toEntity(request);
         topic.setCreatedBy(managerId);
         topic.setUpdatedBy(managerId);
@@ -66,9 +67,28 @@ public class ConversationTopicServiceImpl implements ConversationTopicService {
             throw new BusinessException("VALIDATION_ERROR", "Title must not be blank");
         }
         ConversationTopic topic = findActiveTopic(id);
+        if (request.getTitle() != null && !request.getTitle().equalsIgnoreCase(topic.getTitle())) {
+            assertTitleAvailable(request.getTitle(), id);
+        }
         topicMapper.updateEntity(topic, request);
         topic.setUpdatedBy(managerId);
         return buildTopicResponse(topicRepository.save(topic));
+    }
+
+    /**
+     * Pre-check unique title (case-insensitive, ignoring soft-deleted rows) so users
+     * see a friendly BusinessException instead of a raw unique-index violation.
+     * The DB index {@code uq_conversation_topics_title_active} is the source of truth
+     * — this check is best-effort and a concurrent insert can still trip the index.
+     */
+    private void assertTitleAvailable(String title, UUID excludeId) {
+        if (title == null || title.isBlank()) return;
+        topicRepository.findActiveByTitleIgnoreCase(title.trim()).ifPresent(existing -> {
+            if (excludeId == null || !existing.getId().equals(excludeId)) {
+                throw new BusinessException("DUPLICATE_TITLE",
+                        "Đã tồn tại chủ đề với tiêu đề này");
+            }
+        });
     }
 
     @Override

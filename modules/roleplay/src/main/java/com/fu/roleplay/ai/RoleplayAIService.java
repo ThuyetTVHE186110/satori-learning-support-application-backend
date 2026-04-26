@@ -114,7 +114,15 @@ public class RoleplayAIService {
             String rawResponse = chatClient.prompt()
                     .options(OpenAiChatOptions.builder().model(roleplayProperties.getModelName()).build())
                     .system(systemPrompt)
-                    .user("Start the roleplay conversation. Return the opening JSON array with MISSION_INTRO, SCENE_INTRO, and first DIALOGUE segments as specified in your instructions.")
+                    .user("""
+                            Open the roleplay. Return the JSON array with MISSION_INTRO + SCENE_INTRO + DIALOGUE per the format in your instructions.
+
+                            For the DIALOGUE segment:
+                            - Speak as YOUR character (the role assigned to you in YOUR IDENTITY).
+                            - Your line is what YOU say first to the learner — a greeting, question, or natural opener for your role.
+                            - DO NOT emit a sentence from the learner's task list. Those are the LEARNER's lines, not yours.
+                            - DO NOT speak on behalf of the learner.
+                            """)
                     .call()
                     .content();
 
