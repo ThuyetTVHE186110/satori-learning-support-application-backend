@@ -13,6 +13,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Unified request DTO for creating or updating a full QUIZ assignment.
@@ -36,6 +37,13 @@ public class SaveFullQuizRequest implements AssignmentMetadataRequest {
     @NotNull(message = "Due date is required")
     @Future(message = "Hạn nộp phải là một thời điểm trong tương lai (sau thời điểm hiện tại).")
     private LocalDateTime dueDate;
+
+    /**
+     * Reference to lesson for this assignment (required at creation).
+     * Associates the quiz with specific lesson content.
+     */
+    @NotNull(message = "Lesson is required")
+    private UUID lessonId;
 
     /** 
      * Target status for the assignment.

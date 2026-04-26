@@ -59,7 +59,7 @@ public interface AssignmentService {
 
     AssignmentResponse getAssignment(UUID assignmentId, UUID teacherId);
 
-    Page<AssignmentSummaryResponse> getAssignmentsByClass(UUID classId, String title, com.fu.assignment.entity.AssignmentStatus status, AssignmentType type, Pageable pageable, UUID teacherId);
+    Page<AssignmentSummaryResponse> getAssignmentsByClass(UUID classId, String title, com.fu.assignment.entity.AssignmentStatus status, AssignmentType type, UUID lessonId, Pageable pageable, UUID teacherId);
 
     ClassAssignmentStatisticsResponse getClassAssignmentStatistics(UUID classId, UUID teacherId);
 
@@ -72,7 +72,7 @@ public interface AssignmentService {
             UUID classId,
             UUID teacherId);
 
-    Page<AssignmentSummaryResponse> getMyAssignments(UUID teacherId, String title, com.fu.assignment.entity.AssignmentStatus status, AssignmentType type, Pageable pageable);
+    Page<AssignmentSummaryResponse> getMyAssignments(UUID teacherId, String title, com.fu.assignment.entity.AssignmentStatus status, AssignmentType type, UUID lessonId, Pageable pageable);
 
 
 
@@ -130,7 +130,8 @@ public interface AssignmentService {
             UUID classId, 
             String title, 
             AssignmentType type, 
-            SubmissionStatus status, 
+            SubmissionStatus status,
+            UUID lessonId,
             Pageable pageable);
 
 

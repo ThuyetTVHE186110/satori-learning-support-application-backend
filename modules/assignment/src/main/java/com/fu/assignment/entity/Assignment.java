@@ -27,7 +27,8 @@ import org.hibernate.dialect.PostgreSQLEnumJdbcType;
         @Index(name = "idx_assignments_status", columnList = "status"),
         @Index(name = "idx_assignments_class_id", columnList = "class_id"),
         @Index(name = "idx_assignments_created_by", columnList = "created_by"),
-        @Index(name = "idx_assignments_due_date", columnList = "due_date")
+        @Index(name = "idx_assignments_due_date", columnList = "due_date"),
+        @Index(name = "idx_assignments_lesson_id", columnList = "lesson_id")
 })
 @Getter
 @Setter
@@ -60,6 +61,13 @@ public class Assignment extends SoftDeletableEntity {
      */
     @Column(name = "class_id")
     private UUID classId;
+
+    /**
+     * Optional reference to a lesson from the course module.
+     * Allows teachers to link assignments to specific lesson content.
+     */
+    @Column(name = "lesson_id")
+    private UUID lessonId;
 
     // ── Timing ────────────────────────────────────────────────────────────────
 
