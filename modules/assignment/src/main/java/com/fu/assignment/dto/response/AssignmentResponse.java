@@ -49,4 +49,7 @@ public class AssignmentResponse {
 
     private UUID classId;
     private String className;
+
+    private UUID lessonId;
+    private String lessonName;
 }

@@ -115,7 +115,7 @@ public class QuizAiGenerationService {
      * then confirms via the saveFullQuiz endpoint.
      */
     public List<QuizQuestionResponse> generateQuestions(AiQuizGenerationRequest request) {
-        if (request.getLessonIds() == null || request.getLessonIds().isEmpty()) {
+        if (request.getLessonId() == null) {
             throw new BusinessException("MISSING_LESSONS", "Vui lòng chọn ít nhất 1 bài học để tạo câu hỏi.");
         }
         List<AiQuizQuestionDto> aiDtos = callAi(request);
@@ -128,27 +128,27 @@ public class QuizAiGenerationService {
 
     private List<AiQuizQuestionDto> callAi(AiQuizGenerationRequest request) {
         int totalCount = request.getQuestionCount();
-        
+
         // 1. Distribute questions into batches
         List<Integer> batchSizes = distributeByBatch(totalCount);
         log.info("Batching {} questions into {} batches: {}", totalCount, batchSizes.size(), batchSizes);
-        
+
         // 2. Create parallel tasks for each batch
         List<CompletableFuture<List<AiQuizQuestionDto>>> futures = new ArrayList<>();
         for (int i = 0; i < batchSizes.size(); i++) {
             int count = batchSizes.get(i);
             int batchNumber = i + 1;
             futures.add(
-                CompletableFuture.supplyAsync(() ->
-                    callAiBatchWithRetry(count, batchNumber, request),
-                    quizBatchExecutor
-                )
+                    CompletableFuture.supplyAsync(() ->
+                                    callAiBatchWithRetry(count, batchNumber, request),
+                            quizBatchExecutor
+                    )
             );
         }
-        
+
         // 3. Wait for all batches to complete
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        
+
         // 4. Merge results maintaining order
         List<AiQuizQuestionDto> allDtos = new ArrayList<>();
         int batchNum = 1;
@@ -162,11 +162,11 @@ public class QuizAiGenerationService {
                 // Continue with other batches even if one fails
             }
         }
-        
+
         if (allDtos.isEmpty()) {
             throw new BusinessException("AI_EMPTY_RESPONSE", "AI không thể sinh được câu hỏi hợp lệ từ bất kỳ batch nào.");
         }
-        
+
         return allDtos;
     }
 
@@ -319,13 +319,13 @@ public class QuizAiGenerationService {
     private List<Integer> distributeByBatch(int totalCount) {
         List<Integer> batches = new ArrayList<>();
         int batchSize = 5;  // Max questions per call
-        
+
         while (totalCount > 0) {
             int current = Math.min(batchSize, totalCount);
             batches.add(current);
             totalCount -= current;
         }
-        
+
         return batches;
     }
 
@@ -337,12 +337,12 @@ public class QuizAiGenerationService {
                                                          AiQuizGenerationRequest request) {
         // Create a modified request with the batch count
         AiQuizGenerationRequest batchRequest = new AiQuizGenerationRequest(
-            request.getTeacherPrompt(),
-            request.getClassId(),
-            count,  // Use batch count instead of total count
-            request.getQuestionTypes(),
-            request.getJlptLevel(),
-            request.getLessonIds()
+                request.getTeacherPrompt(),
+                request.getClassId(),
+                count,  // Use batch count instead of total count
+                request.getQuestionTypes(),
+                request.getJlptLevel(),
+                request.getLessonId()
         );
 
         // 1. First Attempt: Full contextual prompt (Lesson Content + RAG Context)
@@ -471,8 +471,8 @@ public class QuizAiGenerationService {
     // ═══════════════════════════════════════════════════════════════════════════
     private String extractContextForPrompt(AiQuizGenerationRequest request, boolean includeRag) {
 
-        List<UUID> lessonIds = request.getLessonIds();
-        if (lessonIds == null || lessonIds.isEmpty()) {
+        UUID lessonIds = request.getLessonId();
+        if (lessonIds == null) {
             return null;
         }
 
@@ -485,29 +485,20 @@ public class QuizAiGenerationService {
         UUID courseId = clazz.getCourseId();
 
         // 2. Fetch lesson metadata for context
-        List<Lesson> targetLessons = lessonRepository.findAllById(lessonIds);
-        if (targetLessons.isEmpty()) {
+        Lesson targetLessons = lessonRepository.findById(lessonIds).orElse(null);
+        if (targetLessons == null) {
             log.warn("No matching lessons found for IDs: {}", lessonIds);
             return null;
         }
 
         StringBuilder ctx = new StringBuilder();
         ctx.append("Selected Source Lessons: ");
-        for (int i = 0; i < targetLessons.size(); i++) {
-            ctx.append(targetLessons.get(i).getTitle());
-            if (i < targetLessons.size() - 1) ctx.append(", ");
-        }
+        ctx.append(targetLessons.getTitle());
         ctx.append("\n\n");
 
         // 3. Aggregate Vocabulary and Grammar
-        List<Vocabulary> allVocab = new ArrayList<>();
-        List<GrammarPoint> allGrammar = new ArrayList<>();
-
-        for (UUID lessonId : lessonIds) {
-            allVocab.addAll(vocabularyRepository.findByLessonId(lessonId));
-            allGrammar.addAll(grammarPointRepository.findByLessonId(lessonId));
-        }
-
+        List<Vocabulary> allVocab = new ArrayList<>(vocabularyRepository.findByLessonId(lessonIds));
+        List<GrammarPoint> allGrammar = new ArrayList<>(grammarPointRepository.findByLessonId(lessonIds));
         if (allVocab.isEmpty() && allGrammar.isEmpty()) {
             throw new BusinessException("EMPTY_LESSON_CONTENT", "Bài học đã chọn không có từ vựng hoặc ngữ pháp. Không thể sinh câu hỏi từ bài học trống.");
         }
@@ -537,13 +528,8 @@ public class QuizAiGenerationService {
         if (includeRag) {
             try {
                 // If 1 lesson -> filter precisely. If > 1 lesson -> search course-wide (lessonId = null)
-                UUID filterLessonId = (lessonIds.size() == 1) ? lessonIds.get(0) : null;
                 ChatbotFilter filter = null;
-                if (filterLessonId != null) {
-                    filter = ChatbotFilter.forPractice(courseId, filterLessonId);
-                } else
-                    filter = ChatbotFilter.byCourse(courseId);
-
+                filter = ChatbotFilter.forPractice(courseId, lessonIds);
                 RagContext rag = embeddingService.retrieveContext(contentSummary.toString(), filter);
                 if (rag.hasContext()) {
                     ctx.append("--- SUPPLEMENTARY CONTEXT (for distractors) ---\n");
