@@ -112,6 +112,6 @@ public interface VocabularyRepository extends JpaRepository<Vocabulary, UUID> {
             "WHERE l.course.id = :courseId " +
             "  AND v.deletedAt IS NULL " +
             "  AND l.deletedAt IS NULL " +
-            "  AND l.status = com.fu.course.entity.Lesson.ContentStatus.PUBLISHED")
+            "  AND l.status = 'PUBLISHED'")
     List<UUID> findIdsByCourseIdAndPublished(@Param("courseId") UUID courseId);
 }

@@ -236,8 +236,14 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         }
         roleplayAIService.cacheSystemPrompt(session.getId(), systemPrompt);
 
-        // 7. Generate AI opening (returns JSON array: MISSION_INTRO + SCENE_INTRO + DIALOGUE)
-        String aiResponseJson = roleplayAIService.generateOpeningMessage(systemPrompt);
+        // 7. Generate AI opening (returns JSON array: MISSION_INTRO + SCENE_INTRO + DIALOGUE).
+        // Pass roles + scenario so the fallback (when OpenAI fails) can emit a context-aware
+        // notice instead of the old hardcoded shopkeeper line.
+        String aiResponseJson = roleplayAIService.generateOpeningMessage(
+                systemPrompt,
+                conversation.getAiRole(),
+                conversation.getLearnerRole(),
+                conversation.getScenario());
 
         // 8. Parse and save all opening message segments (TTS runs synchronously inside)
         AiMessagesResult opening = parseAndSaveAIMessages(session.getId(), aiResponseJson, 1);
