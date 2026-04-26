@@ -70,7 +70,8 @@ public class LearnerConversationController {
     // ==================== Browse Published Conversations ====================
 
     /**
-     * Get published conversations for a topic (enriched with learner's practice history).
+     * Get published conversations for a topic (enriched with learner's practice history),
+     * filtered by the learner's enrolled course's JLPT level.
      * GET /api/v1/learner/conversation/topics/{topicId}/conversations
      */
     @GetMapping("/topics/{topicId}/conversations")
@@ -79,7 +80,7 @@ public class LearnerConversationController {
             @AuthenticationPrincipal(expression = "id") UUID userId) {
 
         List<ConversationSummaryResponse> conversations =
-                conversationService.getPublishedConversationsByTopic(topicId, userId);
+                conversationService.getPublishedConversationsByTopicAndUserJlptLevel(topicId, userId);
         return ResponseEntity.ok(ApiResponse.success(conversations));
     }
 

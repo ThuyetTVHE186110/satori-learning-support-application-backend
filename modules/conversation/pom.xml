@@ -26,6 +26,10 @@
             <groupId>com.fu</groupId>
             <artifactId>course</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.fu</groupId>
+            <artifactId>class</artifactId>
+        </dependency>
         <!-- Để dùng EmbeddingService + ChatbotFilter + RagContext cho chatbot RAG -->
         <dependency>
             <groupId>com.fu</groupId>
