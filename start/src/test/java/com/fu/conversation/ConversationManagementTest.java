@@ -3,7 +3,6 @@ package com.fu.conversation;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.conversation.dto.request.CreateConversationRequest;
 import com.fu.conversation.dto.request.UpdateConversationRequest;
-import com.fu.conversation.dto.request.UpdateMissionRequest;
 import com.fu.conversation.entity.Conversation;
 import com.fu.conversation.entity.ConversationTopic;
 import com.fu.conversation.entity.ConversationMission;
@@ -452,6 +451,9 @@ class ConversationManagementTest {
                     .difficultyScore(5)
                     .vocabularyHints("[\"予約\", \"テーブル\", \"人数\"]")
                     .grammarPoints("[\"〜ください\", \"〜たいです\"]")
+                    .missions(List.of(CreateConversationRequest.InlineMissionRequest.builder()
+                            .title("Test Mission")
+                            .build()))
                     .build());
 
             // ─ Act: Create conversation
@@ -635,6 +637,9 @@ class ConversationManagementTest {
                     .aiRole("AI")
                     .learnerRole("Learner")
                     .scenario("Test")
+                    .missions(List.of(CreateConversationRequest.InlineMissionRequest.builder()
+                            .title("Test Mission")
+                            .build()))
                     .build());
 
             // ─ Act
@@ -702,6 +707,9 @@ class ConversationManagementTest {
                     .aiRole("AI")
                     .learnerRole("Learner")
                     .scenario("Test")
+                    .missions(List.of(CreateConversationRequest.InlineMissionRequest.builder()
+                            .title("Test Mission")
+                            .build()))
                     .build());
 
             // ─ Act
@@ -1204,6 +1212,10 @@ class ConversationManagementTest {
                     .title("New Conversation")
                     .aiRole("AI")
                     .learnerRole("Learner")
+                    .scenario("Test")
+                    .missions(List.of(CreateConversationRequest.InlineMissionRequest.builder()
+                            .title("Test Mission")
+                            .build()))
                     .build());
 
             MvcResult createResult = mockMvc.perform(post("/api/v1/manager/conversation/conversations")
@@ -1427,6 +1439,10 @@ class ConversationManagementTest {
                                     .title("New")
                                     .aiRole("AI")
                                     .learnerRole("Learner")
+                                    .scenario("Test")
+                                    .missions(List.of(CreateConversationRequest.InlineMissionRequest.builder()
+                                            .title("Test Mission")
+                                            .build()))
                                     .build())))
                     .andExpect(status().isCreated());
         }
@@ -1453,6 +1469,10 @@ class ConversationManagementTest {
                                     .title("Unauthorized")
                                     .aiRole("AI")
                                     .learnerRole("Learner")
+                                    .scenario("Test")
+                                    .missions(List.of(CreateConversationRequest.InlineMissionRequest.builder()
+                                            .title("Test Mission")
+                                            .build()))
                                     .build())))
                     .andExpect(status().isForbidden());
         }

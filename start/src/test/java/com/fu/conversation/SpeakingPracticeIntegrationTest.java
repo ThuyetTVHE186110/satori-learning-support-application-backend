@@ -743,7 +743,7 @@ class SpeakingPracticeIntegrationTest {
 
             when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(any()))
+            when(roleplayAIService.generateOpeningMessage(anyString(), anyString(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}," +
                             "{\"type\":\"SCENE_INTRO\",\"japanese_content\":\"Scene\",\"translation\":\"Scene\",\"romaji\":\"\"}," +
                             "{\"type\":\"DIALOGUE\",\"japanese_content\":\"Hello\",\"translation\":\"Hello\",\"romaji\":\"\"}]");
@@ -786,7 +786,7 @@ class SpeakingPracticeIntegrationTest {
 
             when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(any()))
+            when(roleplayAIService.generateOpeningMessage(anyString(), anyString(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
             when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("prompt");
             when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
@@ -923,7 +923,7 @@ class SpeakingPracticeIntegrationTest {
 
             when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(any()))
+            when(roleplayAIService.generateOpeningMessage(anyString(), anyString(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
 
             String startBody = String.format("{\"conversationId\":\"%s\"}", topic.getId());
@@ -1002,7 +1002,7 @@ class SpeakingPracticeIntegrationTest {
 
             when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(any()))
+            when(roleplayAIService.generateOpeningMessage(anyString(), anyString(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
 
             String body = String.format("{\"conversationId\":\"%s\"}", topic.getId());
@@ -1028,7 +1028,7 @@ class SpeakingPracticeIntegrationTest {
 
             when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(any()))
+            when(roleplayAIService.generateOpeningMessage(anyString(), anyString(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}," +
                             "{\"type\":\"SCENE_INTRO\",\"japanese_content\":\"Scene\",\"translation\":\"Scene\",\"romaji\":\"\"}]" );
 
@@ -1233,7 +1233,7 @@ class SpeakingPracticeIntegrationTest {
 
             when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(any()))
+            when(roleplayAIService.generateOpeningMessage(anyString(), anyString(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
             when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("prompt");
             when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
@@ -1469,7 +1469,7 @@ class SpeakingPracticeIntegrationTest {
 
             when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(any()))
+            when(roleplayAIService.generateOpeningMessage(anyString(), anyString(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"Hello\",\"translation\":\"Hello\",\"romaji\":\"\"}]");
 
             String body = String.format("{\"conversationId\":\"%s\"}", topic.getId());
@@ -1621,7 +1621,7 @@ class SpeakingPracticeIntegrationTest {
 
             when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(any()))
+            when(roleplayAIService.generateOpeningMessage(anyString(), anyString(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
             when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("prompt");
             when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
@@ -2066,7 +2066,7 @@ class SpeakingPracticeIntegrationTest {
 
              when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                      .thenReturn("prompt");
-             when(roleplayAIService.generateOpeningMessage(any()))
+             when(roleplayAIService.generateOpeningMessage(anyString(), anyString(), anyString(), anyString()))
                      .thenReturn("[]");
 
              String body = String.format("{\"conversationId\":\"%s\"}", topic.getId());
@@ -2589,7 +2589,7 @@ class SpeakingPracticeIntegrationTest {
                     .thenReturn("prompt");
 
             String fallbackJson = "[{\"type\":\"DIALOGUE\",\"japanese_content\":\"申し訳ありません、エラーが発生しました。\",\"translation\":\"Xin lỗi, đã có lỗi xảy ra.\",\"romaji\":\"Moushiwake arimasen, eraa ga hassei shimashita.\",\"corrections\":[]}]";
-            when(roleplayAIService.generateOpeningMessage(any())).thenReturn(fallbackJson);
+            when(roleplayAIService.generateOpeningMessage(anyString(), anyString(), anyString(), anyString())).thenReturn(fallbackJson);
 
             String body = String.format("{\"conversationId\":\"%s\"}", topic.getId());
 
@@ -2897,7 +2897,7 @@ class SpeakingPracticeIntegrationTest {
 
             when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
-            when(roleplayAIService.generateOpeningMessage(any())).thenReturn("[]");
+            when(roleplayAIService.generateOpeningMessage(anyString(), anyString(), anyString(), anyString())).thenReturn("[]");
 
             int threadCount = 2; // Bắn 2 request tạo session cùng lúc
             java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threadCount);

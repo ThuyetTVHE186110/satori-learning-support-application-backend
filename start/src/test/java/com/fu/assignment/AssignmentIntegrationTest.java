@@ -2983,7 +2983,7 @@ class AssignmentIntegrationTest {
                     .teacherPrompt("N5 verb conjugation")
                     .classId(clazz.getId())
                     .questionCount(1)
-                    .lessonIds(List.of(UUID.randomUUID()))
+                    .lessonId(UUID.randomUUID())
                     .questionTypes(List.of("multiple_choice"))
                     .build());
 
@@ -3157,7 +3157,7 @@ class AssignmentIntegrationTest {
                     .teacherPrompt("N5 vocab")
                     .classId(clazz.getId())
                     .questionCount(1)
-                    .lessonIds(List.of(UUID.randomUUID()))
+                    .lessonId(UUID.randomUUID())
                     .questionTypes(List.of("multiple_choice"))
                     .build());
 

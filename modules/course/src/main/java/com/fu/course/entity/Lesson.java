@@ -52,7 +52,6 @@ public class Lesson extends SoftDeletableEntity {
      * Flexible content structure stored as JSONB in PostgreSQL.
      * Structure varies by lesson type.
      */
-    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "content", columnDefinition = "jsonb")
     @ColumnTransformer(write = "CAST(? AS jsonb)")
     private String content;

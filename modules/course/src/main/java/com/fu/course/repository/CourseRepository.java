@@ -22,14 +22,9 @@ import java.util.UUID;
 public interface CourseRepository extends JpaRepository<Course, UUID>, JpaSpecificationExecutor<Course> {
 
     /**
-     * Find all non-deleted courses (list)
+     * Find all non-deleted courses
      */
     List<Course> findByDeletedAtIsNull();
-
-    /**
-     * Find all non-deleted courses (paginated)
-     */
-    Page<Course> findByDeletedAtIsNull(Pageable pageable);
 
     /**
      * Find course by ID (non-deleted)

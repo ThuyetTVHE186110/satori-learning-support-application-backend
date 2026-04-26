@@ -56,26 +56,6 @@
         </dependency>
 
         <!-- Test dependencies -->
-
-        <!-- user module: required for integration tests.
-             Must be compile scope (not test) because SecurityConfig (infrastructure)
-             injects JwtAuthenticationFilter + UserDetailsService beans defined in
-             the user module — these are needed when ApplicationContext starts. -->
-        <dependency>
-            <groupId>com.fu</groupId>
-            <artifactId>user</artifactId>
-        </dependency>
-
-        <!-- class module: required for integration tests only.
-             UserRepository.findEligibleLearnersForClass uses ClassMember entity (com.fu.clazz.entity)
-             in a JPQL subquery. Hibernate validates ALL queries on ApplicationContext startup,
-             so ClassMember must be on the classpath — even though conversation does not use it directly. -->
-        <dependency>
-            <groupId>com.fu</groupId>
-            <artifactId>class</artifactId>
-            <scope>test</scope>
-        </dependency>
-
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

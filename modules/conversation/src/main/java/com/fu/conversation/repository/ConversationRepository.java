@@ -72,6 +72,18 @@ public interface ConversationRepository extends JpaRepository<Conversation, UUID
     Page<Conversation> findByTopicIdAndStatusAndDeletedAtIsNull(
             @Param("topicId") UUID topicId, @Param("status") String status, Pageable pageable);
 
+    @Query(value = "SELECT * FROM speaking.conversations WHERE topic_id = :topicId AND deleted_at IS NULL AND (" +
+            "LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%')))",
+            countQuery = "SELECT COUNT(*) FROM speaking.conversations WHERE topic_id = :topicId AND deleted_at IS NULL AND (" +
+                    "LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%')))",
+            nativeQuery = true)
+    Page<Conversation> findByTopicIdAndKeywordAndDeletedAtIsNull(
+            @Param("topicId") UUID topicId, @Param("keyword") String keyword, Pageable pageable);
+
     @Query(
             value = "SELECT * FROM speaking.conversations " +
                     "WHERE topic_id = :topicId " +

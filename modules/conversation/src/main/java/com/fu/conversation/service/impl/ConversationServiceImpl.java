@@ -216,12 +216,15 @@ public class ConversationServiceImpl implements ConversationService {
 
     @Override
     public Page<ConversationSummaryResponse> getConversationsByTopic(
-            UUID topicId, Course.JlptLevel jlptLevel, Course.ContentStatus status, Pageable pageable) {
+            UUID topicId, String keyword, Course.JlptLevel jlptLevel, Course.ContentStatus status, Pageable pageable) {
 
         Pageable unsorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
 
         Page<Conversation> page;
-        if (jlptLevel != null && status != null) {
+        if (keyword != null && !keyword.isBlank()) {
+            page = conversationRepository.findByTopicIdAndKeywordAndDeletedAtIsNull(
+                    topicId, keyword.trim(), unsorted);
+        } else if (jlptLevel != null && status != null) {
             page = conversationRepository.findByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(
                     topicId, jlptLevel.name(), status.name(), unsorted);
         } else if (jlptLevel != null) {
