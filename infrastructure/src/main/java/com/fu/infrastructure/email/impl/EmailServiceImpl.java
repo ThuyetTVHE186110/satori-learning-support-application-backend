@@ -14,7 +14,6 @@ import org.thymeleaf.context.Context;
 
 import java.time.LocalDate;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Implementation of EmailService using Resend HTTP API.
@@ -40,10 +39,12 @@ public class EmailServiceImpl implements EmailService {
 
     // Resend free tier: 2 req/sec. Keep ≥600 ms between sends to stay safely under the limit.
     private static final long MIN_SEND_INTERVAL_MS = 600;
-    private final AtomicLong lastResendCallMs = new AtomicLong(0);
+    /** Guards lastResendCallMs read/sleep/write so two threads can't both pass the gate. */
+    private final Object resendLock = new Object();
+    private long lastResendCallMs = 0;
 
     @Override
-    @Async
+    @Async("mailExecutor")
     public void sendSimpleEmail(String to, String subject, String text) {
         if (!emailEnabled) {
             log.info("[EMAIL DISABLED] Would send to: {}, subject: {}", to, subject);
@@ -66,7 +67,7 @@ public class EmailServiceImpl implements EmailService {
     }
 
     @Override
-    @Async
+    @Async("mailExecutor")
     public void sendTemplateEmail(String to, String subject, String templateName, Map<String, Object> variables) {
         if (!emailEnabled) {
             log.info("[EMAIL DISABLED] Would send template '{}' to: {}, subject: {}", templateName, to, subject);
@@ -114,7 +115,7 @@ public class EmailServiceImpl implements EmailService {
     }
 
     @Override
-    @Async
+    @Async("mailExecutor")
     public void sendPasswordResetOtp(String to, String userName, String otp, int expirationMinutes) {
         String subject = "Mã OTP đặt lại mật khẩu - Satori Learning";
 
@@ -129,7 +130,7 @@ public class EmailServiceImpl implements EmailService {
     }
 
     @Override
-    @Async
+    @Async("mailExecutor")
     public void sendPasswordChangedNotification(String to, String userName) {
         String subject = "Mật khẩu đã được thay đổi - Satori Learning";
 
@@ -175,21 +176,34 @@ public class EmailServiceImpl implements EmailService {
 
     /**
      * Wraps every Resend API call with a minimum-interval guard.
-     * Resend allows 2 req/sec; sleeping ≥600 ms between sends keeps us safely under that limit
-     * regardless of how many async threads are dispatching emails concurrently.
+     * Resend allows 2 req/sec; sleeping ≥600 ms between sends keeps us under that limit.
+     *
+     * <p>The whole gate (compute wait → sleep → record timestamp → send) runs inside
+     * {@code resendLock}. Earlier code used an AtomicLong but read-then-sleep-then-write
+     * is not atomic — concurrent threads could both pass the gate before either updated
+     * the timestamp, then fire two sends back-to-back and trip Resend's limiter.
+     * Holding the lock across the {@code send()} ensures the next thread doesn't
+     * compute its wait against a stale timestamp from a still-in-flight call.</p>
+     *
+     * <p>Pairs with the single-thread {@code mailExecutor} bean — defense in depth in
+     * case a future caller invokes the bean from outside the executor.</p>
      */
     private void sendThrottled(CreateEmailOptions params) throws ResendException {
-        long now = System.currentTimeMillis();
-        long last = lastResendCallMs.get();
-        long wait = MIN_SEND_INTERVAL_MS - (now - last);
-        if (wait > 0) {
+        synchronized (resendLock) {
+            long wait = MIN_SEND_INTERVAL_MS - (System.currentTimeMillis() - lastResendCallMs);
+            if (wait > 0) {
+                try {
+                    Thread.sleep(wait);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
             try {
-                Thread.sleep(wait);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                resend.emails().send(params);
+            } finally {
+                lastResendCallMs = System.currentTimeMillis();
             }
         }
-        lastResendCallMs.set(System.currentTimeMillis());
-        resend.emails().send(params);
     }
 }
