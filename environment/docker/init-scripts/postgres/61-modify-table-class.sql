@@ -1,2 +1,2 @@
-ALTER table satori_learning.user_management.classes
+ALTER table user_management.classes
 ADD COLUMN expected_end_date DATE

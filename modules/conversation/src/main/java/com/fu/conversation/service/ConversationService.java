@@ -33,6 +33,13 @@ public interface ConversationService {
             Course.ContentStatus status,
             Pageable pageable);
 
+    Page<ConversationSummaryResponse> getConversationsByTopic(
+            UUID topicId,
+            String keyword,
+            Course.JlptLevel jlptLevel,
+            Course.ContentStatus status,
+            Pageable pageable);
+
     /**
      * Returns published conversations for a topic, enriched with the learner's practice history.
      *
