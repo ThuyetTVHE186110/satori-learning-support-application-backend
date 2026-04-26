@@ -241,6 +241,46 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     @Override
+    public Page<ConversationSummaryResponse> getConversationsByTopic(
+            UUID topicId, String keyword, Course.JlptLevel jlptLevel,
+            Course.ContentStatus status, Pageable pageable) {
+
+        Pageable unsorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
+
+        Page<Conversation> page;
+        if ((keyword == null || keyword.isBlank()) && jlptLevel == null && status == null) {
+            page = conversationRepository.findByTopicIdAndDeletedAtIsNull(topicId, unsorted);
+        } else if (keyword != null && !keyword.isBlank()) {
+            if (jlptLevel != null && status != null) {
+                page = conversationRepository.findByTopicIdAndKeywordAndJlptLevelAndStatusAndDeletedAtIsNull(
+                        topicId, keyword, jlptLevel.name(), status.name(), unsorted);
+            } else if (jlptLevel != null) {
+                page = conversationRepository.findByTopicIdAndKeywordAndJlptLevelAndDeletedAtIsNull(
+                        topicId, keyword, jlptLevel.name(), unsorted);
+            } else if (status != null) {
+                page = conversationRepository.findByTopicIdAndKeywordAndStatusAndDeletedAtIsNull(
+                        topicId, keyword, status.name(), unsorted);
+            } else {
+                page = conversationRepository.findByTopicIdAndKeywordAndDeletedAtIsNull(
+                        topicId, keyword, unsorted);
+            }
+        } else if (jlptLevel != null && status != null) {
+            page = conversationRepository.findByTopicIdAndJlptLevelAndStatusAndDeletedAtIsNull(
+                    topicId, jlptLevel.name(), status.name(), unsorted);
+        } else if (jlptLevel != null) {
+            page = conversationRepository.findByTopicIdAndJlptLevelAndDeletedAtIsNull(
+                    topicId, jlptLevel.name(), unsorted);
+        } else if (status != null) {
+            page = conversationRepository.findByTopicIdAndStatusAndDeletedAtIsNull(
+                    topicId, status.name(), unsorted);
+        } else {
+            page = conversationRepository.findByTopicIdAndDeletedAtIsNull(topicId, unsorted);
+        }
+
+        return page.map(conversationMapper::toSummaryResponse);
+    }
+
+    @Override
     public List<ConversationSummaryResponse> getPublishedConversationsByTopic(UUID topicId, UUID userId) {
         List<Conversation> conversations = conversationRepository
                 .findByTopicIdAndStatusAndDeletedAtIsNullOrderByOrderIndexAsc(

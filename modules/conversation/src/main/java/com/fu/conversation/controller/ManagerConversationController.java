@@ -236,12 +236,16 @@ public class ManagerConversationController {
             @PathVariable UUID topicId,
             @RequestParam(required = false) Course.JlptLevel level,
             @RequestParam(required = false) Course.ContentStatus status,
+            @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
 
+        if(keyword != null && keyword.trim().length() > 100){
+            throw new BusinessException("INVALID_KEYWORD_LENGTH", "Từ khóa tìm kiếm không được quá 100 ký tự!");
+        }
         Pageable pageable = PageRequest.of(page, Math.min(size, 100));
         Page<ConversationSummaryResponse> result =
-                conversationService.getConversationsByTopic(topicId, level, status, pageable);
+                conversationService.getConversationsByTopic(topicId, keyword, level, status, pageable);
         return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
                 result.getContent(), result.getNumber(), result.getSize(),
                 result.getTotalElements(), result.getTotalPages())));
