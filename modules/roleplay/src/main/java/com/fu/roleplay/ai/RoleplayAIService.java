@@ -1,5 +1,8 @@
 package com.fu.roleplay.ai;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fu.common.ai.PromptUtils;
 import com.fu.infrastructure.learner.LearningInsightPoint;
 import com.fu.infrastructure.learner.SkillScore;
@@ -31,15 +34,18 @@ public class RoleplayAIService {
     private final RedisTemplate<String, Object> redisTemplate;
     private final RoleplayPromptBuilder promptBuilder;
     private final RoleplayProperties roleplayProperties;
+    private final ObjectMapper objectMapper;
 
     public RoleplayAIService(OpenAiChatModel chatModel,
                               RedisTemplate<String, Object> redisTemplate,
                               RoleplayPromptBuilder promptBuilder,
-                              RoleplayProperties roleplayProperties) {
+                              RoleplayProperties roleplayProperties,
+                              ObjectMapper objectMapper) {
         this.chatClient = ChatClient.builder(chatModel).build();
         this.redisTemplate = redisTemplate;
         this.promptBuilder = promptBuilder;
         this.roleplayProperties = roleplayProperties;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -109,22 +115,31 @@ public class RoleplayAIService {
         }
     }
 
-    public String generateOpeningMessage(String systemPrompt) {
+    public String generateOpeningMessage(String systemPrompt,
+                                          String aiRole, String learnerRole, String scenario) {
         try {
             String rawResponse = chatClient.prompt()
                     .options(OpenAiChatOptions.builder().model(roleplayProperties.getModelName()).build())
                     .system(systemPrompt)
-                    .user("Start the roleplay conversation. Return the opening JSON array with MISSION_INTRO, SCENE_INTRO, and first DIALOGUE segments as specified in your instructions.")
+                    .user("""
+                            Open the roleplay. Return the JSON array with MISSION_INTRO + SCENE_INTRO + DIALOGUE per the format in your instructions.
+
+                            For the DIALOGUE segment:
+                            - Speak as YOUR character (the role assigned to you in YOUR IDENTITY).
+                            - Your line is what YOU say first to the learner — a greeting, question, or natural opener for your role.
+                            - DO NOT emit a sentence from the learner's task list. Those are the LEARNER's lines, not yours.
+                            - DO NOT speak on behalf of the learner.
+                            """)
                     .call()
                     .content();
 
             return cleanJson(rawResponse);
         } catch (NonTransientAiException e) {
             log.warn("AI service unavailable for opening message (quota/billing): {}", e.getMessage());
-            return defaultOpeningArrayResponse();
+            return defaultOpeningArrayResponse(aiRole, learnerRole, scenario);
         } catch (Exception e) {
             log.error("Failed to generate opening message: {}", e.getMessage());
-            return defaultOpeningArrayResponse();
+            return defaultOpeningArrayResponse(aiRole, learnerRole, scenario);
         }
     }
 
@@ -287,12 +302,63 @@ public class RoleplayAIService {
         return FALLBACK_DIALOGUE_SEGMENTS[ThreadLocalRandom.current().nextInt(FALLBACK_DIALOGUE_SEGMENTS.length)];
     }
 
-    private String defaultOpeningArrayResponse() {
-        return "[" +
-               "{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"本日はよろしくお願いします。会話の練習を始めましょう。\",\"translation\":\"Hôm nay rất vui được luyện tập cùng bạn. Hãy bắt đầu buổi luyện tập hội thoại.\",\"romaji\":\"Honjitsu wa yoroshiku onegai shimasu. Kaiwa no renshuu wo hajimemashou.\"}," +
-               "{\"type\":\"SCENE_INTRO\",\"japanese_content\":\"会話の練習を始めましょう。\",\"translation\":\"Hãy bắt đầu buổi luyện tập hội thoại.\",\"romaji\":\"Kaiwa no renshu wo hajimemasho.\"}," +
-               "{\"type\":\"DIALOGUE\",\"japanese_content\":\"いらっしゃいませ。本日はどのようなご用件でしょうか？\",\"translation\":\"Xin chào, hôm nay tôi có thể giúp gì cho bạn?\",\"romaji\":\"Irasshaimase. Honjitsu wa dono you na goyo-ken deshou ka?\",\"corrections\":[]}" +
-               "]";
+    /**
+     * Context-aware fallback for the opening message when OpenAI is unavailable.
+     * <p>
+     * The previous fallback hardcoded a shopkeeper DIALOGUE — wrong role for any non-retail
+     * scenario, and missing the {@code voice} field so the session voice never locked.
+     * <p>
+     * This version returns 3 segments with EMPTY {@code japanese_content} (so TTS does not
+     * synthesize misleading audio) and Vietnamese-only narration that:
+     * <ul>
+     *   <li>States the assigned roles so the learner knows the scenario stayed correct;</li>
+     *   <li>Echoes the scenario description if available;</li>
+     *   <li>Emits a {@code SYSTEM} segment so FE can render a "AI tạm thời không khả dụng"
+     *       banner instead of treating the message as in-character dialogue.</li>
+     * </ul>
+     * No DIALOGUE segment is emitted — the learner's first message will trigger a fresh
+     * generateResponse call which can recover when the upstream is healthy.
+     */
+    private String defaultOpeningArrayResponse(String aiRole, String learnerRole, String scenario) {
+        String resolvedAi = (aiRole != null && !aiRole.isBlank()) ? aiRole : "nhân vật người Nhật";
+        String resolvedLearner = (learnerRole != null && !learnerRole.isBlank()) ? learnerRole : "người học";
+        String resolvedScenario = (scenario != null && !scenario.isBlank())
+                ? scenario : "(chưa có mô tả bối cảnh)";
+        try {
+            ArrayNode arr = objectMapper.createArrayNode();
+
+            ObjectNode missionIntro = objectMapper.createObjectNode();
+            missionIntro.put("type", "MISSION_INTRO");
+            missionIntro.put("japanese_content", "");
+            missionIntro.put("translation",
+                    "Bạn đóng vai " + resolvedLearner + "; AI đóng vai " + resolvedAi + ".");
+            missionIntro.put("romaji", "");
+            arr.add(missionIntro);
+
+            ObjectNode sceneIntro = objectMapper.createObjectNode();
+            sceneIntro.put("type", "SCENE_INTRO");
+            sceneIntro.put("japanese_content", "");
+            sceneIntro.put("translation", "Bối cảnh: " + resolvedScenario);
+            sceneIntro.put("romaji", "");
+            arr.add(sceneIntro);
+
+            ObjectNode systemNotice = objectMapper.createObjectNode();
+            systemNotice.put("type", "SYSTEM");
+            systemNotice.put("japanese_content", "");
+            systemNotice.put("translation",
+                    "Hệ thống AI tạm thời không khả dụng. Vui lòng gửi tin nhắn đầu tiên — "
+                            + "AI sẽ phản hồi khi hệ thống khôi phục.");
+            systemNotice.put("romaji", "");
+            arr.add(systemNotice);
+
+            return objectMapper.writeValueAsString(arr);
+        } catch (Exception e) {
+            log.warn("Failed to build context-aware fallback opening: {}", e.getMessage());
+            // Last-resort plain SYSTEM notice — still safer than the old shopkeeper hardcode.
+            return "[{\"type\":\"SYSTEM\",\"japanese_content\":\"\","
+                    + "\"translation\":\"Hệ thống AI tạm thời không khả dụng. Vui lòng thử lại sau.\","
+                    + "\"romaji\":\"\"}]";
+        }
     }
 
     private String defaultSetupResponse() {
