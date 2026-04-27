@@ -34,6 +34,10 @@
         </dependency>
         <dependency>
             <groupId>com.fu</groupId>
+            <artifactId>conversation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fu</groupId>
             <artifactId>class</artifactId>
         </dependency>
         <dependency>

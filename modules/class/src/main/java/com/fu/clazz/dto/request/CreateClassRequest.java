@@ -34,7 +34,8 @@ public class CreateClassRequest {
     private UUID courseId;
     @Builder.Default
     private Integer maxStudents = 8;
-
+    @NotNull(message = "Start date is required")
     private LocalDate startDate;
+    @NotNull(message = "Expected end date is required")
     private LocalDate expectedEndDate;
 }
