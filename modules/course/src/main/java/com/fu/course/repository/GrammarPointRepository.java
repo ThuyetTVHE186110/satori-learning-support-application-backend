@@ -105,4 +105,6 @@ public interface GrammarPointRepository extends JpaRepository<GrammarPoint, UUID
             "  AND l.deletedAt IS NULL " +
             "  AND l.status = 'PUBLISHED'")
     List<UUID> findIdsByCourseIdAndPublished(@Param("courseId") UUID courseId);
+
+    long countByDeletedAtIsNull();
 }

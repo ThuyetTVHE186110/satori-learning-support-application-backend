@@ -7,6 +7,7 @@ import com.fu.monitoring.dto.OpenAiUsageResponse;
 import com.fu.monitoring.dto.response.AchievementMetricsResponse;
 import com.fu.monitoring.dto.response.ClassManagementDashboardResponse;
 import com.fu.monitoring.dto.response.ClassStatusChartResponse;
+import com.fu.monitoring.dto.response.ContentManagerDashboardResponse;
 import com.fu.monitoring.dto.response.DashboardKpiResponse;
 import com.fu.monitoring.dto.response.PopularBadgesResponse;
 import com.fu.monitoring.dto.response.PriorityClassesResponse;
@@ -14,6 +15,7 @@ import com.fu.monitoring.dto.response.RareBadgesResponse;
 import com.fu.monitoring.dto.response.StudentTrendResponse;
 import com.fu.monitoring.service.AdminUserService;
 import com.fu.monitoring.service.ClassManagementDashboardService;
+import com.fu.monitoring.service.ContentManagerDashboardService;
 import com.fu.monitoring.service.OpenAiUsageService;
 import com.fu.monitoring.service.SystemMonitoringService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -33,6 +35,7 @@ public class MonitoringController {
     private final OpenAiUsageService openAiUsageService;
     private final AdminUserService adminUserService;
     private final ClassManagementDashboardService dashboardService;
+    private final ContentManagerDashboardService contentManagerDashboardService;
 
     // =====================================================
     // EXISTING ADMIN ENDPOINTS
@@ -128,5 +131,17 @@ public class MonitoringController {
                description = "Returns badges with the fewest earners (awardCount > 0), sorted ascending.")
     public ApiResponse<RareBadgesResponse> getRareBadges() {
         return ApiResponse.success(dashboardService.getRareBadges());
+    }
+
+    // =====================================================
+    // CONTENT MANAGER ENDPOINTS
+    // =====================================================
+
+    @GetMapping("/content-manager/dashboard")
+    @PreAuthorize("hasRole('CONTENT_MANAGER')")
+    @Operation(summary = "Get content manager dashboard",
+               description = "Returns comprehensive dashboard with content statistics, status distributions, and performance metrics for content managers.")
+    public ApiResponse<ContentManagerDashboardResponse> getContentManagerDashboard() {
+        return ApiResponse.success(contentManagerDashboardService.getDashboard());
     }
 }
