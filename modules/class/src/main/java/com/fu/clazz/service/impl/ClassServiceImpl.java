@@ -8,12 +8,15 @@ import com.fu.clazz.dto.request.UpdateClassRequest;
 import com.fu.clazz.dto.response.ClassImportError;
 import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassPreview;
+import com.fu.clazz.dto.response.ClassProgressResponse;
+import com.fu.clazz.dto.response.ClassProgressStatsResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
 import com.fu.clazz.dto.response.ImportClassesPreview;
 import com.fu.clazz.dto.response.ImportClassesResult;
 import com.fu.clazz.dto.response.LearnerClassResponse;
 import com.fu.clazz.dto.response.LearnerInfo;
+import com.fu.clazz.dto.response.LearnerProgressResponse;
 import com.fu.clazz.dto.response.TeacherClassHistoryResponse;
 import com.fu.clazz.utils.ClassExcelRow;
 import com.fu.clazz.utils.ExcelClassImportUtil;
@@ -36,6 +39,7 @@ import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.course.entity.Course;
 import com.fu.course.repository.CourseRepository;
+import com.fu.course.repository.LessonRepository;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
@@ -45,6 +49,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -61,6 +66,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.math.BigDecimal;
 
 /**
  * Implementation of ClazzService
@@ -76,8 +82,10 @@ public class ClassServiceImpl implements ClassService {
     private final ClassMapper classMapper;
     private final UserRepository userRepository;
     private final CourseRepository courseRepository;
+    private final LessonRepository lessonRepository;
     private final ClassTeacherHistoryRepository classTeacherHistoryRepository;
     private final ClassScheduleManager classScheduleManager;
+    private final JdbcTemplate jdbcTemplate;
 
     // =====================================================
     // HELPER METHODS
@@ -1770,5 +1778,215 @@ public class ClassServiceImpl implements ClassService {
         }
 
         return Optional.empty(); // All checks passed
+    }
+
+    // =====================================================
+    // CLASS PROGRESS & LEARNING ANALYTICS
+    // =====================================================
+
+    @Override
+    public ClassProgressResponse getClassProgress(UUID classId) {
+        log.info("Fetching class progress dashboard data for classId: {}", classId);
+
+        // 1. Get and validate class
+        Clazz clazz = findClassOrThrow(classId);
+        Course course = courseRepository.findByIdAndNotDeleted(clazz.getCourseId())
+                .orElseThrow(() -> new ResourceNotFoundException("Khóa học không tồn tại."));
+
+        // 2. Get class stats
+        ClassProgressStatsResponse classStats = calculateClassStats(classId, course.getId());
+
+        // 3. Get active class members with user info via JdbcTemplate
+        String membersSql = """
+                SELECT cm.user_id, CONCAT(u.first_name, ' ', u.last_name) as full_name, 
+                       u.email, u.avatar_url, cm.joined_at
+                FROM user_management.class_members cm
+                JOIN user_management.users u ON cm.user_id = u.id
+                WHERE cm.class_id = ?::uuid AND cm.removed_at IS NULL
+                ORDER BY u.first_name, u.last_name
+                """;
+        List<Object[]> activeMembersRaw = jdbcTemplate.query(membersSql, new Object[]{classId.toString()},
+                (rs, rowNum) -> new Object[]{
+                        java.util.UUID.fromString(rs.getString(1)),
+                        rs.getString(2),
+                        rs.getString(3),
+                        rs.getString(4),
+                        rs.getTimestamp(5).toLocalDateTime()
+                });
+
+        // 4. Get learner progress metrics from database
+        String metricsSql = """
+                SELECT cm.user_id,
+                       COUNT(DISTINCT a.id) as total_assignments,
+                       COUNT(CASE WHEN s.status = 'GRADED' THEN 1 END) as completed_assignments,
+                       COUNT(CASE WHEN s.submitted_at IS NOT NULL THEN 1 END) as submitted_assignments,
+                       AVG(CASE WHEN s.status = 'GRADED' THEN CAST(s.score AS NUMERIC) ELSE NULL END) as avg_score
+                FROM user_management.class_members cm
+                LEFT JOIN assignment.assignments a ON a.class_id = cm.class_id AND a.deleted_at IS NULL
+                LEFT JOIN assignment.assignment_submissions s ON a.id = s.assignment_id AND s.user_id = cm.user_id
+                WHERE cm.class_id = ?::uuid AND cm.removed_at IS NULL
+                GROUP BY cm.user_id
+                ORDER BY cm.user_id
+                """;
+        List<Object[]> learnerMetricsRaw = jdbcTemplate.query(metricsSql, new Object[]{classId.toString()},
+                (rs, rowNum) -> new Object[]{
+                        java.util.UUID.fromString(rs.getString(1)),
+                        rs.getLong(2),
+                        rs.getLong(3),
+                        rs.getLong(4),
+                        rs.getDouble(5) != 0 ? rs.getDouble(5) : null
+                });
+
+        Map<UUID, LearnerProgressResponse> learnerMetricsMap = new HashMap<>();
+        for (Object[] row : learnerMetricsRaw) {
+            UUID userId = (UUID) row[0];
+            Long totalAssignments = (Long) row[1];
+            Long completedAssignments = (Long) row[2];
+            Long submittedAssignments = (Long) row[3];
+            Double scoreDouble = (Double) row[4];
+            BigDecimal avgScore = scoreDouble != null ? BigDecimal.valueOf(scoreDouble) : null;
+
+            Double completionPercentage = totalAssignments > 0 ? (completedAssignments * 100.0 / totalAssignments) : 0.0;
+            Double submissionPercentage = totalAssignments > 0 ? (submittedAssignments * 100.0 / totalAssignments) : 0.0;
+
+            learnerMetricsMap.put(userId, LearnerProgressResponse.builder()
+                    .userId(userId)
+                    .totalAssignments(totalAssignments)
+                    .completedAssignments(completedAssignments)
+                    .submittedAssignments(submittedAssignments)
+                    .completionPercentage(completionPercentage)
+                    .submissionPercentage(submissionPercentage)
+                    .averageScore(avgScore)
+                    .build());
+        }
+
+        // 5. Enhance learner data with user info and calculate status
+        List<LearnerProgressResponse> learnerMetrics = new ArrayList<>();
+        for (Object[] memberRow : activeMembersRaw) {
+            UUID userId = (UUID) memberRow[0];
+            String fullName = (String) memberRow[1];
+            String email = (String) memberRow[2];
+            String avatarUrl = (String) memberRow[3];
+            LocalDateTime joinedAt = (LocalDateTime) memberRow[4];
+
+            LearnerProgressResponse metrics = learnerMetricsMap.getOrDefault(userId, LearnerProgressResponse.builder()
+                    .userId(userId)
+                    .totalAssignments(0L)
+                    .completedAssignments(0L)
+                    .submittedAssignments(0L)
+                    .completionPercentage(0.0)
+                    .submissionPercentage(0.0)
+                    .averageScore(null)
+                    .build());
+
+            metrics.setFullName(fullName);
+            metrics.setEmail(email);
+            metrics.setAvatarUrl(avatarUrl);
+            metrics.setJoinedAt(joinedAt);
+            metrics.setStatus(calculateLearnerStatus(metrics.getCompletionPercentage(), metrics.getAverageScore()));
+
+            learnerMetrics.add(metrics);
+        }
+
+        // 6. Build and return response
+        return ClassProgressResponse.builder()
+                .classId(classId)
+                .className(clazz.getName())
+                .courseId(clazz.getCourseId())
+                .courseName(course.getName())
+                .courseLevel(course.getJlptLevel() != null ? course.getJlptLevel().toString() : null)
+                .classStats(classStats)
+                .learningTrendData(new ArrayList<>()) // Historical data - TBD based on data availability
+                .learnerMetrics(learnerMetrics)
+                .learnerCount(learnerMetrics.size())
+                .build();
+    }
+
+    /**
+     * Calculate class-level progress statistics using JdbcTemplate.
+     */
+    private ClassProgressStatsResponse calculateClassStats(UUID classId, UUID courseId) {
+        // Count active members
+        Long totalLearners = classMemberRepository.countActiveByClassId(classId);
+
+        // Get class entity for max students
+        Clazz clazz = classRepository.findByIdAndNotDeleted(classId)
+                .orElseThrow(() -> new ResourceNotFoundException("Lớp học không tồn tại."));
+
+        Integer maxStudents = clazz.getMaxStudents();
+        Double enrollmentPercentage = maxStudents > 0 ? (totalLearners * 100.0 / maxStudents) : 0.0;
+
+        // Count total lessons in course
+        Long totalLessonsInCourse = lessonRepository.countByCourseIdForAnalytics(courseId);
+
+        // Count lessons with assignments in class via JdbcTemplate
+        String lessonsSql = """
+                SELECT COUNT(DISTINCT a.lesson_id)
+                FROM assignment.assignments a
+                WHERE a.class_id = ?::uuid AND a.deleted_at IS NULL AND a.lesson_id IS NOT NULL
+                """;
+        Long lessonsWithAssignments = jdbcTemplate.queryForObject(lessonsSql, new Object[]{classId.toString()}, Long.class);
+        if (lessonsWithAssignments == null) {
+            lessonsWithAssignments = 0L;
+        }
+
+        Double classProgressPercentage = totalLessonsInCourse != null && totalLessonsInCourse > 0 ?
+                (lessonsWithAssignments * 100.0 / totalLessonsInCourse) : 0.0;
+
+        // Calculate average score from all graded submissions via JdbcTemplate
+        String avgScoreSql = """
+                SELECT AVG(CAST(s.score AS NUMERIC))
+                FROM assignment.assignment_submissions s
+                JOIN assignment.assignments a ON a.id = s.assignment_id
+                WHERE a.class_id = ?::uuid AND a.deleted_at IS NULL AND s.status = 'GRADED'
+                """;
+        Double avgScoreDouble = jdbcTemplate.queryForObject(avgScoreSql, new Object[]{classId.toString()}, Double.class);
+        BigDecimal averageScore = avgScoreDouble != null && avgScoreDouble != 0 ? BigDecimal.valueOf(avgScoreDouble) : null;
+
+        // Count total assignments via JdbcTemplate
+        String totalAssignmentsSql = """
+                SELECT COUNT(a.id)
+                FROM assignment.assignments a
+                WHERE a.class_id = ?::uuid AND a.deleted_at IS NULL
+                """;
+        Long totalAssignments = jdbcTemplate.queryForObject(totalAssignmentsSql, new Object[]{classId.toString()}, Long.class);
+        if (totalAssignments == null) {
+            totalAssignments = 0L;
+        }
+
+        return ClassProgressStatsResponse.builder()
+                .totalLearners(totalLearners)
+                .maxStudents(maxStudents)
+                .enrollmentPercentage(enrollmentPercentage)
+                .classProgressPercentage(classProgressPercentage)
+                .averageScore(averageScore)
+                .totalAssignments(totalAssignments)
+                .lessonsWithAssignments(lessonsWithAssignments)
+                .totalLessonsInCourse(totalLessonsInCourse)
+                .build();
+    }
+
+    /**
+     * Determine learner status based on completion and performance.
+     * Rules:
+     * - 100% completion → "Hoàn thành" (Completed)
+     * - 0% completion → "Chưa bắt đầu" (Not started)
+     * - Completion >= 80% → "Đang học" (Learning)
+     * - Otherwise → "Chậm tiến độ" (Behind)
+     */
+    private String calculateLearnerStatus(Double completionPercentage, BigDecimal averageScore) {
+        if (completionPercentage == null || completionPercentage < 0) {
+            completionPercentage = 0.0;
+        }
+
+        if (completionPercentage >= 100) {
+            return "Hoàn thành";
+        } else if (completionPercentage == 0) {
+            return "Chưa bắt đầu";
+        } else if (completionPercentage >= 80) {
+            return "Đang học";
+        } else {
+            return "Chậm tiến độ";
+        }
     }
 }

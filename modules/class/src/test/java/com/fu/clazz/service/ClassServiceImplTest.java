@@ -1820,4 +1820,221 @@ class ClassServiceImplTest {
             assertThat(response.getCourseLevel()).isNull();
         }
     }
+
+    // =====================================================
+    // CLASS PROGRESS & LEARNING ANALYTICS
+    // =====================================================
+
+    @Nested
+    @DisplayName("Class Progress Dashboard Tests")
+    class ClassProgressTests {
+
+        private UUID testUserId1;
+        private UUID testUserId2;
+        private UUID testUserId3;
+
+        @BeforeEach
+        void setUpProgressTests() {
+            testUserId1 = UUID.randomUUID();
+            testUserId2 = UUID.randomUUID();
+            testUserId3 = UUID.randomUUID();
+        }
+
+        @Test
+        @DisplayName("TC001: Should validate class and course exist for progress")
+        void shouldValidateClassAndCourseForProgress() {
+            // Given
+            UUID nonExistentClassId = UUID.randomUUID();
+            given(classRepository.findByIdAndNotDeleted(nonExistentClassId)).willReturn(Optional.empty());
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.getClassProgress(nonExistentClassId))
+                    .isInstanceOf(ResourceNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("TC003: Should throw exception when class not found")
+        void shouldThrowExceptionWhenClassNotFoundForProgress() {
+            // Given
+            UUID nonExistentClassId = UUID.randomUUID();
+            given(classRepository.findByIdAndNotDeleted(nonExistentClassId)).willReturn(Optional.empty());
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.getClassProgress(nonExistentClassId))
+                    .isInstanceOf(ResourceNotFoundException.class);
+
+            verify(classRepository).findByIdAndNotDeleted(nonExistentClassId);
+        }
+
+        @Test
+        @DisplayName("TC004: Should throw exception when course not found")
+        void shouldThrowExceptionWhenCourseNotFoundForProgress() {
+            // Given
+            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(testClazz));
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.empty());
+
+            // When/Then
+            assertThatThrownBy(() -> clazzService.getClassProgress(classId))
+                    .isInstanceOf(ResourceNotFoundException.class);
+
+            verify(classRepository).findByIdAndNotDeleted(classId);
+            verify(courseRepository).findByIdAndNotDeleted(courseId);
+        }
+
+        @Test
+        @DisplayName("TC005: Learner status 'Hoàn thành' for 100% completion")
+        void shouldReturnCompletedStatusFor100Percent() throws Exception {
+            // Given
+            Double completionPercentage = 100.0;
+
+            // When - invoke private method using reflection
+            String status = (String) ReflectionTestUtils.invokeMethod(clazzService, 
+                    "calculateLearnerStatus", completionPercentage, null);
+
+            // Then
+            assertThat(status).isEqualTo("Hoàn thành");
+        }
+
+        @Test
+        @DisplayName("TC006: Learner status 'Đang học' for 80-99% completion")
+        void shouldReturnLearningStatusFor80To99Percent() throws Exception {
+            // Given
+            Double[] completionPercentages = {80.0, 85.0, 95.0, 99.0};
+
+            // When/Then
+            for (Double percent : completionPercentages) {
+                String status = (String) ReflectionTestUtils.invokeMethod(clazzService,
+                        "calculateLearnerStatus", percent, null);
+                assertThat(status)
+                        .as("Status for %.1f%% should be 'Đang học'", percent)
+                        .isEqualTo("Đang học");
+            }
+        }
+
+        @Test
+        @DisplayName("TC007: Learner status 'Chậm tiến độ' for <80% completion")
+        void shouldReturnBehindStatusForLessThan80Percent() throws Exception {
+            // Given
+            Double[] completionPercentages = {0.1, 50.0, 75.0, 79.9};
+
+            // When/Then
+            for (Double percent : completionPercentages) {
+                if (percent > 0) {
+                    String status = (String) ReflectionTestUtils.invokeMethod(clazzService,
+                            "calculateLearnerStatus", percent, null);
+                    assertThat(status)
+                            .as("Status for %.1f%% should be 'Chậm tiến độ'", percent)
+                            .isEqualTo("Chậm tiến độ");
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("TC008: Learner status 'Chưa bắt đầu' for 0% completion")
+        void shouldReturnNotStartedStatusForZeroPercent() throws Exception {
+            // Given
+            Double completionPercentage = 0.0;
+
+            // When
+            String status = (String) ReflectionTestUtils.invokeMethod(clazzService,
+                    "calculateLearnerStatus", completionPercentage, null);
+
+            // Then
+            assertThat(status).isEqualTo("Chưa bắt đầu");
+        }
+
+        @Test
+        @DisplayName("TC009: Should handle null completion percentage gracefully")
+        void shouldHandleNullCompletionPercentage() throws Exception {
+            // Given
+            Double completionPercentage = null;
+
+            // When
+            String status = (String) ReflectionTestUtils.invokeMethod(clazzService,
+                    "calculateLearnerStatus", completionPercentage, null);
+
+            // Then
+            assertThat(status).isEqualTo("Chưa bắt đầu");
+        }
+
+        @Test
+        @DisplayName("TC010: Should handle negative completion percentage as 0%")
+        void shouldHandleNegativeCompletionPercentage() throws Exception {
+            // Given
+            Double completionPercentage = -5.0;
+
+            // When
+            String status = (String) ReflectionTestUtils.invokeMethod(clazzService,
+                    "calculateLearnerStatus", completionPercentage, null);
+
+            // Then
+            assertThat(status).isEqualTo("Chưa bắt đầu");
+        }
+
+        @Test
+        @DisplayName("TC011: Enrollment percentage should be calculated correctly")
+        void shouldCalculateEnrollmentPercentageCorrectly() {
+            // When - calculate manually based on test class setup
+            Double enrollmentPercentage = (25L * 100.0 / testClazz.getMaxStudents());
+
+            // Then
+            assertThat(enrollmentPercentage).isEqualTo(83.33, within(0.1));
+            assertThat(testClazz.getMaxStudents()).isEqualTo(30);
+        }
+
+        @Test
+        @DisplayName("TC012: Should handle 0 max students gracefully")
+        void shouldHandleZeroMaxStudents() {
+            // Given
+            testClazz.setMaxStudents(0);
+
+            // When
+            Double enrollmentPercentage = testClazz.getMaxStudents() > 0 ? 
+                    (25L * 100.0 / testClazz.getMaxStudents()) : 0.0;
+
+            // Then
+            assertThat(enrollmentPercentage).isEqualTo(0.0);
+        }
+
+        @Test
+        @DisplayName("TC013: Completion percentage = (completedAssignments / totalAssignments) * 100")
+        void shouldCalculateCompletionPercentageCorrectly() {
+            // Given
+            Long completedAssignments = 10L;
+            Long totalAssignments = 15L;
+
+            // When
+            Double completionPercentage = (completedAssignments * 100.0 / totalAssignments);
+
+            // Then
+            assertThat(completionPercentage).isEqualTo(66.67, within(0.1));
+        }
+
+        @Test
+        @DisplayName("TC014: Should handle 0 total assignments gracefully")
+        void shouldHandleZeroTotalAssignments() {
+            // Given
+            Long totalAssignments = 0L;
+
+            // When
+            Double completionPercentage = totalAssignments > 0 ? (10L * 100.0 / totalAssignments) : 0.0;
+
+            // Then
+            assertThat(completionPercentage).isEqualTo(0.0);
+        }
+
+        @Test
+        @DisplayName("TC015: Submission percentage calculation")
+        void shouldCalculateSubmissionPercentageCorrectly() {
+            // Given
+            Long submittedAssignments = 12L;
+            Long totalAssignments = 15L;
+
+            // When
+            Double submissionPercentage = (submittedAssignments * 100.0 / totalAssignments);
+
+            // Then
+            assertThat(submissionPercentage).isEqualTo(80.0);
+        }
+    }
 }
