@@ -144,4 +144,15 @@ public interface LessonRepository extends JpaRepository<Lesson, UUID> {
             "LIMIT :limit",
             nativeQuery = true)
     List<Object[]> getLessonsNeedingImprovement(@Param("threshold") double threshold, @Param("limit") int limit);
+
+    // =====================================================
+    // CLASS PROGRESS & LEARNING ANALYTICS QUERIES
+    // =====================================================
+
+    /**
+     * Count all non-deleted lessons for a course.
+     * Used to calculate class progress percentage.
+     */
+    @Query("SELECT COUNT(l) FROM Lesson l WHERE l.course.id = :courseId AND l.deletedAt IS NULL")
+    Long countByCourseIdForAnalytics(@Param("courseId") UUID courseId);
 }
