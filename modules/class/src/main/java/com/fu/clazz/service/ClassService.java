@@ -145,4 +145,15 @@ public interface ClassService {
      * @return ImportClassesResult with final counts of created/updated/failed
      */
     ImportClassesResult approveImportClasses(ApproveImportClassesRequest request, UUID managerId);
+
+    /**
+     * Get class progress and learner performance dashboard data.
+     * Returns aggregated class metrics, learning trend data, and individual learner progress.
+     * Calculated in real-time on each request.
+     * 
+     * @param classId the class ID
+     * @return ClassProgressResponse containing all dashboard data
+     * @throws com.fu.common.exception.ResourceNotFoundException if class not found
+     */
+    com.fu.clazz.dto.response.ClassProgressResponse getClassProgress(UUID classId);
 }

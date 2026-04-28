@@ -87,5 +87,26 @@ public interface ClassMemberRepository extends JpaRepository<ClassMember, UUID> 
      */
     @Query("SELECT CASE WHEN COUNT(m) > 0 THEN true ELSE false END FROM ClassMember m WHERE m.userId = :userId AND m.removedAt IS NULL")
     boolean existsByUserIdAndRemovedAtNull(@Param("userId") UUID userId);
+
+    // =====================================================
+    // CLASS PROGRESS & LEARNING ANALYTICS QUERIES
+    // =====================================================
+
+    /**
+     * Get count of active members in a class with user info for learner progress table
+     * Returns list of [userId, fullName, email, avatarUrl, joinedAt] for active class members
+     */
+    @Query(value = "SELECT " +
+            "cm.user_id, " +
+            "CONCAT(u.first_name, ' ', u.last_name) as full_name, " +
+            "u.email, " +
+            "u.avatar_url, " +
+            "cm.joined_at " +
+            "FROM user_management.class_members cm " +
+            "JOIN user_management.users u ON cm.user_id = u.id " +
+            "WHERE cm.class_id = :classId AND cm.removed_at IS NULL " +
+            "ORDER BY u.first_name, u.last_name",
+            nativeQuery = true)
+    java.util.List<Object[]> findActiveMembersWithUserInfo(@Param("classId") UUID classId);
 }
 

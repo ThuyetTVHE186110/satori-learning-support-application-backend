@@ -89,4 +89,12 @@ public interface ConversationTopicRepository extends JpaRepository<ConversationT
     @Query("SELECT t FROM ConversationTopic t " +
            "WHERE LOWER(t.title) = LOWER(:title) AND t.deletedAt IS NULL")
     Optional<ConversationTopic> findActiveByTitleIgnoreCase(@Param("title") String title);
+
+    long countByDeletedAtIsNull();
+
+    @Query(
+            value = "SELECT COUNT(*) FROM speaking.conversation_topics WHERE status = CAST(:status AS content_status) AND deleted_at IS NULL",
+            nativeQuery = true
+    )
+    long countByStatusAndDeletedAtIsNull(@Param("status") String status);
 }

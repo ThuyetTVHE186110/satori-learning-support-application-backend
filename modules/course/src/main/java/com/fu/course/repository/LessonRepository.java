@@ -132,4 +132,27 @@ public interface LessonRepository extends JpaRepository<Lesson, UUID> {
     boolean existsByTitleIgnoreCaseAndCourseIdAndIdNot(@Param("title") String title,
                                                         @Param("courseId") UUID courseId,
                                                         @Param("lessonId") UUID lessonId);
+
+    @Query(value = "SELECT l.id, l.title, c.jlpt_level, c.name as course_name, " +
+            "ROUND(lp.best_score::NUMERIC, 1) as avg_score " +
+            "FROM learning_content.lessons l " +
+            "INNER JOIN learning_content.courses c ON l.course_id = c.id " +
+            "INNER JOIN practice.lesson_progress lp ON l.id = lp.lesson_id " +
+            "WHERE l.deleted_at IS NULL " +
+            "AND lp.best_score < :threshold " +
+            "ORDER BY lp.best_score ASC " +
+            "LIMIT :limit",
+            nativeQuery = true)
+    List<Object[]> getLessonsNeedingImprovement(@Param("threshold") double threshold, @Param("limit") int limit);
+
+    // =====================================================
+    // CLASS PROGRESS & LEARNING ANALYTICS QUERIES
+    // =====================================================
+
+    /**
+     * Count all non-deleted lessons for a course.
+     * Used to calculate class progress percentage.
+     */
+    @Query("SELECT COUNT(l) FROM Lesson l WHERE l.course.id = :courseId AND l.deletedAt IS NULL")
+    Long countByCourseIdForAnalytics(@Param("courseId") UUID courseId);
 }
