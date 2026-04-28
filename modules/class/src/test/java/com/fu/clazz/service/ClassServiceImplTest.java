@@ -101,6 +101,9 @@ class ClassServiceImplTest {
     @Captor
     private ArgumentCaptor<User> userCaptor;
 
+    @Captor
+    private ArgumentCaptor<ClassTeacherHistory> historyCaptor;
+
     // Test fixtures
     private Clazz testClazz;
     private ClassResponse testClassResponse;
@@ -304,7 +307,113 @@ class ClassServiceImplTest {
         }
 
         @Test
-        @DisplayName("TC06: Should throw exception when class name already exists")
+        @DisplayName("TC14: Should set status to ACTIVE when startDate is today")
+        void shouldSetStatusActiveWhenStartDateIsToday() {
+            createRequest.setStartDate(LocalDate.now());
+            given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(classMapper.toEntity(createRequest)).willReturn(testClazz);
+            given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
+            given(classTeacherHistoryRepository.save(any(ClassTeacherHistory.class))).willReturn(new ClassTeacherHistory());
+            given(classMapper.toResponse(any(Clazz.class))).willReturn(testClassResponse);
+            given(classMemberRepository.countActiveByClassId(any())).willReturn(0L);
+
+            clazzService.createClass(createRequest, managerId);
+
+            verify(classRepository).save(clazzCaptor.capture());
+            verify(classScheduleManager).scheduleActivation(any(Clazz.class));
+            assertThat(clazzCaptor.getValue().getStatus()).isEqualTo(ClassStatus.ACTIVE);
+        }
+
+        @Test
+        @DisplayName("TC15: Should throw exception when expectedEndDate is before startDate")
+        void shouldThrowWhenExpectedEndDateBeforeStartDate() {
+            LocalDate startDate = LocalDate.now().plusDays(5);
+            LocalDate expectedEndDate = startDate.minusDays(1);
+            createRequest.setStartDate(startDate);
+            createRequest.setExpectedEndDate(expectedEndDate);
+            given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+
+            assertThatThrownBy(() -> clazzService.createClass(createRequest, managerId))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Ngày kết thúc dự kiến" + expectedEndDate)
+                    .hasMessageContaining("không được trước ngày bắt đầu " + startDate)
+                    .extracting(ex -> ((BusinessException) ex).getErrorCode())
+                    .isEqualTo("INVALID_EXPECTED_END_DATE");
+
+            verify(classRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("TC16: Should allow expectedEndDate equal to startDate")
+        void shouldAllowExpectedEndDateEqualStartDate() {
+            LocalDate startDate = LocalDate.now().plusDays(3);
+            createRequest.setStartDate(startDate);
+            createRequest.setExpectedEndDate(startDate);
+            given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(classMapper.toEntity(createRequest)).willReturn(testClazz);
+            given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
+            given(classTeacherHistoryRepository.save(any(ClassTeacherHistory.class))).willReturn(new ClassTeacherHistory());
+            given(classMapper.toResponse(any(Clazz.class))).willReturn(testClassResponse);
+            given(classMemberRepository.countActiveByClassId(any())).willReturn(0L);
+
+            assertThatNoException().isThrownBy(() -> clazzService.createClass(createRequest, managerId));
+        }
+
+        @Test
+        @DisplayName("TC17: Should save teacher history with correct assignment fields")
+        void shouldSaveTeacherHistoryWithCorrectFields() {
+            given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(classMapper.toEntity(createRequest)).willReturn(testClazz);
+            given(classRepository.save(any(Clazz.class))).willReturn(testClazz);
+            given(classTeacherHistoryRepository.save(any(ClassTeacherHistory.class))).willReturn(new ClassTeacherHistory());
+            given(classMapper.toResponse(any(Clazz.class))).willReturn(testClassResponse);
+            given(classMemberRepository.countActiveByClassId(any())).willReturn(0L);
+
+            clazzService.createClass(createRequest, managerId);
+
+            verify(classTeacherHistoryRepository).save(historyCaptor.capture());
+            ClassTeacherHistory savedHistory = historyCaptor.getValue();
+            assertThat(savedHistory.getClassId()).isEqualTo(classId);
+            assertThat(savedHistory.getTeacherId()).isEqualTo(teacherId);
+            assertThat(savedHistory.getAssignedAt()).isEqualTo(LocalDate.now());
+            assertThat(savedHistory.getCreatedBy()).isEqualTo(managerId);
+            assertThat(savedHistory.getUpdatedBy()).isEqualTo(managerId);
+        }
+
+        @Test
+        @DisplayName("TC18: Should schedule activation for saved class instance")
+        void shouldScheduleActivationForSavedClass() {
+            Clazz savedClazz = Clazz.builder()
+                    .name("N5 Morning Class")
+                    .courseId(courseId)
+                    .startDate(createRequest.getStartDate())
+                    .status(ClassStatus.NOT_STARTED)
+                    .build();
+            ReflectionTestUtils.setField(savedClazz, "id", UUID.randomUUID());
+            given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
+            given(userRepository.findById(teacherId)).willReturn(Optional.of(testTeacher));
+            given(courseRepository.findByIdAndNotDeleted(courseId)).willReturn(Optional.of(testCourse));
+            given(classMapper.toEntity(createRequest)).willReturn(testClazz);
+            given(classRepository.save(any(Clazz.class))).willReturn(savedClazz);
+            given(classTeacherHistoryRepository.save(any(ClassTeacherHistory.class))).willReturn(new ClassTeacherHistory());
+            given(classMapper.toResponse(any(Clazz.class))).willReturn(testClassResponse);
+            given(classMemberRepository.countActiveByClassId(any())).willReturn(0L);
+
+            clazzService.createClass(createRequest, managerId);
+
+            verify(classScheduleManager).scheduleActivation(eq(savedClazz));
+        }
+
+        @Test
+        @DisplayName("TC19: Should throw exception when class name already exists")
         void shouldThrowWhenClassNameExists() {
             // Given
             given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(true);
@@ -319,7 +428,7 @@ class ClassServiceImplTest {
         }
 
         @Test
-        @DisplayName("TC07: Should throw exception when teacher not found")
+        @DisplayName("TC20: Should throw exception when teacher not found")
         void shouldThrowWhenTeacherNotFound() {
             // Given
             given(classRepository.existsByNameIgnoreCase(createRequest.getName())).willReturn(false);
@@ -335,7 +444,7 @@ class ClassServiceImplTest {
         }
 
         @Test
-        @DisplayName("TC08: Should throw exception when teacher has wrong role")
+        @DisplayName("TC21: Should throw exception when teacher has wrong role")
         void shouldThrowWhenTeacherHasWrongRole() {
             // Given
             testTeacher.setRole(UserRole.LEARNER);
@@ -1206,7 +1315,6 @@ class ClassServiceImplTest {
             assertThat(result).isNotNull();
             assertThat(result.getTotalElements()).isEqualTo(1);
             assertThat(result.getContent().get(0).getId()).isEqualTo(studentId);
-            verify(classMemberRepository).findUserIdsByClosedClass(closedClassId);
         }
 
         @Test

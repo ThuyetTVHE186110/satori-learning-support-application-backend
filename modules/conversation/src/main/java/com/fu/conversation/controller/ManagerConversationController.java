@@ -90,6 +90,10 @@ public class ManagerConversationController {
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) Course.ContentStatus status) {
 
+        if(keyword != null && keyword.trim().length() > 100){
+            throw new BusinessException("INVALID_KEYWORD_LENGTH", "Từ khóa tìm kiếm không được quá 100 ký tự!");
+        }
+
         Pageable pageable = PageRequest.of(page, Math.min(size, 100),
                 Sort.by("order_index").ascending());
 
