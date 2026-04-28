@@ -8,12 +8,16 @@ import com.fu.clazz.dto.request.UpdateClassRequest;
 import com.fu.clazz.dto.response.ClassImportError;
 import com.fu.clazz.dto.response.ClassMemberResponse;
 import com.fu.clazz.dto.response.ClassPreview;
+import com.fu.clazz.dto.response.ClassProgressResponse;
+import com.fu.clazz.dto.response.ClassProgressStatsResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
 import com.fu.clazz.dto.response.ImportClassesPreview;
 import com.fu.clazz.dto.response.ImportClassesResult;
 import com.fu.clazz.dto.response.LearnerClassResponse;
 import com.fu.clazz.dto.response.LearnerInfo;
+import com.fu.clazz.dto.response.LearnerProgressResponse;
+import com.fu.clazz.dto.response.LearningTrendDataPoint;
 import com.fu.clazz.dto.response.TeacherClassHistoryResponse;
 import com.fu.clazz.utils.ClassExcelRow;
 import com.fu.clazz.utils.ExcelClassImportUtil;
@@ -36,10 +40,15 @@ import com.fu.common.exception.BusinessException;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.course.entity.Course;
 import com.fu.course.repository.CourseRepository;
+import com.fu.course.repository.LessonRepository;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
 import com.fu.user.repository.UserRepository;
+import com.fu.clazz.repository.ClassProgressAnalyticsRepository;
+import com.fu.clazz.dto.analytics.LearnerProgressMetrics;
+import com.fu.clazz.dto.analytics.ClassMemberInfo;
+import com.fu.clazz.dto.analytics.LearningTrendMetrics;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -61,6 +70,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.math.BigDecimal;
 
 /**
  * Implementation of ClazzService
@@ -76,8 +86,10 @@ public class ClassServiceImpl implements ClassService {
     private final ClassMapper classMapper;
     private final UserRepository userRepository;
     private final CourseRepository courseRepository;
+    private final LessonRepository lessonRepository;
     private final ClassTeacherHistoryRepository classTeacherHistoryRepository;
     private final ClassScheduleManager classScheduleManager;
+    private final ClassProgressAnalyticsRepository analyticsRepository;
 
     // =====================================================
     // HELPER METHODS
@@ -1546,6 +1558,13 @@ public class ClassServiceImpl implements ClassService {
             preview.setOldStatus(existingClass.getStatus());
             preview.setOldMaxStudents(existingClass.getMaxStudents());
             preview.setOldCourseId(existingClass.getCourseId());
+            
+            // Get old course name
+            if (existingClass.getCourseId() != null) {
+                courseRepository.findById(existingClass.getCourseId()).ifPresent(course -> 
+                    preview.setOldCourseName(course.getName())
+                );
+            }
 
             if (existingTeacher != null) {
                 preview.setOldTeacherEmail(existingTeacher.getEmail());
@@ -1614,7 +1633,7 @@ public class ClassServiceImpl implements ClassService {
         // Course cannot be changed on UPDATE
         if (!Objects.equals(preview.getCourseId(), existingClass.getCourseId())) {
             return String.format("Không thể thay đổi khóa học của lớp đã tồn tại. Khóa học hiện tại: %s, khóa học trong file: %s",
-                    preview.getOldCourseId(), preview.getCourseId());
+                    preview.getOldCourseName(), preview.getCourseName());
         }
 
         return null;
@@ -1770,5 +1789,246 @@ public class ClassServiceImpl implements ClassService {
         }
 
         return Optional.empty(); // All checks passed
+    }
+
+    // =====================================================
+    // CLASS PROGRESS & LEARNING ANALYTICS
+    // =====================================================
+
+    @Override
+    public ClassProgressResponse getClassProgress(UUID classId) {
+        log.info("Fetching class progress dashboard data for classId: {}", classId);
+
+        // 1. Get and validate class
+        Clazz clazz = findClassOrThrow(classId);
+        Course course = courseRepository.findByIdAndNotDeleted(clazz.getCourseId())
+                .orElseThrow(() -> new ResourceNotFoundException("Khóa học không tồn tại."));
+
+        // 2. Get class stats
+        ClassProgressStatsResponse classStats = calculateClassStats(classId, course.getId());
+
+        // 3. Get active class members with user info via repository
+        List<ClassMemberInfo> activeMembersRaw = analyticsRepository.getActiveClassMembersWithUserInfo(classId);
+
+        // 4. Get learner progress metrics from repository
+        List<LearnerProgressMetrics> learnerMetricsRaw = analyticsRepository.getProgressMetricsForClass(classId);
+
+        // 5. Build metrics map for quick lookup
+        Map<UUID, LearnerProgressResponse> learnerMetricsMap = new HashMap<>();
+        for (LearnerProgressMetrics metrics : learnerMetricsRaw) {
+            UUID userId = metrics.getUserId();
+            Long totalAssignments = metrics.getTotalAssignments() != null ? metrics.getTotalAssignments() : 0L;
+            Long completedAssignments = metrics.getCompletedAssignments() != null ? metrics.getCompletedAssignments() : 0L;
+            Long submittedAssignments = metrics.getSubmittedAssignments() != null ? metrics.getSubmittedAssignments() : 0L;
+            Double scoreDouble = metrics.getAvgScore();
+            BigDecimal avgScore = scoreDouble != null && scoreDouble != 0 ? BigDecimal.valueOf(scoreDouble) : BigDecimal.ZERO;
+
+            Double completionPercentage = totalAssignments > 0 ? (completedAssignments * 100.0 / totalAssignments) : 0.0;
+            Double submissionPercentage = totalAssignments > 0 ? (submittedAssignments * 100.0 / totalAssignments) : 0.0;
+
+            learnerMetricsMap.put(userId, LearnerProgressResponse.builder()
+                    .userId(userId)
+                    .totalAssignments(totalAssignments)
+                    .completedAssignments(completedAssignments)
+                    .submittedAssignments(submittedAssignments)
+                    .completionPercentage(completionPercentage)
+                    .submissionPercentage(submissionPercentage)
+                    .averageScore(avgScore)
+                    .build());
+        }
+
+        // 6. Enhance learner data with user info and calculate status
+        List<LearnerProgressResponse> learnerMetrics = new ArrayList<>();
+        for (ClassMemberInfo memberInfo : activeMembersRaw) {
+            UUID userId = memberInfo.getUserId();
+            String fullName = memberInfo.getFullName();
+            String email = memberInfo.getEmail();
+            String avatarUrl = memberInfo.getAvatarUrl();
+            LocalDateTime joinedAt = memberInfo.getJoinedAt();
+
+            LearnerProgressResponse metrics = learnerMetricsMap.getOrDefault(userId, LearnerProgressResponse.builder()
+                    .userId(userId)
+                    .totalAssignments(0L)
+                    .completedAssignments(0L)
+                    .submittedAssignments(0L)
+                    .completionPercentage(0.0)
+                    .submissionPercentage(0.0)
+                    .averageScore(BigDecimal.ZERO)
+                    .build());
+
+            metrics.setFullName(fullName);
+            metrics.setEmail(email);
+            metrics.setAvatarUrl(avatarUrl);
+            metrics.setJoinedAt(joinedAt);
+            metrics.setStatus(calculateLearnerStatus(metrics.getCompletionPercentage(), metrics.getAverageScore()));
+
+            learnerMetrics.add(metrics);
+        }
+
+        // 7. Calculate learning trend data
+        List<LearningTrendDataPoint> trendData = calculateLearningTrend(classId, clazz);
+
+        // 8. Build and return response
+        return ClassProgressResponse.builder()
+                .classId(classId)
+                .className(clazz.getName())
+                .courseId(clazz.getCourseId())
+                .courseName(course.getName())
+                .courseLevel(course.getJlptLevel() != null ? course.getJlptLevel().toString() : null)
+                .classStats(classStats)
+                .learningTrendData(trendData)
+                .learnerMetrics(learnerMetrics)
+                .learnerCount(learnerMetrics.size())
+                .build();
+    }
+
+    /**
+     * Calculate learning trend data by grouping submissions into custom weeks.
+     * Weeks are calculated relative to class start date.
+     * Generates all weeks from class start to today, filling gaps with zero-value entries.
+     */
+    private List<LearningTrendDataPoint> calculateLearningTrend(UUID classId, Clazz clazz) {
+        List<LearningTrendMetrics> trendData = analyticsRepository.getWeeklyTrendDataForClass(classId);
+        
+        LocalDate classStartDate = clazz.getStartDate();
+        LocalDate today = LocalDate.now();
+        
+        // Build a map for quick lookup of trend data by week start date
+        Map<LocalDate, LearningTrendMetrics> trendDataMap = new HashMap<>();
+        if (trendData != null && !trendData.isEmpty()) {
+            for (LearningTrendMetrics metric : trendData) {
+                trendDataMap.put(metric.getPeriodStart(), metric);
+            }
+        }
+        
+        // Get total assignments count for completion percentage calculation
+        Long totalAssignments = analyticsRepository.countAssignmentsInClass(classId);
+        
+        List<LearningTrendDataPoint> result = new ArrayList<>();
+        
+        // Generate all weeks from class start date to today
+        for (LocalDate weekStart = classStartDate; 
+             !weekStart.isAfter(today); 
+             weekStart = weekStart.plusDays(7)) {
+            
+            LocalDate periodEnd = weekStart.plusDays(6);
+            
+            // Calculate week number relative to class start date
+            long daysSinceStart = java.time.temporal.ChronoUnit.DAYS.between(classStartDate, weekStart);
+            int weekNumber = (int) (daysSinceStart / 7) + 1;
+            
+            // Get metric data if it exists, otherwise use zero values
+            LearningTrendMetrics metric = trendDataMap.get(weekStart);
+            
+            Long submissionsCount = metric != null ? metric.getSubmissionsCount() : 0L;
+            Double completionPercentage = calculateCompletionPercentageForPeriod(totalAssignments, submissionsCount);
+            BigDecimal averageScore = metric != null && metric.getAverageScore() != null ? 
+                    BigDecimal.valueOf(metric.getAverageScore()) : BigDecimal.ZERO;
+            Long activeLearnersCount = metric != null ? metric.getActiveLearnersCount() : 0L;
+            
+            result.add(LearningTrendDataPoint.builder()
+                    .periodLabel(String.format("Week %d: %s - %s", weekNumber, weekStart, periodEnd))
+                    .periodStart(weekStart.atStartOfDay())
+                    .periodEnd(periodEnd.atTime(23, 59, 59))
+                    .completionPercentage(completionPercentage)
+                    .averageScore(averageScore)
+                    .activeLearnersCount(activeLearnersCount)
+                    .submissionsCount(submissionsCount)
+                    .build());
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Calculate completion percentage for a week.
+     * Completion % = (submissions in period / total assignments in class) * 100
+     * 
+     * @param totalAssignments total number of assignments in the class
+     * @param submissionsInPeriod number of submissions in the specific week
+     * @return completion percentage (0-100), or 0 if no assignments
+     */
+    private Double calculateCompletionPercentageForPeriod(Long totalAssignments, Long submissionsInPeriod) {
+        if (totalAssignments == null || totalAssignments == 0) {
+            return 0.0;
+        }
+        
+        if (submissionsInPeriod == null || submissionsInPeriod == 0) {
+            return 0.0;
+        }
+        
+        return (submissionsInPeriod.doubleValue() / totalAssignments.doubleValue()) * 100.0;
+    }
+
+    /**
+     * Calculate class-level progress statistics using repository queries.
+     */
+    private ClassProgressStatsResponse calculateClassStats(UUID classId, UUID courseId) {
+        // Count active members
+        Long totalLearners = classMemberRepository.countActiveByClassId(classId);
+
+        // Get class entity for max students
+        Clazz clazz = classRepository.findByIdAndNotDeleted(classId)
+                .orElseThrow(() -> new ResourceNotFoundException("Lớp học không tồn tại."));
+
+        Integer maxStudents = clazz.getMaxStudents();
+        Double enrollmentPercentage = maxStudents > 0 ? (totalLearners * 100.0 / maxStudents) : 0.0;
+
+        // Count total lessons in course
+        Long totalLessonsInCourse = lessonRepository.countByCourseIdForAnalytics(courseId);
+
+        // Count lessons with assignments in class via repository
+        Long lessonsWithAssignments = analyticsRepository.countLessonsWithAssignmentsInClass(classId);
+        if (lessonsWithAssignments == null) {
+            lessonsWithAssignments = 0L;
+        }
+
+        Double classProgressPercentage = totalLessonsInCourse != null && totalLessonsInCourse > 0 ?
+                (lessonsWithAssignments * 100.0 / totalLessonsInCourse) : 0.0;
+
+        // Calculate average score via repository
+        Double avgScoreDouble = analyticsRepository.getAverageScoreForClass(classId);
+        BigDecimal averageScore = avgScoreDouble != null && avgScoreDouble != 0 ? BigDecimal.valueOf(avgScoreDouble) : BigDecimal.ZERO;
+
+        // Count total assignments via repository
+        Long totalAssignments = analyticsRepository.countAssignmentsInClass(classId);
+        if (totalAssignments == null) {
+            totalAssignments = 0L;
+        }
+
+        return ClassProgressStatsResponse.builder()
+                .totalLearners(totalLearners)
+                .maxStudents(maxStudents)
+                .enrollmentPercentage(enrollmentPercentage)
+                .classProgressPercentage(classProgressPercentage)
+                .averageScore(averageScore)
+                .totalAssignments(totalAssignments)
+                .lessonsWithAssignments(lessonsWithAssignments)
+                .totalLessonsInCourse(totalLessonsInCourse)
+                .build();
+    }
+
+    /**
+     * Determine learner status based on completion and performance.
+     * Rules:
+     * - 100% completion → "Hoàn thành" (Completed)
+     * - 0% completion → "Chưa bắt đầu" (Not started)
+     * - Completion >= 80% → "Đang học" (Learning)
+     * - Otherwise → "Chậm tiến độ" (Behind)
+     */
+    private String calculateLearnerStatus(Double completionPercentage, BigDecimal averageScore) {
+        if (completionPercentage == null || completionPercentage < 0) {
+            completionPercentage = 0.0;
+        }
+
+        if (completionPercentage >= 100) {
+            return "Hoàn thành";
+        } else if (completionPercentage == 0) {
+            return "Chưa bắt đầu";
+        } else if (completionPercentage >= 80) {
+            return "Đang học";
+        } else {
+            return "Chậm tiến độ";
+        }
     }
 }

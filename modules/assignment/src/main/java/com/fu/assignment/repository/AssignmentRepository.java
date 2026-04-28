@@ -157,4 +157,18 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>, J
             """, nativeQuery = true)
     List<Object[]> findLessonNamesByIds(@Param("lessonIds") List<UUID> lessonIds);
 
+    // =====================================================
+    // CLASS PROGRESS & LEARNING ANALYTICS QUERIES
+    // =====================================================
+
+    /**
+     * Count total non-deleted assignments for a class.
+     * Used to calculate class progress metrics.
+     */
+    @Query(value = """
+            SELECT COUNT(a.id)
+            FROM assignment.assignments a
+            WHERE a.class_id = :classId AND a.deleted_at IS NULL
+            """, nativeQuery = true)
+    long countByClassAndStatusForAnalytics(@Param("classId") UUID classId);
 }

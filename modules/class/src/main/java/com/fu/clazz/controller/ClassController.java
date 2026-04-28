@@ -6,6 +6,7 @@ import com.fu.clazz.dto.request.ApproveImportClassesRequest;
 import com.fu.clazz.dto.request.CreateClassRequest;
 import com.fu.clazz.dto.request.UpdateClassRequest;
 import com.fu.clazz.dto.response.ClassMemberResponse;
+import com.fu.clazz.dto.response.ClassProgressResponse;
 import com.fu.clazz.dto.response.ClassResponse;
 import com.fu.clazz.dto.response.ClassSummaryResponse;
 import com.fu.clazz.dto.response.TeacherClassHistoryResponse;
@@ -160,6 +161,33 @@ public class ClassController {
                 memberPage.getTotalElements(),
                 memberPage.getTotalPages());
         return ResponseEntity.ok(ApiResponse.success(pageResponse));
+    }
+
+    /**
+     * Get class progress and learner performance dashboard data.
+     * Returns aggregated class metrics, learning trend, and individual learner progress.
+     * - OPERATION_MANAGER: can view progress of any class
+     * - TEACHER: can only view progress of their assigned classes
+     * <p>
+     * GET /api/v1/classes/{classId}/progress
+     */
+    @GetMapping("/{classId}/progress")
+    public ResponseEntity<ApiResponse<ClassProgressResponse>> getClassProgress(
+            @PathVariable UUID classId,
+            @AuthenticationPrincipal UUID userId) {
+
+        log.info("Fetching class progress for classId: {}", classId);
+
+        ClassProgressResponse response;
+        if (isManager()) {
+            response = clazzService.getClassProgress(classId);
+        } else {
+            // For teachers, validate they are assigned to this class before returning progress
+            clazzService.getClassByIdForTeacher(classId, userId);
+            response = clazzService.getClassProgress(classId);
+        }
+
+        return ResponseEntity.ok(ApiResponse.success("Lấy tiến độ lớp học thành công.", response));
     }
 
     /**
