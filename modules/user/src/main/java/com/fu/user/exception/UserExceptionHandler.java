@@ -11,8 +11,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 /**
  * Exception handler for User module specific exceptions.
- * This handler has higher priority than GlobalExceptionHandler to catch
- * domain-specific exceptions.
+ * This handler has higher priority than GlobalExceptionHandler to catch domain-specific exceptions.
  * This approach maintains proper separation of concerns:
  * - Common module: handles generic exceptions
  * - User module: handles user-domain specific exceptions
@@ -23,10 +22,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class UserExceptionHandler {
 
     /**
-     * Handle DeletedUserExistsException - when trying to create user with deleted
-     * email.
-     * Returns HTTP 409 CONFLICT with deleted user information for frontend to
-     * handle.
+     * Handle DeletedUserExistsException - when trying to create user with deleted email.
+     * Returns HTTP 409 CONFLICT with deleted user information for frontend to handle.
      */
     @ExceptionHandler(DeletedUserExistsException.class)
     public ResponseEntity<ApiResponse<Object>> handleDeletedUserExistsException(DeletedUserExistsException ex) {

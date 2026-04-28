@@ -23,7 +23,6 @@ public class CreateTopicRequest {
     @Size(max = 255)
     private String titleJapanese;
 
-    @Size(max = 1000)
     private String description;
 
     private String descriptionVi;

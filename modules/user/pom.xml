@@ -14,12 +14,6 @@
     <description>User module - Authentication, User management</description>
 
     <dependencies>
-
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
-
         <dependency>
             <groupId>com.fu</groupId>
             <artifactId>common</artifactId>
