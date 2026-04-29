@@ -1105,7 +1105,7 @@ public class ExerciseGeneratorAgent {
                       ⚡ KHÔNG THÊM distractor / từ thừa / từ dự phòng. Mọi token PHẢI XUẤT HIỆN trong câu đúng.
                       ⚡ Ghép nối options[0].text + options[1].text + ... + options[N-1].text (không dấu cách)
                          PHẢI BẰNG correctAnswer chính xác ký tự.
-                      (Frontend sẽ tự shuffle hiển thị; backend dùng thứ tự LLM trả về làm ground truth.)
+                      (LLM TRẢ VỀ thứ tự đúng; backend sẽ shuffle trước khi serve để options không lộ đáp án.)
 
                     CẤU TRÚC:
                       • question         : câu TIẾNG VIỆT tương ứng (để học viên biết nên sắp xếp thế nào).
