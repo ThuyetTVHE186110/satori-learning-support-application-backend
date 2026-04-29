@@ -1497,10 +1497,13 @@ public class PracticeSessionService {
     /**
      * Build SENTENCE_ORDER item.
      * <p>
-     * Tokens được lưu ĐÚNG THỨ TỰ như LLM sinh ra (thứ tự đúng của câu).
-     * Frontend tự shuffle để hiển thị — server không cần biết display order.
-     * correctAnswer = "0,1,2,...,N-1" (thứ tự ID đúng).
-     * Frontend submit ordered IDs theo thứ tự user chọn → server so sánh int array.
+     * Server shuffle tokens trước khi lưu để options KHÔNG tiết lộ thứ tự đúng.
+     * displayId = vị trí trong options JSON sau shuffle.
+     * correctAnswer = chuỗi displayId cần ghép theo thứ tự câu đúng.
+     * Ví dụ LLM trả [これ, は, 辞書, です]; permutation [3,0,2,1] →
+     *   options shuffled = [です, これ, 辞書, は]
+     *   correctAnswer    = "1,3,2,0"  (これ@1, は@3, 辞書@2, です@0)
+     * Frontend submit ordered displayIds theo thứ tự user kéo → server so sánh int array.
      */
     private PracticeItem buildSentenceOrderItem(PracticeSession session,
                                                 ExerciseGeneratorAgent.GeneratedItem gen,
@@ -1519,11 +1522,29 @@ public class PracticeSessionService {
                     .build();
         }
 
-        // correctAnswer = "0,1,2,...,N-1" — thứ tự đúng chính là thứ tự LLM trả về
+        int n = options.size();
+        // Permutation: perm[displayPos] = original index
+        List<Integer> perm = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) perm.add(i);
+        Collections.shuffle(perm);
+        // Tránh identity permutation cho n >= 2 — nếu trúng thì swap 2 phần tử đầu
+        if (n >= 2 && isIdentity(perm)) {
+            Collections.swap(perm, 0, 1);
+        }
+
+        List<ExerciseGeneratorAgent.GeneratedItem.OptionItem> shuffledOptions = new ArrayList<>(n);
+        int[] inverse = new int[n]; // inverse[originalIdx] = displayPos
+        for (int pos = 0; pos < n; pos++) {
+            int origIdx = perm.get(pos);
+            shuffledOptions.add(options.get(origIdx));
+            inverse[origIdx] = pos;
+        }
+
+        // correctAnswer = thứ tự displayId cần ghép để tái tạo câu đúng
         StringBuilder correctAnswer = new StringBuilder();
-        for (int i = 0; i < options.size(); i++) {
+        for (int i = 0; i < n; i++) {
             if (i > 0) correctAnswer.append(",");
-            correctAnswer.append(i);
+            correctAnswer.append(inverse[i]);
         }
 
         return PracticeItem.builder()
@@ -1534,12 +1555,19 @@ public class PracticeSessionService {
                 .questionJapanese(gen.getQuestionJapanese())
                 .questionJapaneseWithFurigana(gen.getQuestionJapaneseWithFurigana())
                 .hint(gen.getHint())
-                .options(buildOptionsJson(options))   // giữ thứ tự đúng, frontend tự shuffle
+                .options(buildOptionsJson(shuffledOptions))
                 .correctAnswer(correctAnswer.toString())
                 .explanation(gen.getExplanation())
                 .refContentId(parseUuid(gen.getRefContentId()))
                 .refContentType(gen.getRefContentType())
                 .build();
+    }
+
+    private static boolean isIdentity(List<Integer> perm) {
+        for (int i = 0; i < perm.size(); i++) {
+            if (perm.get(i) != i) return false;
+        }
+        return true;
     }
 
     /**
