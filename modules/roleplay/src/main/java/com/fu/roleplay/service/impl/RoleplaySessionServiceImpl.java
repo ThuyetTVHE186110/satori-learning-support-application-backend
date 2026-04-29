@@ -366,21 +366,21 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         // 1b. Validate audio file and eagerly read bytes (before async dispatch)
         if (audio == null || audio.isEmpty()) {
-            throw new BusinessException("AUDIO_REQUIRED", "Audio file is required.");
+            throw new BusinessException("AUDIO_REQUIRED", "Phải có file audio kèm theo tin nhắn");
         }
         long maxAudioSize = 10L * 1024 * 1024; // 10MB
         if (audio.getSize() > maxAudioSize) {
-            throw new BusinessException("AUDIO_TOO_LARGE", "Audio file must not exceed 10MB");
+            throw new BusinessException("AUDIO_TOO_LARGE", "Kích thước file audio vượt quá giới hạn 10MB");
         }
         String audioContentType = audio.getContentType();
         if (audioContentType != null && !audioContentType.startsWith("audio/")) {
-            throw new BusinessException("INVALID_AUDIO", "File must be an audio file");
+            throw new BusinessException("INVALID_AUDIO", "File đính kèm phải là file audio.");
         }
         byte[] audioBytes;
         try {
             audioBytes = audio.getBytes();
         } catch (Exception e) {
-            throw new BusinessException("AUDIO_READ_FAILED", "Failed to read audio file: " + e.getMessage());
+            throw new BusinessException("AUDIO_READ_FAILED", "Lỗi khi đọc file audio: " + e.getMessage());
         }
 
         // 1c. Azure STT → authoritative transcript.
@@ -435,7 +435,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // Task A: Pronunciation assessment — fire-and-forget after tx commit
         if (audioBytes != null && !pronunciationProvider.isAvailable()) {
             log.warn("Pronunciation provider unavailable — audio from user {} in session {} will not be scored. " +
-                    "Check AZURE_SPEECH_ENABLED/AZURE_SPEECH_KEY or SPEECHSUPER_APP_KEY/SPEECHSUPER_SECRET_KEY env vars.",
+                            "Check AZURE_SPEECH_ENABLED/AZURE_SPEECH_KEY or SPEECHSUPER_APP_KEY/SPEECHSUPER_SECRET_KEY env vars.",
                     userId, sessionId);
         }
         final String aiInputContent = effectiveContent;
@@ -1000,17 +1000,20 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 if (feedbackNode.has("errorBreakdown")) {
                     errorBreakdownMap = objectMapper.convertValue(
                             feedbackNode.get("errorBreakdown"),
-                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, Integer>>() {});
+                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, Integer>>() {
+                            });
                 }
                 if (feedbackNode.has("jlptDistribution")) {
                     jlptDistributionMap = objectMapper.convertValue(
                             feedbackNode.get("jlptDistribution"),
-                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, BigDecimal>>() {});
+                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, BigDecimal>>() {
+                            });
                 }
                 if (feedbackNode.has("topCorrections")) {
                     topCorrectionsList = objectMapper.convertValue(
                             feedbackNode.get("topCorrections"),
-                            new com.fasterxml.jackson.core.type.TypeReference<List<SessionEvaluationResponse.CorrectionExample>>() {});
+                            new com.fasterxml.jackson.core.type.TypeReference<List<SessionEvaluationResponse.CorrectionExample>>() {
+                            });
                 }
                 // Legacy v1 fallback
                 if (feedbackNode.has("languageEvaluation")) {
@@ -1103,7 +1106,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
      */
     private record AiMessagesResult(List<ConversationMessage> messages,
                                     java.util.Map<UUID, byte[]> audioByMessageId,
-                                    String discoveredVoice) {}
+                                    String discoveredVoice) {
+    }
 
     private AiMessagesResult parseAndSaveAIMessages(UUID sessionId, String aiResponseJson, int startSeq) {
         return parseAndSaveAIMessages(sessionId, aiResponseJson, startSeq, null);
@@ -1111,12 +1115,12 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
     /**
      * @param lockedVoice voice chosen at session opening (from session context). When non-null,
-     *   overrides whatever the LLM emits on subsequent turns so the character's voice stays
-     *   consistent. The LLM reliably picks a coherent voice on turn 1 but drifts later, so we
-     *   pin it server-side rather than re-asking every turn.
+     *                    overrides whatever the LLM emits on subsequent turns so the character's voice stays
+     *                    consistent. The LLM reliably picks a coherent voice on turn 1 but drifts later, so we
+     *                    pin it server-side rather than re-asking every turn.
      */
     private AiMessagesResult parseAndSaveAIMessages(UUID sessionId, String aiResponseJson,
-                                                   int startSeq, String lockedVoice) {
+                                                    int startSeq, String lockedVoice) {
         List<ConversationMessage> saved = new ArrayList<>();
         List<TtsJob> ttsJobs = new ArrayList<>();
         String discoveredVoice = null;
@@ -1285,7 +1289,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
      * NOT shown to learner — used only for gamification EXP/badges.
      */
     private BigDecimal computeInternalOverall(BigDecimal accuracyScore, BigDecimal pronunciationScore,
-                                               BigDecimal taskCompletionScore, BigDecimal complexityScore) {
+                                              BigDecimal taskCompletionScore, BigDecimal complexityScore) {
         // Weights: accuracy 30%, pronunciation 25%, task completion 30%, complexity 15%
         double accuracy = accuracyScore != null ? accuracyScore.doubleValue() : 0;
         double pronunciation = pronunciationScore != null ? pronunciationScore.doubleValue() : 0;
@@ -1325,8 +1329,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
     /**
      * @return {@code true} if any mission's status transitioned (not just progressPct), so the caller
-     *         knows to rebuild the system prompt — stale mission status in the prompt is a primary
-     *         driver of AI drift on long sessions.
+     * knows to rebuild the system prompt — stale mission status in the prompt is a primary
+     * driver of AI drift on long sessions.
      */
     private boolean updateSessionMissions(List<SessionMission> sessionMissions,
                                           List<MissionEvaluatorAI.MissionProgress> progressList) {
@@ -1423,16 +1427,16 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             List<MessagePronunciation> pronunciations) {
         if (pronunciations.isEmpty()) return null;
 
-        BigDecimal totalOverall      = BigDecimal.ZERO;
-        BigDecimal totalAccuracy     = BigDecimal.ZERO;
-        BigDecimal totalFluency      = BigDecimal.ZERO;
+        BigDecimal totalOverall = BigDecimal.ZERO;
+        BigDecimal totalAccuracy = BigDecimal.ZERO;
+        BigDecimal totalFluency = BigDecimal.ZERO;
         BigDecimal totalCompleteness = BigDecimal.ZERO;
 
         for (MessagePronunciation p : pronunciations) {
-            if (p.getOverallScore()       != null) totalOverall      = totalOverall.add(p.getOverallScore());
-            if (p.getAccuracyScore()      != null) totalAccuracy     = totalAccuracy.add(p.getAccuracyScore());
-            if (p.getFluencyScore()       != null) totalFluency      = totalFluency.add(p.getFluencyScore());
-            if (p.getCompletenessScore()  != null) totalCompleteness = totalCompleteness.add(p.getCompletenessScore());
+            if (p.getOverallScore() != null) totalOverall = totalOverall.add(p.getOverallScore());
+            if (p.getAccuracyScore() != null) totalAccuracy = totalAccuracy.add(p.getAccuracyScore());
+            if (p.getFluencyScore() != null) totalFluency = totalFluency.add(p.getFluencyScore());
+            if (p.getCompletenessScore() != null) totalCompleteness = totalCompleteness.add(p.getCompletenessScore());
         }
 
         BigDecimal count = BigDecimal.valueOf(pronunciations.size());
@@ -1584,8 +1588,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         }
     }
 
-    /** Per-segment TTS payload. Synthesis runs synchronously in parallel before response is returned. */
-    private record TtsJob(UUID messageId, String text, String voice, String style) {}
+    /**
+     * Per-segment TTS payload. Synthesis runs synchronously in parallel before response is returned.
+     */
+    private record TtsJob(UUID messageId, String text, String voice, String style) {
+    }
 
     /**
      * Synthesize every job in parallel via the roleplay executor, capped by the bundle timeout.
@@ -1600,8 +1607,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         List<CompletableFuture<java.util.Map.Entry<UUID, byte[]>>> futures = jobs.stream()
                 .map(job -> CompletableFuture.supplyAsync(
-                        () -> azureTtsProvider.synthesize(job.text(), job.voice(), job.style(), null),
-                        roleplayTaskExecutor)
+                                () -> azureTtsProvider.synthesize(job.text(), job.voice(), job.style(), null),
+                                roleplayTaskExecutor)
                         .exceptionally(ex -> {
                             log.warn("TTS synth failed for message {}: {}", job.messageId(), ex.getMessage());
                             return null;
@@ -1629,12 +1636,15 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             try {
                 java.util.Map.Entry<UUID, byte[]> entry = f.getNow(null);
                 if (entry != null) result.put(entry.getKey(), entry.getValue());
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
         return result;
     }
 
-    /** Populates MessageResponse.audioBase64 for any response whose id has synthesized audio. */
+    /**
+     * Populates MessageResponse.audioBase64 for any response whose id has synthesized audio.
+     */
     private void attachAudio(List<MessageResponse> responses, java.util.Map<UUID, byte[]> audio) {
         if (responses == null || audio == null || audio.isEmpty()) return;
         java.util.Base64.Encoder enc = java.util.Base64.getEncoder();
