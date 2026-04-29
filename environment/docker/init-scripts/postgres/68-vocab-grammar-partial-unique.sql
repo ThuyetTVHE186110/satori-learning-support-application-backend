@@ -1,4 +1,4 @@
--- 67-vocab-grammar-partial-unique.sql
+-- 68-vocab-grammar-partial-unique.sql
 --
 -- Replace full unique constraints on (japanese_text, jlpt_level) and
 -- (pattern, jlpt_level) with partial unique indexes that exclude
