@@ -114,4 +114,6 @@ public interface VocabularyRepository extends JpaRepository<Vocabulary, UUID> {
             "  AND l.deletedAt IS NULL " +
             "  AND l.status = 'PUBLISHED'")
     List<UUID> findIdsByCourseIdAndPublished(@Param("courseId") UUID courseId);
+
+    long countByDeletedAtIsNull();
 }

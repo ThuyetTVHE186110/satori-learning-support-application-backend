@@ -38,8 +38,10 @@ public class CreateAssignmentRequest {
     private LocalDateTime dueDate;
 
     /**
-     * Link to lesson for auto-quiz generation
+     * Reference to lesson for this assignment (required at creation).
+     * Associates the assignment with specific lesson content.
      */
+    @NotNull(message = "Lesson is required")
     private UUID lessonId;
 
     @Builder.Default

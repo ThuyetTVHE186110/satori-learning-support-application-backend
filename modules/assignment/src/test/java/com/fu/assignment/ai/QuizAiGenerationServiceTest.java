@@ -137,7 +137,7 @@ class QuizAiGenerationServiceTest {
         void shouldGenerateQuestionsWithVietnameseInstructions() throws Exception {
             AiQuizGenerationRequest request = AiQuizGenerationRequest.builder()
                     .teacherPrompt("Bài 1: Kiểm tra cấu trúc ngữ pháp")
-                    .lessonIds(List.of(UUID.randomUUID()))
+                    .lessonId(UUID.randomUUID())
                     .classId(UUID.randomUUID())
                     .questionCount(1)
                     .questionTypes(List.of("multiple_choice"))
@@ -176,8 +176,9 @@ class QuizAiGenerationServiceTest {
             Clazz clazz = mock(Clazz.class);
             given(clazz.getCourseId()).willReturn(UUID.randomUUID());
             given(classRepository.findByIdAndNotDeleted(any())).willReturn(Optional.of(clazz));
-            given(lessonRepository.findAllById(any())).willReturn(List.of(mock(Lesson.class)));
-            given(embeddingService.retrieveContext(anyString(), any())).willReturn(RagContext.empty());
+            Lesson mockLesson = mock(Lesson.class);
+            given(mockLesson.getTitle()).willReturn("Test Lesson");
+            given(lessonRepository.findById(any())).willReturn(Optional.of(mockLesson));
             
             // Mock vocabulary/grammar so lesson is not empty
             Vocabulary mockVocab = mock(Vocabulary.class);
@@ -198,7 +199,7 @@ class QuizAiGenerationServiceTest {
         void shouldPreventAnswerLeakage() throws Exception {
             AiQuizGenerationRequest request = AiQuizGenerationRequest.builder()
                     .teacherPrompt("Fill-blank: Where to read newspaper")
-                    .lessonIds(List.of(UUID.randomUUID()))
+                    .lessonId(UUID.randomUUID())
                     .classId(UUID.randomUUID())
                     .questionCount(1)
                     .questionTypes(List.of("fill_blank"))
@@ -238,8 +239,9 @@ class QuizAiGenerationServiceTest {
             Clazz clazz = mock(Clazz.class);
             given(clazz.getCourseId()).willReturn(UUID.randomUUID());
             given(classRepository.findByIdAndNotDeleted(any())).willReturn(Optional.of(clazz));
-            given(lessonRepository.findAllById(any())).willReturn(List.of(mock(Lesson.class)));
-            given(embeddingService.retrieveContext(anyString(), any())).willReturn(RagContext.empty());
+            Lesson mockLesson = mock(Lesson.class);
+            given(mockLesson.getTitle()).willReturn("Test Lesson");
+            given(lessonRepository.findById(any())).willReturn(Optional.of(mockLesson));
             
             Vocabulary mockVocab = mock(Vocabulary.class);
             given(mockVocab.getJapaneseText()).willReturn("日本語");
@@ -263,7 +265,7 @@ class QuizAiGenerationServiceTest {
         void shouldSalvageTruncatedResponse() throws Exception {
             AiQuizGenerationRequest request = AiQuizGenerationRequest.builder()
                     .teacherPrompt("Bài 1")
-                    .lessonIds(List.of(UUID.randomUUID()))
+                    .lessonId(UUID.randomUUID())
                     .classId(UUID.randomUUID())
                     .questionCount(2)
                     .build();
@@ -294,8 +296,9 @@ class QuizAiGenerationServiceTest {
             Clazz clazz = mock(Clazz.class);
             given(clazz.getCourseId()).willReturn(UUID.randomUUID());
             given(classRepository.findByIdAndNotDeleted(any())).willReturn(Optional.of(clazz));
-            given(lessonRepository.findAllById(any())).willReturn(List.of(mock(Lesson.class)));
-            given(embeddingService.retrieveContext(anyString(), any())).willReturn(RagContext.empty());
+            Lesson mockLesson = mock(Lesson.class);
+            given(mockLesson.getTitle()).willReturn("Test Lesson");
+            given(lessonRepository.findById(any())).willReturn(Optional.of(mockLesson));
 
             Vocabulary mockVocab = mock(Vocabulary.class);
             given(mockVocab.getJapaneseText()).willReturn("日本語");
@@ -320,62 +323,11 @@ class QuizAiGenerationServiceTest {
         @DisplayName("Should throw BusinessException when lessonIds is empty")
         void shouldThrowExceptionWhenLessonIdsIsEmpty() {
             AiQuizGenerationRequest request = AiQuizGenerationRequest.builder()
-                    .lessonIds(List.of())
+                    .lessonId(null)
                     .build();
 
             org.junit.jupiter.api.Assertions.assertThrows(com.fu.common.exception.BusinessException.class,
                     () -> quizAiGenerationService.generateQuestions(request));
-        }
-
-        @Test
-        @DisplayName("Should use course-level RAG for multiple lessons (RAG context)")
-        void shouldUseCourseLevelRagForMultipleLessons() throws Exception {
-            UUID classId = UUID.randomUUID();
-            UUID courseId = UUID.randomUUID();
-            List<UUID> lessonIds = List.of(UUID.randomUUID(), UUID.randomUUID());
-
-            AiQuizGenerationRequest request = AiQuizGenerationRequest.builder()
-                    .classId(classId)
-                    .lessonIds(lessonIds)
-                    .questionCount(1)
-                    .teacherPrompt("Test")
-                    .build();
-
-            Clazz clazz = mock(Clazz.class);
-            given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(clazz));
-            given(clazz.getCourseId()).willReturn(courseId);
-
-            Lesson l1 = mock(Lesson.class);
-            given(lessonRepository.findAllById(lessonIds)).willReturn(List.of(l1, mock(Lesson.class)));
-
-            // Mock vocabulary/grammar so lesson is not empty
-            Vocabulary mockVocab = mock(Vocabulary.class);
-            given(mockVocab.getJapaneseText()).willReturn("日本語");
-            given(mockVocab.getMeaningVi()).willReturn("tiếng Nhật");
-            given(vocabularyRepository.findByLessonId(any())).willReturn(List.of(mockVocab));
-            given(grammarPointRepository.findByLessonId(any())).willReturn(List.of());
-
-            // Mock successful AI call for first attempt
-            ChatResponse chatResponse = mock(ChatResponse.class, RETURNS_DEEP_STUBS);
-            Generation gen = mock(Generation.class, RETURNS_DEEP_STUBS);
-            given(chatClient.prompt().system(anyString()).user(anyString()).options(any()).call().chatResponse())
-                    .willReturn(chatResponse);
-            given(chatResponse.getResults()).willReturn(List.of(gen));
-            given(chatResponse.getResult()).willReturn(gen);
-            given(gen.getMetadata().getFinishReason()).willReturn("stop");
-            given(gen.getOutput().getText()).willReturn("{\"questions\": [{\"questionText\": \"Hãy chọn đáp án đúng: test\", \"explanation\": \"test\"}]}");
-            given(outputConverter.convert(anyString())).willReturn(new AiQuizResponseWrapper(List.of(mock(AiQuizQuestionDto.class))));
-
-            given(embeddingService.retrieveContext(anyString(), any())).willReturn(RagContext.empty());
-
-            quizAiGenerationService.generateQuestions(request);
-
-            ArgumentCaptor<ChatbotFilter> filterCaptor = ArgumentCaptor.forClass(ChatbotFilter.class);
-            verify(embeddingService).retrieveContext(anyString(), filterCaptor.capture());
-
-            // Key assertion: lessonId should be null for multi-lesson search
-            assertThat(filterCaptor.getValue().getLessonId()).isNull();
-            assertThat(filterCaptor.getValue().getCourseId()).isEqualTo(courseId);
         }
 
         @Test
@@ -384,7 +336,7 @@ class QuizAiGenerationServiceTest {
             UUID classId = UUID.randomUUID();
             AiQuizGenerationRequest request = AiQuizGenerationRequest.builder()
                     .classId(classId)
-                    .lessonIds(List.of(UUID.randomUUID()))
+                    .lessonId(UUID.randomUUID())
                     .questionCount(1)
                     .teacherPrompt("Test")
                     .build();
@@ -392,7 +344,9 @@ class QuizAiGenerationServiceTest {
             Clazz clazz = mock(Clazz.class);
             given(classRepository.findByIdAndNotDeleted(classId)).willReturn(Optional.of(clazz));
             given(clazz.getCourseId()).willReturn(UUID.randomUUID());
-            given(lessonRepository.findAllById(any())).willReturn(List.of(mock(Lesson.class)));
+            Lesson mockLesson = mock(Lesson.class);
+            given(mockLesson.getTitle()).willReturn("Test Lesson");
+            given(lessonRepository.findById(any())).willReturn(Optional.of(mockLesson));
 
             // Mock vocabulary/grammar so lesson is not empty
             Vocabulary mockVocab = mock(Vocabulary.class);
@@ -420,7 +374,6 @@ class QuizAiGenerationServiceTest {
                     .willReturn(successResponse); // Second call (simple prompt succeeds)
 
             given(outputConverter.convert(anyString())).willReturn(new AiQuizResponseWrapper(List.of(mock(AiQuizQuestionDto.class))));
-            given(embeddingService.retrieveContext(anyString(), any())).willReturn(RagContext.empty());
 
             quizAiGenerationService.generateQuestions(request);
 
@@ -433,7 +386,7 @@ class QuizAiGenerationServiceTest {
         void shouldFollowFivePatternFramework() throws Exception {
             AiQuizGenerationRequest request = AiQuizGenerationRequest.builder()
                     .teacherPrompt("Create 5 questions using all patterns")
-                    .lessonIds(List.of(UUID.randomUUID()))
+                    .lessonId(UUID.randomUUID())
                     .classId(UUID.randomUUID())
                     .questionCount(1)
                     .questionTypes(List.of("multiple_choice"))
@@ -476,8 +429,9 @@ class QuizAiGenerationServiceTest {
             Clazz clazz = mock(Clazz.class);
             given(clazz.getCourseId()).willReturn(UUID.randomUUID());
             given(classRepository.findByIdAndNotDeleted(any())).willReturn(Optional.of(clazz));
-            given(lessonRepository.findAllById(any())).willReturn(List.of(mock(Lesson.class)));
-            given(embeddingService.retrieveContext(anyString(), any())).willReturn(RagContext.empty());
+            Lesson mockLesson = mock(Lesson.class);
+            given(mockLesson.getTitle()).willReturn("Test Lesson");
+            given(lessonRepository.findById(any())).willReturn(Optional.of(mockLesson));
             
             Vocabulary mockVocab = mock(Vocabulary.class);
             given(mockVocab.getJapaneseText()).willReturn("日本語");

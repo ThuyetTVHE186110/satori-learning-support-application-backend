@@ -214,4 +214,57 @@ public interface AssignmentSubmissionRepository extends JpaRepository<Assignment
             @Param("assignmentId") UUID assignmentId,
             @Param("keyword") String keyword,
             Pageable pageable);
+
+    // =====================================================
+    // CLASS PROGRESS & LEARNING ANALYTICS QUERIES
+    // =====================================================
+
+    /**
+     * Get learner progress metrics for a class.
+     * For each active learner, returns: [userId, total_assignments, completed_assignments, submitted_assignments, avg_score]
+     * completed_assignments = count of GRADED submissions
+     * submitted_assignments = count of non-null submitted_at
+     */
+    @Query(value = """
+            SELECT 
+              cm.user_id,
+              COUNT(DISTINCT a.id) as total_assignments,
+              COUNT(CASE WHEN s.status = 'GRADED' THEN 1 END) as completed_assignments,
+              COUNT(CASE WHEN s.submitted_at IS NOT NULL THEN 1 END) as submitted_assignments,
+              AVG(CASE WHEN s.status = 'GRADED' THEN CAST(s.score AS NUMERIC) ELSE NULL END) as avg_score
+            FROM user_management.class_members cm
+            LEFT JOIN assignment.assignments a ON a.class_id = cm.class_id AND a.deleted_at IS NULL
+            LEFT JOIN assignment.assignment_submissions s ON a.id = s.assignment_id AND s.user_id = cm.user_id
+            WHERE cm.class_id = :classId AND cm.removed_at IS NULL
+            GROUP BY cm.user_id
+            ORDER BY cm.user_id
+            """, nativeQuery = true)
+    java.util.List<Object[]> getLearnerProgressMetricsByClass(@Param("classId") UUID classId);
+
+    /**
+     * Get count of distinct lessons with assignments assigned in a class.
+     * Returns count of DISTINCT lesson_ids from assignments in this class.
+     */
+    @Query(value = """
+            SELECT COUNT(DISTINCT a.lesson_id)
+            FROM assignment.assignments a
+            WHERE a.class_id = :classId 
+              AND a.deleted_at IS NULL 
+              AND a.lesson_id IS NOT NULL
+            """, nativeQuery = true)
+    Long countDistinctLessonsWithAssignmentsInClass(@Param("classId") UUID classId);
+
+    /**
+     * Get all graded submissions for a class to calculate average score.
+     * Returns list of [userId, score] for all GRADED submissions in the class.
+     */
+    @Query(value = """
+            SELECT s.user_id, CAST(s.score AS NUMERIC)
+            FROM assignment.assignment_submissions s
+            JOIN assignment.assignments a ON a.id = s.assignment_id
+            WHERE a.class_id = :classId 
+              AND a.deleted_at IS NULL 
+              AND s.status = 'GRADED'
+            """, nativeQuery = true)
+    java.util.List<Object[]> getAllGradedSubmissionsForClass(@Param("classId") UUID classId);
 }

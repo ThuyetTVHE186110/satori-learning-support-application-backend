@@ -30,4 +30,7 @@ public class LearnerAssignmentResponse {
 
     private List<LearnerQuizQuestionResponse> questions;
     private WritingAssignmentResponse writingContent;
+    
+    private UUID lessonId;
+    private String lessonName;
 }

@@ -57,6 +57,7 @@ public class ClassPreview {
     private ClassStatus oldStatus;
     private Integer oldMaxStudents;
     private UUID oldCourseId;
+    private String oldCourseName;          // course name from DB for UPDATE preview
     private String oldTeacherEmail;
     private String oldTeacherFullName;     // full name from DB for UPDATE validation
 

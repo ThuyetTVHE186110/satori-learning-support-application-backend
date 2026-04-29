@@ -203,4 +203,158 @@ public interface ConversationRepository extends JpaRepository<Conversation, UUID
             @Param("topicId") UUID topicId,
             @Param("jlptLevel") String jlptLevel,
             @Param("status") String status);
+
+    @Query(value = "SELECT * FROM speaking.conversations " +
+            "WHERE topic_id = :topicId " +
+            "  AND deleted_at IS NULL " +
+            "  AND (LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "       LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "       LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+            "ORDER BY order_index ASC",
+            countQuery = "SELECT COUNT(*) FROM speaking.conversations " +
+                    "WHERE topic_id = :topicId " +
+                    "  AND deleted_at IS NULL " +
+                    "  AND (LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "       LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "       LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%')))",
+            nativeQuery = true)
+    Page<Conversation> findByTopicIdAndKeywordAndDeletedAtIsNull(
+            @Param("topicId") UUID topicId,
+            @Param("keyword") String keyword,
+            Pageable pageable);
+
+    @Query(value = "SELECT * FROM speaking.conversations " +
+            "WHERE topic_id = :topicId " +
+            "  AND jlpt_level = CAST(:jlptLevel AS jlpt_level) " +
+            "  AND deleted_at IS NULL " +
+            "  AND (LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "       LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "       LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+            "ORDER BY order_index ASC",
+            countQuery = "SELECT COUNT(*) FROM speaking.conversations " +
+                    "WHERE topic_id = :topicId " +
+                    "  AND jlpt_level = CAST(:jlptLevel AS jlpt_level) " +
+                    "  AND deleted_at IS NULL " +
+                    "  AND (LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "       LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "       LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%')))",
+            nativeQuery = true)
+    Page<Conversation> findByTopicIdAndKeywordAndJlptLevelAndDeletedAtIsNull(
+            @Param("topicId") UUID topicId,
+            @Param("keyword") String keyword,
+            @Param("jlptLevel") String jlptLevel,
+            Pageable pageable);
+
+    @Query(value = "SELECT * FROM speaking.conversations " +
+            "WHERE topic_id = :topicId " +
+            "  AND status = CAST(:status AS content_status) " +
+            "  AND deleted_at IS NULL " +
+            "  AND (LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "       LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "       LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+            "ORDER BY order_index ASC",
+            countQuery = "SELECT COUNT(*) FROM speaking.conversations " +
+                    "WHERE topic_id = :topicId " +
+                    "  AND status = CAST(:status AS content_status) " +
+                    "  AND deleted_at IS NULL " +
+                    "  AND (LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "       LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "       LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%')))",
+            nativeQuery = true)
+    Page<Conversation> findByTopicIdAndKeywordAndStatusAndDeletedAtIsNull(
+            @Param("topicId") UUID topicId,
+            @Param("keyword") String keyword,
+            @Param("status") String status,
+            Pageable pageable);
+
+    @Query(value = "SELECT * FROM speaking.conversations " +
+            "WHERE topic_id = :topicId " +
+            "  AND jlpt_level = CAST(:jlptLevel AS jlpt_level) " +
+            "  AND status = CAST(:status AS content_status) " +
+            "  AND deleted_at IS NULL " +
+            "  AND (LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "       LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "       LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+            "ORDER BY order_index ASC",
+            countQuery = "SELECT COUNT(*) FROM speaking.conversations " +
+                    "WHERE topic_id = :topicId " +
+                    "  AND jlpt_level = CAST(:jlptLevel AS jlpt_level) " +
+                    "  AND status = CAST(:status AS content_status) " +
+                    "  AND deleted_at IS NULL " +
+                    "  AND (LOWER(title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "       LOWER(title_japanese) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                    "       LOWER(category) LIKE LOWER(CONCAT('%', :keyword, '%')))",
+            nativeQuery = true)
+    Page<Conversation> findByTopicIdAndKeywordAndJlptLevelAndStatusAndDeletedAtIsNull(
+            @Param("topicId") UUID topicId,
+            @Param("keyword") String keyword,
+            @Param("jlptLevel") String jlptLevel,
+            @Param("status") String status,
+            Pageable pageable);
+
+    long countByDeletedAtIsNull();
+
+    @Query(
+            value = "SELECT COUNT(*) FROM speaking.conversations WHERE status = CAST(:status AS content_status) AND deleted_at IS NULL",
+            nativeQuery = true
+    )
+    long countByStatusAndDeletedAtIsNull(@Param("status") String status);
+
+    @Query(
+            value = "SELECT CAST(AVG(CAST(overall_score AS FLOAT)) AS FLOAT) FROM ai_conversation.conversation_sessions WHERE overall_score IS NOT NULL",
+            nativeQuery = true
+    )
+    Double getAverageOverallScore();
+
+    @Query(
+            value = "SELECT CAST(AVG(EXTRACT(EPOCH FROM (updated_at - created_at))/3600) AS FLOAT) FROM ai_conversation.conversation_sessions WHERE status = CAST('COMPLETED' AS session_status)",
+            nativeQuery = true
+    )
+    Double getAveragePracticeDuration();
+
+    @Query(value = "SELECT ct.id, ct.title, COALESCE(SUM(ucp.total_sessions), 0) as practice_count " +
+            "FROM speaking.conversation_topics ct " +
+            "INNER JOIN speaking.conversations c ON ct.id = c.topic_id " +
+            "LEFT JOIN speaking.user_conversation_progress ucp ON c.id = ucp.conversation_id " +
+            "WHERE ct.deleted_at IS NULL " +
+            "GROUP BY ct.id, ct.title " +
+            "ORDER BY practice_count DESC NULLS LAST LIMIT :limit",
+            nativeQuery = true)
+    List<Object[]> getTopPracticedConversationTopics(@Param("limit") int limit);
+
+    @Query(value = "SELECT ct.id, ct.title, COUNT(cs.id) as practice_count " +
+            "FROM speaking.conversations ct " +
+            "LEFT JOIN ai_conversation.conversation_sessions cs ON ct.id = cs.conversation_id " +
+            "WHERE ct.deleted_at IS NULL " +
+            "GROUP BY ct.id, ct.title " +
+            "ORDER BY practice_count DESC NULLS LAST LIMIT :limit",
+            nativeQuery = true)
+    List<Object[]> getTopPracticedConversations(@Param("limit") int limit);
+
+    @Query(value = "SELECT DATE_TRUNC('day', cs.created_at)::date as practice_date, COUNT(*) as count " +
+            "FROM ai_conversation.conversation_sessions cs " +
+            "WHERE cs.created_at >= NOW() - INTERVAL '30 days' " +
+            "GROUP BY DATE_TRUNC('day', cs.created_at) " +
+            "ORDER BY practice_date",
+            nativeQuery = true)
+    List<Object[]> getPracticeTrendLast30Days();
+
+    @Query(value = "SELECT c.id, c.title, ct.title, c.jlpt_level, c.difficulty_score, " +
+            "ROUND(AVG(CAST(cs.overall_score AS NUMERIC)), 1) as avg_score " +
+            "FROM speaking.conversations c " +
+            "INNER JOIN speaking.conversation_topics ct ON c.topic_id = ct.id " +
+            "LEFT JOIN ai_conversation.conversation_sessions cs ON c.id = cs.conversation_id " +
+            "WHERE c.deleted_at IS NULL AND cs.overall_score IS NOT NULL " +
+            "GROUP BY c.id, c.title, ct.title, c.jlpt_level, c.difficulty_score " +
+            "HAVING AVG(CAST(cs.overall_score AS NUMERIC)) < :threshold " +
+            "ORDER BY avg_score ASC " +
+            "LIMIT :limit",
+            nativeQuery = true)
+    List<Object[]> getConversationsNeedingImprovement(@Param("threshold") double threshold, @Param("limit") int limit);
+
+    @Query(
+            value = "SELECT COUNT(*) FROM ai_conversation.conversation_sessions WHERE status = CAST('COMPLETED' AS session_status)",
+            nativeQuery = true
+    )
+    Long getTotalCompletedSpeakingSessions();
 }
