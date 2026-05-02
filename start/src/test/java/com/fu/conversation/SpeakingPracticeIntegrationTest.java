@@ -26,8 +26,18 @@ import com.fu.conversation.repository.UserConversationProgressRepository;
 import com.fu.roleplay.repository.ConversationSessionRepository;
 import com.fu.roleplay.repository.MessagePronunciationRepository;
 import com.fu.roleplay.repository.SessionMissionRepository;
+import com.fu.course.entity.Course;
+import com.fu.course.repository.CourseRepository;
+import com.fu.clazz.entity.Clazz;
+import com.fu.clazz.entity.ClassMember;
+import com.fu.clazz.repository.ClassRepository;
+import com.fu.clazz.repository.ClassMemberRepository;
+import com.fu.infrastructure.learner.LearnerProfileProvider;
 import com.fu.pronunciation.provider.PronunciationAssessmentProvider;
 import com.fu.pronunciation.dto.AssessmentResult;
+import com.fu.pronunciation.provider.AzureTtsProvider;
+import com.fu.achievement.service.StreakService;
+import com.fu.achievement.service.LearningLevelService;
 import com.fu.user.entity.User;
 import com.fu.user.entity.UserRole;
 import com.fu.user.entity.UserStatus;
@@ -110,12 +120,19 @@ class SpeakingPracticeIntegrationTest {
     @Autowired private UserSessionRepository userSessionRepository;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JwtService jwtService;
+    @Autowired private CourseRepository courseRepository;
+    @Autowired private ClassRepository classRepository;
+    @Autowired private ClassMemberRepository classMemberRepository;
     @MockBean private EmailService emailService;
+    @MockBean private LearnerProfileProvider learnerProfileProvider;
     @MockBean private ConversationGenerationService conversationGenerationService;
     @MockBean private RoleplayAIService roleplayAIService;
     @MockBean private MissionEvaluatorAI missionEvaluatorAI;
     @MockBean private SessionEvaluatorAI sessionEvaluatorAI;
     @MockBean private PronunciationAssessmentProvider pronunciationAssessmentProvider;
+    @MockBean private AzureTtsProvider azureTtsProvider;
+    @MockBean private StreakService streakService;
+    @MockBean private LearningLevelService learningLevelService;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -189,6 +206,9 @@ class SpeakingPracticeIntegrationTest {
                 .status(status)
                 .orderIndex(orderIndex)
                 .roleplayContext("{\"aiRole\":\"shop clerk\",\"scenario\":\"buying items\"}")
+                .aiRole("Shop Clerk")
+                .learnerRole("Customer")
+                .scenario("Buying items at a shop")
                 .jlptLevel(Course.JlptLevel.N5)
                 .build());
     }
@@ -260,6 +280,35 @@ class SpeakingPracticeIntegrationTest {
                 .build());
     }
 
+    private Course saveCourse(String name, Course.JlptLevel jlptLevel) {
+        return courseRepository.save(Course.builder()
+                .name(name)
+                .description("Test course")
+                .jlptLevel(jlptLevel)
+                .status(Course.CourseStatus.ACTIVE)
+                .orderIndex(0)
+                .build());
+    }
+
+    private Clazz saveClass(UUID courseId, String name) {
+        return classRepository.save(Clazz.builder()
+                .courseId(courseId)
+                .name(name)
+                .description("Test class")
+                .maxStudents(10)
+                .startDate(java.time.LocalDate.now())
+                .endDate(java.time.LocalDate.now().plusMonths(3))
+                .build());
+    }
+
+    private ClassMember saveClassMember(UUID classId, UUID userId) {
+        return classMemberRepository.save(ClassMember.builder()
+                .classId(classId)
+                .userId(userId)
+                .joinedAt(LocalDateTime.now())
+                .build());
+    }
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     @BeforeEach
@@ -282,6 +331,9 @@ class SpeakingPracticeIntegrationTest {
         userConversationRepository.deleteAll();
         topicRepository.deleteAll();
         conversationRepository.deleteAll();
+        classMemberRepository.deleteAll();
+        classRepository.deleteAll();
+        courseRepository.deleteAll();
         userSessionRepository.deleteAll();
         userRepository.deleteAll();
     }
@@ -476,8 +528,12 @@ class SpeakingPracticeIntegrationTest {
         @Test
         @DisplayName("TC_SP_VTP_001 — published topics only, ordered by orderIndex")
         void tc_sp_vtp_001() throws Exception {
-            saveLearner("learner@test.com");
+            User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
+
+            Course course = saveCourse("N5 Course", Course.JlptLevel.N5);
+            Clazz clazz = saveClass(course.getId(), "Test Class");
+            saveClassMember(clazz.getId(), learner.getId());
 
             ConversationTopic topic = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             saveConversation(topic.getId(), "Topic B", Course.ContentStatus.PUBLISHED, 2, true);
@@ -505,6 +561,10 @@ class SpeakingPracticeIntegrationTest {
         void tc_sp_vtp_002() throws Exception {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
+
+            Course course = saveCourse("N5 Course", Course.JlptLevel.N5);
+            Clazz clazz = saveClass(course.getId(), "Test Class");
+            saveClassMember(clazz.getId(), learner.getId());
 
             ConversationTopic topic = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             Conversation conversation = saveConversation(topic.getId(), "Topic A", Course.ContentStatus.PUBLISHED, 1, true);
@@ -590,8 +650,12 @@ class SpeakingPracticeIntegrationTest {
         @Test
         @DisplayName("TC_SP_VTP_007 — no practice stats when user has no sessions")
         void tc_sp_vtp_007() throws Exception {
-            saveLearner("learner@test.com");
+            User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
+
+            Course course = saveCourse("N5 Course", Course.JlptLevel.N5);
+            Clazz clazz = saveClass(course.getId(), "Test Class");
+            saveClassMember(clazz.getId(), learner.getId());
 
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             saveConversation(theme.getId(), "Topic A", Course.ContentStatus.PUBLISHED, 1, true);
@@ -609,6 +673,10 @@ class SpeakingPracticeIntegrationTest {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
 
+            Course course = saveCourse("N5 Course", Course.JlptLevel.N5);
+            Clazz clazz = saveClass(course.getId(), "Test Class");
+            saveClassMember(clazz.getId(), learner.getId());
+
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             saveConversation(theme.getId(), "Topic A", Course.ContentStatus.PUBLISHED, 1, true);
             saveSoftDeletedTopic(theme.getId(), "Deleted", learner.getId());
@@ -623,8 +691,12 @@ class SpeakingPracticeIntegrationTest {
         @Test
         @DisplayName("TC_SP_VTP_009 — theme with no topics returns empty list")
         void tc_sp_vtp_009() throws Exception {
-            saveLearner("learner@test.com");
+            User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
+
+            Course course = saveCourse("N5 Course", Course.JlptLevel.N5);
+            Clazz clazz = saveClass(course.getId(), "Test Class");
+            saveClassMember(clazz.getId(), learner.getId());
 
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
 
@@ -639,6 +711,10 @@ class SpeakingPracticeIntegrationTest {
         void tc_sp_vtp_011() throws Exception {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
+
+            Course course = saveCourse("N5 Course", Course.JlptLevel.N5);
+            Clazz clazz = saveClass(course.getId(), "Test Class");
+            saveClassMember(clazz.getId(), learner.getId());
 
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             Conversation topic = saveConversation(theme.getId(), "Topic A", Course.ContentStatus.PUBLISHED, 1, true);
@@ -659,6 +735,10 @@ class SpeakingPracticeIntegrationTest {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
 
+            Course course = saveCourse("N5 Course", Course.JlptLevel.N5);
+            Clazz clazz = saveClass(course.getId(), "Test Class");
+            saveClassMember(clazz.getId(), learner.getId());
+
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             Conversation topic = saveConversation(theme.getId(), "Topic A", Course.ContentStatus.PUBLISHED, 1, true);
             saveSession(learner.getId(), topic.getId());
@@ -677,6 +757,10 @@ class SpeakingPracticeIntegrationTest {
         void tc_sp_vtp_013() throws Exception {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
+
+            Course course = saveCourse("N5 Course", Course.JlptLevel.N5);
+            Clazz clazz = saveClass(course.getId(), "Test Class");
+            saveClassMember(clazz.getId(), learner.getId());
 
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
 
@@ -741,6 +825,8 @@ class SpeakingPracticeIntegrationTest {
             Conversation topic = saveConversation(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
             saveMission(topic.getId(), "Mission 1", 0);
 
+            when(learnerProfileProvider.getLearnerProfile(any())).thenReturn(java.util.Optional.empty());
+            when(azureTtsProvider.isAvailable()).thenReturn(false);
             when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
                     .thenReturn("prompt");
             when(roleplayAIService.generateOpeningMessage(anyString(), anyString(), anyString(), anyString()))
@@ -779,6 +865,9 @@ class SpeakingPracticeIntegrationTest {
         void tc_sp_ai_003() throws Exception {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
+
+            when(learnerProfileProvider.getLearnerProfile(any())).thenReturn(java.util.Optional.empty());
+            when(azureTtsProvider.isAvailable()).thenReturn(false);
 
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             Conversation topic = saveConversation(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
@@ -829,6 +918,15 @@ class SpeakingPracticeIntegrationTest {
         void tc_sp_ai_004() throws Exception {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
+
+            when(learnerProfileProvider.getLearnerProfile(any())).thenReturn(java.util.Optional.empty());
+            when(azureTtsProvider.isAvailable()).thenReturn(false);
+            when(streakService.recordDailyActivity(any(UUID.class), anyString())).thenReturn(
+                    com.fu.achievement.dto.response.StreakNotificationResponse.builder()
+                            .currentStreak(0)
+                            .isFirstActivityToday(false)
+                            .build());
+            when(learningLevelService.getTotalExp(any(UUID.class))).thenReturn(0);
 
             ConversationSession session = saveSession(learner.getId(), null);
             messageRepository.save(ConversationMessage.builder()
@@ -917,6 +1015,9 @@ class SpeakingPracticeIntegrationTest {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
 
+            when(learnerProfileProvider.getLearnerProfile(any())).thenReturn(java.util.Optional.empty());
+            when(azureTtsProvider.isAvailable()).thenReturn(false);
+
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             Conversation topic = saveConversation(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
             saveMission(topic.getId(), "Mission 1", 0);
@@ -996,6 +1097,9 @@ class SpeakingPracticeIntegrationTest {
             saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
 
+            when(learnerProfileProvider.getLearnerProfile(any())).thenReturn(java.util.Optional.empty());
+            when(azureTtsProvider.isAvailable()).thenReturn(false);
+
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             Conversation topic = saveConversation(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
             saveMission(topic.getId(), "Mission 1", 0);
@@ -1021,6 +1125,9 @@ class SpeakingPracticeIntegrationTest {
         void tc_sp_ai_012() throws Exception {
             saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
+
+            when(learnerProfileProvider.getLearnerProfile(any())).thenReturn(java.util.Optional.empty());
+            when(azureTtsProvider.isAvailable()).thenReturn(false);
 
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             Conversation topic = saveConversation(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
@@ -1145,6 +1252,8 @@ class SpeakingPracticeIntegrationTest {
             when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
                     .thenReturn(List.of());
             when(pronunciationAssessmentProvider.isAvailable()).thenReturn(true);
+            when(pronunciationAssessmentProvider.recognize(any(byte[].class), anyString()))
+                    .thenReturn(com.fu.pronunciation.dto.TranscriptionResult.of("Hello", "AZURE"));
 
             AssessmentResult mockResult = AssessmentResult.builder()
                     .success(true)
@@ -1177,6 +1286,9 @@ class SpeakingPracticeIntegrationTest {
         void tc_sp_ai_018() throws Exception {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
+
+            when(learnerProfileProvider.getLearnerProfile(any())).thenReturn(java.util.Optional.empty());
+            when(azureTtsProvider.isAvailable()).thenReturn(false);
 
             when(roleplayAIService.buildSetupSystemPrompt(anyString())).thenReturn("setup");
             when(roleplayAIService.generateSetupOpening(anyString()))
@@ -1226,6 +1338,9 @@ class SpeakingPracticeIntegrationTest {
         void tc_sp_ai_019() throws Exception {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
+
+            when(learnerProfileProvider.getLearnerProfile(any())).thenReturn(java.util.Optional.empty());
+            when(azureTtsProvider.isAvailable()).thenReturn(false);
 
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             Conversation topic = saveConversation(theme.getId(), "Roleplay Topic", Course.ContentStatus.PUBLISHED, 1, true);
@@ -1463,6 +1578,9 @@ class SpeakingPracticeIntegrationTest {
             saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
 
+            when(learnerProfileProvider.getLearnerProfile(any())).thenReturn(java.util.Optional.empty());
+            when(azureTtsProvider.isAvailable()).thenReturn(false);
+
             ConversationTopic theme = saveTopic("Theme", Course.ContentStatus.PUBLISHED, 0);
             Conversation topic = saveConversation(theme.getId(), "No Mission Topic", Course.ContentStatus.PUBLISHED, 1, true);
             // No missions saved for this topic
@@ -1525,6 +1643,9 @@ class SpeakingPracticeIntegrationTest {
         void tc_sp_ct_034() throws Exception {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
+
+            when(learnerProfileProvider.getLearnerProfile(any())).thenReturn(java.util.Optional.empty());
+            when(azureTtsProvider.isAvailable()).thenReturn(false);
 
             saveSession(learner.getId(), null);
             saveSession(learner.getId(), null);
@@ -2251,6 +2372,15 @@ class SpeakingPracticeIntegrationTest {
              User learner = saveLearner("learner@test.com");
              String token = loginAndGetToken("learner@test.com");
 
+             when(learnerProfileProvider.getLearnerProfile(any())).thenReturn(java.util.Optional.empty());
+             when(azureTtsProvider.isAvailable()).thenReturn(false);
+             when(streakService.recordDailyActivity(any(UUID.class), anyString())).thenReturn(
+                     com.fu.achievement.dto.response.StreakNotificationResponse.builder()
+                             .currentStreak(0)
+                             .isFirstActivityToday(false)
+                             .build());
+             when(learningLevelService.getTotalExp(any(UUID.class))).thenReturn(0);
+
              when(roleplayAIService.buildSetupSystemPrompt(anyString())).thenReturn("setup");
              when(roleplayAIService.generateSetupOpening(anyString()))
                      .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"Question\",\"translation\":\"Question\",\"romaji\":\"\",\"corrections\":[]}]" );
@@ -2623,6 +2753,13 @@ class SpeakingPracticeIntegrationTest {
             String token = loginAndGetToken("learner@test.com");
             ConversationSession session = saveSession(learner.getId(), null);
 
+            when(streakService.recordDailyActivity(any(UUID.class), anyString())).thenReturn(
+                    com.fu.achievement.dto.response.StreakNotificationResponse.builder()
+                            .currentStreak(0)
+                            .isFirstActivityToday(false)
+                            .build());
+            when(learningLevelService.getTotalExp(any(UUID.class))).thenReturn(0);
+
             // completeSession requires at least 1 USER message, otherwise it returns 400 SESSION_EMPTY
             messageRepository.save(ConversationMessage.builder()
                     .sessionId(session.getId())
@@ -2676,6 +2813,8 @@ class SpeakingPracticeIntegrationTest {
             when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
                     .thenReturn(List.of());
             when(pronunciationAssessmentProvider.isAvailable()).thenReturn(true);
+            when(pronunciationAssessmentProvider.recognize(any(byte[].class), anyString()))
+                    .thenReturn(com.fu.pronunciation.dto.TranscriptionResult.of("Hello", "AZURE"));
             when(pronunciationAssessmentProvider.assess(any())).thenReturn(
                     AssessmentResult.builder()
                             .success(false)
@@ -2721,6 +2860,8 @@ class SpeakingPracticeIntegrationTest {
 
             // Mô phỏng kết quả từ CompositePronunciationProvider khi cả 2 Provider đều tạch
             when(pronunciationAssessmentProvider.isAvailable()).thenReturn(true);
+            when(pronunciationAssessmentProvider.recognize(any(byte[].class), anyString()))
+                    .thenReturn(com.fu.pronunciation.dto.TranscriptionResult.of("Hello", "AZURE"));
             when(pronunciationAssessmentProvider.assess(any())).thenReturn(
                     AssessmentResult.builder()
                             .success(false)
@@ -2758,6 +2899,8 @@ class SpeakingPracticeIntegrationTest {
             ConversationSession session = saveSession(learner.getId(), null);
 
             when(pronunciationAssessmentProvider.isAvailable()).thenReturn(true);
+            when(pronunciationAssessmentProvider.recognize(any(byte[].class), anyString()))
+                    .thenReturn(com.fu.pronunciation.dto.TranscriptionResult.of("", "AZURE"));
             when(pronunciationAssessmentProvider.assess(any())).thenReturn(
                     AssessmentResult.builder()
                             .success(true)
@@ -2797,6 +2940,8 @@ class SpeakingPracticeIntegrationTest {
 
             // Azure STT succeeds with transcript, SpeechSuper scoring fields are null
             when(pronunciationAssessmentProvider.isAvailable()).thenReturn(true);
+            when(pronunciationAssessmentProvider.recognize(any(byte[].class), anyString()))
+                    .thenReturn(com.fu.pronunciation.dto.TranscriptionResult.of("Hello", "AZURE"));
             when(pronunciationAssessmentProvider.assess(any())).thenReturn(
                     AssessmentResult.builder()
                             .success(true)
@@ -2941,6 +3086,13 @@ class SpeakingPracticeIntegrationTest {
             User learner = saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
             ConversationSession session = saveSession(learner.getId(), null);
+
+            when(streakService.recordDailyActivity(any(UUID.class), anyString())).thenReturn(
+                    com.fu.achievement.dto.response.StreakNotificationResponse.builder()
+                            .currentStreak(0)
+                            .isFirstActivityToday(false)
+                            .build());
+            when(learningLevelService.getTotalExp(any(UUID.class))).thenReturn(0);
 
             // completeSession requires at least 1 USER message
             messageRepository.save(ConversationMessage.builder()

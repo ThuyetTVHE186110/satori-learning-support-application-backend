@@ -593,8 +593,8 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Japanese N5 Class\",\"description\":\"Comprehensive Japanese N5 course for beginners\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                            "\"maxStudents\":8,\"startDate\":\"%s\"}",
-                    teacher.getId(), course.getId(), LocalDate.now());
+                            "\"maxStudents\":8,\"startDate\":\"%s\",\"expectedEndDate\":\"%s\"}",
+                    teacher.getId(), course.getId(), LocalDate.now(), LocalDate.now().plusMonths(6));
 
             MvcResult result = mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -624,8 +624,8 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Future Japanese N5 Class\",\"description\":\"Japanese N5 course starting next month\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                            "\"maxStudents\":8,\"startDate\":\"%s\"}",
-                    teacher.getId(), course.getId(), LocalDate.now().plusDays(30));
+                            "\"maxStudents\":8,\"startDate\":\"%s\",\"expectedEndDate\":\"%s\"}",
+                    teacher.getId(), course.getId(), LocalDate.now().plusDays(30), LocalDate.now().plusMonths(6));
 
             MvcResult result = mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -660,8 +660,8 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Japanese N5 Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                            "\"maxStudents\":8,\"startDate\":\"%s\"}",
-                    teacher.getId(), course.getId(), LocalDate.now().plusDays(1));
+                            "\"maxStudents\":8,\"startDate\":\"%s\",\"expectedEndDate\":\"%s\"}",
+                    teacher.getId(), course.getId(), LocalDate.now().plusDays(1), LocalDate.now().plusMonths(6));
 
             mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -681,9 +681,9 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Bad Teacher Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                            "\"maxStudents\":8,\"startDate\":\"%s\"}",
+                            "\"maxStudents\":8,\"startDate\":\"%s\",\"expectedEndDate\":\"%s\"}",
                     learner.getId(), course.getId(),
-                    LocalDate.now().plusDays(1));
+                    LocalDate.now().plusDays(1), LocalDate.now().plusMonths(6));
 
             mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -703,8 +703,8 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Inactive Course Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                            "\"maxStudents\":8,\"startDate\":\"%s\"}",
-                    teacher.getId(), course.getId(), LocalDate.now().plusDays(1));
+                            "\"maxStudents\":8,\"startDate\":\"%s\",\"expectedEndDate\":\"%s\"}",
+                    teacher.getId(), course.getId(), LocalDate.now().plusDays(1), LocalDate.now().plusMonths(6));
 
             mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -720,8 +720,10 @@ class ClassManagementTest {
             User teacher = saveTeacher("teacher@test.com");
             String token = loginAndGetToken("teacher@test.com", "ValidPass@1");
 
-            String body = "{\"name\":\"Test\",\"teacherId\":\"" + UUID.randomUUID() +
-                    "\",\"courseId\":\"" + UUID.randomUUID() + "\",\"maxStudents\":8}";
+            String body = String.format(
+                    "{\"name\":\"Inactive Course Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
+                            "\"maxStudents\":8,\"startDate\":\"%s\",\"expectedEndDate\":\"%s\"}",
+                    UUID.randomUUID(),UUID.randomUUID(), LocalDate.now().plusDays(1), LocalDate.now().plusMonths(6));
 
             mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -1282,8 +1284,8 @@ class ClassManagementTest {
             // No description field in the payload
             String body = String.format(
                     "{\"name\":\"No Desc Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                            "\"maxStudents\":8,\"startDate\":\"%s\"}",
-                    teacher.getId(), course.getId(), LocalDate.now().plusDays(1));
+                            "\"maxStudents\":8,\"startDate\":\"%s\",\"expectedEndDate\":\"%s\"}",
+                    teacher.getId(), course.getId(), LocalDate.now().plusDays(1), LocalDate.now().plusMonths(6));
 
             MvcResult result = mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -1330,8 +1332,8 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Ghost Teacher Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                            "\"maxStudents\":8,\"startDate\":\"%s\"}",
-                    UUID.randomUUID(), course.getId(), LocalDate.now().plusDays(1));
+                            "\"maxStudents\":8,\"startDate\":\"%s\",\"expectedEndDate\":\"%s\"}",
+                    UUID.randomUUID(), course.getId(), LocalDate.now().plusDays(1), LocalDate.now().plusMonths(6));
 
             mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -1351,8 +1353,8 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Ghost Course Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                            "\"maxStudents\":8,\"startDate\":\"%s\"}",
-                    teacher.getId(), UUID.randomUUID(), LocalDate.now().plusDays(1));
+                            "\"maxStudents\":8,\"startDate\":\"%s\",\"expectedEndDate\":\"%s\"}",
+                    teacher.getId(), UUID.randomUUID(), LocalDate.now().plusDays(1), LocalDate.now().plusMonths(6));
 
             mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON).content(body)
@@ -1373,8 +1375,8 @@ class ClassManagementTest {
 
             String body = String.format(
                     "{\"name\":\"Default Max Class\",\"teacherId\":\"%s\",\"courseId\":\"%s\"," +
-                            "\"startDate\":\"%s\"}",
-                    teacher.getId(), course.getId(), LocalDate.now().plusDays(1));
+                            "\"startDate\":\"%s\",\"expectedEndDate\":\"%s\"}",
+                    teacher.getId(), course.getId(), LocalDate.now().plusDays(1), LocalDate.now().plusMonths(6));
 
             MvcResult result = mockMvc.perform(post("/api/v1/classes")
                             .contentType(MediaType.APPLICATION_JSON).content(body)

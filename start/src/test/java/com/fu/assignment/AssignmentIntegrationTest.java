@@ -22,7 +22,9 @@ import com.fu.common.exception.BusinessException;
 import com.fu.course.entity.Course;
 import com.fu.course.entity.Course.CourseStatus;
 import com.fu.course.entity.Course.JlptLevel;
+import com.fu.course.entity.Lesson;
 import com.fu.course.repository.CourseRepository;
+import com.fu.course.repository.LessonRepository;
 import com.fu.common.exception.ResourceNotFoundException;
 import com.fu.user.entity.*;
 import com.fu.user.repository.UserRepository;
@@ -89,6 +91,7 @@ class AssignmentIntegrationTest {
     @Autowired private ClassMemberRepository classMemberRepository;
     @Autowired private ClassTeacherHistoryRepository classTeacherHistoryRepository;
     @Autowired private CourseRepository courseRepository;
+    @Autowired private LessonRepository lessonRepository;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private AssignmentService assignmentService;
 
@@ -137,6 +140,15 @@ class AssignmentIntegrationTest {
         return courseRepository.save(Course.builder()
                 .name("Integration Course").description("test")
                 .jlptLevel(JlptLevel.N5).status(CourseStatus.ACTIVE).orderIndex(0)
+                .build());
+    }
+
+    private Lesson saveLesson(Course course) {
+        return lessonRepository.save(Lesson.builder()
+                .course(course)
+                .title("Test Lesson")
+                .status(Lesson.ContentStatus.DRAFT)
+                .orderIndex(0)
                 .build());
     }
 
@@ -270,16 +282,17 @@ class AssignmentIntegrationTest {
     }
 
     /** Build JSON body for SaveFullQuizRequest (multipart "data" part). */
-    private String quizRequestJson(AssignmentStatus status, String questionsJson) {
+    private String quizRequestJson(AssignmentStatus status, String questionsJson, UUID lessonId) {
         String questions = (questionsJson != null) ? questionsJson : "[]";
         return """
             {
               "title": "Quiz Title",
               "dueDate": "%s",
               "status": "%s",
-              "questions": %s
+              "questions": %s,
+              "lessonId": "%s"
             }
-            """.formatted(LocalDateTime.now().plusDays(7), status.name(), questions);
+            """.formatted(LocalDateTime.now().plusDays(7), status.name(), questions, lessonId);
     }
 
     /** One valid multiple-choice question JSON for questions[]. Option A is correct. */
@@ -298,15 +311,16 @@ class AssignmentIntegrationTest {
     }
 
     /** Build JSON body for SaveFullWritingRequest. */
-    private String writingRequestJson(AssignmentStatus status) {
+    private String writingRequestJson(AssignmentStatus status, UUID lessonId) {
         return """
             {
               "title": "Writing Title",
               "dueDate": "%s",
               "status": "%s",
-              "prompt": "Write something in Japanese."
+              "prompt": "Write something in Japanese.",
+              "lessonId": "%s"
             }
-            """.formatted(LocalDateTime.now().plusDays(7), status.name());
+            """.formatted(LocalDateTime.now().plusDays(7), status.name(), lessonId);
     }
 
     /** Save an EXPIRED QUIZ assignment (due date in the past). */
@@ -385,6 +399,7 @@ class AssignmentIntegrationTest {
         classMemberRepository.deleteAll();
         classTeacherHistoryRepository.deleteAll();
         classRepository.deleteAll();
+        lessonRepository.deleteAll();
         courseRepository.deleteAll();
         sessionRepository.deleteAll();
         userRepository.deleteAll();
@@ -401,6 +416,7 @@ class AssignmentIntegrationTest {
         classMemberRepository.deleteAll();
         classTeacherHistoryRepository.deleteAll();
         classRepository.deleteAll();
+        lessonRepository.deleteAll();
         courseRepository.deleteAll();
         sessionRepository.deleteAll();
         userRepository.deleteAll();
@@ -439,8 +455,8 @@ class AssignmentIntegrationTest {
                     
                     // Verify expired quiz (first assignment)
                     .andExpect(jsonPath("$.data.content[0].id").exists())
-                    .andExpect(jsonPath("$.data.content[0].title").value("Expired Quiz"))
-                    .andExpect(jsonPath("$.data.content[0].assignmentType").value("QUIZ"))
+                    .andExpect(jsonPath("$.data.content[0].title").value("Ongoing Translation"))
+                    .andExpect(jsonPath("$.data.content[0].assignmentType").value("TRANSLATION"))
                     .andExpect(jsonPath("$.data.content[0].status").exists())
                     .andExpect(jsonPath("$.data.content[0].dueDate").exists())
                     .andExpect(jsonPath("$.data.content[0].questionCount").exists())
@@ -860,7 +876,9 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_CR_001 — Tạo QUIZ thành công → status DRAFT")
         void tc_as_t_cr_001() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             String token = loginAndGetToken("teacher@test.com");
 
             String twoQuestionsJson = """
@@ -886,7 +904,7 @@ class AssignmentIntegrationTest {
 
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    quizRequestJson(AssignmentStatus.DRAFT, twoQuestionsJson).getBytes());
+                    quizRequestJson(AssignmentStatus.DRAFT, twoQuestionsJson, lesson.getId()).getBytes());
 
             mockMvc.perform(multipart("/api/v1/teacher/assignments/class/{classId}/quiz", clazz.getId())
                             .file(dataPart)
@@ -902,12 +920,14 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_CR_002a — Tạo WRITING thành công → status DRAFT")
         void tc_as_t_cr_002a() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             String token = loginAndGetToken("teacher@test.com");
 
             mockMvc.perform(post("/api/v1/teacher/assignments/class/{classId}/writing", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(writingRequestJson(AssignmentStatus.DRAFT))
+                            .content(writingRequestJson(AssignmentStatus.DRAFT, lesson.getId()))
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.assignmentType").value("WRITING"))
@@ -918,7 +938,9 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_CR_002b — Tạo TRANSLATION thành công → status DRAFT")
         void tc_as_t_cr_002b() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             String token = loginAndGetToken("teacher@test.com");
 
             String body = """
@@ -926,9 +948,10 @@ class AssignmentIntegrationTest {
                   "title": "Translation Title",
                   "dueDate": "%s",
                   "status": "DRAFT",
-                  "prompt": "Translate this sentence."
+                  "prompt": "Translate this sentence.",
+                  "lessonId": "%s"
                 }
-                """.formatted(LocalDateTime.now().plusDays(7));
+                """.formatted(LocalDateTime.now().plusDays(7), lesson.getId());
 
             mockMvc.perform(post("/api/v1/teacher/assignments/class/{classId}/translation", clazz.getId())
                             .contentType(MediaType.APPLICATION_JSON)
@@ -990,11 +1013,13 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_CR_005 — classId không tồn tại → 400 (CLASS_NOT_FOUND)")
         void tc_as_t_cr_005() throws Exception {
             saveTeacher("teacher@test.com");
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
             String token = loginAndGetToken("teacher@test.com");
 
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    quizRequestJson(AssignmentStatus.DRAFT, null).getBytes());
+                    quizRequestJson(AssignmentStatus.DRAFT, null, lesson.getId()).getBytes());
 
             mockMvc.perform(multipart("/api/v1/teacher/assignments/class/{classId}/quiz", UUID.randomUUID())
                             .file(dataPart)
@@ -1006,7 +1031,9 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_CR_006 — Tạo QUIZ thành công với instructions")
         void tc_as_t_cr_006() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             String token = loginAndGetToken("teacher@test.com");
 
             MockMultipartFile dataPart = new MockMultipartFile(
@@ -1017,9 +1044,10 @@ class AssignmentIntegrationTest {
                       "instructions": "Read carefully.",
                       "dueDate": "%s",
                       "status": "DRAFT",
-                      "questions": []
+                      "questions": [],
+                      "lessonId": "%s"
                     }
-                    """.formatted(LocalDateTime.now().plusDays(7)).getBytes());
+                    """.formatted(LocalDateTime.now().plusDays(7), lesson.getId()).getBytes());
 
             mockMvc.perform(multipart("/api/v1/teacher/assignments/class/{classId}/quiz", clazz.getId())
                             .file(dataPart)
@@ -1032,13 +1060,15 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_CR_007 — Learner gọi endpoint Teacher create → 403")
         void tc_as_t_cr_007() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             saveLearner("learner@test.com");
             String token = loginAndGetToken("learner@test.com");
 
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    quizRequestJson(AssignmentStatus.DRAFT, null).getBytes());
+                    quizRequestJson(AssignmentStatus.DRAFT, null, lesson.getId()).getBytes());
 
             mockMvc.perform(multipart("/api/v1/teacher/assignments/class/{classId}/quiz", clazz.getId())
                             .file(dataPart)
@@ -1051,12 +1081,14 @@ class AssignmentIntegrationTest {
         void tc_as_t_cr_008() throws Exception {
             User teacherA = saveTeacher("teacherA@test.com");
             saveTeacher("teacherB@test.com");
-            Clazz clazzA = saveClass(teacherA, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazzA = saveClass(teacherA, course);
             String tokenB = loginAndGetToken("teacherB@test.com");
 
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    quizRequestJson(AssignmentStatus.DRAFT, null).getBytes());
+                    quizRequestJson(AssignmentStatus.DRAFT, null, lesson.getId()).getBytes());
 
             mockMvc.perform(
                             multipart("/api/v1/teacher/assignments/class/{classId}/quiz", clazzA.getId())
@@ -1069,12 +1101,14 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_CR_009 — Tạo QUIZ thành công đính kèm audio file")
         void tc_as_t_cr_009() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             String token = loginAndGetToken("teacher@test.com");
 
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    quizRequestJson(AssignmentStatus.DRAFT, null).getBytes());
+                    quizRequestJson(AssignmentStatus.DRAFT, null, lesson.getId()).getBytes());
             MockMultipartFile audioPart = new MockMultipartFile(
                     "audioFile", "test.mp3", "audio/mpeg", "dummy audio content".getBytes());
 
@@ -1146,7 +1180,9 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_UP_001 — Update metadata thành công khi DRAFT")
         void tc_as_t_up_001() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             Assignment a = saveQuizDraft(teacher, clazz);
             String token = loginAndGetToken("teacher@test.com");
 
@@ -1157,9 +1193,11 @@ class AssignmentIntegrationTest {
                       "title": "Updated Title",
                       "dueDate": "%s",
                       "status": "DRAFT",
-                      "questions": []
+                      "questions": [],
+                      "lessonId": "%s"
                     }
-                    """.formatted(LocalDateTime.now().plusDays(14)).getBytes());
+                    """.formatted(LocalDateTime.now().plusDays(14), lesson.getId()).getBytes());
+
 
             mockMvc.perform(multipart(org.springframework.http.HttpMethod.PUT,
                             "/api/v1/teacher/assignments/{id}/quiz", a.getId())
@@ -1173,7 +1211,9 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_UP_002 — Update metadata thành công khi PUBLISHED")
         void tc_as_t_up_002() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             Assignment a = savePublishedQuiz(teacher, clazz);
             String token = loginAndGetToken("teacher@test.com");
 
@@ -1184,9 +1224,10 @@ class AssignmentIntegrationTest {
                       "title": "Updated Published Title",
                       "dueDate": "%s",
                       "status": "PUBLISHED",
-                      "questions": []
+                      "questions": [],
+                      "lessonId": "%s"
                     }
-                    """.formatted(LocalDateTime.now().plusDays(14)).getBytes());
+                    """.formatted(LocalDateTime.now().plusDays(14), lesson.getId()).getBytes());
 
             mockMvc.perform(multipart(org.springframework.http.HttpMethod.PUT,
                             "/api/v1/teacher/assignments/{id}/quiz", a.getId())
@@ -1200,13 +1241,15 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_UP_003 — Update content (câu hỏi) khi chưa có submission → thành công")
         void tc_as_t_up_003() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             Assignment a = saveQuizDraft(teacher, clazz);
             String token = loginAndGetToken("teacher@test.com");
 
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    quizRequestJson(AssignmentStatus.DRAFT, oneQuestionJson()).getBytes());
+                    quizRequestJson(AssignmentStatus.DRAFT, oneQuestionJson(), lesson.getId()).getBytes());
 
             mockMvc.perform(multipart(org.springframework.http.HttpMethod.PUT,
                             "/api/v1/teacher/assignments/{id}/quiz", a.getId())
@@ -1221,7 +1264,9 @@ class AssignmentIntegrationTest {
         void tc_as_t_up_004() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
             User learner = saveLearner("learner@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             Assignment a = savePublishedQuiz(teacher, clazz);
             enrollLearner(clazz.getId(), learner.getId());
             startSubmission(a.getId(), learner.getId());
@@ -1229,7 +1274,7 @@ class AssignmentIntegrationTest {
 
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    quizRequestJson(AssignmentStatus.PUBLISHED, oneQuestionJson()).getBytes());
+                    quizRequestJson(AssignmentStatus.PUBLISHED, oneQuestionJson(), lesson.getId()).getBytes());
 
             mockMvc.perform(multipart(org.springframework.http.HttpMethod.PUT,
                             "/api/v1/teacher/assignments/{id}/quiz", a.getId())
@@ -1272,7 +1317,9 @@ class AssignmentIntegrationTest {
         void tc_as_t_up_006() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
             User learner = saveLearner("learner@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             Assignment a = savePublishedQuiz(teacher, clazz);
             enrollLearner(clazz.getId(), learner.getId());
             startSubmission(a.getId(), learner.getId());
@@ -1285,9 +1332,10 @@ class AssignmentIntegrationTest {
                       "title": "Published Quiz",
                       "dueDate": "%s",
                       "status": "PUBLISHED",
-                      "questions": []
+                      "questions": [],
+                      "lessonId": "%s"
                     }
-                    """.formatted(LocalDateTime.now().plusDays(30)).getBytes());
+                    """.formatted(LocalDateTime.now().plusDays(30), lesson.getId()).getBytes());
 
             mockMvc.perform(multipart(org.springframework.http.HttpMethod.PUT,
                             "/api/v1/teacher/assignments/{id}/quiz", a.getId())
@@ -1301,7 +1349,9 @@ class AssignmentIntegrationTest {
         void tc_as_t_up_007() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
             User learner = saveLearner("learner@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             Assignment a = savePublishedQuiz(teacher, clazz);
             enrollLearner(clazz.getId(), learner.getId());
             startSubmission(a.getId(), learner.getId());
@@ -1315,9 +1365,10 @@ class AssignmentIntegrationTest {
                       "instructions": "Do not use dictionary.",
                       "dueDate": "%s",
                       "status": "PUBLISHED",
-                      "questions": []
+                      "questions": [],
+                      "lessonId": "%s"
                     }
-                    """.formatted(LocalDateTime.now().plusDays(7)).getBytes());
+                    """.formatted(LocalDateTime.now().plusDays(7), lesson.getId()).getBytes());
 
             mockMvc.perform(multipart(org.springframework.http.HttpMethod.PUT,
                             "/api/v1/teacher/assignments/{id}/quiz", a.getId())
@@ -1357,7 +1408,9 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_UP_009 — Update WRITING thành công")
         void tc_as_t_up_009() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             Assignment a = savePublishedWriting(teacher, clazz);
             String token = loginAndGetToken("teacher@test.com");
 
@@ -1366,9 +1419,10 @@ class AssignmentIntegrationTest {
                   "title": "Updated Writing",
                   "dueDate": "%s",
                   "status": "PUBLISHED",
-                  "prompt": "Updated prompt."
+                  "prompt": "Updated prompt.",
+                  "lessonId": "%s"
                 }
-                """.formatted(LocalDateTime.now().plusDays(10));
+                """.formatted(LocalDateTime.now().plusDays(10), lesson.getId());
 
             mockMvc.perform(put("/api/v1/teacher/assignments/{id}/writing", a.getId())
                             .contentType(MediaType.APPLICATION_JSON)
@@ -1382,7 +1436,9 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_UP_010 — Update TRANSLATION thành công")
         void tc_as_t_up_010() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             Assignment a = savePublishedWriting(teacher, clazz);
             a.setAssignmentType(AssignmentType.TRANSLATION);
             assignmentRepository.save(a);
@@ -1394,9 +1450,10 @@ class AssignmentIntegrationTest {
                   "dueDate": "%s",
                   "status": "PUBLISHED",
                   "prompt": "Updated translation prompt.",
-                  "sourceText": "Translate this."
+                  "sourceText": "Translate this.",
+                  "lessonId": "%s"
                 }
-                """.formatted(LocalDateTime.now().plusDays(10));
+                """.formatted(LocalDateTime.now().plusDays(10), lesson.getId());
 
             mockMvc.perform(put("/api/v1/teacher/assignments/{id}/translation", a.getId())
                             .contentType(MediaType.APPLICATION_JSON)
@@ -1446,13 +1503,15 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_ST_001 — DRAFT → PUBLISHED thành công (QUIZ có câu hỏi)")
         void tc_as_t_st_001() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             Assignment a = saveQuizDraft(teacher, clazz);
             String token = loginAndGetToken("teacher@test.com");
 
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    quizRequestJson(AssignmentStatus.PUBLISHED, oneQuestionJson()).getBytes());
+                    quizRequestJson(AssignmentStatus.PUBLISHED, oneQuestionJson(), lesson.getId()).getBytes());
 
             mockMvc.perform(multipart(org.springframework.http.HttpMethod.PUT,
                             "/api/v1/teacher/assignments/{id}/quiz", a.getId())
@@ -1466,13 +1525,15 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_ST_002 — DRAFT → PUBLISHED thiếu câu hỏi → 400 (NO_QUESTIONS)")
         void tc_as_t_st_002() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             Assignment a = saveQuizDraft(teacher, clazz);
             String token = loginAndGetToken("teacher@test.com");
 
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    quizRequestJson(AssignmentStatus.PUBLISHED, "[]").getBytes());
+                    quizRequestJson(AssignmentStatus.PUBLISHED, "[]", lesson.getId()).getBytes());
 
             mockMvc.perform(multipart(org.springframework.http.HttpMethod.PUT,
                             "/api/v1/teacher/assignments/{id}/quiz", a.getId())
@@ -1485,7 +1546,9 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_ST_003 — DRAFT → PUBLISHED với dueDate quá hạn trong request → 400")
         void tc_as_t_st_003() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             saveQuizDraft(teacher, clazz);
             String token = loginAndGetToken("teacher@test.com");
 
@@ -1497,9 +1560,10 @@ class AssignmentIntegrationTest {
                       "title": "Quiz Title",
                       "dueDate": "2020-01-01T00:00:00",
                       "status": "PUBLISHED",
-                      "questions": %s
+                      "questions": %s,
+                      "lessonId": "%s"
                     }
-                    """.formatted(oneQuestionJson()).getBytes());
+                    """.formatted(oneQuestionJson(), lesson.getId()).getBytes());
 
             // Any assignment UUID — @Future validator fires before service logic
             mockMvc.perform(multipart(org.springframework.http.HttpMethod.PUT,
@@ -1513,13 +1577,15 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_ST_004 — PUBLISHED → DRAFT → 400 (INVALID_STATUS_TRANSITION)")
         void tc_as_t_st_004() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             Assignment a = savePublishedQuiz(teacher, clazz);
             String token = loginAndGetToken("teacher@test.com");
 
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    quizRequestJson(AssignmentStatus.DRAFT, "[]").getBytes());
+                    quizRequestJson(AssignmentStatus.DRAFT, "[]", lesson.getId()).getBytes());
 
             mockMvc.perform(multipart(org.springframework.http.HttpMethod.PUT,
                             "/api/v1/teacher/assignments/{id}/quiz", a.getId())
@@ -1532,7 +1598,9 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_ST_005 — PUBLISHED → CLOSED → thành công")
         void tc_as_t_st_005() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             Assignment a = savePublishedQuiz(teacher, clazz);
             String token = loginAndGetToken("teacher@test.com");
 
@@ -1543,9 +1611,10 @@ class AssignmentIntegrationTest {
                       "title": "Published Quiz",
                       "dueDate": "%s",
                       "status": "CLOSED",
-                      "questions": []
+                      "questions": [],
+                      "lessonId": "%s"
                     }
-                    """.formatted(LocalDateTime.now().plusDays(7)).getBytes());
+                    """.formatted(LocalDateTime.now().plusDays(7), lesson.getId()).getBytes());
 
             mockMvc.perform(multipart(org.springframework.http.HttpMethod.PUT,
                             "/api/v1/teacher/assignments/{id}/quiz", a.getId())
@@ -1559,7 +1628,9 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_T_ST_006 — CLOSED → PUBLISHED → 200 (success)")
         void tc_as_t_st_006() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             Assignment a = savePublishedQuiz(teacher, clazz);
             a.setStatus(AssignmentStatus.CLOSED);
             assignmentRepository.save(a);
@@ -1567,7 +1638,7 @@ class AssignmentIntegrationTest {
 
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    quizRequestJson(AssignmentStatus.PUBLISHED, oneQuestionJson()).getBytes());
+                    quizRequestJson(AssignmentStatus.PUBLISHED, oneQuestionJson(), lesson.getId()).getBytes());
 
             mockMvc.perform(multipart(org.springframework.http.HttpMethod.PUT,
                             "/api/v1/teacher/assignments/{id}/quiz", a.getId())
@@ -3182,12 +3253,14 @@ class AssignmentIntegrationTest {
         @DisplayName("TC_AS_CLOUD_001 — Cloudinary upload audio fail → trả lỗi hệ thống")
         void tc_as_cloud_001() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             String token = loginAndGetToken("teacher@test.com");
 
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    quizRequestJson(AssignmentStatus.DRAFT, null).getBytes());
+                    quizRequestJson(AssignmentStatus.DRAFT, null, lesson.getId()).getBytes());
             MockMultipartFile audioPart = new MockMultipartFile(
                     "audioFile", "test.mp3", "audio/mpeg", "dummy audio".getBytes());
 
@@ -3261,7 +3334,9 @@ class AssignmentIntegrationTest {
         void tc_as_cloud_004() throws Exception {
             User teacher = saveTeacher("teacher@test.com");
             User learner = saveLearner("learner@test.com");
-            Clazz clazz = saveClass(teacher, saveCourse());
+            Course course = saveCourse();
+            Lesson lesson = saveLesson(course);
+            Clazz clazz = saveClass(teacher, course);
             Assignment a = savePublishedQuiz(teacher, clazz);
             enrollLearner(clazz.getId(), learner.getId());
             startSubmission(a.getId(), learner.getId());
@@ -3269,7 +3344,7 @@ class AssignmentIntegrationTest {
 
             MockMultipartFile dataPart = new MockMultipartFile(
                     "data", "", "application/json",
-                    quizRequestJson(AssignmentStatus.PUBLISHED, null).getBytes());
+                    quizRequestJson(AssignmentStatus.PUBLISHED, null, lesson.getId()).getBytes());
             MockMultipartFile audioPart = new MockMultipartFile(
                     "audioFile", "new.mp3", "audio/mpeg", "new audio".getBytes());
 
