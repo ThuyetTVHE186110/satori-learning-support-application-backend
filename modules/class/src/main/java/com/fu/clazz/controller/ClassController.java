@@ -80,13 +80,13 @@ public class ClassController {
             @RequestParam(required = false) String keyword) {
 
         Pageable pageable;
-        
+
         // For teacher without status filter: sort by status priority (ACTIVE > NOT_STARTED > CLOSED), then by createdAt
         // For others or with status filter: sort by createdAt only
         if (!isManager() && status == null) {
             // Teacher without status filter: use custom status priority sorting
             // Note: JPA doesn't support CASE expressions in Order, so we'll apply this on service side
-            pageable = PageRequest.of(page, Math.min(size, 100));
+            pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("createdAt").descending());
         } else {
             pageable = PageRequest.of(page, Math.min(size, 100), Sort.by("createdAt").descending());
         }
@@ -321,10 +321,10 @@ public class ClassController {
     /**
      * Get all classes a teacher has taught or is currently teaching.
      * Returns paginated list sorted by assignment date (most recent first).
-     * 
+     * <p>
      * Access Control:
      * - TEACHER: Can only view own class history
-     * 
+     * <p>
      * GET /api/v1/classes/teacher/{teacherId}?page=0&size=10
      */
     @GetMapping("/teacher")
@@ -350,6 +350,7 @@ public class ClassController {
                 : "Lấy lịch sử lớp học thành công.";
         return ResponseEntity.ok(ApiResponse.success(message, pageResponse));
     }
+
     @PostMapping("/import")
     @PreAuthorize("hasRole('OPERATION_MANAGER')")
     public ResponseEntity<ApiResponse<?>> importClassesFromExcel(
@@ -363,7 +364,7 @@ public class ClassController {
             throw new BusinessException("INVALID_FILE_TYPE", "Chỉ chấp nhận file Excel (.xlsx, .xls)");
         }
         try {
-            return ResponseEntity.ok(ApiResponse.success("Trích xuất dữ liệu từ file excel thành công.", 
+            return ResponseEntity.ok(ApiResponse.success("Trích xuất dữ liệu từ file excel thành công.",
                     clazzService.importClassesFromExcel(file, managerId)));
         } catch (Exception e) {
             throw new BusinessException("FILE_READ_ERROR", "Lỗi khi đọc file Excel: " + e.getMessage());
@@ -374,7 +375,7 @@ public class ClassController {
      * Step 2: Approve and confirm class import
      * Creates new classes and updates existing ones based on preview data from step 1.
      * Request contains separated lists: classesToCreate (NEW) and classesToUpdate (UPDATE).
-     * 
+     * <p>
      * POST /api/v1/classes/approve-import
      */
     @PostMapping("/approve-import")
@@ -383,9 +384,9 @@ public class ClassController {
             @Valid @RequestBody com.fu.clazz.dto.request.ApproveImportClassesRequest request,
             @AuthenticationPrincipal UUID managerId) {
         int totalClasses = (request.getClassesToCreate() != null ? request.getClassesToCreate().size() : 0) +
-                          (request.getClassesToUpdate() != null ? request.getClassesToUpdate().size() : 0);
+                (request.getClassesToUpdate() != null ? request.getClassesToUpdate().size() : 0);
         log.info("Manager {} approving import of {} classes", managerId, totalClasses);
-        return ResponseEntity.ok(ApiResponse.success("Nhập khẩu lớp học thành công.", 
+        return ResponseEntity.ok(ApiResponse.success("Nhập khẩu lớp học thành công.",
                 clazzService.approveImportClasses(request, managerId)));
     }
 
