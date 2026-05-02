@@ -21,4 +21,6 @@ public class LearnerClassResponse {
     private UUID id;
     private String name;
     private ClassStatus status;
+    private UUID courseId;
+
 }
