@@ -60,6 +60,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -1967,24 +1968,43 @@ public class ClassServiceImpl implements ClassService {
         // Count active members
         Long totalLearners = classMemberRepository.countActiveByClassId(classId);
 
-        // Get class entity for max students
+        // Get class entity for max students and date information
         Clazz clazz = classRepository.findByIdAndNotDeleted(classId)
                 .orElseThrow(() -> new ResourceNotFoundException("Lớp học không tồn tại."));
 
         Integer maxStudents = clazz.getMaxStudents();
         Double enrollmentPercentage = maxStudents > 0 ? (totalLearners * 100.0 / maxStudents) : 0.0;
 
-        // Count total lessons in course
+        // Calculate class progress percentage based on time elapsed
+        // Formula: (today - startDate) / (expectedEndDate - startDate) * 100
+        LocalDate startDate = clazz.getStartDate();
+        LocalDate expectedEndDate = clazz.getExpectedEndDate();
+        LocalDate today = LocalDate.now();
+
+        Double classProgressPercentage = 0.0;
+        
+        if (startDate != null && expectedEndDate != null) {
+            long daysElapsed = ChronoUnit.DAYS.between(startDate, today);
+            long totalDays = ChronoUnit.DAYS.between(startDate, expectedEndDate);
+            
+            if (totalDays > 0) {
+                classProgressPercentage = Math.min(100.0, (daysElapsed * 100.0 / totalDays));
+            } else if (totalDays == 0 && !today.isBefore(startDate)) {
+                classProgressPercentage = 100.0;
+            }
+            
+            // Ensure percentage is between 0-100
+            classProgressPercentage = Math.max(0.0, classProgressPercentage);
+        }
+
+        // Count total lessons in course (for reference)
         Long totalLessonsInCourse = lessonRepository.countByCourseIdForAnalytics(courseId);
 
-        // Count lessons with assignments in class via repository
+        // Count lessons with assignments in class via repository (for reference)
         Long lessonsWithAssignments = analyticsRepository.countLessonsWithAssignmentsInClass(classId);
         if (lessonsWithAssignments == null) {
             lessonsWithAssignments = 0L;
         }
-
-        Double classProgressPercentage = totalLessonsInCourse != null && totalLessonsInCourse > 0 ?
-                (lessonsWithAssignments * 100.0 / totalLessonsInCourse) : 0.0;
 
         // Calculate average score via repository
         Double avgScoreDouble = analyticsRepository.getAverageScoreForClass(classId);
