@@ -314,11 +314,11 @@ public class QuizAiGenerationService {
 
     /**
      * Distributes total count into optimal batch sizes.
-     * Example: 10 → [5, 5], 12 → [5, 5, 2], 3 → [3]
+     * Example: 10 → [4, 4, 2], 12 → [4, 4, 4], 3 → [3]
      */
     private List<Integer> distributeByBatch(int totalCount) {
         List<Integer> batches = new ArrayList<>();
-        int batchSize = 5;  // Max questions per call
+        int batchSize = 4;  // Max questions per call
 
         while (totalCount > 0) {
             int current = Math.min(batchSize, totalCount);
@@ -516,10 +516,15 @@ public class QuizAiGenerationService {
         if (!allGrammar.isEmpty()) {
             contentSummary.append("--- TARGET GRAMMAR ---\n");
             for (GrammarPoint g : allGrammar) {
-                contentSummary.append("- ").append(g.getPattern())
-                        .append(": ").append(g.getMeaningVi() != null ? g.getMeaningVi() : g.getMeaningEn()).append("\n");
+                contentSummary.append("Pattern: ").append(g.getPattern()).append("\n");
+                String meaning = g.getMeaningVi() != null ? g.getMeaningVi() : g.getMeaningEn();
+                if (meaning != null) contentSummary.append("  Meaning: ").append(meaning).append("\n");
+                if (g.getShortExplanation() != null) contentSummary.append("  Explanation: ").append(g.getShortExplanation()).append("\n");
+                if (g.getFormationRules() != null) contentSummary.append("  Formation: ").append(g.getFormationRules()).append("\n");
+                if (g.getCommonMistakes() != null && !g.getCommonMistakes().equals("[]"))
+                    contentSummary.append("  Common mistakes: ").append(g.getCommonMistakes()).append("\n");
+                contentSummary.append("\n");
             }
-            contentSummary.append("\n");
         }
 
         ctx.append(contentSummary);
