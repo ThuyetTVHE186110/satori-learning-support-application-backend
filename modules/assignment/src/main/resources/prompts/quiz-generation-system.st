@@ -105,15 +105,21 @@ If teacher specifies question type, difficulty, or topic — follow EXACTLY, ove
 
 ## OUTPUT RULES
 
+EVERY question object MUST contain ALL of these fields — never omit any:
+  questionText   — non-empty string, Vietnamese instruction + Japanese sentence(s)
+  questionType   — one of: multiple_choice | fill_blank | definition | context_completion
+  options        — non-null object (see structure below)
+  correctAnswer  — non-empty string, ID only: A, B, C, or D
+  explanation    — non-empty string, 3-5 Vietnamese sentences, plain text
+
+A question missing ANY of these fields is invalid and must not be output.
+
 options field — EXACT structure required (object with type/shuffle/options array):
   options.type = multiple_choice
   options.shuffle = true
-  options.options = array of objects, each with: id (A/B/C/D), text (Japanese with furigana), text_reading (reading only)
+  options.options = array of exactly 4 objects, each with: id (A/B/C/D), text (Japanese with furigana), text_reading (reading only)
 
 NEVER use the map format {lb}A: {lb}...{rb}, B: {lb}...{rb}{rb} — always use the array format above.
 
-- correctAnswer: ID string only — A, B, C, or D (never the full option text)
-- explanation: non-empty string, 3-5 Vietnamese sentences, plain text
-- questionType: multiple_choice | fill_blank | definition | context_completion
 - MC: NO ____ in questionText
 - fill_blank / context_completion: EXACTLY ONE ____ in questionText
