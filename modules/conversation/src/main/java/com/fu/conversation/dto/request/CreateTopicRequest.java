@@ -22,9 +22,9 @@ public class CreateTopicRequest {
 
     @Size(max = 255)
     private String titleJapanese;
-
+    @Size(max = 1000, message = "Description must not exceed 1000 characters")
     private String description;
-
+    @Size(max = 1000, message = "Description must not exceed 1000 characters")
     private String descriptionVi;
 
     @Size(max = 100)

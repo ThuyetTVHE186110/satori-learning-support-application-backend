@@ -107,13 +107,14 @@ public class ContentManagerDashboardServiceImpl implements ContentManagerDashboa
     private StatusDistributionChart getStatusDistributionForLessons() {
         long published = lessonRepository.countByStatusAndDeletedAtIsNull(Lesson.ContentStatus.PUBLISHED);
         long draft = lessonRepository.countByStatusAndDeletedAtIsNull(Lesson.ContentStatus.DRAFT);
-        long total = published + draft;
+        long archived = lessonRepository.countByStatusAndDeletedAtIsNull(Lesson.ContentStatus.ARCHIVED);
+        long total = published + draft + archived;
 
         return StatusDistributionChart.builder()
                 .title("Trạng thái bài học")
                 .total(total)
                 .published(published)
-                .reviewed(0)
+                .archived(archived)
                 .draft(draft)
                 .build();
     }
@@ -121,13 +122,14 @@ public class ContentManagerDashboardServiceImpl implements ContentManagerDashboa
     private StatusDistributionChart getStatusDistributionForTopics() {
         long published = conversationTopicRepository.countByStatusAndDeletedAtIsNull(Course.ContentStatus.PUBLISHED.name());
         long draft = conversationTopicRepository.countByStatusAndDeletedAtIsNull(Course.ContentStatus.DRAFT.name());
-        long total = published + draft;
+        long archived = conversationTopicRepository.countByStatusAndDeletedAtIsNull(Course.ContentStatus.ARCHIVED.name());
+        long total = published + draft + archived;
 
         return StatusDistributionChart.builder()
                 .title("Trạng thái chủ đề hội thoại")
                 .total(total)
                 .published(published)
-                .reviewed(0)
+                .archived(archived)
                 .draft(draft)
                 .build();
     }
@@ -136,14 +138,15 @@ public class ContentManagerDashboardServiceImpl implements ContentManagerDashboa
         // Aggregate status from conversations (roleplay scenarios)
         long conversationPublished = conversationRepository.countByStatusAndDeletedAtIsNull(Course.ContentStatus.PUBLISHED.name());
         long conversationDraft = conversationRepository.countByStatusAndDeletedAtIsNull(Course.ContentStatus.DRAFT.name());
+        long conversationArchived = conversationRepository.countByStatusAndDeletedAtIsNull(Course.ContentStatus.ARCHIVED.name());
 
-        long total = conversationPublished + conversationDraft;
+        long total = conversationPublished + conversationDraft + conversationArchived;
 
         return StatusDistributionChart.builder()
                 .title("Trạng thái nội dung hội thoại")
                 .total(total)
                 .published(conversationPublished)
-                .reviewed(0)
+                .archived(conversationArchived)
                 .draft(conversationDraft)
                 .build();
     }
