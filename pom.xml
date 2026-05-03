@@ -233,8 +233,46 @@
                         </annotationProcessorPaths>
                     </configuration>
                 </plugin>
+                <!--
+                    JDK 21 tightens dynamic agent attach; Mockito 5+ uses ByteBuddy
+                    which must be attached as a javaagent to mock final classes
+                    (Spring AI ChatClient, Spring Data sealed interfaces, etc.).
+                    Without this, such tests fail with "Could not initialize
+                    plugin: org.mockito.plugins.MockMaker".
+                    The agent jar is byte-buddy-agent (NOT mockito-core — that has
+                    no Agent-Class manifest entry); it is a transitive dep of mockito-core.
+                    The path property is supplied by maven-dependency-plugin's
+                    "properties" goal below.
+                -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.2.5</version>
+                    <configuration>
+                        <argLine>-javaagent:${net.bytebuddy:byte-buddy-agent:jar} -XX:+EnableDynamicAgentLoading</argLine>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-dependency-plugin</artifactId>
+                    <version>3.6.1</version>
+                    <executions>
+                        <execution>
+                            <id>resolve-test-deps-properties</id>
+                            <goals><goal>properties</goal></goals>
+                        </execution>
+                    </executions>
+                </plugin>
             </plugins>
         </pluginManagement>
+        <plugins>
+            <!-- Activate the agent-property resolver in every module so the
+                 surefire argLine above can interpolate ${org.mockito:mockito-core:jar}. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+            </plugin>
+        </plugins>
     </build>
     
 </project>
