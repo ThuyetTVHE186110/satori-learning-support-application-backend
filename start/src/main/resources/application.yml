@@ -431,8 +431,10 @@ roleplay:
     max-active-sessions: ${ROLEPLAY_MAX_ACTIVE_SESSIONS:3}
     # AI model for roleplay conversation
     model-name: ${ROLEPLAY_MODEL:gpt-4.1-mini}
-    # AI model for evaluation (mission + session)
-    evaluator-model: ${ROLEPLAY_EVALUATOR_MODEL:gpt-4.1-mini}
+    # AI model for evaluation (mission + session).
+    # Upgraded to gpt-4o for richer feedback completeness — end-of-session call,
+    # not latency-critical. Override via ROLEPLAY_EVALUATOR_MODEL env var.
+    evaluator-model: ${ROLEPLAY_EVALUATOR_MODEL:gpt-4o}
     # Redis session TTL in hours
     redis-session-ttl-hours: ${ROLEPLAY_REDIS_TTL:2}
     # Max context messages for AI conversation

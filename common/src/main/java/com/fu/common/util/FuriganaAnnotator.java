@@ -1,7 +1,7 @@
 package com.fu.common.util;
 
 import com.atilika.kuromoji.ipadic.Token;
-import com.atilika.kuromoji.ipadic.Tokenizer;
+import com.fu.common.util.internal.KuromojiHolder;
 
 import java.util.List;
 import java.util.regex.Pattern;
@@ -19,14 +19,11 @@ import java.util.regex.Pattern;
  * {@link #normalizeAndAnnotate(String)}: strips any existing ruby syntax back to plain text
  * and re-annotates — deterministic, always canonical.
  *
- * <p>The underlying {@link Tokenizer} is heavy (~4MB dictionary, ~200ms init). A lazy-init
- * holder keeps a JVM-wide singleton; modules that never call the annotator pay no init cost.
+ * <p>The underlying Kuromoji tokenizer is heavy (~4MB dictionary, ~200ms init). The shared
+ * {@link KuromojiHolder} singleton is reused across all consumers so the dictionary loads
+ * at most once per JVM.
  */
 public final class FuriganaAnnotator {
-
-    private static final class Holder {
-        static final Tokenizer INSTANCE = new Tokenizer.Builder().build();
-    }
 
     /** Any ruby-like syntax — used to strip before re-annotating. */
     private static final Pattern CANONICAL_RUBY = Pattern.compile("\\[([^\\[\\]]+)\\]\\{[^{}]+\\}");
@@ -48,7 +45,7 @@ public final class FuriganaAnnotator {
         if (text == null || text.isEmpty()) return text;
         if (!containsKanji(text)) return text;
 
-        List<Token> tokens = Holder.INSTANCE.tokenize(text);
+        List<Token> tokens = KuromojiHolder.tokenizer().tokenize(text);
         StringBuilder sb = new StringBuilder(text.length() + 32);
         for (Token t : tokens) {
             String surface = t.getSurface();

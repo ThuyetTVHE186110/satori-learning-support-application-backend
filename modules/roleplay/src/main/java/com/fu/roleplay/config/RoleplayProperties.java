@@ -23,8 +23,12 @@ public class RoleplayProperties {
     /** OpenAI model for roleplay conversation AI. */
     private String modelName = "gpt-4.1-mini";
 
-    /** OpenAI model for mission evaluation and session evaluation. */
-    private String evaluatorModel = "gpt-4.1-mini";
+    /**
+     * OpenAI model for mission evaluation and session evaluation.
+     * Default upgraded to gpt-4o (Phase 0 v28 plan): end-of-session call where
+     * completeness > latency. Override via ROLEPLAY_EVALUATOR_MODEL env var.
+     */
+    private String evaluatorModel = "gpt-4o";
 
     /** Redis cache TTL for system prompts, in hours. */
     private int redisSessionTtlHours = 2;

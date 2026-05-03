@@ -29,12 +29,17 @@ public class SessionEvaluationResponse {
     @JsonIgnore
     private BigDecimal overallScore;
 
-    // ── Legacy fields (kept for backward compat, deprecated) ──
-    @Deprecated
+    // ── Legacy fields (kept for backward compat, scheduled for removal) ──
+    // Marked forRemoval=true (Phase 1 v28). FE should migrate to:
+    //   missionScore       → taskCompletion.score
+    //   pronunciationScore → pronunciation.score
+    //   languageScore      → (accuracy.score + complexity.score) / 2 (no direct equivalent)
+    // Removal target: 1 release after FE migration confirmed.
+    @Deprecated(forRemoval = true)
     private BigDecimal missionScore;
-    @Deprecated
+    @Deprecated(forRemoval = true)
     private BigDecimal pronunciationScore;
-    @Deprecated
+    @Deprecated(forRemoval = true)
     private BigDecimal languageScore;
 
     // ── NEW: 4 Orthogonal Dimensions (shown to learner) ──
@@ -53,7 +58,9 @@ public class SessionEvaluationResponse {
     private List<MissionEvaluationDetail> missionDetails;
 
     // ── Legacy language evaluation (kept for backward compat) ──
-    @Deprecated
+    // Replaced by accuracy + complexity dimensions; only populated by
+    // getConversationFeedback() fallback path. Removal target: 1 release after FE migration.
+    @Deprecated(forRemoval = true)
     private LanguageEvaluationDetail languageEvaluation;
 
     @JsonProperty("newBadgesEarned")
@@ -79,6 +86,20 @@ public class SessionEvaluationResponse {
         private Map<String, Integer> errorBreakdown;
         private List<CorrectionExample> topCorrections;
         private String feedback;
+
+        // Phase 2 v28: clause-based metrics + severity counts (CAF Skehan 1998).
+        // Optional/nullable for backward compat — old payloads without these
+        // fields still deserialize cleanly.
+        private Integer totalClauses;
+        private Integer cleanClauses;
+        private Integer dirtyClauses;
+        /** Counts keyed by "CRITICAL", "MAJOR", "MINOR". */
+        private Map<String, Integer> severityCounts;
+        /**
+         * True iff at least one CRITICAL error caused score to be capped at 70
+         * (categorical communication-breakdown gate).
+         */
+        private Boolean hasCriticalCommunicationBreakdown;
     }
 
     @Data
@@ -90,6 +111,15 @@ public class SessionEvaluationResponse {
         private String corrected;
         private String explanation;
         private String errorType;
+
+        // Phase 2 v28: severity tagging (Vann, Meyer & Lorenz 1984 error gravity).
+        // Nullable so payloads from before Phase 2 still deserialize.
+        /** CRITICAL | MAJOR | MINOR */
+        private String severity;
+        /** LOCAL (single phrase) | GLOBAL (whole utterance meaning) — Burt & Kiparsky 1974 */
+        private String comprehensibilityImpact;
+        /** 1-sentence Vietnamese justification of severity + impact. */
+        private String severityReasoning;
     }
 
     @Data
@@ -103,6 +133,11 @@ public class SessionEvaluationResponse {
         private BigDecimal averageCompleteness;
         private int totalAssessed;
         private String feedback;
+        // ── Phase P2 — actionable lists (PRONUNCIATION_FEEDBACK_PLAN.md) ──
+        private List<MispronouncedWord> weakWords;
+        private List<WeakPhonemeClass> weakPhonemes;
+        private boolean cleanSession;
+        private boolean noAudio;
     }
 
     @Data
@@ -122,10 +157,46 @@ public class SessionEvaluationResponse {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ComplexityDimension {
-        private BigDecimal score;
-        private int uniqueVocabularyCount;
-        private Map<String, BigDecimal> jlptDistribution;
+        private BigDecimal score;                       // composite 0.6×lex + 0.4×syn
+        private int uniqueVocabularyCount;              // backward compat (= lexical.uniqueWords)
+        private Map<String, BigDecimal> jlptDistribution; // backward compat (% per level)
         private String feedback;
+
+        // Phase 3 v28: sub-dimension diagnostics (Norris & Ortega 2009 CAF
+        // sub-construct framework). Nullable for backward compat with payloads
+        // produced before Phase 3.
+        private LexicalDetails lexical;
+        private SyntacticDetails syntactic;
+        private Boolean partialMeasurement;            // true iff one sub-dimension insufficient
+        private Boolean insufficient;                  // true iff both insufficient (no score)
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class LexicalDetails {
+        private BigDecimal score;
+        private BigDecimal L_avg;                       // power mean k=2 over level values
+        private BigDecimal expectedL_avg;               // target-specific anchor (Zipf-derived)
+        private int uniqueWords;
+        private int knownWords;                         // present in curriculum DB
+        private int unknownWords;                       // not in DB (excluded from L_avg)
+        private Map<String, Integer> jlptDistribution;  // raw counts per JLPT level
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SyntacticDetails {
+        private BigDecimal score;
+        private BigDecimal W_per_U;                     // Iwashita 2006: words per AS-unit
+        private BigDecimal C_per_U;                     // Iwashita 2006: clauses per AS-unit
+        private int totalAS_Units;
+        private int totalClauses;
+        /** Per-category breakdown: ADVERBIAL/ADNOMINAL/QUOTATION/COORDINATIVE counts */
+        private Map<String, Integer> clauseTypeBreakdown;
     }
 
     @Data
@@ -179,13 +250,45 @@ public class SessionEvaluationResponse {
         private BigDecimal averageFluency;
         private BigDecimal averageCompleteness;
         private int totalAssessed;
+        // ── Phase P2 — actionable lists (PRONUNCIATION_FEEDBACK_PLAN.md) ──
+        private List<MispronouncedWord> weakWords;
+        private List<WeakPhonemeClass> weakPhonemes;
+        private boolean cleanSession;
+        private boolean noAudio;
     }
 
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    @Deprecated
+    public static class MispronouncedWord {
+        private String word;
+        private BigDecimal averageAccuracy;
+        private int occurrences;
+        private String dominantErrorType;   // None | Mispronunciation | Omission | Insertion
+        private String errorTypeLabel;      // Vietnamese label for UI
+        private BigDecimal impact;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class WeakPhonemeClass {
+        private String ipa;
+        private String label;
+        private BigDecimal averageScore;
+        private int occurrences;
+        private String tier;                // TIER1_MORA_DURATION | TIER2_L1_DIFFICULT_SEGMENT | UNTIERED
+        private String drill;               // Vietnamese drill instruction
+        private BigDecimal impact;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Deprecated(forRemoval = true)
     public static class LanguageEvaluationDetail {
         private BigDecimal fluencyScore;
         private BigDecimal accuracyScore;

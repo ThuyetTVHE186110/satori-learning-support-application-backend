@@ -49,4 +49,21 @@ public class MessagePronunciation extends BaseEntity {
     @Column(name = "raw_response", columnDefinition = "jsonb")
     @Builder.Default
     private String rawResponse = "{}";
+
+    /**
+     * Azure word-level array: [{word, accuracyScore, errorType, phonemes:[{phoneme, accuracyScore}]}].
+     * Source of truth for {@code PronunciationAggregator} session rollup. Nullable when the
+     * provider returned no per-word detail (eg. parse failure or non-Azure provider in future).
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "word_details", columnDefinition = "jsonb")
+    private String wordDetails;
+
+    /**
+     * Per-message pre-aggregation of phonemes scoring &lt; 70: {ipa: {count, avgScore}}.
+     * Avoids re-scanning {@link #wordDetails} at session level. Nullable when no weak phonemes.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "weak_phonemes", columnDefinition = "jsonb")
+    private String weakPhonemes;
 }
