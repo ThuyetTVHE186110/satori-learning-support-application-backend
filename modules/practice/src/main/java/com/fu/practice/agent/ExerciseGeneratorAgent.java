@@ -1139,6 +1139,27 @@ public class ExerciseGeneratorAgent {
                                   {"text":"行きます","isCorrect":false}],
                        "correctAnswer":"私はバスで学校に行きます"}
 
+                    GOOD EXAMPLE 3 (câu ngắn 5 tokens — CHỦ NGỮ + ĐÍCH ĐẾN + ĐỘNG TỪ DI CHUYỂN):
+                      {"itemType":"SENTENCE_ORDER","question":"Tôi đến siêu thị.",
+                       "options":[{"text":"私","isCorrect":false},{"text":"は","isCorrect":false},
+                                  {"text":"スーパー","isCorrect":false},{"text":"に","isCorrect":false},
+                                  {"text":"行きます","isCorrect":false}],
+                       "correctAnswer":"私はスーパーに行きます"}
+
+                    ⚠ QUY TẮC CHỦ NGỮ — CỰC KỲ QUAN TRỌNG (lỗi hay gặp nhất):
+                      Khi question tiếng Việt chứa "Tôi / Bạn / Anh ấy / Cô ấy...":
+                        → CHỦ NGỮ (私/あなた/彼/彼女) PHẢI đứng ĐẦU câu với trợ từ は.
+                        → KHÔNG được đặt 私/あなた ở CUỐI câu.
+
+                      ❌ SAI: options=[スーパー, に, 行きます, 私] → correctAnswer="スーパーに行きます私"
+                              Lý do: "スーパーに行きます私" KHÔNG có nghĩa trong tiếng Nhật.
+                              私 cuối câu không có trợ từ → câu vô nghĩa.
+                      ✅ ĐÚNG: options=[私, は, スーパー, に, 行きます] → correctAnswer="私はスーパーに行きます"
+
+                      Tương tự với phủ định:
+                      ❌ SAI: options=[大学, へ, 行きません, 私] → "大学へ行きません私" (sai)
+                      ✅ ĐÚNG: options=[私, は, 大学, へ, 行きません] → "私は大学へ行きません"
+
                     BAD EXAMPLE — các options SAI (TRÁNH):
                       ❌ [{"text":"これは"},{"text":"辞書"},{"text":"です"},{"text":"本"}]
                          → Lý do: gộp "これは" (phải tách) + thêm "本" là distractor (không thuộc câu).
