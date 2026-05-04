@@ -576,7 +576,10 @@ public class UserServiceImpl implements UserService {
                 UserChangedFromImportResponse userChangedFromImportResponse = null;
                 if (!isNewUser) {
                     // Existing user — update profile only
-                    if (!user.getFirstName().equals(firstName) || !user.getLastName().equals(lastName) || !user.getPhoneNumber().equals(rd.phone()) || (rd.birthDay != null && !user.getDateOfBirth().equals(rd.birthDay))) {
+                    if (!Objects.equals(normalizeStringForComparison(user.getFirstName()), normalizeStringForComparison(firstName)) 
+                        || !Objects.equals(normalizeStringForComparison(user.getLastName()), normalizeStringForComparison(lastName)) 
+                        || !Objects.equals(normalizeStringForComparison(user.getPhoneNumber()), normalizeStringForComparison(rd.phone())) 
+                        || !Objects.equals(user.getDateOfBirth(), rd.birthDay)) {
                         userChangedFromImportResponse = UserChangedFromImportResponse.builder().userId(user.getId()).newEmail(rd.email).oldEmail(user.getEmail()).oldDateOfBirth(user.getDateOfBirth()).newDateOfBirth(rd.birthDay).oldFullName(user.getFullName()).newFullName(rd.fullName).oldPhoneNumber(user.getPhoneNumber()).newPhoneNumber(rd.phone).build();
                         updated.add(userChangedFromImportResponse);
                     }
@@ -706,6 +709,14 @@ public class UserServiceImpl implements UserService {
     }
 
     // ==================== Private Helper Methods ====================
+
+    /**
+     * Normalize string for comparison: treat null and empty/whitespace-only strings as equivalent.
+     * Returns null if input is null or blank, otherwise returns trimmed value.
+     */
+    private String normalizeStringForComparison(String value) {
+        return (value == null || value.trim().isEmpty()) ? null : value.trim();
+    }
 
     /**
      * Find user by ID (not soft-deleted).

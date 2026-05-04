@@ -782,19 +782,9 @@ public class ClassServiceImpl implements ClassService {
             }
         }
 
-        // Identify learners in multiple classes and validate them
-        Set<String> learnersInMultipleClasses = learnerToClassesWithStatus.entrySet().stream()
-                .filter(e -> e.getValue().size() > 1)
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toSet());
-
-        if (!learnersInMultipleClasses.isEmpty()) {
-            log.warn("Found {} learners in multiple classes within this import batch: {}",
-                    learnersInMultipleClasses.size(), learnersInMultipleClasses);
-            learnersInMultipleClasses.forEach(email ->
-                    log.warn("  - {} appears in classes: {}", email, learnerToClassesWithStatus.get(email))
-            );
-        }
+        // Track learners already assigned to a class in this batch (first-come-first-served)
+        // key = learnerEmail, value = className that claimed this learner first
+        Map<String, String> assignedLearnersInBatch = new HashMap<>();
 
         for (ClassExcelRow excelRow : excelRows) {
             if (excelRow.isEmpty()) {
@@ -947,20 +937,56 @@ public class ClassServiceImpl implements ClassService {
                     continue;
                 }
 
-                // Validate learner in multiple classes (v2: stricter membership requirement)
-                if (learnersInMultipleClasses.contains(learnerEmail)) {
-                    Optional<ClassImportError> multiClassError = validateLearnerInMultipleClassesV2(
-                            learnerEmail,
-                            learner,
-                            learnerToClassesWithStatus,
-                            classNameToIdMap,
-                            classMemberLookup,
-                            excelRow.getRowNumber()
-                    );
-                    if (multiClassError.isPresent()) {
-                        errors.add(multiClassError.get());
-                        continue;
+                // Validate learner in multiple classes — first-come-first-served
+                if (assignedLearnersInBatch.containsKey(learnerEmail)) {
+                    String assignedClassName = assignedLearnersInBatch.get(learnerEmail);
+                    errors.add(ClassImportError.builder()
+                            .rowNumber(excelRow.getRowNumber())
+                            .className(className)
+                            .errorMessage(String.format(
+                                    "Học sinh %s đã được thêm vào lớp %s trong file import này, không thể thêm vào nhiều lớp cùng lúc",
+                                    learnerEmail, assignedClassName))
+                            .build());
+                    continue;
+                }
+
+                // For learners in CLOSED/DELETED classes: must have existing membership record
+                Map<String, ClassStatus> learnerClassMap = learnerToClassesWithStatus.get(learnerEmail);
+                if (learnerClassMap != null && learnerClassMap.size() > 1) {
+                    boolean hasClosedDeletedError = false;
+                    for (Map.Entry<String, ClassStatus> entry : learnerClassMap.entrySet()) {
+                        ClassStatus entryStatus = entry.getValue();
+                        if (entryStatus == ClassStatus.CLOSED || entryStatus == ClassStatus.DELETED) {
+                            String closedClassId = classNameToIdMap.get(entry.getKey());
+                            if (closedClassId != null) {
+                                String memberKey = closedClassId + ":" + learner.getId();
+                                ClassMember membership = classMemberLookup.get(memberKey);
+                                if (membership == null) {
+                                    errors.add(ClassImportError.builder()
+                                            .rowNumber(excelRow.getRowNumber())
+                                            .className(className)
+                                            .errorMessage(String.format(
+                                                    "Không tìm thấy ghi nhận học viên %s từng học ở lớp %s (Lớp này đã bị xóa hoặc đã đóng).",
+                                                    learnerEmail, entry.getKey()))
+                                            .build());
+                                    hasClosedDeletedError = true;
+                                    break;
+                                }
+                                if (entryStatus == ClassStatus.DELETED) {
+                                    errors.add(ClassImportError.builder()
+                                            .rowNumber(excelRow.getRowNumber())
+                                            .className(className)
+                                            .errorMessage(String.format(
+                                                    "Không thể thêm học viên %s vào lớp %s đã bị xóa",
+                                                    learnerEmail, entry.getKey()))
+                                            .build());
+                                    hasClosedDeletedError = true;
+                                    break;
+                                }
+                            }
+                        }
                     }
+                    if (hasClosedDeletedError) continue;
                 }
 
                 // For UPDATE classes: Skip learners already in this class
@@ -1017,6 +1043,8 @@ public class ClassServiceImpl implements ClassService {
                         .phoneNumber(learnerExcelRow.getPhoneNumber())
                         .build();
                 learnersToAdd.add(learnerInfo);
+                // Mark learner as assigned to this class in this batch
+                assignedLearnersInBatch.put(learnerEmail, className);
             }
 
             // Validate max students not exceeded
@@ -1290,6 +1318,7 @@ public class ClassServiceImpl implements ClassService {
                         existingClass.setStartDate(preview.getStartDate());
                         existingClass.setExpectedEndDate(preview.getExpectedEndDate());
                         existingClass.setStatus(preview.getStatus());
+                        existingClass.setMaxStudents(preview.getMaxStudents() != null ? preview.getMaxStudents() : existingClass.getMaxStudents());
 
                         classRepository.save(existingClass);
                         log.debug("Updated existing class: {}", preview.getName());
