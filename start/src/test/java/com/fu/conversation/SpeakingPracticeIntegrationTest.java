@@ -878,7 +878,7 @@ class SpeakingPracticeIntegrationTest {
             when(roleplayAIService.generateOpeningMessage(anyString(), anyString(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
             when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("prompt");
-            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
+            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"AI reply\",\"translation\":\"AI reply\",\"romaji\":\"\",\"corrections\":[]}]" );
             when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
                     .thenReturn(List.of());
@@ -1247,7 +1247,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationSession session = saveSession(learner.getId(), null);
 
             when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("prompt");
-            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
+            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"AI reply\",\"translation\":\"AI reply\",\"romaji\":\"\",\"corrections\":[]}]" );
             when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
                     .thenReturn(List.of());
@@ -1306,7 +1306,7 @@ class SpeakingPracticeIntegrationTest {
                     .path("data").path("id").asText();
 
             when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("setup");
-            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
+            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"PHASE_TRANSITION\",\"topicSummary\":\"Shopping\",\"missionSummary\":\"Mua hang\"}," +
                             "{\"type\":\"DIALOGUE\",\"japanese_content\":\"Hello\",\"translation\":\"Hello\",\"romaji\":\"\",\"corrections\":[]}]" );
             when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
@@ -1351,7 +1351,7 @@ class SpeakingPracticeIntegrationTest {
             when(roleplayAIService.generateOpeningMessage(anyString(), anyString(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"MISSION_INTRO\",\"japanese_content\":\"Intro\",\"translation\":\"Intro\",\"romaji\":\"\"}]");
             when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("prompt");
-            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
+            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"AI reply\",\"translation\":\"AI reply\",\"romaji\":\"\",\"corrections\":[]}]" );
             when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
 
@@ -2210,7 +2210,7 @@ class SpeakingPracticeIntegrationTest {
              ConversationSession session = saveSession(learner.getId(), null);
 
              when(roleplayAIService.getCachedSystemPrompt(any())).thenReturn("prompt");
-             when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
+             when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString(), anyString()))
                      .thenReturn("[]");
              when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
                      .thenReturn(List.of());
@@ -2398,7 +2398,7 @@ class SpeakingPracticeIntegrationTest {
                      .path("data").path("id").asText();
 
              when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("setup");
-             when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
+             when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString(), anyString()))
                      .thenReturn("[{\"type\":\"PHASE_TRANSITION\",\"topicSummary\":\"Shopping\",\"missionSummary\":\"Mua hang\"}," +
                              "{\"type\":\"DIALOGUE\",\"japanese_content\":\"Hello\",\"translation\":\"Hello\",\"romaji\":\"\",\"corrections\":[]}]" );
              when(roleplayAIService.buildSystemPrompt(any(ConversationSession.class), nullable(String.class), nullable(String.class),nullable(String.class),nullable(String.class), anyList()))
@@ -2528,7 +2528,7 @@ class SpeakingPracticeIntegrationTest {
                      .build());
 
              when(roleplayAIService.getCachedSystemPrompt(any())).thenReturn("prompt");
-             when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
+             when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString(), anyString()))
                      .thenReturn("[]");
 
              when(missionEvaluatorAI.evaluateProgress(any(), any(), any()))
@@ -2593,7 +2593,7 @@ class SpeakingPracticeIntegrationTest {
 
             when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
             when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("prompt");
-            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
+            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString(), anyString()))
                     .thenThrow(new RuntimeException("AI Service Timeout"));
             when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
                     .thenReturn(List.of());
@@ -2632,7 +2632,7 @@ class SpeakingPracticeIntegrationTest {
 
             when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
             when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("prompt");
-            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
+            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString(), anyString()))
                     .thenThrow(new RuntimeException("OpenAI 500 Internal Server Error"));
             when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
                     .thenReturn(List.of());
@@ -2674,7 +2674,7 @@ class SpeakingPracticeIntegrationTest {
 
             when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
             when(roleplayAIService.getCachedSystemPrompt(any(UUID.class))).thenReturn("prompt");
-            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString()))
+            when(roleplayAIService.generateResponse(any(UUID.class), anyString(), anyList(), anyString(), anyString()))
                     .thenReturn("");
             when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
                     .thenReturn(List.of());
@@ -2808,7 +2808,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationSession session = saveSession(learner.getId(), null);
 
             when(roleplayAIService.getCachedSystemPrompt(any())).thenReturn("prompt");
-            when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
+            when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"AI reply\",\"translation\":\"AI reply\"}]");
             when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
                     .thenReturn(List.of());
@@ -2853,7 +2853,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationSession session = saveSession(learner.getId(), null);
 
             when(roleplayAIService.getCachedSystemPrompt(any())).thenReturn("prompt");
-            when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
+            when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"AI reply\",\"translation\":\"AI reply\"}]");
             when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
                     .thenReturn(List.of());
@@ -2933,7 +2933,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationSession session = saveSession(learner.getId(), null);
 
             when(roleplayAIService.getCachedSystemPrompt(any())).thenReturn("prompt");
-            when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
+            when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"AI reply\",\"translation\":\"AI reply\"}]");
             when(missionEvaluatorAI.evaluateProgress(anyList(), anyString(), anyList()))
                     .thenReturn(List.of());
@@ -2982,7 +2982,7 @@ class SpeakingPracticeIntegrationTest {
             ConversationSession session = saveSession(learner.getId(), null);
 
             when(roleplayAIService.getCachedSystemPrompt(any())).thenReturn("prompt");
-            when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString()))
+            when(roleplayAIService.generateResponse(any(), anyString(), anyList(), anyString(), anyString()))
                     .thenReturn("[{\"type\":\"DIALOGUE\",\"japanese_content\":\"reply\",\"translation\":\"reply\"}]");
             when(pronunciationAssessmentProvider.isAvailable()).thenReturn(false);
 
