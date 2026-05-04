@@ -56,10 +56,12 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -973,14 +975,29 @@ public class ClassServiceImpl implements ClassService {
                         continue;
                     }
                 }
+
+                // Validate learner status — must be INACTIVE (not enrolled in any other class)
+                if (learner.getStatus() == UserStatus.ACTIVE) {
+                    errors.add(ClassImportError.builder()
+                            .rowNumber(excelRow.getRowNumber())
+                            .className(className)
+                            .errorMessage(String.format("Học sinh %s đang ở lớp khác (trạng thái ACTIVE), không thể thêm vào lớp này",
+                                    learnerExcelRow.getEmail()))
+                            .build());
+                    continue;
+                }
+
                 // Check information of learner in excel file is different from database
                 // Use Objects.equals() for null-safe comparison
+                // Normalize blank/null strings to null before comparing to treat "" and null as equal
                 String excelName = safeGetTrimmedValue(learnerExcelRow.getName());
                 String excelPhone = safeGetTrimmedValue(learnerExcelRow.getPhoneNumber());
+                String dbPhone = StringUtils.hasText(learner.getPhoneNumber()) ? learner.getPhoneNumber().trim() : null;
+                String normalizedExcelPhone = StringUtils.hasText(excelPhone) ? excelPhone : null;
 
                 if (!Objects.equals(learner.getFullName(), excelName) ||
                         !Objects.equals(learner.getDateOfBirth(), learnerExcelRow.getDateOfBirth()) ||
-                        !Objects.equals(learner.getPhoneNumber(), excelPhone)) {
+                        !Objects.equals(dbPhone, normalizedExcelPhone)) {
                     errors.add(ClassImportError.builder()
                             .rowNumber(excelRow.getRowNumber())
                             .className(className)
@@ -1012,6 +1029,30 @@ public class ClassServiceImpl implements ClassService {
                         className, existingMemberCount, learnersToAdd.size(), totalLearnersAfterImport, excelRow.getMaxStudents());
             }
 
+            // Build learnersToRemove for UPDATE classes:
+            // Active members currently in the class whose email is NOT in the file
+            List<LearnerInfo> learnersToRemove = new ArrayList<>();
+            if (classExists && existingClass != null) {
+                Set<String> emailsInFile = learnerExcelRows.stream()
+                        .map(r -> r.getEmail().trim().toLowerCase())
+                        .collect(Collectors.toSet());
+
+                List<UUID> currentMemberIds = classMemberRepository.findActiveUserIdsByClassId(existingClass.getId());
+                for (UUID memberId : currentMemberIds) {
+                    userRepository.findById(memberId).ifPresent(user -> {
+                        if (!emailsInFile.contains(user.getEmail().toLowerCase())) {
+                            learnersToRemove.add(LearnerInfo.builder()
+                                    .id(user.getId())
+                                    .email(user.getEmail())
+                                    .fullName(user.getFullName())
+                                    .dateOfBirth(user.getDateOfBirth())
+                                    .phoneNumber(user.getPhoneNumber())
+                                    .build());
+                        }
+                    });
+                }
+                log.debug("Class {} UPDATE: {} learners to remove (not in file)", className, learnersToRemove.size());
+            }
             Optional<ClassImportError> maxStudentsError = ExcelClassImportUtil.validateMaxStudentsNotExceeded(
                     totalLearnersAfterImport, excelRow.getMaxStudents(), className, excelRow.getRowNumber());
             if (maxStudentsError.isPresent()) {
@@ -1042,6 +1083,7 @@ public class ClassServiceImpl implements ClassService {
                     .status(status)
                     .maxStudents(excelRow.getMaxStudents())
                     .learnersToAdd(learnersToAdd)
+                    .learnersToRemove(learnersToRemove)
                     .build();
 
             validClasses.add(preview);
@@ -1089,14 +1131,15 @@ public class ClassServiceImpl implements ClassService {
                 // Check if there are any actual changes by comparing current vs old values
                 boolean hasFieldChanges = hasFieldChanges(enrichedPreview);
                 boolean hasNewLearners = enrichedPreview.getLearnersToAdd() != null && !enrichedPreview.getLearnersToAdd().isEmpty();
+                boolean hasLearnersToRemove = enrichedPreview.getLearnersToRemove() != null && !enrichedPreview.getLearnersToRemove().isEmpty();
                 if (hasFieldChanges && invalidStatusError) {
                     errors.add(ClassImportError.builder()
                             .className(preview.getName())
                             .errorMessage("Lớp học " + preview.getName() + " đã bị xóa hoặc đóng, không thể cập nhật thông tin.")
                             .build());
                 }
-                // Only include if has changes or new learners
-                if (hasFieldChanges || hasNewLearners) {
+                // Only include if has changes or new learners or learners to remove
+                if (hasFieldChanges || hasNewLearners || hasLearnersToRemove) {
                     updatedClasses.add(enrichedPreview);
                 } else {
                     log.debug("Filtering out UPDATE class {} - no actual changes detected", preview.getName());
@@ -1324,6 +1367,39 @@ public class ClassServiceImpl implements ClassService {
                                     errors.add(ClassImportError.builder()
                                             .className(preview.getName())
                                             .errorMessage(String.format("Lỗi thêm học viên %s: %s",
+                                                    learnerInfo.getEmail(), e.getMessage()))
+                                            .build());
+                                }
+                            }
+                        }
+
+                        // Remove learners not present in the file
+                        if (preview.getLearnersToRemove() != null) {
+                            for (LearnerInfo learnerInfo : preview.getLearnersToRemove()) {
+                                try {
+                                    classMemberRepository.findByClassIdAndUserId(
+                                            finalExistingClass.getId(), learnerInfo.getId())
+                                            .ifPresent(member -> {
+                                                if (member.getRemovedAt() == null) {
+                                                    member.remove();
+                                                    classMemberRepository.save(member);
+                                                    log.debug("Removed learner {} from class {}",
+                                                            learnerInfo.getEmail(), preview.getName());
+                                                }
+                                            });
+                                    // Revert learner status to INACTIVE
+                                    userRepository.findById(learnerInfo.getId()).ifPresent(user -> {
+                                        if (user.getRole() == UserRole.LEARNER && user.getStatus() == UserStatus.ACTIVE) {
+                                            user.setStatus(UserStatus.INACTIVE);
+                                            userRepository.save(user);
+                                        }
+                                    });
+                                } catch (Exception e) {
+                                    log.warn("Failed to remove learner {} from class {}: {}",
+                                            learnerInfo.getEmail(), preview.getName(), e.getMessage());
+                                    errors.add(ClassImportError.builder()
+                                            .className(preview.getName())
+                                            .errorMessage(String.format("Lỗi xóa học viên %s: %s",
                                                     learnerInfo.getEmail(), e.getMessage()))
                                             .build());
                                 }
@@ -1967,24 +2043,43 @@ public class ClassServiceImpl implements ClassService {
         // Count active members
         Long totalLearners = classMemberRepository.countActiveByClassId(classId);
 
-        // Get class entity for max students
+        // Get class entity for max students and date information
         Clazz clazz = classRepository.findByIdAndNotDeleted(classId)
                 .orElseThrow(() -> new ResourceNotFoundException("Lớp học không tồn tại."));
 
         Integer maxStudents = clazz.getMaxStudents();
         Double enrollmentPercentage = maxStudents > 0 ? (totalLearners * 100.0 / maxStudents) : 0.0;
 
-        // Count total lessons in course
+        // Calculate class progress percentage based on time elapsed
+        // Formula: (today - startDate) / (expectedEndDate - startDate) * 100
+        LocalDate startDate = clazz.getStartDate();
+        LocalDate expectedEndDate = clazz.getExpectedEndDate();
+        LocalDate today = LocalDate.now();
+
+        Double classProgressPercentage = 0.0;
+        
+        if (startDate != null && expectedEndDate != null) {
+            long daysElapsed = ChronoUnit.DAYS.between(startDate, today);
+            long totalDays = ChronoUnit.DAYS.between(startDate, expectedEndDate);
+            
+            if (totalDays > 0) {
+                classProgressPercentage = Math.min(100.0, (daysElapsed * 100.0 / totalDays));
+            } else if (totalDays == 0 && !today.isBefore(startDate)) {
+                classProgressPercentage = 100.0;
+            }
+            
+            // Ensure percentage is between 0-100
+            classProgressPercentage = Math.max(0.0, classProgressPercentage);
+        }
+
+        // Count total lessons in course (for reference)
         Long totalLessonsInCourse = lessonRepository.countByCourseIdForAnalytics(courseId);
 
-        // Count lessons with assignments in class via repository
+        // Count lessons with assignments in class via repository (for reference)
         Long lessonsWithAssignments = analyticsRepository.countLessonsWithAssignmentsInClass(classId);
         if (lessonsWithAssignments == null) {
             lessonsWithAssignments = 0L;
         }
-
-        Double classProgressPercentage = totalLessonsInCourse != null && totalLessonsInCourse > 0 ?
-                (lessonsWithAssignments * 100.0 / totalLessonsInCourse) : 0.0;
 
         // Calculate average score via repository
         Double avgScoreDouble = analyticsRepository.getAverageScoreForClass(classId);

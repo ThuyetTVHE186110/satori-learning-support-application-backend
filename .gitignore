@@ -72,3 +72,4 @@ release.properties
 /.local.github/
 **/docs
 /scripts/
+.kiro/**

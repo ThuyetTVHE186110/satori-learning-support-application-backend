@@ -20,6 +20,13 @@ public enum ErrorType {
     FORMALITY,
     /** Kana mistakes, wrong kanji reading */
     SPELLING,
+    /**
+     * Discourse-level error: coherence broken across the message (coreference
+     * unclear, contradiction, context-inappropriate response, topic drift).
+     * Phase 2 v28: introduced for CAF clause-based scoring — typically pairs
+     * with comprehensibilityImpact=GLOBAL on the correction.
+     */
+    COHERENCE,
     /** Uncategorized errors */
     OTHER
 }

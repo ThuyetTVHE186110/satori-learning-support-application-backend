@@ -220,6 +220,7 @@ class ContentManagerDashboardServiceImplTest {
         // Arrange - Mock all repository methods
         when(lessonRepository.countByStatusAndDeletedAtIsNull(Lesson.ContentStatus.PUBLISHED)).thenReturn(8L);
         when(lessonRepository.countByStatusAndDeletedAtIsNull(Lesson.ContentStatus.DRAFT)).thenReturn(2L);
+        when(lessonRepository.countByStatusAndDeletedAtIsNull(Lesson.ContentStatus.ARCHIVED)).thenReturn(1L);
         when(vocabularyRepository.countByDeletedAtIsNull()).thenReturn(50L);
         when(grammarPointRepository.countByDeletedAtIsNull()).thenReturn(30L);
         when(conversationRepository.countByDeletedAtIsNull()).thenReturn(5L);
@@ -231,8 +232,10 @@ class ContentManagerDashboardServiceImplTest {
 
         when(conversationTopicRepository.countByStatusAndDeletedAtIsNull("PUBLISHED")).thenReturn(2L);
         when(conversationTopicRepository.countByStatusAndDeletedAtIsNull("DRAFT")).thenReturn(1L);
+        when(conversationTopicRepository.countByStatusAndDeletedAtIsNull("ARCHIVED")).thenReturn(0L);
         when(conversationRepository.countByStatusAndDeletedAtIsNull("PUBLISHED")).thenReturn(3L);
         when(conversationRepository.countByStatusAndDeletedAtIsNull("DRAFT")).thenReturn(2L);
+        when(conversationRepository.countByStatusAndDeletedAtIsNull("ARCHIVED")).thenReturn(1L);
 
         when(conversationRepository.getTopPracticedConversationTopics(5)).thenReturn(new ArrayList<>());
         when(conversationRepository.getTopPracticedConversations(5)).thenReturn(new ArrayList<>());
@@ -267,6 +270,7 @@ class ContentManagerDashboardServiceImplTest {
         // Arrange - Mock all repository methods for Summary
         when(lessonRepository.countByStatusAndDeletedAtIsNull(Lesson.ContentStatus.PUBLISHED)).thenReturn(8L);
         when(lessonRepository.countByStatusAndDeletedAtIsNull(Lesson.ContentStatus.DRAFT)).thenReturn(2L);
+        when(lessonRepository.countByStatusAndDeletedAtIsNull(Lesson.ContentStatus.ARCHIVED)).thenReturn(1L);
         when(vocabularyRepository.countByDeletedAtIsNull()).thenReturn(50L);
         when(grammarPointRepository.countByDeletedAtIsNull()).thenReturn(30L);
         when(conversationRepository.countByDeletedAtIsNull()).thenReturn(5L);
@@ -275,8 +279,10 @@ class ContentManagerDashboardServiceImplTest {
         // Mock status distributions
         when(conversationTopicRepository.countByStatusAndDeletedAtIsNull("PUBLISHED")).thenReturn(2L);
         when(conversationTopicRepository.countByStatusAndDeletedAtIsNull("DRAFT")).thenReturn(1L);
+        when(conversationTopicRepository.countByStatusAndDeletedAtIsNull("ARCHIVED")).thenReturn(0L);
         when(conversationRepository.countByStatusAndDeletedAtIsNull("PUBLISHED")).thenReturn(3L);
         when(conversationRepository.countByStatusAndDeletedAtIsNull("DRAFT")).thenReturn(2L);
+        when(conversationRepository.countByStatusAndDeletedAtIsNull("ARCHIVED")).thenReturn(1L);
 
         // Mock performance metrics
         when(conversationRepository.getTotalCompletedSpeakingSessions()).thenReturn(42L);

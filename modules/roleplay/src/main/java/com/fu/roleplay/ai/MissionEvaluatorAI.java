@@ -29,7 +29,18 @@ public class MissionEvaluatorAI {
             PromptFragment.VIETNAMESE_FIELDS + "\n\n" +
             PromptFragment.JSON_ONLY + "\n" +
             """
-            Each element must have:
+            OUTPUT FORMAT — STRICT:
+            Return a JSON ARRAY at the top level. One element per mission.
+            DO NOT wrap the array inside an outer object (no {"missions":[...]}, no {"results":[...]}).
+            DO NOT return a single object — even when there is only one mission, still return an array.
+
+            Example of CORRECT output:
+            [{"missionId":"...","status":"IN_PROGRESS","progressPct":50,"reasoning":"..."}]
+
+            Example of WRONG output (do NOT do this):
+            {"missions":[{"missionId":"..."}]}
+
+            Each array element must have:
             - missionId (String): UUID of the session mission
             - status (String): PENDING, IN_PROGRESS, COMPLETED, or FAILED
             - progressPct (Integer): 0-100 progress percentage
@@ -84,8 +95,7 @@ public class MissionEvaluatorAI {
             log.debug("Mission evaluator raw response ({} missions in scope): {}", missions.size(), rawResponse);
 
             String cleanJson = cleanJson(rawResponse);
-            List<Map<String, Object>> results = objectMapper.readValue(cleanJson,
-                    new TypeReference<List<Map<String, Object>>>() {});
+            List<Map<String, Object>> results = parseToList(cleanJson);
 
             List<MissionProgress> progressList = new ArrayList<>();
             for (Map<String, Object> r : results) {
@@ -109,6 +119,44 @@ public class MissionEvaluatorAI {
 
     private String cleanJson(String raw) {
         return PromptUtils.cleanMarkdownFences(raw, "[]");
+    }
+
+    /**
+     * Tolerant parser: model may return a top-level array (correct), an object
+     * wrapper like {"missions":[...]}/{"results":[...]}/{"evaluations":[...]}/{"data":[...]},
+     * or a single object. Normalize all three to List<Map>.
+     */
+    private List<Map<String, Object>> parseToList(String json) throws java.io.IOException {
+        com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(json);
+        if (node.isArray()) {
+            return objectMapper.convertValue(node,
+                    new TypeReference<List<Map<String, Object>>>() {});
+        }
+        if (node.isObject()) {
+            // Look for any embedded array field — common keys first, then any array value.
+            for (String key : new String[]{"missions", "results", "evaluations", "data", "items"}) {
+                com.fasterxml.jackson.databind.JsonNode arr = node.get(key);
+                if (arr != null && arr.isArray()) {
+                    return objectMapper.convertValue(arr,
+                            new TypeReference<List<Map<String, Object>>>() {});
+                }
+            }
+            java.util.Iterator<com.fasterxml.jackson.databind.JsonNode> it = node.elements();
+            while (it.hasNext()) {
+                com.fasterxml.jackson.databind.JsonNode v = it.next();
+                if (v.isArray()) {
+                    return objectMapper.convertValue(v,
+                            new TypeReference<List<Map<String, Object>>>() {});
+                }
+            }
+            // Single-object fallback — treat as one-element array if it has missionId.
+            if (node.has("missionId")) {
+                return List.of(objectMapper.convertValue(node,
+                        new TypeReference<Map<String, Object>>() {}));
+            }
+        }
+        log.warn("Mission evaluator returned unexpected JSON shape, ignoring: {}", json);
+        return List.of();
     }
 
     @lombok.Data

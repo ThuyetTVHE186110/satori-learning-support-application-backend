@@ -96,4 +96,30 @@ public interface ConversationSessionRepository extends JpaRepository<Conversatio
             @Param("userId") UUID userId,
             @Param("start") LocalDateTime start,
             @Param("end") LocalDateTime end);
+
+    // ── Admin dashboard queries ──────────────────────────────────────────────
+
+    /**
+     * Count roleplay/conversation sessions (non-CURRICULUM_QA) created within a date range.
+     */
+    @Query(value = """
+            SELECT COUNT(*) FROM ai_conversation.conversation_sessions
+            WHERE session_type != CAST('CURRICULUM_QA' AS session_type)
+              AND created_at >= :start AND created_at < :end
+            """, nativeQuery = true)
+    long countConversationSessionsBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    /**
+     * Daily roleplay/conversation session trend for last N days.
+     * Returns list of [date, count].
+     */
+    @Query(value = """
+            SELECT DATE(created_at) AS day, COUNT(*) AS cnt
+            FROM ai_conversation.conversation_sessions
+            WHERE session_type != CAST('CURRICULUM_QA' AS session_type)
+              AND created_at >= :start
+            GROUP BY DATE(created_at)
+            ORDER BY day ASC
+            """, nativeQuery = true)
+    List<Object[]> findDailyConversationTrend(@Param("start") LocalDateTime start);
 }

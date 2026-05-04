@@ -84,12 +84,14 @@
 
     <build>
         <plugins>
-            <!-- Allow Mockito's inline mock maker to self-attach on Java 21+ -->
+            <!-- Mockito final-class mocking on JDK 21 — must include byte-buddy-agent
+                 javaagent (see root pom for full rationale). This module overrides
+                 the inherited surefire config, so we re-state the argLine here. -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <argLine>-XX:+EnableDynamicAgentLoading</argLine>
+                    <argLine>-javaagent:${net.bytebuddy:byte-buddy-agent:jar} -XX:+EnableDynamicAgentLoading</argLine>
                 </configuration>
             </plugin>
 

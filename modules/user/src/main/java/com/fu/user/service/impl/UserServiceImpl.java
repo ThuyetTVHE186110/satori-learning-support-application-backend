@@ -455,6 +455,7 @@ public class UserServiceImpl implements UserService {
             }
             List<RowData> validRows = new ArrayList<>();
             Set<String> seenEmails = new HashSet<>();
+            Set<String> seenPhones = new HashSet<>();
 
             int totalRows = 0;
             for (int i = 0; i < sheetCount; i++) {
@@ -495,6 +496,12 @@ public class UserServiceImpl implements UserService {
                         errors.add(ImportRowError.builder().rowNumber(rowNum).sheetIndex(i).email(email).fullName(fullName).phoneNumber(phoneNumber).emailErrorMessage("Email trùng lặp trong file").build());
                         continue;
                     }
+                    // Check phone duplicate within file (only for non-blank phones)
+                    String normalizedPhone = StringUtils.hasText(phoneNumber) ? phoneNumber.trim() : null;
+                    if (normalizedPhone != null && !seenPhones.add(normalizedPhone)) {
+                        errors.add(ImportRowError.builder().rowNumber(rowNum).sheetIndex(i).email(email).fullName(fullName).phoneNumber(phoneNumber).phoneNumberErrorMessage("Số điện thoại trùng lặp trong file").build());
+                        continue;
+                    }
                     LocalDate birthDate = null;
                     if (!birthDay.isBlank()) {
                         birthDate = LocalDate.parse(birthDay,
@@ -513,6 +520,31 @@ public class UserServiceImpl implements UserService {
                 existingByEmail.put(u.getEmail().toLowerCase(), u);
             }
 
+            // ── fetch all existing users by phone (non-blank only) ──
+            Set<String> allPhones = validRows.stream()
+                    .map(RowData::phone)
+                    .filter(StringUtils::hasText)
+                    .collect(java.util.stream.Collectors.toSet());
+            Map<String, User> existingByPhone = new HashMap<>();
+            if (!allPhones.isEmpty()) {
+                for (User u : userRepository.findByPhoneNumberIn(allPhones)) {
+                    if (StringUtils.hasText(u.getPhoneNumber())) {
+                        existingByPhone.put(u.getPhoneNumber().trim(), u);
+                    }
+                }
+            }
+
+            // ── build map: userId → incoming phone (to detect "releasing" phone) ──
+            // Keyed by userId (from DB) to avoid any email case/format mismatch
+            Map<UUID, String> incomingPhoneByUserId = new HashMap<>();
+            for (RowData r : validRows) {
+                if (!StringUtils.hasText(r.phone())) continue;
+                User existingUser = existingByEmail.get(r.email());
+                if (existingUser != null) {
+                    incomingPhoneByUserId.put(existingUser.getId(), r.phone());
+                }
+            }
+
             // ── build usersToImport using the in-memory map (zero DB calls) ─
             for (RowData rd : validRows) {
                 String[] nameParts = rd.fullName().split("\\s+");
@@ -521,6 +553,26 @@ public class UserServiceImpl implements UserService {
                 LocalDate birthDay = rd.birthDay();
                 User user = existingByEmail.get(rd.email());
                 boolean isNewUser = (user == null);
+
+                // ── phone conflict check against DB (only for non-blank phones) ──
+                if (StringUtils.hasText(rd.phone())) {
+                    User phoneOwner = existingByPhone.get(rd.phone());
+                    if (phoneOwner != null && !phoneOwner.getEmail().equalsIgnoreCase(rd.email())) {
+                        // Phone belongs to a different user — check if that user is releasing it in this file
+                        String ownerIncomingPhone = incomingPhoneByUserId.get(phoneOwner.getId());
+                        boolean ownerIsReleasingPhone = StringUtils.hasText(ownerIncomingPhone)
+                                && !ownerIncomingPhone.equals(rd.phone());
+                        if (!ownerIsReleasingPhone) {
+                            errors.add(ImportRowError.builder()
+                                    .rowNumber(rd.rowNumber()).sheetIndex(rd.sheetIndex())
+                                    .email(rd.email()).fullName(rd.fullName()).phoneNumber(rd.phone())
+                                    .phoneNumberErrorMessage("Số điện thoại đã được sử dụng bởi tài khoản khác")
+                                    .build());
+                            continue;
+                        }
+                    }
+                }
+
                 UserChangedFromImportResponse userChangedFromImportResponse = null;
                 if (!isNewUser) {
                     // Existing user — update profile only
@@ -814,10 +866,7 @@ public class UserServiceImpl implements UserService {
             error.setFullNameErrorMessage("Họ tên không được vượt quá 100 ký tự");
         }
 
-        if (!StringUtils.hasText(phoneNumber)) {
-            error.setPhoneNumberErrorMessage("Số điện thoại không được để trống");
-        }
-        if (!Pattern.matches(PHONE_REGEX, phoneNumber.trim())) {
+        if (StringUtils.hasText(phoneNumber) && !Pattern.matches(PHONE_REGEX, phoneNumber.trim())) {
             error.setPhoneNumberErrorMessage("Số điện thoại phải đúng 10 chữ số");
         }
         if (StringUtils.hasText(birthDay)) {

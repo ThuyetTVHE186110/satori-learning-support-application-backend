@@ -39,7 +39,7 @@ public class ContentManagerDashboardResponse {
         private String title;
         private long total;
         private long published;
-        private long reviewed;
+        private long archived;
         private long draft;
     }
 

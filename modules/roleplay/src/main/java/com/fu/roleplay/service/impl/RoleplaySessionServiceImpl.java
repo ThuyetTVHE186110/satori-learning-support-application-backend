@@ -64,6 +64,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -101,10 +102,12 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     private final ApplicationEventPublisher eventPublisher;
     private final LearnerProfileProvider learnerProfileProvider;
     private final com.fu.roleplay.evaluation.ErrorPatternAggregator errorPatternAggregator;
-    private final com.fu.roleplay.evaluation.VocabularyRangeAnalyzer vocabularyRangeAnalyzer;
+    private final com.fu.roleplay.evaluation.ComplexityScoreCombiner complexityScoreCombiner;
     private final com.fu.roleplay.evaluation.CrossSessionTracker crossSessionTracker;
+    private final com.fu.roleplay.evaluation.PronunciationAggregator pronunciationAggregator;
     private final AzureTtsProvider azureTtsProvider;
     private final AzureSpeechProperties azureSpeechProperties;
+    private final com.fu.roleplay.memory.WorldStateService worldStateService;
 
     public RoleplaySessionServiceImpl(
             ConversationSessionRepository sessionRepository,
@@ -130,10 +133,12 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             ApplicationEventPublisher eventPublisher,
             LearnerProfileProvider learnerProfileProvider,
             com.fu.roleplay.evaluation.ErrorPatternAggregator errorPatternAggregator,
-            com.fu.roleplay.evaluation.VocabularyRangeAnalyzer vocabularyRangeAnalyzer,
+            com.fu.roleplay.evaluation.ComplexityScoreCombiner complexityScoreCombiner,
             com.fu.roleplay.evaluation.CrossSessionTracker crossSessionTracker,
+            com.fu.roleplay.evaluation.PronunciationAggregator pronunciationAggregator,
             AzureTtsProvider azureTtsProvider,
-            AzureSpeechProperties azureSpeechProperties
+            AzureSpeechProperties azureSpeechProperties,
+            com.fu.roleplay.memory.WorldStateService worldStateService
     ) {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
@@ -158,10 +163,12 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         this.eventPublisher = eventPublisher;
         this.learnerProfileProvider = learnerProfileProvider;
         this.errorPatternAggregator = errorPatternAggregator;
-        this.vocabularyRangeAnalyzer = vocabularyRangeAnalyzer;
+        this.complexityScoreCombiner = complexityScoreCombiner;
         this.crossSessionTracker = crossSessionTracker;
+        this.pronunciationAggregator = pronunciationAggregator;
         this.azureTtsProvider = azureTtsProvider;
         this.azureSpeechProperties = azureSpeechProperties;
+        this.worldStateService = worldStateService;
     }
 
     @Override
@@ -366,21 +373,21 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         // 1b. Validate audio file and eagerly read bytes (before async dispatch)
         if (audio == null || audio.isEmpty()) {
-            throw new BusinessException("AUDIO_REQUIRED", "Audio file is required.");
+            throw new BusinessException("AUDIO_REQUIRED", "Phải có file audio kèm theo tin nhắn");
         }
         long maxAudioSize = 10L * 1024 * 1024; // 10MB
         if (audio.getSize() > maxAudioSize) {
-            throw new BusinessException("AUDIO_TOO_LARGE", "Audio file must not exceed 10MB");
+            throw new BusinessException("AUDIO_TOO_LARGE", "Kích thước file audio vượt quá giới hạn 10MB");
         }
         String audioContentType = audio.getContentType();
         if (audioContentType != null && !audioContentType.startsWith("audio/")) {
-            throw new BusinessException("INVALID_AUDIO", "File must be an audio file");
+            throw new BusinessException("INVALID_AUDIO", "File đính kèm phải là file audio.");
         }
         byte[] audioBytes;
         try {
             audioBytes = audio.getBytes();
         } catch (Exception e) {
-            throw new BusinessException("AUDIO_READ_FAILED", "Failed to read audio file: " + e.getMessage());
+            throw new BusinessException("AUDIO_READ_FAILED", "Lỗi khi đọc file audio: " + e.getMessage());
         }
 
         // 1c. Azure STT → authoritative transcript.
@@ -435,7 +442,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // Task A: Pronunciation assessment — fire-and-forget after tx commit
         if (audioBytes != null && !pronunciationProvider.isAvailable()) {
             log.warn("Pronunciation provider unavailable — audio from user {} in session {} will not be scored. " +
-                    "Check AZURE_SPEECH_ENABLED/AZURE_SPEECH_KEY or SPEECHSUPER_APP_KEY/SPEECHSUPER_SECRET_KEY env vars.",
+                            "Check AZURE_SPEECH_ENABLED/AZURE_SPEECH_KEY or SPEECHSUPER_APP_KEY/SPEECHSUPER_SECRET_KEY env vars.",
                     userId, sessionId);
         }
         final String aiInputContent = effectiveContent;
@@ -463,9 +470,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             });
         }
 
-        // Task B: AI response
+        // Task B: AI response — inject persistent world state so established facts survive
+        // sliding-window truncation (orders placed, names given, missions completed earlier).
+        final String worldStateBlock = worldStateService.renderForPrompt(session);
         CompletableFuture<String> aiResponseFuture = CompletableFuture.supplyAsync(() ->
-                                roleplayAIService.generateResponse(sessionId, cachedPrompt, history, aiInputContent),
+                                roleplayAIService.generateResponse(sessionId, cachedPrompt, history, aiInputContent, worldStateBlock),
                         roleplayTaskExecutor)
                 .exceptionally(ex -> {
                     log.error("AI response generation failed for session {}: {}", sessionId, ex.getMessage());
@@ -498,6 +507,15 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // Turn 1 of CONVERSATION phase (or first DIALOGUE after SETUP) is when a voice first appears.
         if (lockedVoice == null) {
             lockVoiceIfAbsent(session, aiResult.discoveredVoice());
+        }
+
+        // Apply WORLD_STATE_DELTA ops (if any) so established facts persist across the session.
+        try {
+            JsonNode aiArrayForDelta = objectMapper.readTree(aiResponseJson);
+            int currentTurn = (int) (currentMessages + 1);
+            worldStateService.extractAndApplyDelta(session, aiArrayForDelta, currentTurn);
+        } catch (Exception e) {
+            log.debug("Skip worldState delta for session {} (parse failed): {}", sessionId, e.getMessage());
         }
 
         // Set processing time on the first AI message
@@ -534,7 +552,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // learner to do something they just completed, or ignoring a newly failed mission).
         List<MissionEvaluatorAI.MissionProgress> missionProgress = missionFuture.join();
         if (!missionProgress.isEmpty()) {
-            boolean missionStatusChanged = updateSessionMissions(sessionMissions, missionProgress);
+            int currentTurn = (int) (currentMessages + 1);
+            boolean missionStatusChanged = updateSessionMissions(session, sessionMissions, missionProgress, currentTurn);
             if (missionStatusChanged) {
                 List<SessionMission> refreshed = sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
                 String rebuilt = rebuildSystemPrompt(session, refreshed);
@@ -617,8 +636,23 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                                 .average().orElse(0.0))
                         .setScale(2, RoundingMode.HALF_UP);
 
-        // 5. COMPLEXITY — from vocabulary data (NO LLM)
-        var complexityResult = vocabularyRangeAnalyzer.analyze(messages, jlptLevel);
+        // 5. COMPLEXITY — Phase 3 v28: power-mean lexical (Laufer 1995) +
+        // Iwashita 2006 W/U + C/U syntactic, combined 0.6/0.4 (NO LLM).
+        // Tokenize USER messages directly via Kuromoji (replaces LLM-emitted
+        // vocabulary_detected; deterministic + lemmatized base forms).
+        List<String> userMessageTexts = messages.stream()
+                .filter(m -> m.getRole() == ConversationMessage.MessageRole.USER)
+                .map(ConversationMessage::getContent)
+                .filter(content -> content != null && !content.isBlank())
+                .toList();
+        Course.JlptLevel targetJlpt;
+        try {
+            targetJlpt = Course.JlptLevel.valueOf(jlptLevel);
+        } catch (IllegalArgumentException e) {
+            log.warn("Unknown JLPT level '{}' for session {}; defaulting to N5", jlptLevel, sessionId);
+            targetJlpt = Course.JlptLevel.N5;
+        }
+        var complexityResult = complexityScoreCombiner.compute(userMessageTexts, targetJlpt);
 
         // 6. CROSS-SESSION — record + query error patterns
         crossSessionTracker.recordSessionErrors(userId, sessionId, errorBreakdown);
@@ -656,23 +690,54 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         LocalDateTime completedAt = LocalDateTime.now();
         session.setCompletedAt(completedAt);
 
-        // Persist evaluation details so feedback can be retrieved later without re-calling AI
+        // Persist evaluation details so feedback can be retrieved later without re-calling AI.
+        // Note: accuracy/complexity dimensions are serialized below (after they are built),
+        // so getConversationFeedback can return the same shape without re-running AI.
         try {
             ObjectNode feedbackNode = objectMapper.createObjectNode();
             feedbackNode.put("version", 2);
             feedbackNode.set("qualitativeSummary", objectMapper.valueToTree(qualitativeSummary));
             feedbackNode.set("errorBreakdown", objectMapper.valueToTree(errorBreakdown.errorCountsAsStringMap()));
             feedbackNode.set("topCorrections", objectMapper.valueToTree(errorBreakdown.topExamples().stream()
-                    .map(ex -> Map.of(
-                            "original", ex.original() != null ? ex.original() : "",
-                            "corrected", ex.corrected() != null ? ex.corrected() : "",
-                            "explanation", ex.explanation() != null ? ex.explanation() : "",
-                            "errorType", ex.errorType().name()))
+                    .map(ex -> {
+                        Map<String, String> fields = new java.util.LinkedHashMap<>();
+                        fields.put("original", ex.original() != null ? ex.original() : "");
+                        fields.put("corrected", ex.corrected() != null ? ex.corrected() : "");
+                        fields.put("explanation", ex.explanation() != null ? ex.explanation() : "");
+                        fields.put("errorType", ex.errorType().name());
+                        // Phase 2 v28: persist severity tagging so re-fetch path
+                        // (getConversationFeedback) can render rich feedback
+                        fields.put("severity", ex.severity() != null ? ex.severity() : "");
+                        fields.put("comprehensibilityImpact",
+                                ex.comprehensibilityImpact() != null ? ex.comprehensibilityImpact() : "");
+                        fields.put("severityReasoning",
+                                ex.severityReasoning() != null ? ex.severityReasoning() : "");
+                        return fields;
+                    })
                     .collect(Collectors.toList())));
+            feedbackNode.set("severityCounts", objectMapper.valueToTree(errorBreakdown.severityCounts()));
+            feedbackNode.put("totalCorrections", errorBreakdown.totalCorrections());
+            feedbackNode.put("userMessageCount", errorBreakdown.userMessageCount());
+            feedbackNode.set("errorRate", objectMapper.valueToTree(errorBreakdown.errorRate()));
+            feedbackNode.put("totalClauses", errorBreakdown.totalClauses());
+            feedbackNode.put("cleanClauses", errorBreakdown.cleanClauses());
+            feedbackNode.put("dirtyClauses", errorBreakdown.dirtyClauses());
+            feedbackNode.put("hasCritical", errorBreakdown.hasCritical());
             if (pronunciationSummary != null) {
                 feedbackNode.set("pronunciationSummary", objectMapper.valueToTree(pronunciationSummary));
             }
-            feedbackNode.set("jlptDistribution", objectMapper.valueToTree(complexityResult.jlptDistribution()));
+            // Convert lexical raw counts → legacy %-string-keyed map for backward compat
+            feedbackNode.set("jlptDistribution",
+                    objectMapper.valueToTree(legacyJlptDistributionPct(complexityResult)));
+            // Persist unique vocabulary count + lexical/syntactic sub-trees so the
+            // re-fetch path can rebuild ComplexityDimension without recomputing.
+            if (complexityResult != null) {
+                if (complexityResult.lexical() != null && !complexityResult.lexical().insufficient()) {
+                    feedbackNode.put("uniqueVocabularyCount", complexityResult.lexical().uniqueWords());
+                }
+                feedbackNode.put("complexityPartialMeasurement", complexityResult.partialMeasurement());
+                feedbackNode.put("complexityInsufficient", complexityResult.insufficient());
+            }
             session.setFeedback(objectMapper.writeValueAsString(feedbackNode));
         } catch (Exception e) {
             log.warn("Failed to serialize evaluation feedback for session {}: {}", sessionId, e.getMessage());
@@ -690,7 +755,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     taskCompletionScore != null ? taskCompletionScore.doubleValue() : 0.0,
                     complexityResult.score().doubleValue(),
                     errorBreakdown.errorCountsAsStringMap(),
-                    complexityResult.jlptDistribution()));
+                    legacyJlptDistributionPct(complexityResult)));
         } catch (Exception e) {
             log.warn("Failed to publish RoleplaySessionCompletedEvent for session {}: {}", sessionId, e.getMessage());
         }
@@ -797,6 +862,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                         .corrected(ex.corrected())
                         .explanation(ex.explanation())
                         .errorType(ex.errorType().name())
+                        .severity(ex.severity())
+                        .comprehensibilityImpact(ex.comprehensibilityImpact())
+                        .severityReasoning(ex.severityReasoning())
                         .build())
                 .collect(Collectors.toList());
 
@@ -809,6 +877,12 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                         .errorBreakdown(errorBreakdown.errorCountsAsStringMap())
                         .topCorrections(topCorrections)
                         .feedback(qualitativeSummary.getAccuracyFeedback())
+                        // Phase 2 v28: clause-based metrics + severity exposure
+                        .totalClauses(errorBreakdown.totalClauses())
+                        .cleanClauses(errorBreakdown.cleanClauses())
+                        .dirtyClauses(errorBreakdown.dirtyClauses())
+                        .severityCounts(errorBreakdown.severityCounts())
+                        .hasCriticalCommunicationBreakdown(errorBreakdown.hasCritical())
                         .build();
 
         SessionEvaluationResponse.PronunciationDimension pronunciationDimension =
@@ -819,6 +893,10 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                         .averageCompleteness(pronunciationSummary != null ? pronunciationSummary.getAverageCompleteness() : null)
                         .totalAssessed(pronunciationSummary != null ? pronunciationSummary.getTotalAssessed() : 0)
                         .feedback(qualitativeSummary.getPronunciationFeedback())
+                        .weakWords(pronunciationSummary != null ? pronunciationSummary.getWeakWords() : List.of())
+                        .weakPhonemes(pronunciationSummary != null ? pronunciationSummary.getWeakPhonemes() : List.of())
+                        .cleanSession(pronunciationSummary != null && pronunciationSummary.isCleanSession())
+                        .noAudio(pronunciationSummary == null || pronunciationSummary.isNoAudio())
                         .build();
 
         SessionEvaluationResponse.TaskCompletionDimension taskCompletionDimension =
@@ -831,20 +909,21 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                         .build();
 
         SessionEvaluationResponse.ComplexityDimension complexityDimension =
-                SessionEvaluationResponse.ComplexityDimension.builder()
-                        .score(complexityResult.score())
-                        .uniqueVocabularyCount(complexityResult.uniqueVocabularyCount())
-                        .jlptDistribution(complexityResult.jlptDistribution())
-                        .feedback(qualitativeSummary.getComplexityFeedback())
-                        .build();
+                buildComplexityDimension(complexityResult, qualitativeSummary.getComplexityFeedback());
 
         List<SessionEvaluationResponse.RecurringErrorPattern> recurringErrorPatterns =
                 recurringPatterns.stream()
                         .map(rp -> SessionEvaluationResponse.RecurringErrorPattern.builder()
                                 .errorType(rp.errorType().name())
+                                .errorTypeLabel(com.fu.roleplay.enums.ErrorTypeLabels.labelOf(rp.errorType()))
                                 .totalOccurrences(rp.totalOccurrences())
                                 .sessionCount(rp.sessionCount())
                                 .totalSessionsChecked(rp.totalSessionsChecked())
+                                .summaryVi(com.fu.roleplay.enums.ErrorTypeLabels.recurringSummary(
+                                        rp.errorType(),
+                                        rp.totalOccurrences(),
+                                        rp.sessionCount(),
+                                        rp.totalSessionsChecked()))
                                 .build())
                         .collect(Collectors.toList());
 
@@ -985,6 +1064,17 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         Map<String, Integer> errorBreakdownMap = null;
         Map<String, BigDecimal> jlptDistributionMap = null;
         List<SessionEvaluationResponse.CorrectionExample> topCorrectionsList = null;
+        Map<String, Integer> severityCountsMap = null;
+        Integer totalCorrections = null;
+        Integer userMessageCount = null;
+        BigDecimal errorRate = null;
+        Integer totalClauses = null;
+        Integer cleanClauses = null;
+        Integer dirtyClauses = null;
+        Boolean hasCritical = null;
+        Integer uniqueVocabularyCount = null;
+        Boolean complexityPartialMeasurement = null;
+        Boolean complexityInsufficient = null;
 
         String feedbackJson = session.getFeedback();
         if (feedbackJson != null && !feedbackJson.equals("{}")) {
@@ -1000,18 +1090,37 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 if (feedbackNode.has("errorBreakdown")) {
                     errorBreakdownMap = objectMapper.convertValue(
                             feedbackNode.get("errorBreakdown"),
-                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, Integer>>() {});
+                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, Integer>>() {
+                            });
                 }
                 if (feedbackNode.has("jlptDistribution")) {
                     jlptDistributionMap = objectMapper.convertValue(
                             feedbackNode.get("jlptDistribution"),
-                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, BigDecimal>>() {});
+                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, BigDecimal>>() {
+                            });
                 }
                 if (feedbackNode.has("topCorrections")) {
                     topCorrectionsList = objectMapper.convertValue(
                             feedbackNode.get("topCorrections"),
-                            new com.fasterxml.jackson.core.type.TypeReference<List<SessionEvaluationResponse.CorrectionExample>>() {});
+                            new com.fasterxml.jackson.core.type.TypeReference<List<SessionEvaluationResponse.CorrectionExample>>() {
+                            });
                 }
+                if (feedbackNode.has("severityCounts")) {
+                    severityCountsMap = objectMapper.convertValue(
+                            feedbackNode.get("severityCounts"),
+                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, Integer>>() {
+                            });
+                }
+                if (feedbackNode.hasNonNull("totalCorrections")) totalCorrections = feedbackNode.get("totalCorrections").asInt();
+                if (feedbackNode.hasNonNull("userMessageCount")) userMessageCount = feedbackNode.get("userMessageCount").asInt();
+                if (feedbackNode.hasNonNull("errorRate")) errorRate = feedbackNode.get("errorRate").decimalValue();
+                if (feedbackNode.hasNonNull("totalClauses")) totalClauses = feedbackNode.get("totalClauses").asInt();
+                if (feedbackNode.hasNonNull("cleanClauses")) cleanClauses = feedbackNode.get("cleanClauses").asInt();
+                if (feedbackNode.hasNonNull("dirtyClauses")) dirtyClauses = feedbackNode.get("dirtyClauses").asInt();
+                if (feedbackNode.hasNonNull("hasCritical")) hasCritical = feedbackNode.get("hasCritical").asBoolean();
+                if (feedbackNode.hasNonNull("uniqueVocabularyCount")) uniqueVocabularyCount = feedbackNode.get("uniqueVocabularyCount").asInt();
+                if (feedbackNode.hasNonNull("complexityPartialMeasurement")) complexityPartialMeasurement = feedbackNode.get("complexityPartialMeasurement").asBoolean();
+                if (feedbackNode.hasNonNull("complexityInsufficient")) complexityInsufficient = feedbackNode.get("complexityInsufficient").asBoolean();
                 // Legacy v1 fallback
                 if (feedbackNode.has("languageEvaluation")) {
                     languageEval = objectMapper.treeToValue(
@@ -1032,9 +1141,17 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         if (session.getAccuracyScore() != null) {
             accuracyDimension = SessionEvaluationResponse.AccuracyDimension.builder()
                     .score(session.getAccuracyScore())
+                    .totalCorrections(totalCorrections != null ? totalCorrections : 0)
+                    .userMessageCount(userMessageCount != null ? userMessageCount : 0)
+                    .errorRate(errorRate)
                     .errorBreakdown(errorBreakdownMap)
                     .topCorrections(topCorrectionsList)
                     .feedback(qualitativeSummary != null ? qualitativeSummary.getAccuracyFeedback() : null)
+                    .totalClauses(totalClauses)
+                    .cleanClauses(cleanClauses)
+                    .dirtyClauses(dirtyClauses)
+                    .severityCounts(severityCountsMap)
+                    .hasCriticalCommunicationBreakdown(hasCritical)
                     .build();
         }
 
@@ -1047,6 +1164,10 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     .averageCompleteness(pronunciationSummary.getAverageCompleteness())
                     .totalAssessed(pronunciationSummary.getTotalAssessed())
                     .feedback(qualitativeSummary != null ? qualitativeSummary.getPronunciationFeedback() : null)
+                    .weakWords(pronunciationSummary.getWeakWords())
+                    .weakPhonemes(pronunciationSummary.getWeakPhonemes())
+                    .cleanSession(pronunciationSummary.isCleanSession())
+                    .noAudio(pronunciationSummary.isNoAudio())
                     .build();
         }
 
@@ -1067,8 +1188,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         if (session.getComplexityScore() != null) {
             complexityDimension = SessionEvaluationResponse.ComplexityDimension.builder()
                     .score(session.getComplexityScore())
+                    .uniqueVocabularyCount(uniqueVocabularyCount != null ? uniqueVocabularyCount : 0)
                     .jlptDistribution(jlptDistributionMap)
                     .feedback(qualitativeSummary != null ? qualitativeSummary.getComplexityFeedback() : null)
+                    .partialMeasurement(complexityPartialMeasurement)
+                    .insufficient(complexityInsufficient)
                     .build();
         }
 
@@ -1103,7 +1227,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
      */
     private record AiMessagesResult(List<ConversationMessage> messages,
                                     java.util.Map<UUID, byte[]> audioByMessageId,
-                                    String discoveredVoice) {}
+                                    String discoveredVoice) {
+    }
 
     private AiMessagesResult parseAndSaveAIMessages(UUID sessionId, String aiResponseJson, int startSeq) {
         return parseAndSaveAIMessages(sessionId, aiResponseJson, startSeq, null);
@@ -1111,12 +1236,12 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
     /**
      * @param lockedVoice voice chosen at session opening (from session context). When non-null,
-     *   overrides whatever the LLM emits on subsequent turns so the character's voice stays
-     *   consistent. The LLM reliably picks a coherent voice on turn 1 but drifts later, so we
-     *   pin it server-side rather than re-asking every turn.
+     *                    overrides whatever the LLM emits on subsequent turns so the character's voice stays
+     *                    consistent. The LLM reliably picks a coherent voice on turn 1 but drifts later, so we
+     *                    pin it server-side rather than re-asking every turn.
      */
     private AiMessagesResult parseAndSaveAIMessages(UUID sessionId, String aiResponseJson,
-                                                   int startSeq, String lockedVoice) {
+                                                    int startSeq, String lockedVoice) {
         List<ConversationMessage> saved = new ArrayList<>();
         List<TtsJob> ttsJobs = new ArrayList<>();
         String discoveredVoice = null;
@@ -1135,6 +1260,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             int seq = startSeq;
             for (JsonNode node : array) {
                 String type = node.path("type").asText("DIALOGUE");
+                // WORLD_STATE_DELTA is server-only metadata — not a chat message. Caller
+                // applies the ops via WorldStateService after this method returns.
+                if ("WORLD_STATE_DELTA".equals(type)) {
+                    continue;
+                }
                 // Strip any ruby syntax the LLM may leak, then feed plain text into Kuromoji.
                 // This replaces both the old LLM-generated `japanese_with_furigana` field and the
                 // post-hoc FuriganaRubyRepair, neither of which handled hallucination patterns like
@@ -1285,7 +1415,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
      * NOT shown to learner — used only for gamification EXP/badges.
      */
     private BigDecimal computeInternalOverall(BigDecimal accuracyScore, BigDecimal pronunciationScore,
-                                               BigDecimal taskCompletionScore, BigDecimal complexityScore) {
+                                              BigDecimal taskCompletionScore, BigDecimal complexityScore) {
         // Weights: accuracy 30%, pronunciation 25%, task completion 30%, complexity 15%
         double accuracy = accuracyScore != null ? accuracyScore.doubleValue() : 0;
         double pronunciation = pronunciationScore != null ? pronunciationScore.doubleValue() : 0;
@@ -1325,12 +1455,27 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
     /**
      * @return {@code true} if any mission's status transitioned (not just progressPct), so the caller
-     *         knows to rebuild the system prompt — stale mission status in the prompt is a primary
-     *         driver of AI drift on long sessions.
+     * knows to rebuild the system prompt — stale mission status in the prompt is a primary
+     * driver of AI drift on long sessions.
      */
     private boolean updateSessionMissions(List<SessionMission> sessionMissions,
                                           List<MissionEvaluatorAI.MissionProgress> progressList) {
+        return updateSessionMissions(null, sessionMissions, progressList, 0);
+    }
+
+    /**
+     * Overload that also records freshly-COMPLETED missions into the session's world state
+     * so the AI continues to honor them after the dialogue that completed them rolls out of
+     * the context window. {@code session} may be null (legacy callers); world-state recording
+     * is then skipped silently.
+     */
+    private boolean updateSessionMissions(ConversationSession session,
+                                          List<SessionMission> sessionMissions,
+                                          List<MissionEvaluatorAI.MissionProgress> progressList,
+                                          int turn) {
         List<SessionMission> updatedMissions = new ArrayList<>();
+        List<SessionMission> newlyCompleted = new ArrayList<>();
+        List<String> newlyCompletedReasoning = new ArrayList<>();
         boolean statusChanged = false;
         for (MissionEvaluatorAI.MissionProgress progress : progressList) {
             var match = sessionMissions.stream()
@@ -1355,6 +1500,10 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 if (newStatus != sm.getStatus()) {
                     statusChanged = true;
                     sm.setStatus(newStatus);
+                    if (newStatus == SessionMission.MissionStatus.COMPLETED) {
+                        newlyCompleted.add(sm);
+                        newlyCompletedReasoning.add(progress.getReasoning());
+                    }
                 }
             } catch (IllegalArgumentException e) {
                 log.warn("Invalid mission status '{}' from AI for mission {}: {}",
@@ -1366,6 +1515,13 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         }
         if (!updatedMissions.isEmpty()) {
             sessionMissionRepository.saveAll(updatedMissions);
+        }
+        // Persist freshly-completed missions into world state so they survive context truncation.
+        if (session != null && !newlyCompleted.isEmpty()) {
+            for (int i = 0; i < newlyCompleted.size(); i++) {
+                worldStateService.recordCompletedMission(
+                        session, newlyCompleted.get(i), newlyCompletedReasoning.get(i), turn);
+            }
         }
         return statusChanged;
     }
@@ -1415,33 +1571,117 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     }
 
     /**
-     * Aggregates a list of per-message pronunciation records into a session-level summary.
-     * Returns null when the list is empty (no audio messages were assessed).
-     * Used by both completeSession (fresh) and getConversationFeedback (fallback from DB).
+     * Convert lexical raw counts (Map&lt;JlptLevel, Integer&gt;) to legacy
+     * percentage map (Map&lt;String, BigDecimal&gt;) keyed by level name.
+     * Maintains backward compatibility with consumers (event payload, FE
+     * legacy renderer, persisted feedback JSON) that expect the old format.
+     */
+    private Map<String, BigDecimal> legacyJlptDistributionPct(
+            com.fu.roleplay.evaluation.ComplexityScoreCombiner.ComplexityResult result) {
+        if (result == null || result.lexical() == null
+                || result.lexical().jlptDistribution() == null
+                || result.lexical().knownWords() == 0) {
+            return Map.of();
+        }
+        int known = result.lexical().knownWords();
+        Map<String, BigDecimal> pct = new LinkedHashMap<>();
+        result.lexical().jlptDistribution().forEach((level, count) -> {
+            if (count > 0) {
+                pct.put(level.name(),
+                        BigDecimal.valueOf(count * 100.0 / known).setScale(1, RoundingMode.HALF_UP));
+            }
+        });
+        return pct;
+    }
+
+    /**
+     * Build the ComplexityDimension DTO from a Phase 3 v28 ComplexityResult.
+     * Populates both new sub-objects (lexical, syntactic) and legacy top-level
+     * fields (uniqueVocabularyCount, jlptDistribution as % map) for backward
+     * compatibility.
+     */
+    private SessionEvaluationResponse.ComplexityDimension buildComplexityDimension(
+            com.fu.roleplay.evaluation.ComplexityScoreCombiner.ComplexityResult result,
+            String feedback) {
+        var builder = SessionEvaluationResponse.ComplexityDimension.builder()
+                .score(result.score())
+                .feedback(feedback)
+                .partialMeasurement(result.partialMeasurement())
+                .insufficient(result.insufficient());
+
+        var lex = result.lexical();
+        if (lex != null && !lex.insufficient()) {
+            builder.uniqueVocabularyCount(lex.uniqueWords());
+            builder.jlptDistribution(legacyJlptDistributionPct(result));
+            Map<String, Integer> rawCounts = new LinkedHashMap<>();
+            lex.jlptDistribution().forEach((level, count) -> rawCounts.put(level.name(), count));
+            builder.lexical(SessionEvaluationResponse.LexicalDetails.builder()
+                    .score(lex.score())
+                    .L_avg(lex.L_avg())
+                    .expectedL_avg(lex.expectedL_avg())
+                    .uniqueWords(lex.uniqueWords())
+                    .knownWords(lex.knownWords())
+                    .unknownWords(lex.unknownWords())
+                    .jlptDistribution(rawCounts)
+                    .build());
+        }
+
+        var syn = result.syntactic();
+        if (syn != null && !syn.insufficient()) {
+            Map<String, Integer> typeBreakdown = new LinkedHashMap<>();
+            syn.clauseTypeBreakdown().forEach((type, count) -> typeBreakdown.put(type.name(), count));
+            builder.syntactic(SessionEvaluationResponse.SyntacticDetails.builder()
+                    .score(syn.score())
+                    .W_per_U(syn.W_per_U())
+                    .C_per_U(syn.C_per_U())
+                    .totalAS_Units(syn.totalAS_Units())
+                    .totalClauses(syn.totalClauses())
+                    .clauseTypeBreakdown(typeBreakdown)
+                    .build());
+        }
+
+        return builder.build();
+    }
+
+    /**
+     * Builds the per-session pronunciation DTO from persisted message records via the
+     * Levis-tier-aware {@link com.fu.roleplay.evaluation.PronunciationAggregator}.
+     * Returns null when no audio was assessed (preserves legacy contract — callers
+     * already null-guard before reading averages).
      */
     private SessionEvaluationResponse.PronunciationSummary buildPronunciationSummary(
             List<MessagePronunciation> pronunciations) {
         if (pronunciations.isEmpty()) return null;
-
-        BigDecimal totalOverall      = BigDecimal.ZERO;
-        BigDecimal totalAccuracy     = BigDecimal.ZERO;
-        BigDecimal totalFluency      = BigDecimal.ZERO;
-        BigDecimal totalCompleteness = BigDecimal.ZERO;
-
-        for (MessagePronunciation p : pronunciations) {
-            if (p.getOverallScore()       != null) totalOverall      = totalOverall.add(p.getOverallScore());
-            if (p.getAccuracyScore()      != null) totalAccuracy     = totalAccuracy.add(p.getAccuracyScore());
-            if (p.getFluencyScore()       != null) totalFluency      = totalFluency.add(p.getFluencyScore());
-            if (p.getCompletenessScore()  != null) totalCompleteness = totalCompleteness.add(p.getCompletenessScore());
-        }
-
-        BigDecimal count = BigDecimal.valueOf(pronunciations.size());
+        var agg = pronunciationAggregator.aggregate(pronunciations);
         return SessionEvaluationResponse.PronunciationSummary.builder()
-                .averageOverall(totalOverall.divide(count, 2, RoundingMode.HALF_UP))
-                .averageAccuracy(totalAccuracy.divide(count, 2, RoundingMode.HALF_UP))
-                .averageFluency(totalFluency.divide(count, 2, RoundingMode.HALF_UP))
-                .averageCompleteness(totalCompleteness.divide(count, 2, RoundingMode.HALF_UP))
-                .totalAssessed(pronunciations.size())
+                .averageOverall(agg.averageOverall())
+                .averageAccuracy(agg.averageAccuracy())
+                .averageFluency(agg.averageFluency())
+                .averageCompleteness(agg.averageCompleteness())
+                .totalAssessed(agg.totalAssessed())
+                .weakWords(agg.weakWords().stream()
+                        .map(w -> SessionEvaluationResponse.MispronouncedWord.builder()
+                                .word(w.word())
+                                .averageAccuracy(w.averageAccuracy())
+                                .occurrences(w.occurrences())
+                                .dominantErrorType(w.dominantErrorType())
+                                .errorTypeLabel(w.errorTypeLabel())
+                                .impact(w.impact())
+                                .build())
+                        .toList())
+                .weakPhonemes(agg.weakPhonemes().stream()
+                        .map(p -> SessionEvaluationResponse.WeakPhonemeClass.builder()
+                                .ipa(p.ipa())
+                                .label(p.label())
+                                .averageScore(p.averageScore())
+                                .occurrences(p.occurrences())
+                                .tier(p.tier())
+                                .drill(p.drill())
+                                .impact(p.impact())
+                                .build())
+                        .toList())
+                .cleanSession(agg.cleanSession())
+                .noAudio(agg.noAudio())
                 .build();
     }
 
@@ -1452,6 +1692,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     private void savePronunciationResult(AssessmentResult result, UUID messageId, UUID sessionId) {
         if (result == null || !result.isSuccess()) return;
         try {
+            String wordDetailsJson = serializeWordDetails(result.getWordDetails());
+            String weakPhonemesJson = preaggregateWeakPhonemes(result.getWordDetails());
+
             MessagePronunciation mp = MessagePronunciation.builder()
                     .messageId(messageId)
                     .sessionId(sessionId)
@@ -1461,10 +1704,56 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     .completenessScore(toBigDecimal(result.getCompletenessScore()))
                     .transcribedText(result.getTranscribedText())
                     .rawResponse(result.getRawResponse() != null ? result.getRawResponse() : "{}")
+                    .wordDetails(wordDetailsJson)
+                    .weakPhonemes(weakPhonemesJson)
                     .build();
             pronunciationRepository.save(mp);
         } catch (Exception e) {
             log.error("Failed to save pronunciation result for message {}: {}", messageId, e.getMessage());
+        }
+    }
+
+    /** Serialize word-level array; null if Azure returned no per-word detail. */
+    private String serializeWordDetails(List<AssessmentResult.WordAssessment> words) {
+        if (words == null || words.isEmpty()) return null;
+        try {
+            return objectMapper.writeValueAsString(words);
+        } catch (Exception e) {
+            log.warn("Failed to serialize wordDetails: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Pre-aggregate phonemes scoring &lt; 70 into {ipa: {count, avgScore}} so session-level
+     * rollup can sum across messages without re-scanning the full word_details tree.
+     * Threshold 70 matches the marginal-tier word threshold in PronunciationAggregator.
+     */
+    private String preaggregateWeakPhonemes(List<AssessmentResult.WordAssessment> words) {
+        if (words == null || words.isEmpty()) return null;
+        Map<String, double[]> agg = new java.util.HashMap<>();  // ipa -> [count, sum]
+        for (AssessmentResult.WordAssessment w : words) {
+            if (w.getPhonemes() == null) continue;
+            for (AssessmentResult.PhonemeAssessment p : w.getPhonemes()) {
+                if (p.getAccuracyScore() >= 70) continue;
+                double[] entry = agg.computeIfAbsent(p.getPhoneme(), k -> new double[]{0, 0});
+                entry[0]++;
+                entry[1] += p.getAccuracyScore();
+            }
+        }
+        if (agg.isEmpty()) return null;
+        try {
+            ObjectNode root = objectMapper.createObjectNode();
+            for (var e : agg.entrySet()) {
+                ObjectNode node = objectMapper.createObjectNode();
+                node.put("count", (int) e.getValue()[0]);
+                node.put("avgScore", e.getValue()[1] / e.getValue()[0]);
+                root.set(e.getKey(), node);
+            }
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception e) {
+            log.warn("Failed to serialize weakPhonemes: {}", e.getMessage());
+            return null;
         }
     }
 
@@ -1584,8 +1873,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         }
     }
 
-    /** Per-segment TTS payload. Synthesis runs synchronously in parallel before response is returned. */
-    private record TtsJob(UUID messageId, String text, String voice, String style) {}
+    /**
+     * Per-segment TTS payload. Synthesis runs synchronously in parallel before response is returned.
+     */
+    private record TtsJob(UUID messageId, String text, String voice, String style) {
+    }
 
     /**
      * Synthesize every job in parallel via the roleplay executor, capped by the bundle timeout.
@@ -1600,8 +1892,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
 
         List<CompletableFuture<java.util.Map.Entry<UUID, byte[]>>> futures = jobs.stream()
                 .map(job -> CompletableFuture.supplyAsync(
-                        () -> azureTtsProvider.synthesize(job.text(), job.voice(), job.style(), null),
-                        roleplayTaskExecutor)
+                                () -> azureTtsProvider.synthesize(job.text(), job.voice(), job.style(), null),
+                                roleplayTaskExecutor)
                         .exceptionally(ex -> {
                             log.warn("TTS synth failed for message {}: {}", job.messageId(), ex.getMessage());
                             return null;
@@ -1629,12 +1921,15 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             try {
                 java.util.Map.Entry<UUID, byte[]> entry = f.getNow(null);
                 if (entry != null) result.put(entry.getKey(), entry.getValue());
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
         return result;
     }
 
-    /** Populates MessageResponse.audioBase64 for any response whose id has synthesized audio. */
+    /**
+     * Populates MessageResponse.audioBase64 for any response whose id has synthesized audio.
+     */
     private void attachAudio(List<MessageResponse> responses, java.util.Map<UUID, byte[]> audio) {
         if (responses == null || audio == null || audio.isEmpty()) return;
         java.util.Base64.Encoder enc = java.util.Base64.getEncoder();

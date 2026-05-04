@@ -5,6 +5,7 @@ import com.fu.monitoring.dto.AdminUserStatsDTO;
 import com.fu.monitoring.dto.DashboardStatsResponse;
 import com.fu.monitoring.dto.OpenAiUsageResponse;
 import com.fu.monitoring.dto.response.AchievementMetricsResponse;
+import com.fu.monitoring.dto.response.AdminDashboardResponse;
 import com.fu.monitoring.dto.response.ClassManagementDashboardResponse;
 import com.fu.monitoring.dto.response.ClassStatusChartResponse;
 import com.fu.monitoring.dto.response.ContentManagerDashboardResponse;
@@ -13,6 +14,7 @@ import com.fu.monitoring.dto.response.PopularBadgesResponse;
 import com.fu.monitoring.dto.response.PriorityClassesResponse;
 import com.fu.monitoring.dto.response.RareBadgesResponse;
 import com.fu.monitoring.dto.response.StudentTrendResponse;
+import com.fu.monitoring.service.AdminDashboardService;
 import com.fu.monitoring.service.AdminUserService;
 import com.fu.monitoring.service.ClassManagementDashboardService;
 import com.fu.monitoring.service.ContentManagerDashboardService;
@@ -34,6 +36,7 @@ public class MonitoringController {
     private final SystemMonitoringService monitoringService;
     private final OpenAiUsageService openAiUsageService;
     private final AdminUserService adminUserService;
+    private final AdminDashboardService adminDashboardService;
     private final ClassManagementDashboardService dashboardService;
     private final ContentManagerDashboardService contentManagerDashboardService;
 
@@ -41,29 +44,14 @@ public class MonitoringController {
     // EXISTING ADMIN ENDPOINTS
     // =====================================================
 
-    @GetMapping("/dashboard")
+    @GetMapping("/admin/dashboard")
     @PreAuthorize("hasRole('ADMIN')")
-    @Operation(summary = "Get system dashboard statistics",
-               description = "Returns system health, usage statistics, and performance metrics for Admin dashboard.")
-    public ApiResponse<DashboardStatsResponse> getDashboardStats() {
-        return ApiResponse.success(monitoringService.getDashboardStats());
+    @Operation(summary = "Get admin overview dashboard",
+               description = "Returns all widgets for the admin dashboard in one call: KPI cards, user growth trend, role distribution, system health, and AI session trend.")
+    public ApiResponse<AdminDashboardResponse> getAdminDashboard() {
+        return ApiResponse.success(adminDashboardService.getDashboard());
     }
 
-    @GetMapping("/openai/usage")
-    @PreAuthorize("hasRole('ADMIN')")
-    @Operation(summary = "Get OpenAI usage statistics",
-               description = "Returns usage statistics for OpenAI resources.")
-    public ApiResponse<OpenAiUsageResponse> getOpenAiUsage() {
-        return ApiResponse.success(openAiUsageService.getUsage());
-    }
-
-    @GetMapping("/users/stats")
-    @PreAuthorize("hasRole('ADMIN')")
-    @Operation(summary = "Get admin user statistics",
-               description = "Returns comprehensive user statistics including role breakdown, new registrations, sessions, security metrics, and activity metrics.")
-    public ApiResponse<AdminUserStatsDTO> getUserStatistics() {
-        return ApiResponse.success(adminUserService.getUserStatistics());
-    }
 
     // =====================================================
     // CLASS MANAGEMENT DASHBOARD ENDPOINTS
