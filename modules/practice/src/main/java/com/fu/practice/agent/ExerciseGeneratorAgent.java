@@ -678,10 +678,9 @@ public class ExerciseGeneratorAgent {
                 + "Dạng câu hỏi: CHỈ sinh dạng " + itemType.name()
                 + " — itemType của MỌI câu PHẢI là \"" + itemType.name() + "\"\n\n"
                 + "QUY TẮC CHO DẠNG " + itemType.name() + ":\n" + rule + "\n\n"
-                + CLEAN_SOURCE_DIRECTIVE + "\n"
                 + "CẤU TRÚC JSON mỗi phần tử:\n"
                 + "- \"itemType\"        : \"" + itemType.name() + "\"\n"
-                + "- \"question\"        : câu hỏi / yêu cầu — KHÔNG rỗng, KHÔNG chứa \"~\".\n"
+                + "- \"question\"        : câu hỏi / yêu cầu — KHÔNG rỗng.\n"
                 + "- \"questionJapanese\": câu tiếng Nhật thuần (kanji + kana), không chứa brackets/furigana. Null nếu không cần. Server sẽ tự sinh furigana từ trường này.\n"
                 + "- \"options\"         : " + optionsNote + "\n"
                 + "- \"pairs\"           : " + pairsNote + "\n"
@@ -691,22 +690,6 @@ public class ExerciseGeneratorAgent {
                 + "- \"refContentId\"    : shortId [xxxxxxxx] của từ/ngữ pháp đang hỏi — BẮT BUỘC.\n"
                 + "- \"refContentType\"  : \"VOCABULARY\" hoặc \"GRAMMAR\".\n";
     }
-
-    /**
-     * Universal directive to fix "tilde placeholder leak" from vocab data (entries like
-     * "この ~" / "~ này") that previously leaked into generated options.
-     * LLM must either resolve placeholders with a concrete noun OR drop the entity.
-     */
-    private static final String CLEAN_SOURCE_DIRECTIVE = """
-            === LÀM SẠCH DỮ LIỆU NGUỒN (BẮT BUỘC) ===
-            Nguồn vocab đôi khi chứa ký tự placeholder như "~" hoặc "..." (VD: "この ~" = "cái này ~").
-            Khi tạo câu hỏi:
-              • TUYỆT ĐỐI KHÔNG để ký tự "~" hoặc "..." xuất hiện trong question, options, pairs, hay correctAnswer.
-              • Nếu entity gốc có "~": thay bằng 1 danh từ/từ cụ thể phù hợp ngữ cảnh
-                (VD: "この ~" → "この本" / "このペン"; nghĩa: "cái này ~" → "cuốn sách này" / "cây bút này").
-              • Nếu không thay được hợp lý → CHỌN ENTITY KHÁC từ pool vocab/grammar.
-              • KHÔNG trả về option/pair để trống, KHÔNG dùng "N/A" / "-" / "null".
-            """;
 
     private String buildSimpleRetryPrompt(int count, PracticeSessionType sessionType,
                                            String jlptLevel, String contentBlock,
@@ -765,10 +748,6 @@ public class ExerciseGeneratorAgent {
         if (items == null || items.isEmpty()) return 0;
         int before = items.size();
         items.removeIf(it -> {
-            if (hasPlaceholderLeak(it)) {
-                log.warn("Drop item: placeholder leak in options/pairs");
-                return true;
-            }
             if (hasJapaneseGrammarError(it)) {
                 log.warn("Drop item: Japanese grammar error (pronoun+の or determiner+particle)");
                 return true;
@@ -776,26 +755,6 @@ public class ExerciseGeneratorAgent {
             return false;
         });
         return before - items.size();
-    }
-
-    private static boolean hasPlaceholderLeak(GeneratedItem item) {
-        if (containsPlaceholder(item.getCorrectAnswer())) return true;
-        if (item.getOptions() != null) {
-            for (GeneratedItem.OptionItem opt : item.getOptions()) {
-                if (opt != null && containsPlaceholder(opt.text())) return true;
-            }
-        }
-        if (item.getPairs() != null) {
-            for (GeneratedItem.MatchingPair p : item.getPairs()) {
-                if (p == null) continue;
-                if (containsPlaceholder(p.left()) || containsPlaceholder(p.right())) return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean containsPlaceholder(String s) {
-        return s != null && (s.contains("~") || s.contains("..."));
     }
 
     /** Delegates to {@link JapaneseGrammarValidator} across all JP-bearing fields. */
