@@ -17,6 +17,13 @@ import java.util.List;
 @ConfigurationProperties(prefix = "practice")
 public class PracticeProperties {
 
+    /**
+     * OpenAI model for exercise generation. Isolated from global default so
+     * practice gen can be upgraded independently of other modules.
+     * Override via PRACTICE_EXERCISE_MODEL env var.
+     */
+    private String exerciseModel = "gpt-4.1-mini-2025-04-14";
+
     /** Timeout in seconds for parallel LLM exercise generation. */
     private int llmTimeoutSeconds = 120;
 
