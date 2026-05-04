@@ -56,6 +56,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
@@ -988,12 +989,15 @@ public class ClassServiceImpl implements ClassService {
 
                 // Check information of learner in excel file is different from database
                 // Use Objects.equals() for null-safe comparison
+                // Normalize blank/null strings to null before comparing to treat "" and null as equal
                 String excelName = safeGetTrimmedValue(learnerExcelRow.getName());
                 String excelPhone = safeGetTrimmedValue(learnerExcelRow.getPhoneNumber());
+                String dbPhone = StringUtils.hasText(learner.getPhoneNumber()) ? learner.getPhoneNumber().trim() : null;
+                String normalizedExcelPhone = StringUtils.hasText(excelPhone) ? excelPhone : null;
 
                 if (!Objects.equals(learner.getFullName(), excelName) ||
                         !Objects.equals(learner.getDateOfBirth(), learnerExcelRow.getDateOfBirth()) ||
-                        !Objects.equals(learner.getPhoneNumber(), excelPhone)) {
+                        !Objects.equals(dbPhone, normalizedExcelPhone)) {
                     errors.add(ClassImportError.builder()
                             .rowNumber(excelRow.getRowNumber())
                             .className(className)
