@@ -31,6 +31,13 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
     List<User> findByEmailIn(Collection<String> emails);
 
     /**
+     * Batch fetch non-deleted users by a set of phone numbers.
+     * Used by Excel import to check phone number conflicts in a single query.
+     */
+    @Query("SELECT u FROM User u WHERE u.phoneNumber IN :phones AND u.deletedAt IS NULL")
+    List<User> findByPhoneNumberIn(@Param("phones") Collection<String> phones);
+
+    /**
      * Find active user by email (not soft-deleted)
      */
     @Query("SELECT u FROM User u WHERE u.email = :email AND u.deletedAt IS NULL")
