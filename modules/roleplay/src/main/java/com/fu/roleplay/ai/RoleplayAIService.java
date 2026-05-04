@@ -86,10 +86,25 @@ public class RoleplayAIService {
 
     public String generateResponse(UUID sessionId, String systemPrompt, List<ConversationMessage> history,
                                     String userMessage) {
+        return generateResponse(sessionId, systemPrompt, history, userMessage, null);
+    }
+
+    /**
+     * Overload that prepends a server-rendered world-state block to the user-side payload.
+     * Used for persistent-memory roleplay where established facts must survive context-window
+     * truncation. {@code worldStateBlock} may be {@code null} or empty when there is nothing
+     * to inject yet (early in the session).
+     */
+    public String generateResponse(UUID sessionId, String systemPrompt, List<ConversationMessage> history,
+                                    String userMessage, String worldStateBlock) {
         try {
             List<ConversationMessage> hybridHistory = buildHybridContextWindow(history);
 
             StringBuilder conversationHistory = new StringBuilder();
+            if (worldStateBlock != null && !worldStateBlock.isBlank()) {
+                conversationHistory.append(worldStateBlock);
+                if (!worldStateBlock.endsWith("\n")) conversationHistory.append("\n");
+            }
             conversationHistory.append("<conversation_history>\n");
             for (ConversationMessage msg : hybridHistory) {
                 String role = msg.getRole() == ConversationMessage.MessageRole.USER ? "Learner" : "AI";
