@@ -47,7 +47,8 @@ public class ClassPreview {
     private Integer maxStudents;       // sức chứa lớp (default=8)
     
     // Learners with full details (not just UUIDs)
-    private List<LearnerInfo> learnersToAdd;  // danh sách học viên với email, tên, sinh nhật, điện thoại
+    private List<LearnerInfo> learnersToAdd;     // học viên sẽ được thêm vào lớp
+    private List<LearnerInfo> learnersToRemove;  // học viên sẽ bị xóa khỏi lớp (UPDATE only — không có trong file)
     
     // ===== UPDATE classes: Old values from DB for comparison =====
     private String oldClassName;
