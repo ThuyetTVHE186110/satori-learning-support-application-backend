@@ -62,4 +62,25 @@ public interface PracticeSessionRepository extends JpaRepository<PracticeSession
             @Param("userId") UUID userId,
             @Param("startDate") LocalDateTime startDate,
             @Param("endDate") LocalDateTime endDate);
+
+    // ── Admin dashboard queries ──────────────────────────────────────────────
+
+    /**
+     * Count practice sessions created within a date range (for admin dashboard KPI).
+     */
+    @Query("SELECT COUNT(ps) FROM PracticeSession ps WHERE ps.createdAt >= :start AND ps.createdAt < :end")
+    long countByCreatedAtBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    /**
+     * Daily practice session count trend for last N days (for admin dashboard chart).
+     * Returns list of [date, count].
+     */
+    @Query(value = """
+            SELECT DATE(created_at) AS day, COUNT(*) AS cnt
+            FROM practice.practice_sessions
+            WHERE created_at >= :start
+            GROUP BY DATE(created_at)
+            ORDER BY day ASC
+            """, nativeQuery = true)
+    List<Object[]> findDailySessionTrend(@Param("start") LocalDateTime start);
 }

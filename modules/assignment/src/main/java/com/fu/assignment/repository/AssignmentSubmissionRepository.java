@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -267,4 +268,28 @@ public interface AssignmentSubmissionRepository extends JpaRepository<Assignment
               AND s.status = 'GRADED'
             """, nativeQuery = true)
     java.util.List<Object[]> getAllGradedSubmissionsForClass(@Param("classId") UUID classId);
+
+    // ── Admin dashboard queries ──────────────────────────────────────────────
+
+    /**
+     * Count submissions submitted today (submittedAt not null, within date range).
+     */
+    @Query(value = """
+            SELECT COUNT(*) FROM assignment.assignment_submissions
+            WHERE submitted_at >= :start AND submitted_at < :end
+            """, nativeQuery = true)
+    long countSubmittedBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    /**
+     * Daily submission count trend for last N days (for admin dashboard chart).
+     * Returns list of [date, count].
+     */
+    @Query(value = """
+            SELECT DATE(submitted_at) AS day, COUNT(*) AS cnt
+            FROM assignment.assignment_submissions
+            WHERE submitted_at >= :start
+            GROUP BY DATE(submitted_at)
+            ORDER BY day ASC
+            """, nativeQuery = true)
+    java.util.List<Object[]> findDailySubmissionTrend(@Param("start") LocalDateTime start);
 }
