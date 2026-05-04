@@ -974,6 +974,18 @@ public class ClassServiceImpl implements ClassService {
                         continue;
                     }
                 }
+
+                // Validate learner status — must be INACTIVE (not enrolled in any other class)
+                if (learner.getStatus() == UserStatus.ACTIVE) {
+                    errors.add(ClassImportError.builder()
+                            .rowNumber(excelRow.getRowNumber())
+                            .className(className)
+                            .errorMessage(String.format("Học sinh %s đang ở lớp khác (trạng thái ACTIVE), không thể thêm vào lớp này",
+                                    learnerExcelRow.getEmail()))
+                            .build());
+                    continue;
+                }
+
                 // Check information of learner in excel file is different from database
                 // Use Objects.equals() for null-safe comparison
                 String excelName = safeGetTrimmedValue(learnerExcelRow.getName());
@@ -1013,6 +1025,30 @@ public class ClassServiceImpl implements ClassService {
                         className, existingMemberCount, learnersToAdd.size(), totalLearnersAfterImport, excelRow.getMaxStudents());
             }
 
+            // Build learnersToRemove for UPDATE classes:
+            // Active members currently in the class whose email is NOT in the file
+            List<LearnerInfo> learnersToRemove = new ArrayList<>();
+            if (classExists && existingClass != null) {
+                Set<String> emailsInFile = learnerExcelRows.stream()
+                        .map(r -> r.getEmail().trim().toLowerCase())
+                        .collect(Collectors.toSet());
+
+                List<UUID> currentMemberIds = classMemberRepository.findActiveUserIdsByClassId(existingClass.getId());
+                for (UUID memberId : currentMemberIds) {
+                    userRepository.findById(memberId).ifPresent(user -> {
+                        if (!emailsInFile.contains(user.getEmail().toLowerCase())) {
+                            learnersToRemove.add(LearnerInfo.builder()
+                                    .id(user.getId())
+                                    .email(user.getEmail())
+                                    .fullName(user.getFullName())
+                                    .dateOfBirth(user.getDateOfBirth())
+                                    .phoneNumber(user.getPhoneNumber())
+                                    .build());
+                        }
+                    });
+                }
+                log.debug("Class {} UPDATE: {} learners to remove (not in file)", className, learnersToRemove.size());
+            }
             Optional<ClassImportError> maxStudentsError = ExcelClassImportUtil.validateMaxStudentsNotExceeded(
                     totalLearnersAfterImport, excelRow.getMaxStudents(), className, excelRow.getRowNumber());
             if (maxStudentsError.isPresent()) {
@@ -1043,6 +1079,7 @@ public class ClassServiceImpl implements ClassService {
                     .status(status)
                     .maxStudents(excelRow.getMaxStudents())
                     .learnersToAdd(learnersToAdd)
+                    .learnersToRemove(learnersToRemove)
                     .build();
 
             validClasses.add(preview);
@@ -1090,14 +1127,15 @@ public class ClassServiceImpl implements ClassService {
                 // Check if there are any actual changes by comparing current vs old values
                 boolean hasFieldChanges = hasFieldChanges(enrichedPreview);
                 boolean hasNewLearners = enrichedPreview.getLearnersToAdd() != null && !enrichedPreview.getLearnersToAdd().isEmpty();
+                boolean hasLearnersToRemove = enrichedPreview.getLearnersToRemove() != null && !enrichedPreview.getLearnersToRemove().isEmpty();
                 if (hasFieldChanges && invalidStatusError) {
                     errors.add(ClassImportError.builder()
                             .className(preview.getName())
                             .errorMessage("Lớp học " + preview.getName() + " đã bị xóa hoặc đóng, không thể cập nhật thông tin.")
                             .build());
                 }
-                // Only include if has changes or new learners
-                if (hasFieldChanges || hasNewLearners) {
+                // Only include if has changes or new learners or learners to remove
+                if (hasFieldChanges || hasNewLearners || hasLearnersToRemove) {
                     updatedClasses.add(enrichedPreview);
                 } else {
                     log.debug("Filtering out UPDATE class {} - no actual changes detected", preview.getName());
@@ -1325,6 +1363,39 @@ public class ClassServiceImpl implements ClassService {
                                     errors.add(ClassImportError.builder()
                                             .className(preview.getName())
                                             .errorMessage(String.format("Lỗi thêm học viên %s: %s",
+                                                    learnerInfo.getEmail(), e.getMessage()))
+                                            .build());
+                                }
+                            }
+                        }
+
+                        // Remove learners not present in the file
+                        if (preview.getLearnersToRemove() != null) {
+                            for (LearnerInfo learnerInfo : preview.getLearnersToRemove()) {
+                                try {
+                                    classMemberRepository.findByClassIdAndUserId(
+                                            finalExistingClass.getId(), learnerInfo.getId())
+                                            .ifPresent(member -> {
+                                                if (member.getRemovedAt() == null) {
+                                                    member.remove();
+                                                    classMemberRepository.save(member);
+                                                    log.debug("Removed learner {} from class {}",
+                                                            learnerInfo.getEmail(), preview.getName());
+                                                }
+                                            });
+                                    // Revert learner status to INACTIVE
+                                    userRepository.findById(learnerInfo.getId()).ifPresent(user -> {
+                                        if (user.getRole() == UserRole.LEARNER && user.getStatus() == UserStatus.ACTIVE) {
+                                            user.setStatus(UserStatus.INACTIVE);
+                                            userRepository.save(user);
+                                        }
+                                    });
+                                } catch (Exception e) {
+                                    log.warn("Failed to remove learner {} from class {}: {}",
+                                            learnerInfo.getEmail(), preview.getName(), e.getMessage());
+                                    errors.add(ClassImportError.builder()
+                                            .className(preview.getName())
+                                            .errorMessage(String.format("Lỗi xóa học viên %s: %s",
                                                     learnerInfo.getEmail(), e.getMessage()))
                                             .build());
                                 }
