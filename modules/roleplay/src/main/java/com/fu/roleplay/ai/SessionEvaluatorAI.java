@@ -5,13 +5,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fu.common.ai.PromptFragment;
 import com.fu.common.ai.PromptUtils;
 import com.fu.roleplay.dto.response.SessionEvaluationResponse;
+import com.fu.roleplay.config.RoleplayProperties;
+import com.fu.roleplay.evaluation.ComplexityScoreCombiner;
 import com.fu.roleplay.evaluation.CrossSessionTracker;
 import com.fu.roleplay.evaluation.ErrorPatternAggregator;
-import com.fu.roleplay.evaluation.VocabularyRangeAnalyzer;
 import com.fu.roleplay.enums.ErrorType;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -42,32 +45,127 @@ public class SessionEvaluatorAI {
             "LANGUAGE REQUIREMENT: ALL text MUST be written in Vietnamese (Tiếng Việt).\n\n" +
             PromptFragment.JSON_ONLY + "\n" +
             """
-            Return a JSON object with these fields:
-            - overallAssessment (String): 2-3 câu nhận xét tổng thể trung thực. Tham chiếu lỗi cụ thể theo tên.
-            - jlptEstimate (String): e.g. "N5 (vững)" or "N5→N4 (đang chuyển tiếp)"
-            - accuracyFeedback (String): 1-2 câu về lỗi cụ thể, gọi tên loại lỗi và đề xuất bài học cụ thể.
-            - pronunciationFeedback (String): 1-2 câu về phát âm dựa trên dữ liệu.
-            - taskCompletionFeedback (String): 1-2 câu về nhiệm vụ đã/chưa hoàn thành, gợi ý cách hoàn thành.
-            - complexityFeedback (String): 1-2 câu về phân bố từ vựng JLPT, gợi ý mở rộng.
-            - recurringWarning (String): Cảnh báo lỗi lặp nếu có, hoặc "" nếu không.
-            - nextSteps (Array<String>): 2-3 hành động cụ thể (tên ngữ pháp, bộ từ vựng, loại bài tập).
+            Return a JSON object with these fields. ALL string fields use Markdown.
 
-            RULES:
-            - Be honest. If error rate > 40%, do NOT say "doing well" or use vague praise.
-            - Every feedback field MUST cite specific data (error count, word, grammar point).
-            - accuracyFeedback MUST name the dominant error type AND quote at least one concrete
-              error using the format: "bạn đã viết '<WRONG>' thay vì '<CORRECT>'". Never swap the
-              two sides — WRONG is what the learner said, CORRECT is the target form.
-            - complexityFeedback MUST reference the JLPT distribution numbers.
-            - nextSteps MUST be actionable: name specific grammar points, vocabulary sets, or drill types.
+            - overallAssessment (String, 2-3 sentences): honest summary referencing
+              the dominant error type by name and the learner's strongest dimension.
+
+            - jlptEstimate (String): e.g. "N5 (vững)" or "N5→N4 (đang chuyển tiếp)".
+
+            - accuracyFeedback (String, Markdown):
+                Format MUST follow this structure exactly:
+
+                  Tóm tắt: <1 câu — loại lỗi chiếm đa số, tổng số CRITICAL/MAJOR/MINOR>
+
+                  Chi tiết lỗi:
+                  - 🔴 [CRITICAL] "<original>" → "<corrected>"
+                    Vì sao: <explanation>
+                    Cách sửa: <specific actionable fix, KHÔNG chung chung>
+                  - 🟡 [MAJOR] "<original>" → "<corrected>"
+                    Vì sao: <explanation>
+                    Cách sửa: <specific actionable fix>
+                  - 🟢 [MINOR] "<original>" → "<corrected>"
+                    Vì sao: <explanation>
+
+                CRITICAL RULES:
+                - List EVERY correction in the topCorrections facts list. Do NOT
+                  merge multiple corrections into one bullet. Do NOT skip any
+                  correction even if minor or repeated.
+                - Use exact severity emoji per severity tag (🔴/🟡/🟢).
+                - Quote original/corrected exactly as in the facts. NEVER swap
+                  WRONG/CORRECT sides.
+                - "Cách sửa" must be concrete (e.g., "Trong câu chuyển động, が
+                  đánh dấu chủ ngữ, を đánh dấu tân ngữ. Mèo (chủ ngữ) → 猫が."),
+                  NOT generic ("học lại bài").
+                - If session has NO corrections, output: "Tóm tắt: Không có lỗi
+                  nào cần sửa trong session này. Tiếp tục giữ vững!"
+
+            - pronunciationFeedback (Markdown, 3-8 lines, Vietnamese):
+                Branch on facts (4 cases):
+                  1. noAudio=true → output exactly:
+                     "Chưa có audio để chấm phát âm trong session này."
+                  2. cleanSession=true → output:
+                     "Phát âm sạch — <averageOverall>/100. Không có từ nào đáng lo, tiếp tục giữ vững."
+                  3. weakWords non-empty → output a Markdown bulleted list. For EACH weak
+                     word in the facts (do NOT skip any, do NOT add any not in facts):
+                       - **<word>** (× <occurrences>, <averageAccuracy>/100, <errorTypeLabel>)
+                     If list ≥ 6 items AND weakPhonemes non-empty, append a clustering line:
+                       Cụm âm cần luyện: <ipa1> (<phonemeLabel1>), <ipa2> (...) — <drill1>
+                     Otherwise add up to 2 phoneme drill bullets verbatim from weakPhonemes
+                     (use the `drill` field as-is — DO NOT paraphrase or invent articulation
+                     advice; the drill text is curated pedagogy).
+                  4. weakWords empty BUT averageOverall < 80 (mediocre, no specific flags) →
+                     "Phát âm trung bình <averageOverall>/100. Hãy luyện đọc to và rõ
+                      ràng hơn, chú ý nhịp mora đầy đủ."
+                Quote `word`, `ipa`, `drill` exactly. Severity emoji NOT used here
+                (different convention from accuracy feedback — pronunciation severity
+                is encoded by tier, not emoji).
+
+            - taskCompletionFeedback (String, 1-2 sentences):
+                Reference completed/total mission count. If failed missions exist,
+                name them and suggest a concrete way to attempt next time.
+
+            - complexityFeedback (String, Markdown):
+                Format MUST follow this structure exactly:
+
+                  Tổng quan: Điểm <score>/100 (Lexical <lex.score>, Syntactic <syn.score>).
+
+                  Từ vựng:
+                  - L_avg = <lex.L_avg> (mục tiêu cho level học viên: <lex.expectedL_avg>)
+                  - <uniqueWords> từ riêng biệt, phân bố: <jlpt distribution như "N5: X từ, N4: Y từ">
+                  - <1 câu diễn giải mức độ phức tạp từ vựng>
+
+                  Cấu trúc câu (Iwashita 2006):
+                  - W/U = <syn.W_per_U> (trung bình từ/AS-unit)
+                  - C/U = <syn.C_per_U> (trung bình mệnh đề/AS-unit)
+                  - Mệnh đề đã dùng: <clause type breakdown như "ADVERBIAL: X, ADNOMINAL: Y">
+                  - <1 câu diễn giải mức độ phức tạp cấu trúc>
+
+                CRITICAL RULES:
+                - Cite the EXACT numerical values from the facts (do not round
+                  L_avg/W/U/C/U; copy the BigDecimal values verbatim).
+                - If insufficient data, output: "Phiên quá ngắn để đo độ phức tạp
+                  đáng tin cậy. Hãy nói nhiều hơn lần sau."
+                - If partial measurement (one sub-dimension insufficient), note
+                  which sub-dimension is unreliable.
+
+            - recurringWarning (String): cite recurring patterns by name +
+              occurrence count if any in the facts; "" otherwise.
+
+            - nextSteps (Array<String>, 2-3 items):
+                Each step MUST be:
+                - Concrete (name a specific grammar pattern, vocabulary topic, or
+                  drill type). NOT "luyện tập nhiều hơn".
+                - Tied to observed weakness (e.g., if dominant error type is
+                  PARTICLE → "Ôn particle が/を: Bài 10 Minna I").
+                - Actionable today (1 specific thing the learner can do next).
+
+            GENERAL RULES:
+            - Be honest. If error rate > 40% or hasCritical=true, do NOT say
+              "doing well" or use vague praise.
+            - Every feedback field MUST cite specific data from the facts. NEVER
+              invent numbers, words, or grammar points not in the facts.
+            - NEVER swap WRONG/CORRECT in correction quotations.
+            - If a fact is missing/null in input, omit that bullet rather than
+              hallucinating a value.
             """;
 
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
+    private final RoleplayProperties roleplayProperties;
 
-    public SessionEvaluatorAI(OpenAiChatModel chatModel, ObjectMapper objectMapper) {
+    public SessionEvaluatorAI(OpenAiChatModel chatModel,
+                              ObjectMapper objectMapper,
+                              RoleplayProperties roleplayProperties) {
         this.chatClient = ChatClient.builder(chatModel).build();
         this.objectMapper = objectMapper;
+        this.roleplayProperties = roleplayProperties;
+    }
+
+    @PostConstruct
+    void logConfiguredModel() {
+        log.info("SessionEvaluatorAI configured with evaluator model: {}",
+                roleplayProperties.getEvaluatorModel());
     }
 
     /**
@@ -80,7 +178,7 @@ public class SessionEvaluatorAI {
             int completedMissions,
             int totalMissions,
             List<String> failedMissionTitles,
-            VocabularyRangeAnalyzer.ComplexityResult complexity,
+            ComplexityScoreCombiner.ComplexityResult complexity,
             List<CrossSessionTracker.RecurringPattern> recurringPatterns,
             String jlptLevel) {
         try {
@@ -90,6 +188,9 @@ public class SessionEvaluatorAI {
                     complexity, recurringPatterns, jlptLevel);
 
             String rawResponse = chatClient.prompt()
+                    .options(OpenAiChatOptions.builder()
+                            .model(roleplayProperties.getEvaluatorModel())
+                            .build())
                     .system(SYNTHESIZER_SYSTEM_PROMPT)
                     .user(userPrompt)
                     .call()
@@ -123,7 +224,7 @@ public class SessionEvaluatorAI {
             SessionEvaluationResponse.PronunciationSummary pronunciationSummary,
             BigDecimal taskCompletionScore,
             int completedMissions, int totalMissions, List<String> failedMissionTitles,
-            VocabularyRangeAnalyzer.ComplexityResult complexity,
+            ComplexityScoreCombiner.ComplexityResult complexity,
             List<CrossSessionTracker.RecurringPattern> recurringPatterns,
             String jlptLevel) {
 
@@ -132,35 +233,85 @@ public class SessionEvaluatorAI {
 
         // Accuracy facts
         sb.append("## ACCURACY\n");
-        sb.append("- Error rate: ").append(errorBreakdown.errorRate()).append("% (")
-          .append(errorBreakdown.totalCorrections()).append(" corrections / ")
-          .append(errorBreakdown.userMessageCount()).append(" messages)\n");
-        sb.append("- Error breakdown: ");
+        sb.append("- Score: ").append(errorBreakdown.accuracyScore()).append("/100")
+          .append(errorBreakdown.hasCritical() ? " (capped at 70 due to CRITICAL error)" : "").append("\n");
+        sb.append("- Clauses: ").append(errorBreakdown.cleanClauses()).append(" clean / ")
+          .append(errorBreakdown.totalClauses()).append(" total (")
+          .append(errorBreakdown.dirtyClauses()).append(" dirty)\n");
+        sb.append("- Severity counts: ");
+        errorBreakdown.severityCounts().forEach((sev, count) ->
+                sb.append(sev).append(": ").append(count).append("  "));
+        sb.append("\n");
+        sb.append("- Error type breakdown: ");
         errorBreakdown.errorCounts().forEach((type, count) ->
                 sb.append(type.name()).append(": ").append(count).append(", "));
         sb.append("\n");
+        sb.append("- (Legacy) Error rate: ").append(errorBreakdown.errorRate()).append("% (")
+          .append(errorBreakdown.totalCorrections()).append(" corrections / ")
+          .append(errorBreakdown.userMessageCount()).append(" messages)\n");
         if (!errorBreakdown.topExamples().isEmpty()) {
-            sb.append("- Top errors (format: WRONG → CORRECT). The left side is what the learner said incorrectly; the right side is the correct form:\n");
+            sb.append("- ALL corrections (format: WRONG → CORRECT). The left side is what the learner\n");
+            sb.append("  said incorrectly; the right side is the correct form. List EVERY entry\n");
+            sb.append("  in your accuracyFeedback Markdown — do NOT skip or merge.\n");
             for (var ex : errorBreakdown.topExamples()) {
-                sb.append("  - WRONG=\"").append(ex.original()).append("\" CORRECT=\"").append(ex.corrected()).append("\"")
-                  .append(" type=").append(ex.errorType().name());
+                sb.append("  - severity=").append(ex.severity() != null ? ex.severity() : "MAJOR")
+                  .append(" impact=").append(ex.comprehensibilityImpact() != null ? ex.comprehensibilityImpact() : "LOCAL")
+                  .append(" type=").append(ex.errorType().name())
+                  .append(" WRONG=\"").append(ex.original()).append("\"")
+                  .append(" CORRECT=\"").append(ex.corrected()).append("\"");
                 if (ex.explanation() != null && !ex.explanation().isBlank()) {
                     sb.append(" explanation=\"").append(ex.explanation()).append("\"");
                 }
+                if (ex.severityReasoning() != null && !ex.severityReasoning().isBlank()) {
+                    sb.append(" severityReasoning=\"").append(ex.severityReasoning()).append("\"");
+                }
                 sb.append("\n");
             }
+        } else {
+            sb.append("- No corrections in this session.\n");
         }
 
-        // Pronunciation facts
+        // Pronunciation facts — branch on the 4 cases the prompt instructions handle.
         sb.append("\n## PRONUNCIATION\n");
-        if (pronunciationSummary != null && pronunciationSummary.getTotalAssessed() > 0) {
-            sb.append("- Average overall: ").append(pronunciationSummary.getAverageOverall()).append("/100\n");
-            sb.append("- Accuracy: ").append(pronunciationSummary.getAverageAccuracy())
-              .append(", Fluency: ").append(pronunciationSummary.getAverageFluency())
-              .append(", Completeness: ").append(pronunciationSummary.getAverageCompleteness()).append("\n");
-            sb.append("- Messages assessed: ").append(pronunciationSummary.getTotalAssessed()).append("\n");
+        if (pronunciationSummary == null || pronunciationSummary.isNoAudio()
+                || pronunciationSummary.getTotalAssessed() == 0) {
+            sb.append("- noAudio: true\n");
         } else {
-            sb.append("- No audio messages submitted (pronunciation not assessed)\n");
+            sb.append("- noAudio: false\n");
+            sb.append("- cleanSession: ").append(pronunciationSummary.isCleanSession()).append("\n");
+            sb.append("- averageOverall: ").append(pronunciationSummary.getAverageOverall()).append("/100\n");
+            sb.append("- averageAccuracy: ").append(pronunciationSummary.getAverageAccuracy())
+              .append(", averageFluency: ").append(pronunciationSummary.getAverageFluency())
+              .append(", averageCompleteness: ").append(pronunciationSummary.getAverageCompleteness()).append("\n");
+            sb.append("- totalAssessed: ").append(pronunciationSummary.getTotalAssessed()).append("\n");
+
+            var weakWords = pronunciationSummary.getWeakWords();
+            if (weakWords != null && !weakWords.isEmpty()) {
+                sb.append("- weakWords (sorted by impact desc, list ALL in feedback):\n");
+                for (var w : weakWords) {
+                    sb.append("    - word=\"").append(w.getWord())
+                      .append("\", averageAccuracy=").append(w.getAverageAccuracy())
+                      .append(", occurrences=").append(w.getOccurrences())
+                      .append(", errorTypeLabel=\"").append(w.getErrorTypeLabel()).append("\"\n");
+                }
+            } else {
+                sb.append("- weakWords: []\n");
+            }
+
+            var weakPhonemes = pronunciationSummary.getWeakPhonemes();
+            if (weakPhonemes != null && !weakPhonemes.isEmpty()) {
+                sb.append("- weakPhonemes (use drill text VERBATIM, do not paraphrase):\n");
+                for (var p : weakPhonemes) {
+                    sb.append("    - ipa=\"").append(p.getIpa())
+                      .append("\", label=\"").append(p.getLabel())
+                      .append("\", averageScore=").append(p.getAverageScore())
+                      .append(", occurrences=").append(p.getOccurrences())
+                      .append(", tier=").append(p.getTier())
+                      .append(", drill=\"").append(p.getDrill()).append("\"\n");
+                }
+            } else {
+                sb.append("- weakPhonemes: []\n");
+            }
         }
 
         // Task completion facts
@@ -170,16 +321,40 @@ public class SessionEvaluatorAI {
             sb.append("- Not completed: ").append(String.join(", ", failedMissionTitles)).append("\n");
         }
 
-        // Complexity facts
-        sb.append("\n## VOCABULARY COMPLEXITY\n");
-        sb.append("- Unique words used: ").append(complexity.uniqueVocabularyCount()).append("\n");
-        if (!complexity.jlptDistribution().isEmpty()) {
-            sb.append("- JLPT distribution: ");
-            complexity.jlptDistribution().forEach((level, pct) ->
-                    sb.append(level).append(": ").append(pct).append("%, "));
-            sb.append("\n");
+        // Complexity facts (lexical + syntactic, Phase 3 v28)
+        sb.append("\n## COMPLEXITY (Lexical + Syntactic)\n");
+        if (complexity.insufficient()) {
+            sb.append("- Insufficient text for reliable measurement (skip in feedback)\n");
         } else {
-            sb.append("- No vocabulary matched in database\n");
+            sb.append("- Composite score: ").append(complexity.score()).append("/100 (0.6 lexical + 0.4 syntactic)\n");
+            var lex = complexity.lexical();
+            if (lex != null && !lex.insufficient()) {
+                sb.append("- Lexical: score=").append(lex.score())
+                  .append(", L_avg=").append(lex.L_avg())
+                  .append(" (expected for target=").append(lex.expectedL_avg()).append(")")
+                  .append(", unique=").append(lex.uniqueWords())
+                  .append(" (").append(lex.knownWords()).append(" in DB, ").append(lex.unknownWords()).append(" unknown)\n");
+                if (lex.jlptDistribution() != null && !lex.jlptDistribution().isEmpty()) {
+                    sb.append("- JLPT distribution (raw counts): ");
+                    lex.jlptDistribution().forEach((level, count) ->
+                            sb.append(level.name()).append(":").append(count).append(" "));
+                    sb.append("\n");
+                }
+            }
+            var syn = complexity.syntactic();
+            if (syn != null && !syn.insufficient()) {
+                sb.append("- Syntactic (Iwashita 2006): score=").append(syn.score())
+                  .append(", W/U=").append(syn.W_per_U())
+                  .append(", C/U=").append(syn.C_per_U())
+                  .append(", AS-units=").append(syn.totalAS_Units())
+                  .append(", clauses=").append(syn.totalClauses()).append("\n");
+                if (syn.clauseTypeBreakdown() != null && !syn.clauseTypeBreakdown().isEmpty()) {
+                    sb.append("- Clause types: ");
+                    syn.clauseTypeBreakdown().forEach((type, count) ->
+                            sb.append(type.name()).append(":").append(count).append(" "));
+                    sb.append("\n");
+                }
+            }
         }
 
         // Recurring patterns
