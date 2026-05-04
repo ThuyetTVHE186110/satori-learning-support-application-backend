@@ -1318,6 +1318,7 @@ public class ClassServiceImpl implements ClassService {
                         existingClass.setStartDate(preview.getStartDate());
                         existingClass.setExpectedEndDate(preview.getExpectedEndDate());
                         existingClass.setStatus(preview.getStatus());
+                        existingClass.setMaxStudents(preview.getMaxStudents() != null ? preview.getMaxStudents() : existingClass.getMaxStudents());
 
                         classRepository.save(existingClass);
                         log.debug("Updated existing class: {}", preview.getName());
