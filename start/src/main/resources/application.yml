@@ -430,7 +430,7 @@ roleplay:
     max-messages: ${ROLEPLAY_MAX_MESSAGES:50}
     max-active-sessions: ${ROLEPLAY_MAX_ACTIVE_SESSIONS:3}
     # AI model for roleplay conversation
-    model-name: ${ROLEPLAY_MODEL:gpt-4.1-mini}
+    model-name: ${ROLEPLAY_MODEL:gpt-4.1}
     # AI model for evaluation (mission + session).
     # Upgraded to gpt-4o for richer feedback completeness — end-of-session call,
     # not latency-critical. Override via ROLEPLAY_EVALUATOR_MODEL env var.
