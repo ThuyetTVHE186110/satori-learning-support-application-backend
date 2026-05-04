@@ -73,6 +73,17 @@ public class SyntacticComplexityCalculator {
     /** Minimum content tokens required for reliable measurement. */
     private static final int MIN_TOKENS_FOR_VALIDITY = 20;
 
+    /**
+     * Sanity floor on words-per-AS-unit. Real spoken Japanese — even at beginner
+     * level — averages ≥ ~1.5 content tokens per AS-unit. A computed value below
+     * this threshold means the AS-unit detector inflated the count, which happens
+     * when Speech-to-Text engines insert {@code ？} after every short fragment.
+     * In that case the score is meaningless (not a measure of learner ability) so
+     * we mark the syntactic dimension insufficient instead of reporting a misleading
+     * near-zero score that drags the composite down (e.g., L=100 + S=0.4 → composite=60).
+     */
+    private static final double SANITY_MIN_W_PER_U = 1.5;
+
     private final ClauseDetector clauseDetector;
 
     public SyntacticResult compute(java.util.List<String> userMessages, JlptLevel target) {
@@ -90,6 +101,13 @@ public class SyntacticComplexityCalculator {
 
         double wPerU = (double) totalTokens / detection.asUnits();
         double cPerU = (double) detection.totalClauses() / detection.asUnits();
+
+        // Detect Speech-to-Text artifact: STT may insert sentence punctuation after every
+        // utterance fragment, inflating asUnits and crashing W/U well below realistic floor.
+        // Reporting a score under these conditions misleads the learner — flag insufficient.
+        if (wPerU < SANITY_MIN_W_PER_U) {
+            return SyntacticResult.notEnoughData();
+        }
 
         double wuScore = asym(wPerU, EXPECTED_WU.getOrDefault(target, EXPECTED_WU.get(JlptLevel.N5)));
         double cuScore = asym(cPerU, EXPECTED_CU.getOrDefault(target, EXPECTED_CU.get(JlptLevel.N5)));

@@ -3,6 +3,10 @@ package com.fu.analytics.insight;
 import com.fu.infrastructure.learner.LearningInsightPoint;
 import com.fu.infrastructure.learner.SkillScore;
 import com.fu.infrastructure.event.LearningInsightsUpdatedEvent;
+import com.fu.course.entity.GrammarPoint;
+import com.fu.course.entity.Vocabulary;
+import com.fu.course.repository.GrammarPointRepository;
+import com.fu.course.repository.VocabularyRepository;
 import com.fu.practice.entity.ItemMastery;
 import com.fu.practice.repository.ItemMasteryRepository;
 import com.fu.roleplay.entity.MessagePronunciation;
@@ -36,6 +40,8 @@ public class InsightAggregationService {
     private final UserRepository userRepository;
     private final ItemMasteryRepository itemMasteryRepository;
     private final MessagePronunciationRepository messagePronunciationRepository;
+    private final VocabularyRepository vocabularyRepository;
+    private final GrammarPointRepository grammarPointRepository;
     private final ApplicationEventPublisher eventPublisher;
 
     private static final int MAX_INSIGHTS_PER_LIST = 20;
@@ -328,17 +334,87 @@ public class InsightAggregationService {
         return "SPEAKING";
     }
 
+    /**
+     * Render a learner-facing description naming the actual word/grammar plus a friendly
+     * "độ thành thạo" percentage. Replaces the previous opaque "Từ vựng cần ôn tập — đúng
+     * 0/2 lần (EMA: 18%)" which named neither the term nor a meaningful metric.
+     */
     private String buildWeakDescription(ItemMastery im) {
-        String type = "VOCABULARY".equals(im.getEntityType()) ? "Từ vựng" : "Ngữ pháp";
-        return String.format("%s cần ôn tập — đúng %d/%d lần (EMA: %.0f%%)",
-                type, im.getCorrectCount(), im.getAttemptCount(),
-                im.getEmaScore().doubleValue() * 100);
+        String label = resolveItemLabel(im);
+        int pct = masteryPercent(im);
+        if (im.getAttemptCount() <= 0) {
+            return String.format("%s — mới gặp, chưa luyện. Hãy ôn lại trong phiên Practice.", label);
+        }
+        return String.format("%s cần ôn tập — đúng %d/%d lần, độ thành thạo %d%%",
+                label, im.getCorrectCount(), im.getAttemptCount(), pct);
     }
 
     private String buildStrongDescription(ItemMastery im) {
-        String type = "VOCABULARY".equals(im.getEntityType()) ? "Từ vựng" : "Ngữ pháp";
-        return String.format("%s đã thành thạo — đúng %d/%d lần (EMA: %.0f%%)",
-                type, im.getCorrectCount(), im.getAttemptCount(),
-                im.getEmaScore().doubleValue() * 100);
+        String label = resolveItemLabel(im);
+        int pct = masteryPercent(im);
+        return String.format("%s đã thành thạo — đúng %d/%d lần, độ thành thạo %d%%",
+                label, im.getCorrectCount(), im.getAttemptCount(), pct);
+    }
+
+    private static int masteryPercent(ItemMastery im) {
+        if (im.getEmaScore() == null) return 0;
+        return (int) Math.round(im.getEmaScore().doubleValue() * 100);
+    }
+
+    /**
+     * Resolves a learner-friendly Vietnamese label for an {@link ItemMastery} entry.
+     * Looks up the actual Japanese word / grammar pattern by entityId so the description
+     * becomes "「食べる」 (たべる — ăn) cần ôn tập…" instead of the opaque generic "Từ vựng".
+     *
+     * <p>Falls back gracefully when the underlying item is missing or soft-deleted so a
+     * stale ItemMastery row does not break the dashboard.
+     */
+    private String resolveItemLabel(ItemMastery im) {
+        if (im == null || im.getEntityId() == null || im.getEntityType() == null) {
+            return "Một mục cần ôn tập";
+        }
+        try {
+            if ("VOCABULARY".equals(im.getEntityType())) {
+                return vocabularyRepository.findById(im.getEntityId())
+                        .map(InsightAggregationService::renderVocabLabel)
+                        .orElse("Một từ vựng cần ôn tập");
+            }
+            if ("GRAMMAR".equals(im.getEntityType()) || "GRAMMAR_POINT".equals(im.getEntityType())) {
+                return grammarPointRepository.findById(im.getEntityId())
+                        .map(InsightAggregationService::renderGrammarLabel)
+                        .orElse("Một mẫu ngữ pháp cần ôn tập");
+            }
+        } catch (Exception e) {
+            log.debug("resolveItemLabel failed for {}/{}: {}", im.getEntityType(), im.getEntityId(), e.getMessage());
+        }
+        return "Một mục cần ôn tập";
+    }
+
+    /** Formats a vocabulary entry as "「食べる」 (たべる — ăn)" with graceful fallbacks. */
+    private static String renderVocabLabel(Vocabulary v) {
+        String text = v.getJapaneseText() != null ? v.getJapaneseText() : "";
+        String reading = v.getReading() != null ? v.getReading().trim() : "";
+        String meaning = v.getMeaningVi() != null ? v.getMeaningVi().trim() : "";
+        String inner = "";
+        if (!reading.isEmpty() && !meaning.isEmpty()) {
+            inner = " (" + reading + " — " + truncate(meaning, 40) + ")";
+        } else if (!reading.isEmpty()) {
+            inner = " (" + reading + ")";
+        } else if (!meaning.isEmpty()) {
+            inner = " (" + truncate(meaning, 40) + ")";
+        }
+        return "「" + (text.isEmpty() ? "?" : text) + "」" + inner;
+    }
+
+    /** Formats a grammar point as "Ngữ pháp 〜てもいい" with optional meaning hint. */
+    private static String renderGrammarLabel(GrammarPoint g) {
+        String pattern = g.getPattern() != null ? g.getPattern() : "?";
+        return "Ngữ pháp 〜" + pattern;
+    }
+
+    private static String truncate(String s, int max) {
+        if (s == null) return "";
+        s = s.trim();
+        return s.length() > max ? s.substring(0, max) + "…" : s;
     }
 }
