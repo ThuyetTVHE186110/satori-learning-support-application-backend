@@ -161,4 +161,30 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, UUID> 
                AND created_at < :cutoff
             """, nativeQuery = true)
     int markAbandonedBefore(@Param("cutoff") LocalDateTime cutoff);
+
+    // ── Admin dashboard queries ──────────────────────────────────────────────
+
+    /**
+     * Count CURRICULUM_QA chat sessions created within a date range.
+     */
+    @Query(value = """
+            SELECT COUNT(*) FROM ai_conversation.conversation_sessions
+            WHERE session_type = CAST('CURRICULUM_QA' AS session_type)
+              AND created_at >= :start AND created_at < :end
+            """, nativeQuery = true)
+    long countCurriculumQABetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    /**
+     * Daily CURRICULUM_QA session trend for last N days.
+     * Returns list of [date, count].
+     */
+    @Query(value = """
+            SELECT DATE(created_at) AS day, COUNT(*) AS cnt
+            FROM ai_conversation.conversation_sessions
+            WHERE session_type = CAST('CURRICULUM_QA' AS session_type)
+              AND created_at >= :start
+            GROUP BY DATE(created_at)
+            ORDER BY day ASC
+            """, nativeQuery = true)
+    List<Object[]> findDailyCurriculumQATrend(@Param("start") LocalDateTime start);
 }
