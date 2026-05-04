@@ -107,6 +107,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
     private final com.fu.roleplay.evaluation.PronunciationAggregator pronunciationAggregator;
     private final AzureTtsProvider azureTtsProvider;
     private final AzureSpeechProperties azureSpeechProperties;
+    private final com.fu.roleplay.memory.WorldStateService worldStateService;
 
     public RoleplaySessionServiceImpl(
             ConversationSessionRepository sessionRepository,
@@ -136,7 +137,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             com.fu.roleplay.evaluation.CrossSessionTracker crossSessionTracker,
             com.fu.roleplay.evaluation.PronunciationAggregator pronunciationAggregator,
             AzureTtsProvider azureTtsProvider,
-            AzureSpeechProperties azureSpeechProperties
+            AzureSpeechProperties azureSpeechProperties,
+            com.fu.roleplay.memory.WorldStateService worldStateService
     ) {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
@@ -166,6 +168,7 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         this.pronunciationAggregator = pronunciationAggregator;
         this.azureTtsProvider = azureTtsProvider;
         this.azureSpeechProperties = azureSpeechProperties;
+        this.worldStateService = worldStateService;
     }
 
     @Override
@@ -467,9 +470,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             });
         }
 
-        // Task B: AI response
+        // Task B: AI response — inject persistent world state so established facts survive
+        // sliding-window truncation (orders placed, names given, missions completed earlier).
+        final String worldStateBlock = worldStateService.renderForPrompt(session);
         CompletableFuture<String> aiResponseFuture = CompletableFuture.supplyAsync(() ->
-                                roleplayAIService.generateResponse(sessionId, cachedPrompt, history, aiInputContent),
+                                roleplayAIService.generateResponse(sessionId, cachedPrompt, history, aiInputContent, worldStateBlock),
                         roleplayTaskExecutor)
                 .exceptionally(ex -> {
                     log.error("AI response generation failed for session {}: {}", sessionId, ex.getMessage());
@@ -502,6 +507,15 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // Turn 1 of CONVERSATION phase (or first DIALOGUE after SETUP) is when a voice first appears.
         if (lockedVoice == null) {
             lockVoiceIfAbsent(session, aiResult.discoveredVoice());
+        }
+
+        // Apply WORLD_STATE_DELTA ops (if any) so established facts persist across the session.
+        try {
+            JsonNode aiArrayForDelta = objectMapper.readTree(aiResponseJson);
+            int currentTurn = (int) (currentMessages + 1);
+            worldStateService.extractAndApplyDelta(session, aiArrayForDelta, currentTurn);
+        } catch (Exception e) {
+            log.debug("Skip worldState delta for session {} (parse failed): {}", sessionId, e.getMessage());
         }
 
         // Set processing time on the first AI message
@@ -538,7 +552,8 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         // learner to do something they just completed, or ignoring a newly failed mission).
         List<MissionEvaluatorAI.MissionProgress> missionProgress = missionFuture.join();
         if (!missionProgress.isEmpty()) {
-            boolean missionStatusChanged = updateSessionMissions(sessionMissions, missionProgress);
+            int currentTurn = (int) (currentMessages + 1);
+            boolean missionStatusChanged = updateSessionMissions(session, sessionMissions, missionProgress, currentTurn);
             if (missionStatusChanged) {
                 List<SessionMission> refreshed = sessionMissionRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
                 String rebuilt = rebuildSystemPrompt(session, refreshed);
@@ -1239,6 +1254,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             int seq = startSeq;
             for (JsonNode node : array) {
                 String type = node.path("type").asText("DIALOGUE");
+                // WORLD_STATE_DELTA is server-only metadata — not a chat message. Caller
+                // applies the ops via WorldStateService after this method returns.
+                if ("WORLD_STATE_DELTA".equals(type)) {
+                    continue;
+                }
                 // Strip any ruby syntax the LLM may leak, then feed plain text into Kuromoji.
                 // This replaces both the old LLM-generated `japanese_with_furigana` field and the
                 // post-hoc FuriganaRubyRepair, neither of which handled hallucination patterns like
@@ -1434,7 +1454,22 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
      */
     private boolean updateSessionMissions(List<SessionMission> sessionMissions,
                                           List<MissionEvaluatorAI.MissionProgress> progressList) {
+        return updateSessionMissions(null, sessionMissions, progressList, 0);
+    }
+
+    /**
+     * Overload that also records freshly-COMPLETED missions into the session's world state
+     * so the AI continues to honor them after the dialogue that completed them rolls out of
+     * the context window. {@code session} may be null (legacy callers); world-state recording
+     * is then skipped silently.
+     */
+    private boolean updateSessionMissions(ConversationSession session,
+                                          List<SessionMission> sessionMissions,
+                                          List<MissionEvaluatorAI.MissionProgress> progressList,
+                                          int turn) {
         List<SessionMission> updatedMissions = new ArrayList<>();
+        List<SessionMission> newlyCompleted = new ArrayList<>();
+        List<String> newlyCompletedReasoning = new ArrayList<>();
         boolean statusChanged = false;
         for (MissionEvaluatorAI.MissionProgress progress : progressList) {
             var match = sessionMissions.stream()
@@ -1459,6 +1494,10 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 if (newStatus != sm.getStatus()) {
                     statusChanged = true;
                     sm.setStatus(newStatus);
+                    if (newStatus == SessionMission.MissionStatus.COMPLETED) {
+                        newlyCompleted.add(sm);
+                        newlyCompletedReasoning.add(progress.getReasoning());
+                    }
                 }
             } catch (IllegalArgumentException e) {
                 log.warn("Invalid mission status '{}' from AI for mission {}: {}",
@@ -1470,6 +1509,13 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         }
         if (!updatedMissions.isEmpty()) {
             sessionMissionRepository.saveAll(updatedMissions);
+        }
+        // Persist freshly-completed missions into world state so they survive context truncation.
+        if (session != null && !newlyCompleted.isEmpty()) {
+            for (int i = 0; i < newlyCompleted.size(); i++) {
+                worldStateService.recordCompletedMission(
+                        session, newlyCompleted.get(i), newlyCompletedReasoning.get(i), turn);
+            }
         }
         return statusChanged;
     }

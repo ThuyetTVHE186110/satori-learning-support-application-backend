@@ -204,6 +204,36 @@ public class RoleplayPromptBuilder {
         sb.append("  (e.g. shopkeeper → いらっしゃいませ; interviewer → 自己紹介をお願いします;\n");
         sb.append("   teacher → 今日はどうしましたか). Then wait for ").append(learnerRole).append(" to respond.\n\n");
 
+        // ── 5b. WORLD STATE PROTOCOL (persistent memory) ──────────────────────────
+        sb.append("### WORLD STATE — persistent session memory\n");
+        sb.append("The user-side payload may include a `<world_state>` block listing facts that\n");
+        sb.append("have already been established earlier in the conversation (orders, names, decisions,\n");
+        sb.append("relationships) and missions already completed. These facts SURVIVE context-window\n");
+        sb.append("truncation — even when the dialogue that introduced them is no longer visible.\n\n");
+        sb.append("RULES:\n");
+        sb.append("- Treat every fact in `<world_state>` as ground truth. Do NOT contradict it.\n");
+        sb.append("- Do NOT re-ask for information already in `<world_state>` (e.g. don't re-ask the\n");
+        sb.append("  learner's name if `customerInfo.name` is already set).\n");
+        sb.append("- When the learner establishes a NEW fact (places an order, gives a name, makes a\n");
+        sb.append("  decision), append a `WORLD_STATE_DELTA` segment to your response with the ops.\n\n");
+        sb.append("DELTA SEGMENT FORMAT (optional, append AFTER your DIALOGUE segment when needed):\n");
+        sb.append("{\n");
+        sb.append("  \"type\": \"WORLD_STATE_DELTA\",\n");
+        sb.append("  \"ops\": [\n");
+        sb.append("    {\"op\":\"set\",\"path\":\"facts.customerInfo.name\",\"value\":\"Linh\"},\n");
+        sb.append("    {\"op\":\"append\",\"path\":\"facts.establishedOrders\",\"value\":{\"item\":\"mì\",\"qty\":1}},\n");
+        sb.append("    {\"op\":\"inc\",\"path\":\"facts.establishedOrders.totalItems\",\"value\":1},\n");
+        sb.append("    {\"op\":\"remove\",\"path\":\"facts.cart.tempItem\"}\n");
+        sb.append("  ]\n");
+        sb.append("}\n\n");
+        sb.append("DELTA RULES:\n");
+        sb.append("- Allowed ops: `set` | `append` | `remove` | `inc`. Path uses dot segments only,\n");
+        sb.append("  scoped under `facts.*` (server rejects paths outside `facts.*`).\n");
+        sb.append("- Only emit a delta when something NEW or CHANGED. Do not re-emit existing facts.\n");
+        sb.append("- Keep facts compact (short keys, scalar values where possible).\n");
+        sb.append("- Do NOT touch `completedMissions` — that is server-managed.\n");
+        sb.append("- The delta is server-only metadata; it is never shown to the learner.\n\n");
+
         sb.append("### Regular RESPONSES — return 1-2 DIALOGUE segments:\n");
         sb.append("[\n");
         sb.append("  {\n");
