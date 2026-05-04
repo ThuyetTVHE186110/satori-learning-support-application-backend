@@ -79,6 +79,12 @@ public class SessionEvaluatorAI {
                   NOT generic ("học lại bài").
                 - If session has NO corrections, output: "Tóm tắt: Không có lỗi
                   nào cần sửa trong session này. Tiếp tục giữ vững!"
+                - INPUT IS SPOKEN (Speech-to-Text). Phrase explanations using spoken-language
+                  framing: "khi bạn NÓI ...", "phát âm trong câu này", "câu bạn vừa nói".
+                  CẤM dùng "bạn viết", "bạn gõ", "bạn đánh máy" — học viên không gõ chữ.
+                - Nếu một correction trong facts có `original` chỉ là dấu câu (`?`, `。`, `！`,
+                  `、`, khoảng trắng) hoặc khác `corrected` chỉ ở dấu câu/khoảng trắng → BỎ QUA
+                  bullet đó (đây là artifact của STT, không phải lỗi của học viên).
 
             - pronunciationFeedback (Markdown, 3-8 lines, Vietnamese):
                 Branch on facts (4 cases):
@@ -105,32 +111,43 @@ public class SessionEvaluatorAI {
                 Reference completed/total mission count. If failed missions exist,
                 name them and suggest a concrete way to attempt next time.
 
-            - complexityFeedback (String, Markdown):
-                Format MUST follow this structure exactly:
+            - complexityFeedback (String, Markdown — viết cho HỌC VIÊN, không phải nhà nghiên cứu):
+                Format theo cấu trúc sau, mỗi mục 1-2 dòng tự nhiên bằng tiếng Việt:
 
-                  Tổng quan: Điểm <score>/100 (Lexical <lex.score>, Syntactic <syn.score>).
+                  **Tổng quan**: <1 câu nhận xét chung về độ phong phú ngôn ngữ — KHÔNG nêu số liệu>.
 
-                  Từ vựng:
-                  - L_avg = <lex.L_avg> (mục tiêu cho level học viên: <lex.expectedL_avg>)
-                  - <uniqueWords> từ riêng biệt, phân bố: <jlpt distribution như "N5: X từ, N4: Y từ">
-                  - <1 câu diễn giải mức độ phức tạp từ vựng>
+                  **Vốn từ**:
+                  - <Nhận xét chất lượng vốn từ: phong phú / vừa phải / còn đơn giản — căn cứ vào
+                    điểm và mức độ phù hợp với JLPT mục tiêu>.
+                  - Đã dùng khoảng <uniqueWords> từ khác nhau, chủ yếu ở mức <level chiếm tỉ trọng cao
+                    nhất, vd. "N5">. <1 gợi ý cụ thể về cụm từ / cấu trúc N4-N3 nên thử lần sau>.
 
-                  Cấu trúc câu (Iwashita 2006):
-                  - W/U = <syn.W_per_U> (trung bình từ/AS-unit)
-                  - C/U = <syn.C_per_U> (trung bình mệnh đề/AS-unit)
-                  - Mệnh đề đã dùng: <clause type breakdown như "ADVERBIAL: X, ADNOMINAL: Y">
-                  - <1 câu diễn giải mức độ phức tạp cấu trúc>
+                  **Câu**:
+                  - <Nhận xét độ dài và cấu trúc câu: ngắn-đơn giản / vừa / dài-có mệnh đề phụ>.
+                  - <1 mẫu câu cụ thể bằng tiếng Nhật học viên có thể tập viết theo, vd. khi câu còn
+                    ngắn → đưa câu mẫu dùng 〜て、〜から、〜のに>.
 
-                CRITICAL RULES:
-                - Cite the EXACT numerical values from the facts (do not round
-                  L_avg/W/U/C/U; copy the BigDecimal values verbatim).
-                - If insufficient data, output: "Phiên quá ngắn để đo độ phức tạp
-                  đáng tin cậy. Hãy nói nhiều hơn lần sau."
-                - If partial measurement (one sub-dimension insufficient), note
-                  which sub-dimension is unreliable.
+                CẤM TUYỆT ĐỐI (sẽ làm hỏng UX cho học viên):
+                - KHÔNG dùng các ký hiệu/thuật ngữ kỹ thuật: "L_avg", "W/U", "C/U", "AS-unit",
+                  "AS unit", "Iwashita", "Skehan", "Zipf", "Lexical", "Syntactic", "BigDecimal",
+                  "power mean", "expected", "ratio".
+                - KHÔNG in số thập phân của các chỉ số nội bộ (ví dụ "L_avg = 1.82") — học viên
+                  không hiểu nghĩa. Nếu cần thể hiện mức độ, dùng từ định tính: "phong phú",
+                  "vừa phải", "còn đơn giản", "ngắn", "dài", "có mệnh đề phụ".
+                - KHÔNG nhắc tên framework học thuật.
+                - Mọi mẫu câu tiếng Nhật MINH HỌA cho học viên — nên kèm ngắn 1 dòng nghĩa Việt.
 
-            - recurringWarning (String): cite recurring patterns by name +
-              occurrence count if any in the facts; "" otherwise.
+                Edge cases:
+                - Nếu insufficient data → output đúng câu: "Phiên còn ngắn nên chưa đủ dữ liệu để
+                  đánh giá đáng tin cậy. Hãy nói nhiều hơn ở phiên sau để đo chính xác hơn."
+                - Nếu partial measurement → ghi rõ phần nào chưa đủ dữ liệu (vốn từ HOẶC câu) bằng
+                  câu thân thiện, không nhắc thuật ngữ.
+
+            - recurringWarning (String, tiếng Việt): nếu có recurring patterns, dùng nguyên
+              `label_vi` đã cho (KHÔNG dùng tên enum gốc như "WORD_CHOICE"), nêu số lần và
+              số buổi để học viên biết mức độ. Ví dụ:
+                "Lỗi <i>Dùng từ chưa phù hợp</i> lặp lại 26 lần trong 3/5 buổi gần đây — nên ưu tiên ôn."
+              Nếu không có pattern nào → "".
 
             - nextSteps (Array<String>, 2-3 items):
                 Each step MUST be:
@@ -242,9 +259,11 @@ public class SessionEvaluatorAI {
         errorBreakdown.severityCounts().forEach((sev, count) ->
                 sb.append(sev).append(": ").append(count).append("  "));
         sb.append("\n");
-        sb.append("- Error type breakdown: ");
+        sb.append("- Error type breakdown (use label_vi when citing in feedback): ");
         errorBreakdown.errorCounts().forEach((type, count) ->
-                sb.append(type.name()).append(": ").append(count).append(", "));
+                sb.append("[label_vi=\"")
+                  .append(com.fu.roleplay.enums.ErrorTypeLabels.labelOf(type))
+                  .append("\", count=").append(count).append("] "));
         sb.append("\n");
         sb.append("- (Legacy) Error rate: ").append(errorBreakdown.errorRate()).append("% (")
           .append(errorBreakdown.totalCorrections()).append(" corrections / ")
@@ -321,58 +340,94 @@ public class SessionEvaluatorAI {
             sb.append("- Not completed: ").append(String.join(", ", failedMissionTitles)).append("\n");
         }
 
-        // Complexity facts (lexical + syntactic, Phase 3 v28)
-        sb.append("\n## COMPLEXITY (Lexical + Syntactic)\n");
+        // Complexity facts — fed as qualitative buckets so the LLM does not echo raw symbols.
+        // Internal numbers stay in the API response payload (lexical/syntactic sub-objects)
+        // for FE that wants a deep-dive; the LLM-rendered text must stay learner-friendly.
+        sb.append("\n## COMPLEXITY (qualitative buckets — do NOT mention symbols in output)\n");
         if (complexity.insufficient()) {
-            sb.append("- Insufficient text for reliable measurement (skip in feedback)\n");
+            sb.append("- insufficient_data=true (use the canned phrase from CRITICAL RULES)\n");
         } else {
-            sb.append("- Composite score: ").append(complexity.score()).append("/100 (0.6 lexical + 0.4 syntactic)\n");
+            sb.append("- composite_score=").append(complexity.score()).append("/100\n");
             var lex = complexity.lexical();
             if (lex != null && !lex.insufficient()) {
-                sb.append("- Lexical: score=").append(lex.score())
-                  .append(", L_avg=").append(lex.L_avg())
-                  .append(" (expected for target=").append(lex.expectedL_avg()).append(")")
-                  .append(", unique=").append(lex.uniqueWords())
-                  .append(" (").append(lex.knownWords()).append(" in DB, ").append(lex.unknownWords()).append(" unknown)\n");
+                sb.append("- vocabulary_score=").append(lex.score()).append("/100")
+                  .append(", vocabulary_richness=").append(lexicalRichnessBucket(lex.score()))
+                  .append(", unique_words=").append(lex.uniqueWords())
+                  .append("\n");
                 if (lex.jlptDistribution() != null && !lex.jlptDistribution().isEmpty()) {
-                    sb.append("- JLPT distribution (raw counts): ");
+                    String dominant = lex.jlptDistribution().entrySet().stream()
+                            .max(java.util.Map.Entry.comparingByValue())
+                            .map(e -> e.getKey().name()).orElse("N5");
+                    sb.append("- vocabulary_dominant_level=").append(dominant).append("\n");
+                    sb.append("- vocabulary_distribution: ");
                     lex.jlptDistribution().forEach((level, count) ->
-                            sb.append(level.name()).append(":").append(count).append(" "));
+                            sb.append(level.name()).append("=").append(count).append(" "));
                     sb.append("\n");
                 }
+            } else if (lex != null) {
+                sb.append("- vocabulary_insufficient=true\n");
             }
             var syn = complexity.syntactic();
             if (syn != null && !syn.insufficient()) {
-                sb.append("- Syntactic (Iwashita 2006): score=").append(syn.score())
-                  .append(", W/U=").append(syn.W_per_U())
-                  .append(", C/U=").append(syn.C_per_U())
-                  .append(", AS-units=").append(syn.totalAS_Units())
-                  .append(", clauses=").append(syn.totalClauses()).append("\n");
+                sb.append("- sentence_score=").append(syn.score()).append("/100")
+                  .append(", sentence_length_bucket=").append(sentenceLengthBucket(syn.W_per_U()))
+                  .append(", clause_complexity_bucket=").append(clauseComplexityBucket(syn.C_per_U()))
+                  .append(", total_sentences=").append(syn.totalAS_Units())
+                  .append(", total_clauses=").append(syn.totalClauses()).append("\n");
                 if (syn.clauseTypeBreakdown() != null && !syn.clauseTypeBreakdown().isEmpty()) {
-                    sb.append("- Clause types: ");
+                    sb.append("- clause_types_used: ");
                     syn.clauseTypeBreakdown().forEach((type, count) ->
-                            sb.append(type.name()).append(":").append(count).append(" "));
+                            sb.append(type.name()).append("=").append(count).append(" "));
                     sb.append("\n");
                 }
+            } else if (syn != null) {
+                sb.append("- sentence_insufficient=true\n");
             }
         }
 
-        // Recurring patterns
+        // Recurring patterns — feed Vietnamese labels so the warning text stays consistent
+        // with what FE renders elsewhere (RecurringErrorPattern.errorTypeLabel / summaryVi).
         sb.append("\n## CROSS-SESSION PATTERNS\n");
         if (recurringPatterns.isEmpty()) {
             sb.append("- No prior session data available\n");
         } else {
             for (var rp : recurringPatterns) {
-                sb.append("- ").append(rp.errorType().name())
-                  .append(": ").append(rp.totalOccurrences()).append(" occurrences in ")
-                  .append(rp.sessionCount()).append("/").append(rp.totalSessionsChecked())
-                  .append(" recent sessions\n");
+                sb.append("- label_vi=\"")
+                  .append(com.fu.roleplay.enums.ErrorTypeLabels.labelOf(rp.errorType()))
+                  .append("\", total=").append(rp.totalOccurrences())
+                  .append(", sessions=").append(rp.sessionCount()).append("/").append(rp.totalSessionsChecked())
+                  .append("\n");
             }
         }
 
         sb.append("\n## TARGET JLPT LEVEL: ").append(jlptLevel != null ? jlptLevel : "N5").append("\n");
 
         return sb.toString();
+    }
+
+    private static String lexicalRichnessBucket(java.math.BigDecimal score) {
+        if (score == null) return "UNKNOWN";
+        double v = score.doubleValue();
+        if (v >= 80) return "PHONG_PHU";       // rich/varied vocabulary
+        if (v >= 60) return "VUA_PHAI";        // moderate
+        if (v >= 40) return "CON_DON_GIAN";    // still simple
+        return "RAT_DON_GIAN";                  // very simple
+    }
+
+    private static String sentenceLengthBucket(java.math.BigDecimal wordsPerUnit) {
+        if (wordsPerUnit == null) return "UNKNOWN";
+        double v = wordsPerUnit.doubleValue();
+        if (v >= 12) return "DAI";
+        if (v >= 7) return "VUA";
+        return "NGAN";
+    }
+
+    private static String clauseComplexityBucket(java.math.BigDecimal clausesPerUnit) {
+        if (clausesPerUnit == null) return "UNKNOWN";
+        double v = clausesPerUnit.doubleValue();
+        if (v >= 1.7) return "CO_NHIEU_MENH_DE_PHU";  // multi-clause sentences
+        if (v >= 1.2) return "CO_MOT_SO_MENH_DE_PHU";
+        return "CHU_YEU_DON_MENH_DE";
     }
 
     private SessionEvaluationResponse.QualitativeSummary fallbackSummary() {
