@@ -915,9 +915,15 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                 recurringPatterns.stream()
                         .map(rp -> SessionEvaluationResponse.RecurringErrorPattern.builder()
                                 .errorType(rp.errorType().name())
+                                .errorTypeLabel(com.fu.roleplay.enums.ErrorTypeLabels.labelOf(rp.errorType()))
                                 .totalOccurrences(rp.totalOccurrences())
                                 .sessionCount(rp.sessionCount())
                                 .totalSessionsChecked(rp.totalSessionsChecked())
+                                .summaryVi(com.fu.roleplay.enums.ErrorTypeLabels.recurringSummary(
+                                        rp.errorType(),
+                                        rp.totalOccurrences(),
+                                        rp.sessionCount(),
+                                        rp.totalSessionsChecked()))
                                 .build())
                         .collect(Collectors.toList());
 

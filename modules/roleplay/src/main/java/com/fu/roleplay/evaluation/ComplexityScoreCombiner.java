@@ -64,9 +64,25 @@ public class ComplexityScoreCombiner {
             return ComplexityResult.notEnoughData(lex, syn);
         }
 
-        double M1_lex = lex.insufficient() ? 0.0 : lex.score().doubleValue();
-        double M1_syn = syn.insufficient() ? 0.0 : syn.score().doubleValue();
-        double composite = LEX_WEIGHT * M1_lex + SYN_WEIGHT * M1_syn;
+        // Composite formula:
+        // - Both available: 0.6 × lex + 0.4 × syn
+        // - Only lex available (syn insufficient): use lex score alone (renormalized)
+        // - Only syn available (lex insufficient): use syn score alone (renormalized)
+        // Treating an insufficient dimension as a hard 0 (the previous behavior) penalizes
+        // the learner for an UNMEASURABLE dimension, e.g. lex=100, syn=insufficient yielded
+        // composite=60 — confusing because Vocabulary scored full marks. Renormalizing
+        // makes "partial measurement" honest: report the available dimension as the score
+        // and flag partialMeasurement so the FE can show "đang đo từ vựng / chưa đủ dữ liệu
+        // câu" without appearing punitive.
+        double composite;
+        if (lex.insufficient()) {
+            composite = syn.score().doubleValue();
+        } else if (syn.insufficient()) {
+            composite = lex.score().doubleValue();
+        } else {
+            composite = LEX_WEIGHT * lex.score().doubleValue()
+                      + SYN_WEIGHT * syn.score().doubleValue();
+        }
 
         return ComplexityResult.builder()
                 .score(BigDecimal.valueOf(composite).setScale(2, RoundingMode.HALF_UP))
