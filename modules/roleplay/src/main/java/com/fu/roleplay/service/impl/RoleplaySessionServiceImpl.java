@@ -675,7 +675,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         LocalDateTime completedAt = LocalDateTime.now();
         session.setCompletedAt(completedAt);
 
-        // Persist evaluation details so feedback can be retrieved later without re-calling AI
+        // Persist evaluation details so feedback can be retrieved later without re-calling AI.
+        // Note: accuracy/complexity dimensions are serialized below (after they are built),
+        // so getConversationFeedback can return the same shape without re-running AI.
         try {
             ObjectNode feedbackNode = objectMapper.createObjectNode();
             feedbackNode.put("version", 2);
@@ -699,6 +701,9 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                     })
                     .collect(Collectors.toList())));
             feedbackNode.set("severityCounts", objectMapper.valueToTree(errorBreakdown.severityCounts()));
+            feedbackNode.put("totalCorrections", errorBreakdown.totalCorrections());
+            feedbackNode.put("userMessageCount", errorBreakdown.userMessageCount());
+            feedbackNode.set("errorRate", objectMapper.valueToTree(errorBreakdown.errorRate()));
             feedbackNode.put("totalClauses", errorBreakdown.totalClauses());
             feedbackNode.put("cleanClauses", errorBreakdown.cleanClauses());
             feedbackNode.put("dirtyClauses", errorBreakdown.dirtyClauses());
@@ -709,6 +714,15 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
             // Convert lexical raw counts → legacy %-string-keyed map for backward compat
             feedbackNode.set("jlptDistribution",
                     objectMapper.valueToTree(legacyJlptDistributionPct(complexityResult)));
+            // Persist unique vocabulary count + lexical/syntactic sub-trees so the
+            // re-fetch path can rebuild ComplexityDimension without recomputing.
+            if (complexityResult != null) {
+                if (complexityResult.lexical() != null && !complexityResult.lexical().insufficient()) {
+                    feedbackNode.put("uniqueVocabularyCount", complexityResult.lexical().uniqueWords());
+                }
+                feedbackNode.put("complexityPartialMeasurement", complexityResult.partialMeasurement());
+                feedbackNode.put("complexityInsufficient", complexityResult.insufficient());
+            }
             session.setFeedback(objectMapper.writeValueAsString(feedbackNode));
         } catch (Exception e) {
             log.warn("Failed to serialize evaluation feedback for session {}: {}", sessionId, e.getMessage());
@@ -1029,6 +1043,17 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         Map<String, Integer> errorBreakdownMap = null;
         Map<String, BigDecimal> jlptDistributionMap = null;
         List<SessionEvaluationResponse.CorrectionExample> topCorrectionsList = null;
+        Map<String, Integer> severityCountsMap = null;
+        Integer totalCorrections = null;
+        Integer userMessageCount = null;
+        BigDecimal errorRate = null;
+        Integer totalClauses = null;
+        Integer cleanClauses = null;
+        Integer dirtyClauses = null;
+        Boolean hasCritical = null;
+        Integer uniqueVocabularyCount = null;
+        Boolean complexityPartialMeasurement = null;
+        Boolean complexityInsufficient = null;
 
         String feedbackJson = session.getFeedback();
         if (feedbackJson != null && !feedbackJson.equals("{}")) {
@@ -1059,6 +1084,22 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
                             new com.fasterxml.jackson.core.type.TypeReference<List<SessionEvaluationResponse.CorrectionExample>>() {
                             });
                 }
+                if (feedbackNode.has("severityCounts")) {
+                    severityCountsMap = objectMapper.convertValue(
+                            feedbackNode.get("severityCounts"),
+                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, Integer>>() {
+                            });
+                }
+                if (feedbackNode.hasNonNull("totalCorrections")) totalCorrections = feedbackNode.get("totalCorrections").asInt();
+                if (feedbackNode.hasNonNull("userMessageCount")) userMessageCount = feedbackNode.get("userMessageCount").asInt();
+                if (feedbackNode.hasNonNull("errorRate")) errorRate = feedbackNode.get("errorRate").decimalValue();
+                if (feedbackNode.hasNonNull("totalClauses")) totalClauses = feedbackNode.get("totalClauses").asInt();
+                if (feedbackNode.hasNonNull("cleanClauses")) cleanClauses = feedbackNode.get("cleanClauses").asInt();
+                if (feedbackNode.hasNonNull("dirtyClauses")) dirtyClauses = feedbackNode.get("dirtyClauses").asInt();
+                if (feedbackNode.hasNonNull("hasCritical")) hasCritical = feedbackNode.get("hasCritical").asBoolean();
+                if (feedbackNode.hasNonNull("uniqueVocabularyCount")) uniqueVocabularyCount = feedbackNode.get("uniqueVocabularyCount").asInt();
+                if (feedbackNode.hasNonNull("complexityPartialMeasurement")) complexityPartialMeasurement = feedbackNode.get("complexityPartialMeasurement").asBoolean();
+                if (feedbackNode.hasNonNull("complexityInsufficient")) complexityInsufficient = feedbackNode.get("complexityInsufficient").asBoolean();
                 // Legacy v1 fallback
                 if (feedbackNode.has("languageEvaluation")) {
                     languageEval = objectMapper.treeToValue(
@@ -1079,9 +1120,17 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         if (session.getAccuracyScore() != null) {
             accuracyDimension = SessionEvaluationResponse.AccuracyDimension.builder()
                     .score(session.getAccuracyScore())
+                    .totalCorrections(totalCorrections != null ? totalCorrections : 0)
+                    .userMessageCount(userMessageCount != null ? userMessageCount : 0)
+                    .errorRate(errorRate)
                     .errorBreakdown(errorBreakdownMap)
                     .topCorrections(topCorrectionsList)
                     .feedback(qualitativeSummary != null ? qualitativeSummary.getAccuracyFeedback() : null)
+                    .totalClauses(totalClauses)
+                    .cleanClauses(cleanClauses)
+                    .dirtyClauses(dirtyClauses)
+                    .severityCounts(severityCountsMap)
+                    .hasCriticalCommunicationBreakdown(hasCritical)
                     .build();
         }
 
@@ -1118,8 +1167,11 @@ public class RoleplaySessionServiceImpl implements RoleplaySessionService {
         if (session.getComplexityScore() != null) {
             complexityDimension = SessionEvaluationResponse.ComplexityDimension.builder()
                     .score(session.getComplexityScore())
+                    .uniqueVocabularyCount(uniqueVocabularyCount != null ? uniqueVocabularyCount : 0)
                     .jlptDistribution(jlptDistributionMap)
                     .feedback(qualitativeSummary != null ? qualitativeSummary.getComplexityFeedback() : null)
+                    .partialMeasurement(complexityPartialMeasurement)
+                    .insufficient(complexityInsufficient)
                     .build();
         }
 
