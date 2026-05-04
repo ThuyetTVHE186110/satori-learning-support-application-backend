@@ -58,18 +58,21 @@ public class ExerciseGeneratorAgent {
     private final ObjectMapper objectMapper;
     private final PromptTemplateLoader promptLoader;
     private final Executor taskExecutor;
+    private final com.fu.practice.config.PracticeProperties practiceProperties;
 
     public ExerciseGeneratorAgent(
             OpenAiChatModel openAiChatModel,
             EmbeddingService embeddingService,
             ObjectMapper objectMapper,
             PromptTemplateLoader promptLoader,
-            @Qualifier("practiceTaskExecutor") Executor taskExecutor) {
+            @Qualifier("practiceTaskExecutor") Executor taskExecutor,
+            com.fu.practice.config.PracticeProperties practiceProperties) {
         this.chatClient = ChatClient.builder(openAiChatModel).build();
         this.embeddingService = embeddingService;
         this.objectMapper = objectMapper;
         this.promptLoader = promptLoader;
         this.taskExecutor = taskExecutor;
+        this.practiceProperties = practiceProperties;
     }
 
     // ── Public API ─────────────────────────────────────────────────────────
@@ -1255,19 +1258,19 @@ public class ExerciseGeneratorAgent {
 
     // ── LLM call + JSON repair ────────────────────────────────────────────
 
-    private static final OpenAiChatOptions JSON_MODE_OPTIONS = OpenAiChatOptions.builder()
-            .responseFormat(ResponseFormat.builder()
-                    .type(ResponseFormat.Type.JSON_OBJECT).build())
-            .build();
-
     private List<GeneratedItem> callLlm(String prompt, int count) {
         String wrappedPrompt = prompt
                 + "\nQUAN TRỌNG: Đặt toàn bộ array câu hỏi trong JSON object: "
                 + "{\"items\": [ ...array câu hỏi... ]}. KHÔNG trả về bare array [].";
+        OpenAiChatOptions options = OpenAiChatOptions.builder()
+                .model(practiceProperties.getExerciseModel())
+                .responseFormat(ResponseFormat.builder()
+                        .type(ResponseFormat.Type.JSON_OBJECT).build())
+                .build();
         try {
             String raw = chatClient.prompt()
                     .user(wrappedPrompt)
-                    .options(JSON_MODE_OPTIONS)
+                    .options(options)
                     .call()
                     .content();
 

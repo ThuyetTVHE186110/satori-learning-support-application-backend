@@ -314,6 +314,7 @@ curriculum-import:
 
 # ==================== Practice Module Configuration ====================
 practice:
+    exercise-model: ${PRACTICE_EXERCISE_MODEL:gpt-4.1-mini-2025-04-14}
     llm-timeout-seconds: ${PRACTICE_LLM_TIMEOUT:120}
     rag-timeout-seconds: ${PRACTICE_RAG_TIMEOUT:3}
     anti-repeat-window-hours: ${PRACTICE_ANTI_REPEAT_HOURS:24}
