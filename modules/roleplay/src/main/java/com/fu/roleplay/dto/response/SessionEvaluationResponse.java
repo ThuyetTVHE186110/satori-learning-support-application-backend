@@ -219,10 +219,15 @@ public class SessionEvaluationResponse {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class RecurringErrorPattern {
+        /** Raw enum name — kept for analytics/FE filtering. */
         private String errorType;
+        /** Vietnamese label for direct display (e.g. "Dùng từ chưa phù hợp"). */
+        private String errorTypeLabel;
         private int totalOccurrences;
         private int sessionCount;
         private int totalSessionsChecked;
+        /** Pre-rendered Vietnamese sentence FE can show without further formatting. */
+        private String summaryVi;
     }
 
     // ── Legacy inner classes (kept for backward compat) ──

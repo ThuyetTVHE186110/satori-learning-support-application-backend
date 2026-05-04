@@ -81,6 +81,15 @@ public class ErrorPatternAggregator {
     private static final String IMPACT_GLOBAL = "GLOBAL";
 
     /**
+     * Punctuation / whitespace characters injected by Speech-to-Text (Azure, Google,
+     * device STT) that are NOT learner choices. A "correction" whose surface diff is
+     * only these characters is an STT artifact, not a real mistake — drop it before
+     * it pollutes the error breakdown and the learner-facing feedback.
+     */
+    private static final java.util.regex.Pattern STT_PUNCTUATION_ONLY = java.util.regex.Pattern.compile(
+            "^[\\s。、！？!?,.…・「」『』（）()]*$");
+
+    /**
      * Aggregate corrections into a structured breakdown.
      *
      * @param messages  full session message history (USER + ASSISTANT)
@@ -124,6 +133,14 @@ public class ErrorPatternAggregator {
             boolean seriousGlobal = false;
 
             for (Map<String, String> correction : corrections) {
+                // Drop STT-artifact corrections (LLM occasionally flags punctuation that the
+                // STT engine inserted). These are NOT learner errors — counting them inflates
+                // the correction count and shows confusing entries like `original: "?"`.
+                if (isPunctuationOnlyCorrection(correction)) {
+                    log.debug("Skipping STT-artifact correction: original='{}' corrected='{}'",
+                            correction.get("original"), correction.get("corrected"));
+                    continue;
+                }
                 totalCorrections++;
                 ErrorType type = parseErrorType(correction.get("errorType"));
                 errorCounts.merge(type, 1, Integer::sum);
@@ -234,6 +251,28 @@ public class ErrorPatternAggregator {
                 .multiply(BigDecimal.valueOf(100))
                 .setScale(2, RoundingMode.HALF_UP);
     }
+
+    /**
+     * @return {@code true} when the correction targets only Speech-to-Text-injected
+     * punctuation/whitespace (and so is not a real learner mistake). Matches when
+     * {@code original} is empty / pure punctuation, OR when {@code original} and
+     * {@code corrected} differ ONLY in punctuation/whitespace once stripped.
+     */
+    private static boolean isPunctuationOnlyCorrection(Map<String, String> correction) {
+        if (correction == null) return false;
+        String original  = nullToEmpty(correction.get("original"));
+        String corrected = nullToEmpty(correction.get("corrected"));
+        // Pure-punctuation original is always an STT artifact (e.g., LLM flagged "?").
+        if (STT_PUNCTUATION_ONLY.matcher(original).matches()) return true;
+        // Original and corrected identical after stripping punctuation+whitespace
+        // → only punctuation differs, also an STT artifact (engine inserted/dropped it).
+        String stripPattern = "[\\s。、！？!?,.…・「」『』（）()]+";
+        String strippedOrig = original.replaceAll(stripPattern, "");
+        String strippedCorr = corrected.replaceAll(stripPattern, "");
+        return !strippedOrig.isEmpty() && strippedOrig.equals(strippedCorr) && !original.equals(corrected);
+    }
+
+    private static String nullToEmpty(String s) { return s == null ? "" : s; }
 
     private ErrorType parseErrorType(String raw) {
         if (raw == null || raw.isBlank()) return ErrorType.OTHER;

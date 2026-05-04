@@ -1057,6 +1057,13 @@ public class ExerciseGeneratorAgent {
                       ❌ option chứa "~" hoặc placeholder (VD: "cái ~ này") — dịch phải HOÀN CHỈNH.""";
 
             case SENTENCE_ORDER -> """
+                    *** RULE TUYỆT ĐỐI — VI PHẠM = ITEM BỊ DROP ***
+                    Tokens trong array `options` PHẢI đọc từ TRÁI sang PHẢI = câu Nhật hoàn chỉnh, đúng ngữ pháp.
+                    Backend shuffle PHÍA SAU — đó là việc của backend, KHÔNG phải việc của bạn.
+                    Bạn KHÔNG được tự ý đảo thứ tự dưới BẤT KỲ lý do nào (kể cả "để không lộ đáp án" — sai!).
+                    Đọc options[0]→options[1]→...→options[N-1] phải khớp với correctAnswer ký tự.
+                    *** /RULE ***
+
                     MỤC TIÊU: Học viên sắp xếp các TOKEN tiếng Nhật theo đúng thứ tự để tạo thành 1 câu hoàn chỉnh.
 
                     QUY TẮC VÀNG (KHÔNG THƯƠNG LƯỢNG):
@@ -1064,7 +1071,6 @@ public class ExerciseGeneratorAgent {
                       ⚡ KHÔNG THÊM distractor / từ thừa / từ dự phòng. Mọi token PHẢI XUẤT HIỆN trong câu đúng.
                       ⚡ Ghép nối options[0].text + options[1].text + ... + options[N-1].text (không dấu cách)
                          PHẢI BẰNG correctAnswer chính xác ký tự.
-                      (LLM TRẢ VỀ thứ tự đúng; backend sẽ shuffle trước khi serve để options không lộ đáp án.)
 
                     CẤU TRÚC:
                       • question         : câu TIẾNG VIỆT tương ứng (để học viên biết nên sắp xếp thế nào).
@@ -1107,6 +1113,23 @@ public class ExerciseGeneratorAgent {
                        "options":[{"text":"これ","isCorrect":false},{"text":"は","isCorrect":false},
                                   {"text":"辞書","isCorrect":false},{"text":"です","isCorrect":false}],
                        "correctAnswer":"これは辞書です"}
+                      → Đọc options từ trái sang phải: これ + は + 辞書 + です = "これは辞書です" ✓ khớp correctAnswer.
+
+                    BAD EXAMPLE — TUYỆT ĐỐI TRÁNH (đã xảy ra trong production, gây ship đáp án sai):
+                      Câu hỏi: "Đây là trường đại học."
+                      ❌ SAI: options=[{"text":"大学","isCorrect":false},{"text":"は","isCorrect":false},
+                                       {"text":"これ","isCorrect":false},{"text":"です","isCorrect":false}],
+                              "correctAnswer":"これは大学です"
+                              → Đọc options từ trái sang phải: 大学 + は + これ + です = "大学はこれです"
+                              → KHÔNG khớp correctAnswer "これは大学です". Vi phạm rule tuyệt đối.
+                      ✅ ĐÚNG: options=[{"text":"これ","isCorrect":false},{"text":"は","isCorrect":false},
+                                        {"text":"大学","isCorrect":false},{"text":"です","isCorrect":false}],
+                               "correctAnswer":"これは大学です"
+                              → Đọc trái-phải = correctAnswer ✓
+
+                    Lý do KHÔNG được tự shuffle: backend đã có hàm shuffle riêng chạy SAU response. Nếu bạn shuffle nữa
+                    thì backend sẽ shuffle thứ tự đã sai — kết quả là correctAnswer trỏ về câu vô nghĩa.
+                    Việc của bạn DUY NHẤT là cung cấp tokens đúng thứ tự để backend biết câu đúng là gì.
 
                     GOOD EXAMPLE 2 (câu có động từ — 6 tokens):
                       {"itemType":"SENTENCE_ORDER","question":"Tôi đến trường bằng xe buýt.",
