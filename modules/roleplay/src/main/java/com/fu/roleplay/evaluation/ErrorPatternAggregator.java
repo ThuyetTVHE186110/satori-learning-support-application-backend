@@ -264,9 +264,12 @@ public class ErrorPatternAggregator {
         String corrected = nullToEmpty(correction.get("corrected"));
         // Pure-punctuation original is always an STT artifact (e.g., LLM flagged "?").
         if (STT_PUNCTUATION_ONLY.matcher(original).matches()) return true;
-        // Original and corrected identical after stripping punctuation+whitespace
-        // → only punctuation differs, also an STT artifact (engine inserted/dropped it).
-        String stripPattern = "[\\s。、！？!?,.…・「」『』（）()]+";
+        // Original and corrected identical after stripping ONLY punctuation marks
+        // → only punctuation differs, an STT artifact (engine inserted/dropped it).
+        // Whitespace is intentionally NOT stripped: Japanese has no inter-word spaces,
+        // so a space inside a learner phrase is a real spelling error worth correcting,
+        // not an STT artifact (Azure ja-JP STT does not inject spaces).
+        String stripPattern = "[。、！？!?,.…・「」『』（）()]+";
         String strippedOrig = original.replaceAll(stripPattern, "");
         String strippedCorr = corrected.replaceAll(stripPattern, "");
         return !strippedOrig.isEmpty() && strippedOrig.equals(strippedCorr) && !original.equals(corrected);
