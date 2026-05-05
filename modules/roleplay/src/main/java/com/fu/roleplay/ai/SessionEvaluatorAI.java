@@ -146,7 +146,7 @@ public class SessionEvaluatorAI {
             - recurringWarning (String, tiếng Việt): nếu có recurring patterns, dùng nguyên
               `label_vi` đã cho (KHÔNG dùng tên enum gốc như "WORD_CHOICE"), nêu số lần và
               số buổi để học viên biết mức độ. Ví dụ:
-                "Lỗi <i>Dùng từ chưa phù hợp</i> lặp lại 26 lần trong 3/5 buổi gần đây — nên ưu tiên ôn."
+                "Lỗi *Dùng từ chưa phù hợp* lặp lại 26 lần trong 3/5 buổi gần đây — nên ưu tiên ôn."
               Nếu không có pattern nào → "".
 
             - nextSteps (Array<String>, 2-3 items):
